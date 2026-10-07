@@ -12,6 +12,7 @@
 #include "prx/libc/include/GuestArena.hpp"
 #include "prx/libc/include/GuestWriteWatch.hpp"
 #include "prx/libc/include/general/AtomicSharedPtr.hpp"
+#include "prx/libc/include/HostThreadLocal.hpp"
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -2607,13 +2608,49 @@ bool ImportMappedRanges(const Context& context, const GuestAllocations::Mapped& 
 bool RegisteredReadableCovers(std::uint64_t address, std::size_t bytes, std::vector<RegisteredPiece>* pieces) {
     if (pieces != nullptr) pieces->clear();
     if (bytes == 0 || bytes > std::numeric_limits<std::uint64_t>::max() - address) return false;
-    const auto lease = GuestAllocations::GuestAllocationsAcquire_nid_postfix();
     const auto end = address + bytes;
+    static const bool memo = std::getenv("APS5_NO_REGISTERED_COVER_MEMO") == nullptr;
+    if (!memo) {
+        const auto lease = GuestAllocations::GuestAllocationsAcquire_nid_postfix();
+        for (auto at = address; at < end;) {
+            const auto* range = containingRange(lease, at, at + 1);
+            if (range == nullptr) return false;
+            if (pieces != nullptr) pieces->push_back({range->address, range->bytes, range->writable, range->gpu});
+            at = range->address + range->bytes;
+        }
+        return true;
+    }
+    struct ReadableRange {
+        std::uint64_t begin;
+        std::uint64_t end;
+        bool writable;
+        bool gpu;
+    };
+    struct ReadableRanges {
+        std::uint64_t generation = 0;
+        std::vector<ReadableRange> ranges;
+    };
+    struct ReadableRangesStorage {};
+    auto& readable = HostThreadLocal<ReadableRanges, ReadableRangesStorage>();
+    const auto generation = GuestAllocations::GuestAllocationsGeneration_nid_postfix();
+    if (readable.generation != generation) {
+        readable.ranges.clear();
+        {
+            const auto lease = GuestAllocations::GuestAllocationsAcquire_nid_postfix();
+            readable.ranges.reserve(lease.size());
+            for (const auto& range : lease) {
+                if (range->readable) readable.ranges.push_back({range->address, range->address + range->bytes, range->writable, range->gpu});
+            }
+        }
+        readable.generation = generation;
+    }
     for (auto at = address; at < end;) {
-        const auto* range = containingRange(lease, at, at + 1);
-        if (range == nullptr) return false;
-        if (pieces != nullptr) pieces->push_back({range->address, range->bytes, range->writable, range->gpu});
-        at = range->address + range->bytes;
+        const auto found = std::upper_bound(readable.ranges.begin(), readable.ranges.end(), at, [](std::uint64_t value, const ReadableRange& range) { return value < range.begin; });
+        if (found == readable.ranges.begin()) return false;
+        const auto& range = *std::prev(found);
+        if (at >= range.end) return false;
+        if (pieces != nullptr) pieces->push_back({range.begin, range.end - range.begin, range.writable, range.gpu});
+        at = range.end;
     }
     return true;
 }
