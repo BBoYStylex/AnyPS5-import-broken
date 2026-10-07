@@ -12,6 +12,7 @@
 #include <list>
 #include <map>
 #include <memory>
+#include <memory_resource>
 #include <optional>
 #include <mutex>
 #include <string>
@@ -190,7 +191,7 @@ public:
     void PrecollectSurfaces() const;
     bool Reusable() const { return reusable; }
     static bool NeverReusable(std::span<const CompiledShader> shaders);
-    const std::vector<std::shared_ptr<Texture>>& SampledTextures() const { return textures; }
+    const std::pmr::vector<std::shared_ptr<Texture>>& SampledTextures() const { return textures; }
     bool ChecksFaults() const { return bda != nullptr; }
     void CheckFaults() const;
     // `shaders` are the stages the object was built from, in build order (a recorded draw's vertex
@@ -247,6 +248,7 @@ public:
     std::vector<std::pair<std::uint64_t, std::uint64_t>> PresyncSurfaces() const;
 
 private:
+    std::pmr::monotonic_buffer_resource allocationArena;
     friend class AgcDriver::VulkanDevice;
     bool refreshData(VkCommandBuffer commands, const CompiledShader& shader, Recorder* recorder);
     struct DescribedRange {
@@ -259,7 +261,7 @@ private:
         int tileMode = 0;
         std::uint64_t dccAddress = 0;
     };
-    std::vector<DescribedRange> describedRanges;
+    std::pmr::vector<DescribedRange> describedRanges{&allocationArena};
     struct Allocation {
         std::uint64_t address;
         std::size_t size;
@@ -428,26 +430,26 @@ private:
     VkDescriptorPool pool = VK_NULL_HANDLE;
     // The cache pool the set was allocated from, freed back to it on release.
     DescriptorCache::SetAllocation cacheAllocation;
-    std::vector<Allocation> allocations;
-    std::vector<VkDescriptorBufferInfo> descriptorBuffers;
-    std::vector<VkDescriptorImageInfo> descriptorImages;
-    std::vector<VkWriteDescriptorSet> descriptorWrites;
+    std::pmr::vector<Allocation> allocations{&allocationArena};
+    std::pmr::vector<VkDescriptorBufferInfo> descriptorBuffers{&allocationArena};
+    std::pmr::vector<VkDescriptorImageInfo> descriptorImages{&allocationArena};
+    std::pmr::vector<VkWriteDescriptorSet> descriptorWrites{&allocationArena};
     // Guest buffer elements bound read-only: each use of this object skips that many pending-write
     // notes (counted in MarkGpuWrites for the [buffers] line).
     std::size_t readOnlyBuffers = 0;
     bool drawBuild = false;
     std::uint64_t dispatchThreads = 0;
-    std::vector<std::shared_ptr<Texture>> textures;
-    std::vector<bool> textureFirstLayer;
-    std::vector<bool> textureBaseLevel;
-    std::vector<std::shared_ptr<StorageTexture>> storageTextures;
-    std::vector<std::uint32_t> storageMips;
-    std::vector<std::uint64_t> storageKeys;
-    std::vector<bool> storageFirstLayer;
-    std::vector<bool> storageWritten;
-    std::vector<bool> storageAtomic;
-    std::vector<bool> storageAtomic64;
-    std::vector<std::shared_ptr<Sampler>> samplers;
+    std::pmr::vector<std::shared_ptr<Texture>> textures{&allocationArena};
+    std::pmr::vector<bool> textureFirstLayer{std::pmr::polymorphic_allocator<bool>{&allocationArena}};
+    std::pmr::vector<bool> textureBaseLevel{std::pmr::polymorphic_allocator<bool>{&allocationArena}};
+    std::pmr::vector<std::shared_ptr<StorageTexture>> storageTextures{&allocationArena};
+    std::pmr::vector<std::uint32_t> storageMips{&allocationArena};
+    std::pmr::vector<std::uint64_t> storageKeys{&allocationArena};
+    std::pmr::vector<bool> storageFirstLayer{std::pmr::polymorphic_allocator<bool>{&allocationArena}};
+    std::pmr::vector<bool> storageWritten{std::pmr::polymorphic_allocator<bool>{&allocationArena}};
+    std::pmr::vector<bool> storageAtomic{std::pmr::polymorphic_allocator<bool>{&allocationArena}};
+    std::pmr::vector<bool> storageAtomic64{std::pmr::polymorphic_allocator<bool>{&allocationArena}};
+    std::pmr::vector<std::shared_ptr<Sampler>> samplers{&allocationArena};
     std::shared_ptr<Sampler> paddingSampler;
     struct SamplerSource {
         std::array<std::uint32_t, 4> words{};
@@ -459,8 +461,8 @@ private:
     };
     std::vector<SamplerSource> samplerSources;
     bool reusable = false;
-    std::vector<DirectRegion> directRegions;
-    std::vector<ValidatedSurface> validatedTextures;
+    std::pmr::vector<DirectRegion> directRegions{&allocationArena};
+    std::pmr::vector<ValidatedSurface> validatedTextures{&allocationArena};
     // The pending registry's serial at the last Revalidate that proved this object, taken before
     // its checks and kept only when unchanged after them (0: none): while it is still the serial,
     // no image other than the object's own sources has results pending over its surfaces and
@@ -471,8 +473,8 @@ private:
     // FNV-1a offset basis: the hash of no data buffers (DataWordsHash).
     std::uint64_t dataWordsHash = 14695981039346656037ull;
     void rehashDataWords();
-    std::vector<std::pair<std::uint32_t, std::uint32_t>> pushPatches;
-    std::vector<DataPatch> dataPatches;
+    std::pmr::vector<std::pair<std::uint32_t, std::uint32_t>> pushPatches{&allocationArena};
+    std::pmr::vector<DataPatch> dataPatches{&allocationArena};
     BuildTiming timing;
     // Build state carried from stage A to stage B: the bindings in plan order, the image bindings
     // still to look up (index into `bindings`; the DescriptorBinding lives in the compiled shader),
@@ -486,7 +488,7 @@ private:
         std::size_t firstSampler = 0;
         std::size_t samplerCount = 0;
     };
-    std::vector<DeferredImages> deferredImages;
+    std::pmr::vector<DeferredImages> deferredImages{&allocationArena};
     std::uint64_t storageBuffers = 0;
     bool updateAfterBind = false;
     std::uint32_t plannedSampledImages = 0;
