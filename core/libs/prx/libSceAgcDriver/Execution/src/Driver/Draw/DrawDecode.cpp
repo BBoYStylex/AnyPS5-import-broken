@@ -61,6 +61,7 @@ void DecodeGraphicsPrograms(DrawDecode& decoded, const QueueState& queue, const 
         roles.reserve(5);
         const auto append = [&](std::uint32_t base, std::uint8_t type, Stage stage, std::uint32_t resources, std::uint32_t users, Role role) {
             programs.push_back(prepare(programAddress(base), type, stage, resources, users));
+            if (role != Role::GeometryBack && role != Role::Fragment) programs.back().vertexInputs = std::make_shared<const Graphics::VertexStagePlan>(programs.back().binary.header, programs.back().binary.headerAddress);
             roles.push_back(role);
         };
         const auto initializeMerged = [&](DrawProgram& program, std::uint32_t pointerBase, bool pointerRequired) {

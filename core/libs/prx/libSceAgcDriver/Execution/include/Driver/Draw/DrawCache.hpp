@@ -12,6 +12,8 @@
 #include <memory>
 #include <vector>
 
+namespace AgcDriver::Graphics { class VertexStagePlan; }
+
 namespace AgcDriver::DriverDetail {
 
 struct DrawProgram {
@@ -23,6 +25,7 @@ struct DrawProgram {
 
     std::shared_ptr<const ShaderSnapshot> snapshot;
     std::size_t codeOffset = 0;
+    std::shared_ptr<const Graphics::VertexStagePlan> vertexInputs;
 };
 
 struct DrawDecode {

@@ -380,6 +380,17 @@ target_link_libraries(agc_shared_write_tests PRIVATE libSceAgcDriver libkernel l
 set_target_properties(agc_shared_write_tests PROPERTIES CXX_EXTENSIONS OFF)
 configure_windows_unwind(agc_shared_write_tests)
 
+add_test_executable(agc_vertex_stage_tests EXCLUDE_FROM_ALL tests/VertexStage.cpp)
+target_include_directories(agc_vertex_stage_tests PRIVATE ${LIBS_INCLUDE_DIR} ${CMAKE_SOURCE_DIR}/core/shader/recompiler ${CMAKE_SOURCE_DIR}/3rdparty/Vulkan-Headers/include)
+target_link_libraries(agc_vertex_stage_tests PRIVATE libSceAgcDriver libc)
+set_target_properties(agc_vertex_stage_tests PROPERTIES CXX_EXTENSIONS OFF)
+configure_windows_unwind(agc_vertex_stage_tests)
+if(BUILD_TESTING)
+    set_target_properties(agc_vertex_stage_tests PROPERTIES EXCLUDE_FROM_ALL OFF)
+    add_test(NAME agc_vertex_stage COMMAND agc_vertex_stage_tests)
+    set_tests_properties(agc_vertex_stage PROPERTIES TIMEOUT 30)
+endif()
+
 add_test_executable(agc_write_tracking_tests EXCLUDE_FROM_ALL
         tests/WriteTracking.cpp
         Execution/src/GuestMemory.cpp
