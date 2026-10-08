@@ -667,6 +667,7 @@ void decodeAllocation(Reader& reader, CompiledBindingLayout& allocation) {
 constexpr std::string_view NeutralSwitches[] = {
     "APS5_PROFILE_DRAW",
     "APS5_DUMP_IR",
+    "APS5_DUMP_FAILED_REQUESTS",
     "APS5_NO_CODE_HASH_KEY",
     "APS5_NO_FAILURE_MEMO",
     "APS5_NO_PERF_FRONTEND_PAIR",
