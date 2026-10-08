@@ -10,6 +10,7 @@
 extern "C" {
 FileStream* APS5_VABI _ZSt7_FiopenPKcNSt5_IosbIiE9_OpenmodeEi_nid_postfix(const char*, int, int);
 FileStream* APS5_VABI fopen_nid_postfix(const char*, const char*);
+int APS5_VABI fopen_s_nid_postfix(FileStream**, const char*, const char*);
 int APS5_VABI fclose_nid_postfix(FileStream*);
 std::int64_t APS5_VABI ftello_nid_postfix(FileStream*);
 }
@@ -65,6 +66,8 @@ int main() {
 
     Write(Open(file, Out), "abc");
     Require(Contents(file) == "abc");
+    FileStream* secureStream = nullptr;
+    Require(fopen_s_nid_postfix(&secureStream, file, "invalid") == 22 && secureStream == nullptr);
 
     auto* stream = Open(file, In);
     Require(stream != nullptr && std::fgetc(stream->GetHandle()) == 'a');
