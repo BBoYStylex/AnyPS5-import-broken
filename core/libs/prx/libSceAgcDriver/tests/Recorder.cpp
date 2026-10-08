@@ -4966,6 +4966,7 @@ void depthArrayTests(const Device& device, Recorder& recorder, bool failBeforeSy
     } reservation{reserved};
     const auto reservedAddress = reinterpret_cast<std::uint64_t>(reserved);
     auto context = device.GetContext();
+    context.nullDescriptors = true;
     DepthOperations operations(context);
     TextureDetiler detiler(context);
     context.detiler = &detiler;
@@ -5063,7 +5064,7 @@ void depthArrayTests(const Device& device, Recorder& recorder, bool failBeforeSy
         binding.kind = ShaderRecompiler::DescriptorKind::SampledImage;
         binding.role = ShaderRecompiler::DescriptorRole::GuestImages;
         binding.descriptorSet = 0;
-        binding.binding = 0;
+        binding.binding = ShaderRecompiler::RuntimeAbi::FirstImageBinding;
         binding.count = 1;
         binding.imageShape = ShaderRecompiler::DescriptorImageShape::Image2DArray;
         binding.imageSamplers = {0};
