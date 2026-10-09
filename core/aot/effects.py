@@ -147,13 +147,13 @@ def summarize(function):
         for operand in ins.operands:
             if operand.type != X86_OP_MEM or not operand.access & CS_AC_WRITE:
                 continue
-            origin = function.memory_origin(ins, function.states[address], operand)
+            origin = function.memory_write_region(ins, function.states[address], operand)
             if origin is None:
                 return None
-            kind, begin = origin
+            kind, begin, end = origin
             if kind == 'image':
-                writes.add((begin, begin + operand.size))
-            elif begin + operand.size > 0:
+                writes.add((begin, end))
+            elif end > 0:
                 return None
     merged = []
     for begin, end in sorted(writes):

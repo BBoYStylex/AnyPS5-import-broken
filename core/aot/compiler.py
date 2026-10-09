@@ -15,6 +15,7 @@ import vector
 import avx
 import integer
 import effects
+import loop_ranges
 from dynamic import parse_dynamic, DynamicError
 from calls import validate_indirect_calls, CallError
 
@@ -236,6 +237,7 @@ class Function:
         self.stack_end = max([8] + [loc['offset'] + 8 for loc in self.argument_locations if loc['kind'] == 'stack'])
         self.image.annotated_calls(contract)
         self.discover()
+        self.index_ranges, self.loop_proofs = loop_ranges.discover(self, ALIASES, VOLATILE)
 
     def fail(self, ins, message):
         raise Rejected(f"{self.contract['name']} at 0x{ins.address:x} ({ins.mnemonic} {ins.op_str}): {message}")
@@ -571,6 +573,12 @@ class Function:
             return pointer[0], pointer[2] + displacement
         return None
 
+    def memory_write_region(self, ins, state, operand):
+        if operand.mem.index:
+            return loop_ranges.frame_write(self, ins, state, operand)
+        origin = self.memory_origin(ins, state, operand)
+        return None if origin is None else (origin[0], origin[1], origin[1] + operand.size)
+
     def pointer_operand(self, ins, state, operand):
         if operand.size != 8:
             return False
@@ -599,7 +607,7 @@ class Function:
         for operand in args:
             if operand.type != X86_OP_MEM or not operand.access & CS_AC_WRITE:
                 continue
-            origin = self.memory_origin(ins, original, operand)
+            origin = self.memory_write_region(ins, original, operand)
             if origin is None or origin[0] != 'frame':
                 callback_memory_unmodified = False
             if origin is None:
@@ -607,11 +615,11 @@ class Function:
                 image.clear()
                 bindings.clear()
             else:
-                cells, begin = (stack if origin[0] == 'frame' else image), origin[1]
-                cells.difference_update(offset for offset in list(cells) if begin < offset + 8 and offset < begin + operand.size)
+                cells, begin, end = (stack if origin[0] == 'frame' else image), origin[1], origin[2]
+                cells.difference_update(offset for offset in list(cells) if begin < offset + 8 and offset < end)
                 if origin[0] == 'image':
-                    bindings.difference_update(offset for offset in list(bindings) if begin < offset + 8 and offset < begin + operand.size)
-                if op == 'mov' and operand is args[0] and self.pointer_operand(ins, original, args[1]):
+                    bindings.difference_update(offset for offset in list(bindings) if begin < offset + 8 and offset < end)
+                if op == 'mov' and not operand.mem.index and operand is args[0] and self.pointer_operand(ins, original, args[1]):
                     cells.add(begin)
         if op == 'push':
             offset = original['rsp'] - 8
@@ -1065,6 +1073,7 @@ def compile_image(image):
     report = {'schema': 1, 'status': 'experimental_native_ir', 'input_sha256': hashlib.sha256(image.bytes).hexdigest(),
               'functions': [{'name': f.contract['name'], 'address': f.contract['address'], 'instructions': len(f.instructions),
                              'native_tail_calls': len(f.tail_calls),
+                             'bounded_loops': f.loop_proofs,
                              'memory_effects': effects.report(image.memory_effects.get(f.contract['address'])),
                              'native_frame_bytes_before_optimization': f.depth} for f in functions],
               'required_provider_bindings': {image.functions[address]['name']: sorted(slots) for address, slots in image.provider_requirements.items() if slots},
