@@ -81,6 +81,7 @@ std::lldiv_t APS5_VABI lldiv_nid_postfix(long long, long long);
 std::lldiv_t APS5_VABI ldiv_nid_postfix(std::int64_t, std::int64_t);
 float APS5_VABI nanf_nid_postfix(const char*);
 double APS5_VABI nan_nid_postfix(const char*);
+double APS5_VABI __powidf2_nid_postfix(double, int);
 }
 static void Require(bool value) { if (!value) std::abort(); }
 
@@ -350,7 +351,29 @@ static void CheckFloatRounding(float value, std::int64_t expected, bool invalid)
     }
 }
 
+static void CheckIntegerPower() {
+    Require(__powidf2_nid_postfix(2.0, 10) == 1024.0);
+    Require(__powidf2_nid_postfix(2.0, -3) == 0.125);
+    Require(__powidf2_nid_postfix(-2.0, 3) == -8.0);
+    Require(__powidf2_nid_postfix(-2.0, 4) == 16.0);
+    Require(__powidf2_nid_postfix(5.5, 0) == 1.0);
+    Require(__powidf2_nid_postfix(-5.5, 0) == 1.0);
+    Require(__powidf2_nid_postfix(0.0, 0) == 1.0);
+    Require(__powidf2_nid_postfix(0.0, 3) == 0.0);
+    Require(std::isinf(__powidf2_nid_postfix(0.0, -3)) && __powidf2_nid_postfix(0.0, -3) > 0.0);
+    Require(__powidf2_nid_postfix(-2.0, -3) == -0.125);
+    Require(__powidf2_nid_postfix(1.5, 1) == 1.5);
+    Require(__powidf2_nid_postfix(1.5, -1) == 1.0 / 1.5);
+    Require(std::abs(__powidf2_nid_postfix(10.0, -6) - 1e-6) / 1e-6 < 1e-12);
+    Require(std::abs(__powidf2_nid_postfix(1e-150, 2) - 1e-300) / 1e-300 < 1e-12);
+    Require(std::abs(__powidf2_nid_postfix(1e150, -2) - 1e-300) / 1e-300 < 1e-12);
+    Require(__powidf2_nid_postfix(2.0, std::numeric_limits<int>::min()) == 0.0);
+    Require(__powidf2_nid_postfix(-1.0, std::numeric_limits<int>::min()) == 1.0);
+    Require(__powidf2_nid_postfix(1.0, std::numeric_limits<int>::min()) == 1.0);
+}
+
 int main() {
+    CheckIntegerPower();
     CheckFloatClassification();
     CheckIntegerConversions();
     Require(atof_nid_postfix(" -12.5tail") == -12.5);

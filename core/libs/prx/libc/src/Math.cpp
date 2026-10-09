@@ -220,6 +220,19 @@ double APS5_VABI _Sinh_nid_postfix(double x, double y) {
 
 int APS5_VABI _Fltrounds_nid_postfix(void) {
     return SonyFltrounds();
+
+}
+
+double APS5_VABI __powidf2_nid_postfix(double base, int exponent) {
+    const bool negative = exponent < 0;
+    unsigned int magnitude = static_cast<unsigned int>(exponent);
+    if (negative) magnitude = -magnitude;
+    double result = (magnitude & 1u) != 0u ? base : 1.0;
+    while ((magnitude >>= 1u) != 0u) {
+        base *= base;
+        if ((magnitude & 1u) != 0u) result *= base;
+    }
+    return negative ? 1.0 / result : result;
 }
 
 }
