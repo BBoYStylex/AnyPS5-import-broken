@@ -49,22 +49,31 @@ def argument_pointer(function, ins, contract, index, state):
     return state['pointers'].get(name)
 
 
+def argument_value(ins, contract, index, state):
+    location = abi.locations(contract['parameters'])[index]
+    if location['kind'] == 'register':
+        value = state['constants'].get(location['name'])
+    else:
+        offset = state['rsp'] + location['offset'] - (8 if ins.mnemonic == 'call' else 0)
+        size = location['bits'] // 8
+        values = state['stack_values']
+        if not all(offset + byte in values for byte in range(size)):
+            return None
+        value = sum(values[offset + byte] << (byte * 8) for byte in range(size))
+    return None if value is None else value & ((1 << location['bits']) - 1)
+
+
 def provider_writes(function, ins, contract, state):
     effects = contract.get('memory_effects')
     if effects is None or effects['callbacks']:
         return None
-    locations = abi.locations(contract['parameters'])
     writes = []
     for write in effects['writes']:
         size = write.get('size')
         if size is None:
-            length = locations[write['size_parameter']]
-            if length['kind'] != 'register':
-                return None
-            size = state['constants'].get(length['name'])
+            size = argument_value(ins, contract, write['size_parameter'], state)
             if size is None:
                 return None
-            size &= (1 << length['bits']) - 1
         if size == 0:
             continue
         pointer = argument_pointer(function, ins, contract, write['parameter'], state)

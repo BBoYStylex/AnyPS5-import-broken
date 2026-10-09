@@ -19,6 +19,7 @@ import loop_ranges
 import native_image
 import checked_stack
 import immutable_data
+import stack_values
 from dynamic import parse_dynamic, DynamicError
 from calls import validate_indirect_calls, CallError
 
@@ -420,7 +421,7 @@ class Function:
                  'saved': original['saved'].copy(), 'flags': set(original['flags']), 'pointers': original['pointers'].copy(),
                  'constants': original.get('constants', {}).copy(), 'tail_stack_clean': original['tail_stack_clean'],
                  'native_pointers': original['native_pointers'].copy(), 'stack_pointers': original['stack_pointers'].copy(),
-                 'stack_origins': original['stack_origins'].copy(),
+                 'stack_origins': original['stack_origins'].copy(), 'stack_values': original['stack_values'].copy(),
                  'image_pointers': original['image_pointers'].copy(), 'import_bindings': original['import_bindings'].copy(), 'callback_memory_unmodified': original['callback_memory_unmodified']}
         op, args = ins.mnemonic, ins.operands
         if avx.analyze(self, ins, state) or vector.analyze(self, ins, state):
@@ -492,7 +493,7 @@ class Function:
                     offset = state['rsp'] + loc['offset'] - 8
                     if offset + 8 > 0:
                         self.fail(ins, 'outgoing stack argument is not allocated')
-                    if loc['type'] == 'ptr' and offset not in state['stack_pointers']:
+                    if loc['type'] == 'ptr' and offset not in state['stack_pointers'] and stack_values.read(state, offset, 8) != 0:
                         self.fail(ins, 'stack pointer argument has no proven native pointer origin')
             for reg in VOLATILE | set(VECTOR_STORAGE):
                 state['known'].pop(reg, None)
@@ -747,6 +748,7 @@ class Function:
         state['callback_memory_unmodified'] = callback_memory_unmodified
         state['import_bindings'] = bindings
         state['stack_origins'] = origins
+        stack_values.transfer(self, ins, original, state)
         return state
 
     def constant_operand(self, ins, state, operand):
@@ -782,6 +784,7 @@ class Function:
                    'stack_pointers': {loc['offset'] for loc in self.argument_locations if loc['kind'] == 'stack' and loc['type'] == 'ptr'},
                    'stack_origins': {loc['offset']: ('parameter', index, 0) for index, loc in enumerate(self.argument_locations) if loc['kind'] == 'stack' and loc['type'] == 'ptr'},
                    'image_pointers': set(self.image.import_slots) | {slot for slot, _ in self.image.relocations},
+                   'stack_values': {},
                    'import_bindings': set(self.image.import_slots), 'callback_memory_unmodified': True}
         entry = self.contract['address']
         self.states[entry] = initial
@@ -808,6 +811,7 @@ class Function:
                     new['native_pointers'] = old['native_pointers'] & state['native_pointers']
                     new['stack_pointers'] = old['stack_pointers'] & state['stack_pointers']
                     new['stack_origins'] = {offset: pointer for offset, pointer in state['stack_origins'].items() if old['stack_origins'].get(offset) == pointer}
+                    new['stack_values'] = {offset: value for offset, value in state['stack_values'].items() if old['stack_values'].get(offset) == value}
                     new['image_pointers'] = old['image_pointers'] & state['image_pointers']
                     new['import_bindings'] = old['import_bindings'] & state['import_bindings']
                     new['callback_memory_unmodified'] = old['callback_memory_unmodified'] and state['callback_memory_unmodified']

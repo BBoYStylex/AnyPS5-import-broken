@@ -117,13 +117,15 @@ class StackOriginTests(unittest.TestCase):
         with self.assertRaisesRegex(Rejected, 'pointer origin'):
             self.compile_ir(*self.spill_fixture(rewrite='pxor xmm0, xmm0\nmovups [rsp], xmm0'))
 
-    def test_stack_passed_effect_size_remains_unresolved(self):
+    def test_stack_passed_effect_size_resolves_write_region(self):
         parameters = ['ptr'] + ['u64'] * 8
         raw, contracts = self.fixture([
             ('test_entry', 'push rdi\nsub rsp, 40\nlea rdi, [rsp+24]\nmov QWORD PTR [rsp], 0\nmov QWORD PTR [rsp+8], 0\nmov QWORD PTR [rsp+16], 8\nxor esi, esi\nxor edx, edx\nxor ecx, ecx\nxor r8d, r8d\nxor r9d, r9d\ncall [rip+image_cell]\nadd rsp, 40\npop rax\nmov rax, [rax]\nret', ['ptr'], 'u64')],
             imports=self.provider(parameters, [{'parameter': 0, 'size_parameter': 8}]))
-        with self.assertRaisesRegex(Rejected, 'pointer origin'):
-            self.compile_ir(raw, contracts)
+        provider = '#include <string.h>\nvoid native_probe(void* p, unsigned long long a, unsigned long long b, unsigned long long c, unsigned long long d, unsigned long long e, unsigned long long f, unsigned long long g, unsigned long long size) { memset(p,0,size); }'
+        function, _, _ = self.compile(raw, contracts, extra=provider)
+        value = ctypes.c_uint64(123)
+        self.assertEqual(function(ctypes.addressof(value)), 123)
 
     def test_disjoint_callee_write_keeps_spilled_origin(self):
         function, _, _ = self.compile(*self.spill_fixture(rewrite='lea rdi, [rsp+16]\ncall writer'))
