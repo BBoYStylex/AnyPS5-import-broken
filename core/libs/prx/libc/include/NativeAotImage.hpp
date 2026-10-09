@@ -20,5 +20,6 @@ struct NativeAotImage {
 };
 
 extern "C" void NativeAotRegisterImage_nid_no_patch(const NativeAotImage* image);
+extern "C" void NativeAotRequireReadOnly_nid_no_patch(const NativeAotDataRange* ranges, std::size_t count);
 
 #endif

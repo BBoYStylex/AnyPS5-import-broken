@@ -18,6 +18,7 @@ import effects
 import loop_ranges
 import native_image
 import checked_stack
+import immutable_data
 from dynamic import parse_dynamic, DynamicError
 from calls import validate_indirect_calls, CallError
 
@@ -162,6 +163,10 @@ class Image:
         self.call_contracts = {}
         self.memory_effects = {}
         self.provider_requirements = {}
+        try:
+            immutable_data.configure(self)
+        except ValueError as error:
+            raise Rejected(str(error)) from error
 
     def segment(self, address, size=1):
         matches = [s for s in self.segments if s['p_vaddr'] <= address and address + size <= s['p_vaddr'] + s['p_memsz']]
@@ -347,6 +352,9 @@ class Function:
         elif operand.type == X86_OP_MEM:
             self.memory_writes[ins.address] = (operand,)
             self.read_operand(ins, state, operand)
+            region = self.memory_write_region(ins, state, operand)
+            if region is not None and region[0] == 'image' and immutable_data.overlaps(self.image, region[1], region[2]):
+                self.fail(ins, 'write overlaps immutable image data')
             clean = state.get('tail_stack_clean', frozenset())
             base_name = ins.reg_name(operand.mem.base)
             frame = state['pointers'].get(base_name)
@@ -371,8 +379,21 @@ class Function:
         state['saved'] = {offset: (saved[0], saved[1], None, None) for offset, saved in state['saved'].items()}
         state['tail_stack_clean'] = frozenset()
 
+    def check_immutable_call(self, ins, callee, state, writes):
+        if writes is not None:
+            if any(kind == 'image' and immutable_data.overlaps(self.image, begin, end) for kind, begin, end in writes.writes):
+                self.fail(ins, 'call writes immutable image data')
+            return
+        for index, kind in enumerate(callee['parameters']):
+            if kind != 'ptr':
+                continue
+            pointer = effects.argument_pointer(self, ins, callee, index, state)
+            if pointer and pointer[0] == 'image' and immutable_data.overlaps(self.image, pointer[2], pointer[2] + 1):
+                self.fail(ins, 'immutable image pointer passed to a call with unknown effects')
+
     def check_tail_call(self, ins, state):
         callee, slot = self.tail_calls[ins.address]
+        self.check_immutable_call(ins, callee, state, effects.call_writes(self, ins, state))
         if not effects.required_bindings(self, ins) <= state['import_bindings']:
             self.fail(ins, 'native callee requires original provider bindings')
         if slot is not None and slot not in state['image_pointers']:
@@ -478,6 +499,7 @@ class Function:
                 state['pointers'].pop(reg, None)
                 state['constants'].pop(reg, None)
             memory_effects = effects.call_writes(self, ins, original)
+            self.check_immutable_call(ins, callee, original, memory_effects)
             if memory_effects is None or memory_effects.parameter_writes or any(kind == 'frame' for kind, _, _ in memory_effects.writes):
                 self.invalidate_stack_aliases(state)
             state['flags'] = set()
@@ -719,6 +741,8 @@ class Function:
                 proven = all(self.pointer_operand(ins, original, operand) for operand in args)
             if proven:
                 native.add(destination)
+        image.update(self.image.immutable_cells)
+        bindings.update(self.image.immutable_bindings)
         state['native_pointers'], state['stack_pointers'], state['image_pointers'] = native, stack, image
         state['callback_memory_unmodified'] = callback_memory_unmodified
         state['import_bindings'] = bindings
@@ -1115,19 +1139,30 @@ def compile_image(image):
         suffix = ' noreturn' if contract.get('noreturn') else ''
         lines.append(f"declare {abi.result_type(result)} @{contract['name']}({', '.join(abi.parameter_type(t) for t in parameters)}){suffix}")
     for spec in image.data:
+        if spec['address'] in image.immutable_initializers:
+            lines.append(immutable_data.declaration(image, spec))
+            continue
         raw = image.read(spec['address'], spec['size'])
         value = ''.join(f'\\{byte:02X}' for byte in raw)
         writable = image.segment(spec['address'])['p_flags'] & 2 or any(spec['address'] <= slot < spec['address'] + spec['size'] for slot in [*image.import_slots, *(slot for slot, _ in image.relocations)])
         lines.append(f"@data_{spec['address']:x} = {'global' if writable else 'constant'} [{len(raw)} x i8] c\"{value}\", align 16")
     if descriptor is not None:
         lines.extend(native_image.declarations(image, descriptor))
-    if image.relocations or image.import_slots or descriptor is not None:
+    if image.immutable_regions:
+        lines.extend(immutable_data.declarations(image))
+    if image.relocations or image.import_slots or descriptor is not None or image.immutable_regions:
         lines.extend(['@llvm.global_ctors = appending global [1 x { i32, ptr, ptr }] [{ i32, ptr, ptr } { i32 101, ptr @native_image_init, ptr null }]',
                       'define internal void @native_image_init() {'])
         for slot, target in image.relocations:
+            if slot in image.immutable_cells:
+                continue
             lines.append(f'  store ptr {image.pointer(target)}, ptr {image.pointer(slot, 8)}, align 1')
         for slot, contract in image.import_slots.items():
+            if slot in image.immutable_cells:
+                continue
             lines.append(f"  store ptr @{contract['name']}, ptr {image.pointer(slot, 8)}, align 1")
+        if image.immutable_regions:
+            lines.append(f'  call void @NativeAotRequireReadOnly_nid_no_patch(ptr @__aps5_aot_readonly_ranges, i64 {len(image.immutable_regions)})')
         if descriptor is not None:
             lines.append('  call void @NativeAotRegisterImage_nid_no_patch(ptr @__aps5_aot_image)')
         lines.extend(['  ret void', '}'])
@@ -1140,6 +1175,7 @@ def compile_image(image):
                              'memory_effects': effects.report(image.memory_effects.get(f.contract['address'])),
                              'native_frame_bytes_before_optimization': f.depth} for f in functions],
               'native_image': descriptor,
+              'immutable_data': image.contracts.get('immutable_data', []),
               'required_provider_bindings': {image.functions[address]['name']: sorted(slots) for address, slots in image.provider_requirements.items() if slots},
               'provider_effect_contracts': {name: contract['memory_effects'] for name, contract in image.imports.items() if 'memory_effects' in contract},
               'imports': len(image.import_slots), 'pointer_relocations': len(image.relocations),

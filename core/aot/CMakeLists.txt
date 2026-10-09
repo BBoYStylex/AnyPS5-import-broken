@@ -20,7 +20,9 @@ add_subdirectory(${CMAKE_SOURCE_DIR}/3rdparty/capstone ${CMAKE_CURRENT_BINARY_DI
 set(aotPythonPath "${CMAKE_SOURCE_DIR}/3rdparty/capstone/bindings/python:${CMAKE_SOURCE_DIR}/3rdparty/pyelftools:${CMAKE_CURRENT_SOURCE_DIR}")
 configure_file(launcher.py.in native_aot.py @ONLY)
 add_custom_target(native_aot ALL DEPENDS capstone_shared)
-add_library(anyps5_native_image STATIC "${CMAKE_SOURCE_DIR}/core/libs/native/NativeAotImage.cpp")
+add_library(anyps5_native_image STATIC
+    "${CMAKE_SOURCE_DIR}/core/libs/native/NativeAotImage.cpp"
+    "${CMAKE_SOURCE_DIR}/core/libs/native/NativeAotReadonly.cpp")
 target_include_directories(anyps5_native_image PUBLIC "${CMAKE_SOURCE_DIR}/core/libs")
 set_target_properties(anyps5_native_image PROPERTIES CXX_EXTENSIONS OFF)
 
