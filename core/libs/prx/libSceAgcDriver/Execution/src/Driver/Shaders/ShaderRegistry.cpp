@@ -1131,7 +1131,7 @@ void Driver::RegisterShader(const Shader* shader) {
     snapshot.header.resize(fields.header_size);
     std::memcpy(snapshot.header.data(), static_cast<const void*>(shader), fields.header_size);
 
-    transaction.Hold();
+    std::shared_ptr<const ShaderSnapshot> identical;
     {
         std::lock_guard lock(mutex);
         rethrowFailure();
@@ -1140,14 +1140,21 @@ void Driver::RegisterShader(const Shader* shader) {
             if (found != shaders->end()) {
                 for (const auto& current : found->second) {
                     if (current->headerAddress == snapshot.headerAddress && current->type == snapshot.type && current->code == snapshot.code && current->header == snapshot.header) {
-                        const auto identical = current;
-                        PublishRegisteredShader(shaders, identical);
-                        transaction.Commit();
-                        return;
+                        identical = current;
+                        break;
                     }
                 }
             }
         }
+    }
+
+    if (identical != nullptr) {
+        transaction.Hold();
+        std::lock_guard lock(mutex);
+        rethrowFailure();
+        PublishRegisteredShader(shaders, identical);
+        transaction.Commit();
+        return;
     }
 
     std::shared_ptr<VulkanDevice> localDevice = device.Load();
@@ -1190,6 +1197,7 @@ void Driver::RegisterShader(const Shader* shader) {
         std::fprintf(stderr, "\n");
     }
     const auto published = std::make_shared<const ShaderSnapshot>(std::move(snapshot));
+    transaction.Hold();
     std::lock_guard lock(mutex);
     rethrowFailure();
     PublishRegisteredShader(shaders, published);
