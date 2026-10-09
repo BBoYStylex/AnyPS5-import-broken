@@ -103,12 +103,14 @@ class ParameterEffectTests(unittest.TestCase):
         with self.assertRaisesRegex(Rejected, 'pointer origin'):
             self.compile_ir(raw, contracts)
 
-    def test_stack_passed_pointer_keeps_conservative_effects(self):
+    def test_stack_passed_pointer_preserves_disjoint_caller_memory(self):
         raw, contracts = self.fixture([
             ('test_entry', 'push rdi\nsub rsp, 24\nlea rax, [rsp+8]\nmov [rsp], rax\nxor edi, edi\nxor esi, esi\nxor edx, edx\nxor ecx, ecx\nxor r8d, r8d\nxor r9d, r9d\ncall writer\nadd rsp, 24\npop rax\nmov rax, [rax]\nret', ['ptr'], 'i64'),
             ('writer', 'mov rax, [rsp+8]\nmov QWORD PTR [rax], 42\nret', ['i64'] * 6 + ['ptr'], 'void')])
-        with self.assertRaisesRegex(Rejected, 'pointer origin'):
-            self.compile_ir(raw, contracts)
+        function, report, _ = self.compile(raw, contracts)
+        value = ctypes.c_uint64(123)
+        self.assertEqual(function(ctypes.addressof(value)), 123)
+        self.assertEqual(report['functions'][1]['memory_effects']['parameter_writes'], [{'parameter': 6, 'offset': 0, 'size': 8}])
 
     def test_parameter_write_invalidates_import_binding(self):
         imports = {'nativeNid': {'name': 'native_probe', 'parameters': [], 'result': 'void',

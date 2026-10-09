@@ -38,7 +38,18 @@ def validate_provider(contract):
                 raise ValueError('provider write size parameter must be an integer')
 
 
-def provider_writes(function, contract, state):
+def argument_pointer(function, ins, contract, index, state):
+    location = abi.locations(contract['parameters'])[index]
+    if location['kind'] == 'stack':
+        offset = state['rsp'] + location['offset'] - (8 if ins.mnemonic == 'call' else 0)
+        return state['stack_origins'].get(offset) if offset in state['stack_pointers'] else None
+    name = location['name']
+    if name in ('rsp', 'rbp') and state[name] is not None:
+        return 'frame', 0, state[name]
+    return state['pointers'].get(name)
+
+
+def provider_writes(function, ins, contract, state):
     effects = contract.get('memory_effects')
     if effects is None or effects['callbacks']:
         return None
@@ -56,13 +67,7 @@ def provider_writes(function, contract, state):
             size &= (1 << length['bits']) - 1
         if size == 0:
             continue
-        location = locations[write['parameter']]
-        if location['kind'] != 'register':
-            return None
-        name = location['name']
-        pointer = state['pointers'].get(name)
-        if name in ('rsp', 'rbp') and state[name] is not None:
-            pointer = ('frame', 0, state[name])
+        pointer = argument_pointer(function, ins, contract, write['parameter'], state)
         if pointer is None or pointer[0] not in ('frame', 'image'):
             return None
         kind, _, begin = pointer
@@ -137,17 +142,10 @@ def parameter_write(function, ins, state, operand):
     return index, begin, end
 
 
-def resolve_parameters(function, contract, result, state):
+def resolve_parameters(function, ins, contract, result, state):
     writes, parameters = list(result.writes), []
-    locations = abi.locations(contract['parameters'])
     for index, begin, end in result.parameter_writes:
-        location = locations[index]
-        if location['kind'] != 'register':
-            return None
-        name = location['name']
-        pointer = state['pointers'].get(name)
-        if name in ('rsp', 'rbp') and state[name] is not None:
-            pointer = ('frame', 0, state[name])
+        pointer = argument_pointer(function, ins, contract, index, state)
         if pointer is None:
             return None
         kind, parameter, offset = pointer
@@ -186,11 +184,11 @@ def call_writes(function, ins, state=None):
         result = function.image.memory_effects.get(target)
         if result is None or not result.bindings <= state['import_bindings']:
             return None
-        return resolve_parameters(function, function.image.functions[target], result, state)
+        return resolve_parameters(function, ins, function.image.functions[target], result, state)
     contract, slot = function.image.call(ins, function.contract)
     if slot not in state['import_bindings']:
         return None
-    writes = provider_writes(function, contract, state)
+    writes = provider_writes(function, ins, contract, state)
     return None if writes is None else MemoryEffects(writes, frozenset({slot}))
 
 

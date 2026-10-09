@@ -391,6 +391,7 @@ class Function:
                  'saved': original['saved'].copy(), 'flags': set(original['flags']), 'pointers': original['pointers'].copy(),
                  'constants': original.get('constants', {}).copy(), 'tail_stack_clean': original['tail_stack_clean'],
                  'native_pointers': original['native_pointers'].copy(), 'stack_pointers': original['stack_pointers'].copy(),
+                 'stack_origins': original['stack_origins'].copy(),
                  'image_pointers': original['image_pointers'].copy(), 'import_bindings': original['import_bindings'].copy(), 'callback_memory_unmodified': original['callback_memory_unmodified']}
         op, args = ins.mnemonic, ins.operands
         if avx.analyze(self, ins, state) or vector.analyze(self, ins, state):
@@ -581,6 +582,19 @@ class Function:
         origin = self.memory_origin(ins, state, operand)
         return None if origin is None else (origin[0], origin[1], origin[1] + operand.size)
 
+    def pointer_origin(self, ins, state, operand):
+        if operand.size != 8 or not self.pointer_operand(ins, state, operand):
+            return None
+        if operand.type == X86_OP_REG:
+            name = self.reg(ins, operand)[0]
+            if name in ('rsp', 'rbp') and state[name] is not None:
+                return 'frame', 0, state[name]
+            return state['pointers'].get(name)
+        origin = self.memory_origin(ins, state, operand)
+        if origin is not None and origin[0] == 'frame':
+            return state['stack_origins'].get(origin[1])
+        return None
+
     def pointer_operand(self, ins, state, operand):
         if operand.size != 8:
             return False
@@ -602,6 +616,7 @@ class Function:
             if name in ALIASES:
                 native.discard(ALIASES[name][0])
         stack = original['stack_pointers'].copy()
+        origins = original['stack_origins'].copy()
         image = original['image_pointers'].copy()
         bindings = original['import_bindings'].copy()
         callback_memory_unmodified = original['callback_memory_unmodified']
@@ -612,24 +627,40 @@ class Function:
                 callback_memory_unmodified = False
             if origin is None:
                 stack.clear()
+                origins.clear()
                 image.clear()
                 bindings.clear()
             else:
                 cells, begin, end = (stack if origin[0] == 'frame' else image), origin[1], origin[2]
                 cells.difference_update(offset for offset in list(cells) if begin < offset + 8 and offset < end)
+                if origin[0] == 'frame':
+                    origins = {offset: pointer for offset, pointer in origins.items() if not (begin < offset + 8 and offset < end)}
                 if origin[0] == 'image':
                     bindings.difference_update(offset for offset in list(bindings) if begin < offset + 8 and offset < end)
                 if op == 'mov' and not operand.mem.index and operand is args[0] and self.pointer_operand(ins, original, args[1]):
                     cells.add(begin)
+                    pointer = self.pointer_origin(ins, original, args[1])
+                    if origin[0] == 'frame' and pointer is not None:
+                        origins[begin] = pointer
         if op == 'push':
             offset = original['rsp'] - 8
             stack = {saved for saved in stack if not (offset < saved + 8 and saved < offset + 8)}
+            origins = {saved: pointer for saved, pointer in origins.items() if not (offset < saved + 8 and saved < offset + 8)}
+            pointer = self.pointer_origin(ins, original, args[0])
+            if pointer is not None:
+                origins[offset] = pointer
             if self.pointer_operand(ins, original, args[0]):
                 stack.add(offset)
             native.add('rsp')
         elif op == 'pop':
             if original['rsp'] in original['stack_pointers']:
                 native.add(self.reg(ins, args[0])[0])
+            name = self.reg(ins, args[0])[0]
+            pointer = original['stack_origins'].get(original['rsp'])
+            state['pointers'].pop(name, None)
+            if pointer is not None:
+                state['pointers'][name] = pointer
+            origins.pop(original['rsp'], None)
             stack.discard(original['rsp'])
             native.add('rsp')
         elif op == 'call':
@@ -637,6 +668,7 @@ class Function:
             writes = effects.call_writes(self, ins, original)
             if writes is None or writes.parameter_writes:
                 stack.clear()
+                origins.clear()
                 image.clear()
                 bindings.clear()
                 callback_memory_unmodified = False
@@ -644,6 +676,8 @@ class Function:
                 for kind, begin, end in writes.writes:
                     cells = stack if kind == 'frame' else image
                     cells.difference_update(offset for offset in list(cells) if begin < offset + 8 and offset < end)
+                    if kind == 'frame':
+                        origins = {offset: pointer for offset, pointer in origins.items() if not (begin < offset + 8 and offset < end)}
                     if kind == 'image':
                         bindings.difference_update(offset for offset in list(bindings) if begin < offset + 8 and offset < end)
                         callback_memory_unmodified = False
@@ -656,6 +690,9 @@ class Function:
             proven = False
             if op in ('mov', 'movabs'):
                 proven = self.pointer_operand(ins, original, args[1])
+                pointer = self.pointer_origin(ins, original, args[1])
+                if pointer is not None:
+                    state['pointers'][destination] = pointer
             elif op == 'lea':
                 memory = args[1].mem
                 base, index = ins.reg_name(memory.base), ins.reg_name(memory.index)
@@ -672,6 +709,7 @@ class Function:
         state['native_pointers'], state['stack_pointers'], state['image_pointers'] = native, stack, image
         state['callback_memory_unmodified'] = callback_memory_unmodified
         state['import_bindings'] = bindings
+        state['stack_origins'] = origins
         return state
 
     def constant_operand(self, ins, state, operand):
@@ -705,6 +743,7 @@ class Function:
                    'tail_stack_clean': frozenset(loc['offset'] for loc in self.argument_locations if loc['kind'] == 'stack'),
                    'native_pointers': {'rsp'} | set(pointers),
                    'stack_pointers': {loc['offset'] for loc in self.argument_locations if loc['kind'] == 'stack' and loc['type'] == 'ptr'},
+                   'stack_origins': {loc['offset']: ('parameter', index, 0) for index, loc in enumerate(self.argument_locations) if loc['kind'] == 'stack' and loc['type'] == 'ptr'},
                    'image_pointers': set(self.image.import_slots) | {slot for slot, _ in self.image.relocations},
                    'import_bindings': set(self.image.import_slots), 'callback_memory_unmodified': True}
         entry = self.contract['address']
@@ -731,6 +770,7 @@ class Function:
                     new['tail_stack_clean'] = old['tail_stack_clean'] & state['tail_stack_clean']
                     new['native_pointers'] = old['native_pointers'] & state['native_pointers']
                     new['stack_pointers'] = old['stack_pointers'] & state['stack_pointers']
+                    new['stack_origins'] = {offset: pointer for offset, pointer in state['stack_origins'].items() if old['stack_origins'].get(offset) == pointer}
                     new['image_pointers'] = old['image_pointers'] & state['image_pointers']
                     new['import_bindings'] = old['import_bindings'] & state['import_bindings']
                     new['callback_memory_unmodified'] = old['callback_memory_unmodified'] and state['callback_memory_unmodified']
