@@ -36,7 +36,24 @@ Supported operations cover declared scalar integer, SSE and VEX integer/bitwise 
 
 The tests build synthetic ELF inputs, compile and execute ARM64 code, check native callback/tail-call ABIs and compare supported operations with independent integer oracles and x86 SSE probes. The SSE reference executables use Rosetta on Apple Silicon; generated ARM64 programs do not. Those differential tests therefore require Rosetta to be installed. They do not qualify console hardware, complete games or performance.
 
-Guest TLS and C++ exceptions, aggregate and variadic ABIs, general computed jumps, x87, atomics, guest fault delivery, concurrent memory semantics and full module lifecycle are incomplete. Unsupported instructions and declared ABIs reject. Pointer operands need a proven native origin: declared pointer arguments/results, reconstructed image/frame addresses or tracked pointer cells. For acyclic direct calls within the image, the compiler infers writes from validated instruction states, including transitive tail calls. Private frame writes preserve caller memory proofs; fixed image writes invalidate overlapping pointer cells. Import calls, indirect calls, recursive call chains, parameter writes and unresolved aliases retain conservative invalidation. Arbitrary pointer fields loaded from structs still reject. Inferred effects are included in the compilation report; native provider effects remain future work. Concurrent accesses are not qualified by the single-threaded memory model. See [TechnicalDebt](TechnicalDebt.md) for the remaining qualification limits.
+Guest TLS and C++ exceptions, aggregate and variadic ABIs, general computed jumps, x87, atomics, guest fault delivery, concurrent memory semantics and full module lifecycle are incomplete. Unsupported instructions and declared ABIs reject. Pointer operands need a proven native origin: declared pointer arguments/results, reconstructed image/frame addresses or tracked pointer cells. For acyclic direct calls within the image, the compiler infers writes from validated instruction states, including transitive tail calls. Private frame writes preserve caller memory proofs; fixed image writes invalidate overlapping pointer cells. Unqualified imports, indirect calls, recursive call chains, parameter writes and unresolved aliases retain conservative invalidation. Arbitrary pointer fields loaded from structs still reject. Inferred effects and provider-binding preconditions are included in the compilation report. Concurrent accesses are not qualified by the single-threaded memory model. See [TechnicalDebt](TechnicalDebt.md) for the remaining qualification limits.
+
+Import contracts optionally accept `memory_effects` with exactly `writes`, `callbacks` and a nonempty `evidence` string. These are caller-verified assertions about the actual native provider and execution profile, not inferred or checked against its binary. `writes` must cover all changes to guest-visible memory, including captured aliases and globals. `callbacks: false` asserts no guest callback or reentry during the call. Private host state is excluded only when it cannot alias tracked guest memory; asynchronous mutation is outside this profile. Missing effects or possible guest callbacks invalidate memory proofs.
+
+For example, a verified native `memset(ptr, i32, u64)` provider may declare:
+
+```json
+"memory_effects": {
+  "writes": [{"parameter": 0, "size_parameter": 2}],
+  "callbacks": false,
+  "evidence": "Identify the provider implementation/version, source and verified execution constraints"
+}
+```
+
+Each write starts at a pointer parameter and specifies either a constant unsigned byte `size` or an integer `size_parameter`. Indices are zero-based. The current analysis requires a register argument with a proven frame/image address and a constant extent; unresolved, out-of-region or stack-passed extents/destinations retain conservative invalidation. A zero extent performs no write. `writes: []` asserts no guest-visible writes. Native return-pointer identity still follows the result ABI contract; return aliases are not inferred.
+
+Provider effects apply only while the import slot retains its original binding. Writes invalidate binding proofs even when they store another native pointer. Callee binding preconditions propagate through direct, tail and declared indirect calls, including recursive dependencies, and must hold before calling code compiled under those assumptions. External native callers must honor the reported preconditions as well. Internal functions cannot override inferred effects with annotations. The report retains provider evidence for review; linking the matching provider remains the caller's responsibility.
+
 
 ## Full build
 

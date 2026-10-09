@@ -87,6 +87,7 @@ class Image:
         self.functions = {}
         for function in contracts['functions']:
             signature(function)
+            require('memory_effects' not in function, 'internal memory effects must be inferred from code')
             objects = sorted(function.get('stack_objects', []), key=lambda o: o['offset'])
             for index, obj in enumerate(objects):
                 require(obj['size'] > 0 and obj['offset'] + obj['size'] <= 0 and obj['offset'] >= -1024 * 1024,
@@ -105,6 +106,10 @@ class Image:
         self.imports = contracts['imports']
         for contract in self.imports.values():
             signature(contract)
+            try:
+                effects.validate_provider(contract)
+            except ValueError as error:
+                raise Rejected(str(error)) from error
         self.data = []
         for spec in contracts['data']:
             seg = self.segment(spec['address'], spec['size'])
@@ -153,6 +158,7 @@ class Image:
         self.decoder.detail = True
         self.call_contracts = {}
         self.memory_effects = {}
+        self.provider_requirements = {}
 
     def segment(self, address, size=1):
         matches = [s for s in self.segments if s['p_vaddr'] <= address and address + size <= s['p_vaddr'] + s['p_memsz']]
@@ -355,6 +361,8 @@ class Function:
 
     def check_tail_call(self, ins, state):
         callee, slot = self.tail_calls[ins.address]
+        if not effects.required_bindings(self, ins) <= state['import_bindings']:
+            self.fail(ins, 'native callee requires original provider bindings')
         if slot is not None and slot not in state['image_pointers']:
             self.fail(ins, 'import target has no proven native pointer origin')
         if state['rsp'] != 0 or state['saved']:
@@ -379,7 +387,7 @@ class Function:
                  'saved': original['saved'].copy(), 'flags': set(original['flags']), 'pointers': original['pointers'].copy(),
                  'constants': original.get('constants', {}).copy(), 'tail_stack_clean': original['tail_stack_clean'],
                  'native_pointers': original['native_pointers'].copy(), 'stack_pointers': original['stack_pointers'].copy(),
-                 'image_pointers': original['image_pointers'].copy(), 'callback_memory_unmodified': original['callback_memory_unmodified']}
+                 'image_pointers': original['image_pointers'].copy(), 'import_bindings': original['import_bindings'].copy(), 'callback_memory_unmodified': original['callback_memory_unmodified']}
         op, args = ins.mnemonic, ins.operands
         if avx.analyze(self, ins, state) or vector.analyze(self, ins, state):
             return state
@@ -426,6 +434,8 @@ class Function:
             return state
         if op == 'call':
             callee, slot = self.image.call(ins, self.contract)
+            if not effects.required_bindings(self, ins) <= state['import_bindings']:
+                self.fail(ins, 'native callee requires original provider bindings')
             if slot == 'operand':
                 self.read_operand(ins, state, args[0])
                 if (args[0].type == X86_OP_REG or self.memory_origin(ins, state, args[0]) is not None) and not self.pointer_operand(ins, state, args[0]):
@@ -454,7 +464,8 @@ class Function:
                 state['known'].pop(reg, None)
                 state['pointers'].pop(reg, None)
                 state['constants'].pop(reg, None)
-            if effects.call_writes(self, ins) is None:
+            memory_effects = effects.call_writes(self, ins, original)
+            if memory_effects is None or any(kind == 'frame' for kind, _, _ in memory_effects.writes):
                 self.invalidate_stack_aliases(state)
             state['flags'] = set()
             if callee['result'] != 'void':
@@ -582,6 +593,7 @@ class Function:
                 native.discard(ALIASES[name][0])
         stack = original['stack_pointers'].copy()
         image = original['image_pointers'].copy()
+        bindings = original['import_bindings'].copy()
         callback_memory_unmodified = original['callback_memory_unmodified']
         op, args = ins.mnemonic, ins.operands
         for operand in args:
@@ -593,9 +605,12 @@ class Function:
             if origin is None:
                 stack.clear()
                 image.clear()
+                bindings.clear()
             else:
                 cells, begin = (stack if origin[0] == 'frame' else image), origin[1]
                 cells.difference_update(offset for offset in list(cells) if begin < offset + 8 and offset < begin + operand.size)
+                if origin[0] == 'image':
+                    bindings.difference_update(offset for offset in list(bindings) if begin < offset + 8 and offset < begin + operand.size)
                 if op == 'mov' and operand is args[0] and self.pointer_operand(ins, original, args[1]):
                     cells.add(begin)
         if op == 'push':
@@ -611,14 +626,19 @@ class Function:
             native.add('rsp')
         elif op == 'call':
             native.difference_update(VOLATILE | set(VECTOR_STORAGE))
-            writes = effects.call_writes(self, ins)
+            writes = effects.call_writes(self, ins, original)
             if writes is None:
                 stack.clear()
                 image.clear()
+                bindings.clear()
                 callback_memory_unmodified = False
-            elif writes:
-                image.difference_update(offset for offset in list(image) if any(begin < offset + 8 and offset < end for begin, end in writes))
-                callback_memory_unmodified = False
+            else:
+                for kind, begin, end in writes.writes:
+                    cells = stack if kind == 'frame' else image
+                    cells.difference_update(offset for offset in list(cells) if begin < offset + 8 and offset < end)
+                    if kind == 'image':
+                        bindings.difference_update(offset for offset in list(bindings) if begin < offset + 8 and offset < end)
+                        callback_memory_unmodified = False
             callee, _ = self.image.call(ins, self.contract)
             if callee['result'] == 'ptr':
                 native.add('rax')
@@ -643,6 +663,7 @@ class Function:
                 native.add(destination)
         state['native_pointers'], state['stack_pointers'], state['image_pointers'] = native, stack, image
         state['callback_memory_unmodified'] = callback_memory_unmodified
+        state['import_bindings'] = bindings
         return state
 
     def constant_operand(self, ins, state, operand):
@@ -677,7 +698,7 @@ class Function:
                    'native_pointers': {'rsp'} | set(pointers),
                    'stack_pointers': {loc['offset'] for loc in self.argument_locations if loc['kind'] == 'stack' and loc['type'] == 'ptr'},
                    'image_pointers': set(self.image.import_slots) | {slot for slot, _ in self.image.relocations},
-                   'callback_memory_unmodified': True}
+                   'import_bindings': set(self.image.import_slots), 'callback_memory_unmodified': True}
         entry = self.contract['address']
         self.states[entry] = initial
         pending = deque([entry])
@@ -703,6 +724,7 @@ class Function:
                     new['native_pointers'] = old['native_pointers'] & state['native_pointers']
                     new['stack_pointers'] = old['stack_pointers'] & state['stack_pointers']
                     new['image_pointers'] = old['image_pointers'] & state['image_pointers']
+                    new['import_bindings'] = old['import_bindings'] & state['import_bindings']
                     new['callback_memory_unmodified'] = old['callback_memory_unmodified'] and state['callback_memory_unmodified']
                     new['pointers'] = {name: pointer for name, pointer in state['pointers'].items() if old['pointers'].get(name) == pointer}
                     new['constants'] = {name: value for name, value in state['constants'].items() if old['constants'].get(name) == value}
@@ -1045,6 +1067,8 @@ def compile_image(image):
                              'native_tail_calls': len(f.tail_calls),
                              'memory_effects': effects.report(image.memory_effects.get(f.contract['address'])),
                              'native_frame_bytes_before_optimization': f.depth} for f in functions],
+              'required_provider_bindings': {image.functions[address]['name']: sorted(slots) for address, slots in image.provider_requirements.items() if slots},
+              'provider_effect_contracts': {name: contract['memory_effects'] for name, contract in image.imports.items() if 'memory_effects' in contract},
               'imports': len(image.import_slots), 'pointer_relocations': len(image.relocations),
               'indirect_calls': [site for sites in image.call_contracts.values() for site in sites.values()],
               'limitations': ['declared function boundaries and ABIs', 'declared scalar, SSE and AVX instruction subsets', 'no guest exception, TLS or computed-jump target recovery', 'indirect call target sets are declared, not inferred',
