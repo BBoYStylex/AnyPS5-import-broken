@@ -16,6 +16,7 @@ import avx
 import integer
 import effects
 import loop_ranges
+import native_image
 from dynamic import parse_dynamic, DynamicError
 from calls import validate_indirect_calls, CallError
 
@@ -68,7 +69,7 @@ class Image:
         self.contracts = contracts
         self.bytes = Path(path).read_bytes()
         require(contracts.get('schema') == 1, 'unsupported contract schema')
-        require(not contracts.get('native_runtime_registration'), 'native runtime image registration is outside this compiler build')
+        require(type(contracts.get('native_runtime_registration', False)) is bool, 'native_runtime_registration must be a boolean')
         require(hashlib.sha256(self.bytes).hexdigest() == contracts['sha256'], 'input hash does not match contracts')
         self.elf = ELFFile(io.BytesIO(self.bytes))
         require(self.elf.elfclass == 64 and self.elf.little_endian and self.elf['e_machine'] == 'EM_X86_64', 'expected little-endian x86-64 ELF')
@@ -1088,6 +1089,10 @@ class Function:
 def compile_image(image):
     functions = [Function(image, spec) for spec in image.functions.values()]
     effects.analyze(functions)
+    try:
+        descriptor = native_image.describe(image) if image.contracts.get('native_runtime_registration') else None
+    except ValueError as error:
+        raise Rejected(str(error)) from error
     lines = ['target triple = "arm64-apple-macosx13.0.0"', 'declare void @llvm.trap()', 'declare i8 @llvm.ctpop.i8(i8)']
     names = {spec['name'] for spec in image.functions.values()}
     for contract in image.imports.values():
@@ -1101,13 +1106,17 @@ def compile_image(image):
         value = ''.join(f'\\{byte:02X}' for byte in raw)
         writable = image.segment(spec['address'])['p_flags'] & 2 or any(spec['address'] <= slot < spec['address'] + spec['size'] for slot in [*image.import_slots, *(slot for slot, _ in image.relocations)])
         lines.append(f"@data_{spec['address']:x} = {'global' if writable else 'constant'} [{len(raw)} x i8] c\"{value}\", align 16")
-    if image.relocations or image.import_slots:
+    if descriptor is not None:
+        lines.extend(native_image.declarations(image, descriptor))
+    if image.relocations or image.import_slots or descriptor is not None:
         lines.extend(['@llvm.global_ctors = appending global [1 x { i32, ptr, ptr }] [{ i32, ptr, ptr } { i32 101, ptr @native_image_init, ptr null }]',
                       'define internal void @native_image_init() {'])
         for slot, target in image.relocations:
             lines.append(f'  store ptr {image.pointer(target)}, ptr {image.pointer(slot, 8)}, align 1')
         for slot, contract in image.import_slots.items():
             lines.append(f"  store ptr @{contract['name']}, ptr {image.pointer(slot, 8)}, align 1")
+        if descriptor is not None:
+            lines.append('  call void @NativeAotRegisterImage_nid_no_patch(ptr @__aps5_aot_image)')
         lines.extend(['  ret void', '}'])
     lines.extend(function.lower() for function in functions)
     report = {'schema': 1, 'status': 'experimental_native_ir', 'input_sha256': hashlib.sha256(image.bytes).hexdigest(),
@@ -1116,6 +1125,7 @@ def compile_image(image):
                              'bounded_loops': f.loop_proofs,
                              'memory_effects': effects.report(image.memory_effects.get(f.contract['address'])),
                              'native_frame_bytes_before_optimization': f.depth} for f in functions],
+              'native_image': descriptor,
               'required_provider_bindings': {image.functions[address]['name']: sorted(slots) for address, slots in image.provider_requirements.items() if slots},
               'provider_effect_contracts': {name: contract['memory_effects'] for name, contract in image.imports.items() if 'memory_effects' in contract},
               'imports': len(image.import_slots), 'pointer_relocations': len(image.relocations),
