@@ -14,6 +14,7 @@ import abi
 import vector
 import avx
 import integer
+import effects
 from dynamic import parse_dynamic, DynamicError
 from calls import validate_indirect_calls, CallError
 
@@ -151,6 +152,7 @@ class Image:
         self.decoder = Cs(CS_ARCH_X86, CS_MODE_64)
         self.decoder.detail = True
         self.call_contracts = {}
+        self.memory_effects = {}
 
     def segment(self, address, size=1):
         matches = [s for s in self.segments if s['p_vaddr'] <= address and address + size <= s['p_vaddr'] + s['p_memsz']]
@@ -228,7 +230,6 @@ class Function:
         self.stack_end = max([8] + [loc['offset'] + 8 for loc in self.argument_locations if loc['kind'] == 'stack'])
         self.image.annotated_calls(contract)
         self.discover()
-        self.analyze()
 
     def fail(self, ins, message):
         raise Rejected(f"{self.contract['name']} at 0x{ins.address:x} ({ins.mnemonic} {ins.op_str}): {message}")
@@ -453,7 +454,8 @@ class Function:
                 state['known'].pop(reg, None)
                 state['pointers'].pop(reg, None)
                 state['constants'].pop(reg, None)
-            self.invalidate_stack_aliases(state)
+            if effects.call_writes(self, ins) is None:
+                self.invalidate_stack_aliases(state)
             state['flags'] = set()
             if callee['result'] != 'void':
                 state['known'][abi.return_register(callee['result'])] = (1 << abi.bits(callee['result'])) - 1
@@ -609,9 +611,14 @@ class Function:
             native.add('rsp')
         elif op == 'call':
             native.difference_update(VOLATILE | set(VECTOR_STORAGE))
-            stack.clear()
-            image.clear()
-            callback_memory_unmodified = False
+            writes = effects.call_writes(self, ins)
+            if writes is None:
+                stack.clear()
+                image.clear()
+                callback_memory_unmodified = False
+            elif writes:
+                image.difference_update(offset for offset in list(image) if any(begin < offset + 8 and offset < end for begin, end in writes))
+                callback_memory_unmodified = False
             callee, _ = self.image.call(ins, self.contract)
             if callee['result'] == 'ptr':
                 native.add('rax')
@@ -1010,6 +1017,7 @@ class Function:
 
 def compile_image(image):
     functions = [Function(image, spec) for spec in image.functions.values()]
+    effects.analyze(functions)
     lines = ['target triple = "arm64-apple-macosx13.0.0"', 'declare void @llvm.trap()', 'declare i8 @llvm.ctpop.i8(i8)']
     names = {spec['name'] for spec in image.functions.values()}
     for contract in image.imports.values():
@@ -1035,6 +1043,7 @@ def compile_image(image):
     report = {'schema': 1, 'status': 'experimental_native_ir', 'input_sha256': hashlib.sha256(image.bytes).hexdigest(),
               'functions': [{'name': f.contract['name'], 'address': f.contract['address'], 'instructions': len(f.instructions),
                              'native_tail_calls': len(f.tail_calls),
+                             'memory_effects': effects.report(image.memory_effects.get(f.contract['address'])),
                              'native_frame_bytes_before_optimization': f.depth} for f in functions],
               'imports': len(image.import_slots), 'pointer_relocations': len(image.relocations),
               'indirect_calls': [site for sites in image.call_contracts.values() for site in sites.values()],
