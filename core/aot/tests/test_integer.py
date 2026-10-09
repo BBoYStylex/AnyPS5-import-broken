@@ -33,6 +33,7 @@ class Harness(Function):
     def __init__(self, instruction, flags=integer.FLAGS, division=None):
         self.serial, self.depth = 0, 256
         self.memory_writes = {}
+        self.checked_accesses = {}
         self.contract = {'name': 'probe', 'integer_division': division}
         self.lines = ['declare void @llvm.trap()', 'declare i8 @llvm.ctpop.i8(i8)',
                       'define void @probe(i64 %input_rax, i64 %input_rdx, i64 %input_rcx, i64 %input_rdi, i64 %input_rsi, i64 %input_flags, ptr %output) {', 'entry:']

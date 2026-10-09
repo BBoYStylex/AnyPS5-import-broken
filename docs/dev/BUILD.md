@@ -57,6 +57,8 @@ Provider effects apply only while the import slot retains its original binding. 
 
 The optional `native_runtime_registration: true` contract validates the process/libc parameter chain and allocator callback ABIs, emits a versioned native image descriptor, and registers it after pointer relocations. Link these objects with the `anyps5_native_image` static target and the actual native import providers. The registry supplies `ApplicationProcessParameters_nid_no_patch`; do not also link the ordinary executable-image implementation of that symbol. No fixed guest data address is required in the launcher. The component accepts one main image with static metadata lifetime; module loading/unloading and complete runtime integration remain outside this target. Allocator extension callbacks without a supported signature reject.
 
+Functions may opt into `checked_stack_accesses`: each record has an instruction `address`, memory `operand` index, a declared stack object's `object_offset`, and a boolean `pointer`. The instruction must have one memory operand with a proven native frame base. The compiler emits native bounds checks before the access and traps on violation; this does not provide guest fault delivery. A `pointer: true` scalar load additionally checks eight-byte cell alignment and requires every candidate cell to contain an independently proved native pointer. Declaring a pointer table does not establish its contents. Stores conservatively invalidate the object's affected pointer proofs. Object layouts remain source/recovery contracts. The report lists these checked accesses separately from statically bounded loops; their runtime cost must be measured on each workload.
+
 ## Full build
 
 ```sh

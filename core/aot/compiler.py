@@ -17,6 +17,7 @@ import integer
 import effects
 import loop_ranges
 import native_image
+import checked_stack
 from dynamic import parse_dynamic, DynamicError
 from calls import validate_indirect_calls, CallError
 
@@ -234,11 +235,15 @@ class Function:
         self.memory_writes = {}
         self.lines = []
         self.serial = 0
-        self.depth = 128
+        self.depth = max([128] + [-obj['offset'] for obj in contract.get('stack_objects', [])])
         self.argument_locations = abi.locations(contract['parameters'])
         self.stack_end = max([8] + [loc['offset'] + 8 for loc in self.argument_locations if loc['kind'] == 'stack'])
         self.image.annotated_calls(contract)
         self.discover()
+        try:
+            self.checked_accesses = checked_stack.parse(self)
+        except ValueError as error:
+            raise Rejected(str(error)) from error
         self.index_ranges, self.loop_proofs = loop_ranges.discover(self, ALIASES, VOLATILE)
 
     def fail(self, ins, message):
@@ -301,6 +306,8 @@ class Function:
         if operand.type == X86_OP_REG:
             self.check_register(ins, state, *self.reg(ins, operand))
         elif operand.type == X86_OP_MEM:
+            checked_stack.region(self, ins, state, operand)
+            checked_stack.pointer(self, ins, state, operand)
             mem = operand.mem
             if ins.mnemonic != 'lea' and ins.addr_size != 8:
                 self.fail(ins, '32-bit memory addressing requires pointer reconstruction')
@@ -578,6 +585,9 @@ class Function:
         return None
 
     def memory_write_region(self, ins, state, operand):
+        checked = checked_stack.region(self, ins, state, operand)
+        if checked is not None:
+            return checked
         if operand.mem.index:
             return loop_ranges.frame_write(self, ins, state, operand)
         origin = self.memory_origin(ins, state, operand)
@@ -597,6 +607,8 @@ class Function:
         return None
 
     def pointer_operand(self, ins, state, operand):
+        if checked_stack.pointer(self, ins, state, operand):
+            return True
         if operand.size != 8:
             return False
         if operand.type == X86_OP_REG:
@@ -638,7 +650,7 @@ class Function:
                     origins = {offset: pointer for offset, pointer in origins.items() if not (begin < offset + 8 and offset < end)}
                 if origin[0] == 'image':
                     bindings.difference_update(offset for offset in list(bindings) if begin < offset + 8 and offset < end)
-                if op == 'mov' and not operand.mem.index and operand is args[0] and self.pointer_operand(ins, original, args[1]):
+                if op == 'mov' and checked_stack.lookup(self, ins, operand) is None and not operand.mem.index and operand is args[0] and self.pointer_operand(ins, original, args[1]):
                     cells.add(begin)
                     pointer = self.pointer_origin(ins, original, args[1])
                     if origin[0] == 'frame' and pointer is not None:
@@ -874,7 +886,8 @@ class Function:
             if mem.scale != 1:
                 value = self.emit(f'mul i64 {value}, {mem.scale}')
             offset = self.emit(f'add i64 {value}, {offset}')
-        return self.emit(f'getelementptr i8, ptr {pointer}, i64 {offset}') if offset != '0' else pointer
+        address = self.emit(f'getelementptr i8, ptr {pointer}, i64 {offset}') if offset != '0' else pointer
+        return checked_stack.guard(self, ins, operand, address)
 
     def read(self, ins, operand, bits=None):
         bits = operand.size * 8 if bits is None else bits
@@ -1123,6 +1136,7 @@ def compile_image(image):
               'functions': [{'name': f.contract['name'], 'address': f.contract['address'], 'instructions': len(f.instructions),
                              'native_tail_calls': len(f.tail_calls),
                              'bounded_loops': f.loop_proofs,
+                             'checked_stack_accesses': list(f.checked_accesses.values()),
                              'memory_effects': effects.report(image.memory_effects.get(f.contract['address'])),
                              'native_frame_bytes_before_optimization': f.depth} for f in functions],
               'native_image': descriptor,
