@@ -467,7 +467,7 @@ class Function:
                 state['pointers'].pop(reg, None)
                 state['constants'].pop(reg, None)
             memory_effects = effects.call_writes(self, ins, original)
-            if memory_effects is None or any(kind == 'frame' for kind, _, _ in memory_effects.writes):
+            if memory_effects is None or memory_effects.parameter_writes or any(kind == 'frame' for kind, _, _ in memory_effects.writes):
                 self.invalidate_stack_aliases(state)
             state['flags'] = set()
             if callee['result'] != 'void':
@@ -635,7 +635,7 @@ class Function:
         elif op == 'call':
             native.difference_update(VOLATILE | set(VECTOR_STORAGE))
             writes = effects.call_writes(self, ins, original)
-            if writes is None:
+            if writes is None or writes.parameter_writes:
                 stack.clear()
                 image.clear()
                 bindings.clear()

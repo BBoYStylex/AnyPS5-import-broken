@@ -10,6 +10,7 @@ import abi
 class MemoryEffects(NamedTuple):
     writes: tuple
     bindings: frozenset = frozenset()
+    parameter_writes: tuple = ()
 
 
 def validate_provider(contract):
@@ -122,12 +123,71 @@ def infer_requirements(functions):
     image.provider_requirements = {address: frozenset(slots) for address, slots in requirements.items()}
 
 
+def parameter_write(function, ins, state, operand):
+    memory = operand.mem
+    if ins.addr_size != 8 or memory.segment or memory.index:
+        return None
+    pointer = state['pointers'].get(ins.reg_name(memory.base))
+    if pointer is None or pointer[0] != 'parameter':
+        return None
+    _, index, displacement = pointer
+    begin = displacement + memory.disp
+    end = begin + operand.size
+    if not -(1 << 63) <= begin < end <= 1 << 63:
+        return None
+    return index, begin, end
+
+
+def resolve_parameters(function, contract, result, state):
+    writes, parameters = list(result.writes), []
+    locations = abi.locations(contract['parameters'])
+    for index, begin, end in result.parameter_writes:
+        location = locations[index]
+        if location['kind'] != 'register':
+            return None
+        name = location['name']
+        pointer = state['pointers'].get(name)
+        if name in ('rsp', 'rbp') and state[name] is not None:
+            pointer = ('frame', 0, state[name])
+        if pointer is None:
+            return None
+        kind, parameter, offset = pointer
+        begin, end = begin + offset, end + offset
+        if not -(1 << 63) <= begin < end <= 1 << 63:
+            return None
+        if kind == 'parameter':
+            parameters.append((parameter, begin, end))
+            continue
+        if kind == 'frame':
+            if not -function.depth <= begin < end <= 0:
+                return None
+        elif kind == 'image':
+            if not any(spec['address'] <= begin < end <= spec['address'] + spec['size'] for spec in function.image.data):
+                return None
+        else:
+            return None
+        writes.append((kind, begin, end))
+    return MemoryEffects(tuple(writes), result.bindings, tuple(parameters))
+
+
+def merge_ranges(ranges):
+    merged = []
+    for begin, end in sorted(ranges):
+        if merged and begin <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(end, merged[-1][1]))
+        else:
+            merged.append((begin, end))
+    return tuple(merged)
+
+
 def call_writes(function, ins, state=None):
     state = function.states[ins.address] if state is None else state
     target = direct_target(function, ins)
     if target is not None:
         result = function.image.memory_effects.get(target)
-        return result if result is not None and result.bindings <= state['import_bindings'] else None
+        if result is None or not result.bindings <= state['import_bindings']:
+            return None
+        return resolve_parameters(function, function.image.functions[target], result, state)
     contract, slot = function.image.call(ins, function.contract)
     if slot not in state['import_bindings']:
         return None
@@ -136,7 +196,7 @@ def call_writes(function, ins, state=None):
 
 
 def summarize(function):
-    writes, bindings = set(), set()
+    writes, bindings, parameters = set(), set(), set()
     for address, ins in function.instructions.items():
         if ins.mnemonic == 'call' or address in function.tail_calls:
             nested = call_writes(function, ins)
@@ -144,24 +204,25 @@ def summarize(function):
                 return None
             writes.update((begin, end) for kind, begin, end in nested.writes if kind == 'image')
             bindings.update(nested.bindings)
+            parameters.update(nested.parameter_writes)
         for operand in ins.operands:
             if operand.type != X86_OP_MEM or not operand.access & CS_AC_WRITE:
                 continue
             origin = function.memory_write_region(ins, function.states[address], operand)
             if origin is None:
-                return None
+                parameter = parameter_write(function, ins, function.states[address], operand)
+                if parameter is None:
+                    return None
+                parameters.add(parameter)
+                continue
             kind, begin, end = origin
             if kind == 'image':
                 writes.add((begin, end))
             elif end > 0:
                 return None
-    merged = []
-    for begin, end in sorted(writes):
-        if merged and begin <= merged[-1][1]:
-            merged[-1] = (merged[-1][0], max(end, merged[-1][1]))
-        else:
-            merged.append((begin, end))
-    return MemoryEffects(tuple(('image', begin, end) for begin, end in merged), frozenset(bindings))
+    merged_parameters = tuple((index, begin, end) for index in sorted({index for index, _, _ in parameters})
+                              for begin, end in merge_ranges((begin, end) for parameter, begin, end in parameters if parameter == index))
+    return MemoryEffects(tuple(('image', begin, end) for begin, end in merge_ranges(writes)), frozenset(bindings), merged_parameters)
 
 
 def analyze(functions):
@@ -198,6 +259,8 @@ def report(writes):
     if writes is None:
         return {'status': 'unknown'}
     result = {'status': 'inferred', 'image_writes': [{'address': begin, 'size': end - begin} for _, begin, end in writes.writes]}
+    if writes.parameter_writes:
+        result['parameter_writes'] = [{'parameter': index, 'offset': begin, 'size': end - begin} for index, begin, end in writes.parameter_writes]
     if writes.bindings:
         result['required_provider_bindings'] = sorted(writes.bindings)
     return result

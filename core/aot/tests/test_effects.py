@@ -74,7 +74,7 @@ class CallEffectsTests(unittest.TestCase):
         with self.assertRaisesRegex(Rejected, 'pointer origin'):
             self.compile_ir(raw, contracts)
 
-    def test_pointer_parameter_write_remains_unknown(self):
+    def test_pointer_parameter_write_invalidates_overlapping_cell(self):
         raw, contracts = self.fixture([
             ('test_entry', 'push rdi\nmov rdi, rsp\ncall helper\npop rax\nmov rax, [rax]\nret', ['ptr'], 'i64'),
             ('helper', 'mov BYTE PTR [rdi], 0\nret', ['ptr'], 'void')])
