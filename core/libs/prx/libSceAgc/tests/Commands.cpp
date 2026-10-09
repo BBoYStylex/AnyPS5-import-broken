@@ -36,6 +36,8 @@ extern "C" std::uint32_t* APS5_VABI sceAgcAcbSetMarker(CommandBuffer* buf, const
 extern "C" std::uint32_t* APS5_VABI sceAgcDcbSetIndexBuffer(CommandBuffer* buf, std::uint64_t indexAddress);
 extern "C" std::uint32_t* APS5_VABI sceAgcDcbSetBaseIndirectArgs(CommandBuffer* buf, std::uint32_t shaderType, const volatile void* indirectBaseAddr);
 extern "C" std::uint32_t* APS5_VABI sceAgcSetNop(CommandBuffer* buf, std::uint32_t sizeDw);
+extern "C" std::uint32_t APS5_VABI sceAgcDcbBeginOcclusionQueryGetSize(std::uint8_t type);
+extern "C" std::uint32_t APS5_VABI sceAgcDcbEndOcclusionQueryGetSize();
 
 namespace {
 
@@ -201,6 +203,14 @@ void testMarkers() {
     expectFailure([] { sceAgcAcbPushMarker(nullptr, "frame", 0); });
     expectFailure([] { sceAgcAcbPopMarker(nullptr); });
     expectFailure([] { sceAgcAcbSetMarker(nullptr, "frame", 0); });
+}
+
+void testOcclusionQuerySizes() {
+    check(sceAgcDcbBeginOcclusionQueryGetSize(0) == 16, "occlusion query begin size mismatch");
+    check(sceAgcDcbBeginOcclusionQueryGetSize(1) == 288, "type 1 occlusion query begin size mismatch");
+    check(sceAgcDcbEndOcclusionQueryGetSize() == 16, "occlusion query end size mismatch");
+    expectFailure([] { sceAgcDcbBeginOcclusionQueryGetSize(2); });
+    expectFailure([] { sceAgcDcbBeginOcclusionQueryGetSize(0xff); });
 }
 
 void testIndexBuffer() {
@@ -438,6 +448,7 @@ int main(int argc, char** argv) {
         testClearState();
         testIndexedIndirectDraws();
         testMarkers();
+        testOcclusionQuerySizes();
         testIndexBuffer();
         testIndirectBase();
         testContextState();
