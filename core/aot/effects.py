@@ -1,8 +1,7 @@
 from collections import deque
 from typing import NamedTuple
 
-from capstone import CS_AC_WRITE
-from capstone.x86 import X86_OP_IMM, X86_OP_MEM
+from capstone.x86 import X86_OP_IMM
 
 import abi
 
@@ -205,9 +204,7 @@ def summarize(function):
             writes.update((begin, end) for kind, begin, end in nested.writes if kind == 'image')
             bindings.update(nested.bindings)
             parameters.update(nested.parameter_writes)
-        for operand in ins.operands:
-            if operand.type != X86_OP_MEM or not operand.access & CS_AC_WRITE:
-                continue
+        for operand in function.memory_writes.get(address, ()):
             origin = function.memory_write_region(ins, function.states[address], operand)
             if origin is None:
                 parameter = parameter_write(function, ins, function.states[address], operand)
