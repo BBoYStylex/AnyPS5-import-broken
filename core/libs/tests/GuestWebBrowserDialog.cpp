@@ -27,6 +27,8 @@ void Require(bool value) { if (!value) std::abort(); }
 
 int main() {
     Require(sceWebBrowserDialogGetStatus() == COMMON_DIALOG_STATUS_NONE);
+    std::uint8_t predetermined[32] = {};
+    Require(sceWebBrowserDialogOpenForPredeterminedContent(predetermined, predetermined) == COMMON_DIALOG_ERROR_NOT_INITIALIZED);
     Require(sceWebBrowserDialogInitialize() == 0);
     Require(sceWebBrowserDialogGetStatus() == COMMON_DIALOG_STATUS_INITIALIZED);
     Require(sceWebBrowserDialogTerminate() == 0);
@@ -36,13 +38,8 @@ int main() {
     Require(sceWebBrowserDialogOpen(param) == 0);
     Require(sceWebBrowserDialogGetStatus() == COMMON_DIALOG_STATUS_FINISHED);
     Require(sceWebBrowserDialogUpdateStatus() == COMMON_DIALOG_STATUS_FINISHED);
-    Require(sceWebBrowserDialogTerminate() == 0);
-    std::uint8_t predetermined[32] = {};
-    Require(sceWebBrowserDialogOpenForPredeterminedContent(param, predetermined) == COMMON_DIALOG_ERROR_NOT_INITIALIZED);
-    Require(sceWebBrowserDialogInitialize() == 0);
     Require(sceWebBrowserDialogOpenForPredeterminedContent(param, nullptr) == COMMON_DIALOG_ERROR_ARG_NULL);
     Require(sceWebBrowserDialogOpenForPredeterminedContent(nullptr, predetermined) == COMMON_DIALOG_ERROR_ARG_NULL);
-    Require(sceWebBrowserDialogGetStatus() == COMMON_DIALOG_STATUS_INITIALIZED);
     Require(sceWebBrowserDialogOpenForPredeterminedContent(param, predetermined) == 0);
     Require(sceWebBrowserDialogGetStatus() == COMMON_DIALOG_STATUS_FINISHED);
     std::uint8_t cookie[64] = {};
