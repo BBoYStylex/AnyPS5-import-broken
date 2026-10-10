@@ -191,6 +191,26 @@ int GuestThreadCpuClockId(const PthreadPrivate* thread) {
     return static_cast<int>(CPU_CLOCK_BIT | static_cast<std::uint32_t>(thread->cpuClockThread));
 }
 
+bool GuestThreadAffinity(std::int64_t tid, KernelCpumask* mask) {
+    auto& registry = CpuClocks();
+    std::lock_guard lock(registry.lock);
+    for (const auto& [clock, thread] : registry.threads) {
+        if (thread->tid != tid || thread->_finished.load(std::memory_order_acquire)) continue;
+        *mask = thread->affinity.load(std::memory_order_relaxed);
+        return true;
+    }
+    return false;
+}
+
+KernelCpumask GuestProcessAffinity() {
+    auto& registry = CpuClocks();
+    std::lock_guard lock(registry.lock);
+    KernelCpumask mask = 0;
+    for (const auto& [clock, thread] : registry.threads)
+        if (!thread->_finished.load(std::memory_order_acquire)) mask |= thread->affinity.load(std::memory_order_relaxed);
+    return mask;
+}
+
 bool GuestThreadCpuNanos(int cpuClockThread, std::uint64_t* nanos) {
     auto& registry = CpuClocks();
     std::lock_guard lock(registry.lock);

@@ -9,6 +9,7 @@
 #include "Common.hpp"
 #include "prx/libkernel/KernelErrors.hpp"
 #include <chrono>
+#include <stdexcept>
 #include <thread>
 
 extern "C" {
@@ -31,23 +32,33 @@ static constexpr int GUEST_SCHED_FIFO = 1;
 
 extern "C" {
 int* APS5_VABI __error_nid_postfix();
-int APS5_VABI scePthreadGetaffinity(Pthread thread, KernelCpumask* mask);
+int APS5_VABI getpid_nid_postfix(void);
 
 int APS5_VABI cpuset_getaffinity_nid_postfix(int level, int which, std::int64_t id, std::size_t size, void* mask) {
-    constexpr int LevelWhich = 3, WhichThread = 1;
-    constexpr int GuestEfault = 14, GuestErange = 34;
+    constexpr int LevelWhich = 3, WhichTid = 1, WhichPid = 2, WhichDomain = 6;
+    constexpr int GuestEsrch = 3, GuestEfault = 14, GuestEinval = 22, GuestErange = 34;
     constexpr std::size_t MaximumSize = 256 / 8;
-    if (size < sizeof(KernelCpumask) || size > MaximumSize) {
-        *__error_nid_postfix() = GuestErange;
+    const auto failed = [](int error) {
+        *__error_nid_postfix() = error;
         return -1;
-    }
-    if (level != LevelWhich || which != WhichThread || id != -1) NotImplemented_nid_no_patch("cpuset_getaffinity other than the calling thread");
-    if (!mask) {
-        *__error_nid_postfix() = GuestEfault;
-        return -1;
-    }
+    };
+    if (size < sizeof(KernelCpumask) || size > MaximumSize) return failed(GuestErange);
+    if (which < WhichTid || which > WhichDomain) return failed(GuestEinval);
+    if (which != WhichTid && which != WhichPid) throw std::runtime_error("cpuset_getaffinity: cpuset, irq, jail and domain sets are not modelled");
     KernelCpumask affinity = 0;
-    scePthreadGetaffinity(scePthreadSelf(), &affinity);
+    if (which == WhichTid) {
+        const std::int64_t self = scePthreadSelf()->tid;
+        if (!GuestThreadAffinity(id == -1 ? self : id, &affinity)) return failed(GuestEsrch);
+    } else {
+        scePthreadSelf();
+        if (id != -1 && id != getpid_nid_postfix()) return failed(GuestEsrch);
+        affinity = GuestProcessAffinity();
+    }
+    if (level != LevelWhich) {
+        if (level == 1 || level == 2) throw std::runtime_error("cpuset_getaffinity: root and cpuset levels are not modelled");
+        return failed(GuestEinval);
+    }
+    if (!mask) return failed(GuestEfault);
     std::memset(mask, 0, size);
     std::memcpy(mask, &affinity, sizeof(affinity));
     return 0;

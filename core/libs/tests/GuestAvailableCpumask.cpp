@@ -2,7 +2,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <bit>
+#include <chrono>
 #include <future>
+#include <thread>
 
 extern "C" {
 KernelCpumask APS5_VABI sceKernelGetAvailableCpumask(void);
@@ -15,6 +18,9 @@ int APS5_VABI scePthreadAttrDestroy(PthreadAttr* attr);
 int APS5_VABI scePthreadAttrGetaffinity(const PthreadAttr* attr, KernelCpumask* mask);
 int APS5_VABI cpuset_getaffinity_nid_postfix(int level, int which, std::int64_t id, std::size_t size, void* mask);
 int* APS5_VABI __error_nid_postfix();
+int APS5_VABI scePthreadGetthreadid(void);
+int APS5_VABI getpid_nid_postfix(void);
+Pthread APS5_VABI scePthreadSelf();
 }
 
 static constexpr int SCE_OK = 0;
@@ -38,6 +44,30 @@ static void* APS5_VABI ReportCpuset(void* arg) {
     result[5] = cpuset_getaffinity_nid_postfix(3, 1, -1, 4, set) == -1 && *__error_nid_postfix() == 34;
     result[6] = cpuset_getaffinity_nid_postfix(3, 1, -1, 33, set) == -1 && *__error_nid_postfix() == 34;
     result[7] = cpuset_getaffinity_nid_postfix(3, 1, -1, 8, nullptr) == -1 && *__error_nid_postfix() == 14;
+    return nullptr;
+}
+
+static std::uint64_t Affinity(int level, int which, std::int64_t id) {
+    std::uint64_t set[4] = {~0ull, ~0ull, ~0ull, ~0ull};
+    if (cpuset_getaffinity_nid_postfix(level, which, id, sizeof(set), set) != 0) return ~0ull;
+    Require(set[1] == 0 && set[2] == 0 && set[3] == 0);
+    return set[0];
+}
+
+static int Error(int level, int which, std::int64_t id, void* mask) {
+    if (cpuset_getaffinity_nid_postfix(level, which, id, 8, mask) != -1) return 0;
+    return *__error_nid_postfix();
+}
+
+struct Pinned {
+    std::future<void>* release;
+    std::int64_t tid;
+};
+
+static void* APS5_VABI PinnedWorker(void* arg) {
+    auto* pinned = static_cast<Pinned*>(arg);
+    pinned->tid = scePthreadGetthreadid();
+    pinned->release->get();
     return nullptr;
 }
 
@@ -86,5 +116,62 @@ int main() {
     Require(cpuset[0] == 0 && cpuset[1] == available && cpuset[2] == ~0ull);
     Require(cpuset[3] == 0 && cpuset[4] == available);
     Require(cpuset[5] == 1 && cpuset[6] == 1 && cpuset[7] == 1);
+
+    constexpr int LevelRoot = 1, LevelCpuset = 2, LevelWhich = 3, WhichTid = 1, WhichPid = 2;
+    constexpr int Esrch = 3, Efault = 14, Einval = 22;
+    std::uint64_t set = 0;
+    Require(scePthreadSetaffinity(scePthreadSelf(), available) == SCE_OK);
+    const std::int64_t self = scePthreadGetthreadid();
+    Require(Affinity(LevelWhich, WhichTid, -1) == available);
+    Require(Affinity(LevelWhich, WhichTid, self) == available);
+    Require(Affinity(LevelWhich, WhichPid, -1) == available);
+    Require(Affinity(LevelWhich, WhichPid, getpid_nid_postfix()) == available);
+
+    const KernelCpumask low = available & -available;
+    const KernelCpumask high = KernelCpumask{1} << (63 - std::countl_zero(available));
+    Require(low != high);
+    std::promise<void> unpin;
+    auto unpinned = unpin.get_future();
+    Pinned pinned{&unpinned, 0};
+    Require(scePthreadCreate(&thread, &attr, PinnedWorker, &pinned, nullptr) == SCE_OK);
+    Require(scePthreadSetaffinity(thread, high) == SCE_OK);
+    Require(scePthreadSetaffinity(scePthreadSelf(), low) == SCE_OK);
+    while (__atomic_load_n(&pinned.tid, __ATOMIC_ACQUIRE) == 0) std::this_thread::yield();
+    Require(pinned.tid != self);
+    Require(Affinity(LevelWhich, WhichTid, pinned.tid) == high);
+    Require(Affinity(LevelWhich, WhichTid, -1) == low);
+    Require(Affinity(LevelWhich, WhichPid, -1) == (low | high));
+    unpin.set_value();
+    Require(scePthreadJoin(thread, nullptr) == SCE_OK);
+    Require(Affinity(LevelWhich, WhichPid, -1) == low);
+    Require(Error(LevelWhich, WhichTid, pinned.tid, nullptr) == Esrch);
+
+    std::promise<void> finish;
+    auto finished = finish.get_future();
+    finish.set_value();
+    Pinned exited{&finished, 0};
+    Require(scePthreadCreate(&thread, &attr, PinnedWorker, &exited, nullptr) == SCE_OK);
+    Require(scePthreadSetaffinity(thread, high) == SCE_OK);
+    while (__atomic_load_n(&exited.tid, __ATOMIC_ACQUIRE) == 0) std::this_thread::yield();
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (Error(LevelWhich, WhichTid, exited.tid, &set) != Esrch) {
+        Require(std::chrono::steady_clock::now() < deadline);
+        std::this_thread::yield();
+    }
+    Require(Affinity(LevelWhich, WhichPid, -1) == low);
+    Require(scePthreadJoin(thread, nullptr) == SCE_OK);
+    Require(scePthreadSetaffinity(scePthreadSelf(), available) == SCE_OK);
+
+    Require(Error(LevelWhich, WhichTid, 1, &set) == Esrch);
+    Require(Error(LevelWhich, WhichPid, getpid_nid_postfix() + 1, &set) == Esrch);
+    Require(Error(LevelWhich, 0, -1, &set) == Einval);
+    Require(Error(LevelWhich, 7, -1, &set) == Einval);
+    Require(Error(0, WhichTid, -1, &set) == Einval);
+    Require(Error(4, WhichPid, -1, &set) == Einval);
+    Require(Error(4, WhichTid, 1, &set) == Esrch);
+    Require(Error(LevelRoot, WhichTid, 1, &set) == Esrch);
+    Require(Error(LevelCpuset, 0, -1, &set) == Einval);
+    Require(Error(4, WhichPid, -1, nullptr) == Einval);
+    Require(Error(LevelWhich, WhichPid, -1, nullptr) == Efault);
     Require(scePthreadAttrDestroy(&attr) == SCE_OK);
 }

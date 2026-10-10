@@ -145,5 +145,7 @@ struct PthreadPrivate {
 bool GuestThreadStack(std::uintptr_t address, std::uintptr_t* start, std::uintptr_t* end);
 int GuestThreadCpuClockId(const PthreadPrivate* thread);
 bool GuestThreadCpuNanos(int cpuClockThread, std::uint64_t* nanos);
+bool GuestThreadAffinity(std::int64_t tid, KernelCpumask* mask);
+KernelCpumask GuestProcessAffinity();
 
 #endif
