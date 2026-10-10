@@ -8,8 +8,10 @@
 #include <cmath>
 #include <cstdio>
 #include <iostream>
+#include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -42,6 +44,11 @@ alignas(256) constexpr std::array<std::uint32_t, 52> RoundingCode{
     0x041a0b04, 0xcc21400f, 0x0c1a0b04, 0xcc210010, 0x141a0b04, 0xe0702000, 0x80010a03, 0xe0702004,
     0x80010b03, 0xe0702008, 0x80010c03, 0xe070200c, 0x80010d03, 0xe0702010, 0x80010e03, 0xe0702014,
     0x80010f03, 0xe0702018, 0x80011003, 0xbf810000,
+};
+
+alignas(256) constexpr std::array<std::uint32_t, 16> MixHiF16Code{
+    0x34020082, 0x34060084, 0xe0302000, 0x80000401, 0xe0302004, 0x80000501, 0xe0302008, 0x80000601,
+    0x7e1402ff, 0x0000abcd, 0xbf8c3f70, 0xcc22400a, 0x1c1a0b04, 0xe0702000, 0x80010a03, 0xbf810000,
 };
 
 struct RoundingRow {
@@ -115,6 +122,37 @@ constexpr std::array<RoundingRow, Threads> RoundingRows{{
     {0x00003c01u, 0x00004200u, 0x00800000u, 3u, 0x4202u},
 }};
 
+struct OverflowProbe {
+    std::uint32_t a, b, c;
+    std::uint32_t clear, set;
+};
+
+constexpr std::array<OverflowProbe, 10> F32OverflowProbes{{
+    {0x7f800000u, 0x3f800000u, 0x00000000u, 0x7c00u, 0x7c00u},
+    {0xff800000u, 0x3f800000u, 0x00000000u, 0xfc00u, 0xfc00u},
+    {0x3f800000u, 0x7f800000u, 0x00000000u, 0x7c00u, 0x7c00u},
+    {0x3f800000u, 0xff800000u, 0x00000000u, 0xfc00u, 0xfc00u},
+    {0x3f800000u, 0x3f800000u, 0x7f800000u, 0x7c00u, 0x7c00u},
+    {0x3f800000u, 0x3f800000u, 0xff800000u, 0xfc00u, 0xfc00u},
+    {0x477fef00u, 0x3f800000u, 0x00000000u, 0x7bffu, 0x7bffu},
+    {0x477ff000u, 0x3f800000u, 0x00000000u, 0x7c00u, 0x7bffu},
+    {0x43800000u, 0x43800000u, 0x00000000u, 0x7c00u, 0x7bffu},
+    {0xc3800000u, 0x43800000u, 0x00000000u, 0xfc00u, 0xfbffu},
+}};
+
+constexpr std::array<OverflowProbe, 10> F16OverflowProbes{{
+    {0x00007c00u, 0x00003c00u, 0x00000000u, 0x7c00u, 0x7c00u},
+    {0x0000fc00u, 0x00003c00u, 0x00000000u, 0xfc00u, 0xfc00u},
+    {0x00003c00u, 0x00007c00u, 0x00000000u, 0x7c00u, 0x7c00u},
+    {0x00003c00u, 0x0000fc00u, 0x00000000u, 0xfc00u, 0xfc00u},
+    {0x00003c00u, 0x00003c00u, 0x00007c00u, 0x7c00u, 0x7c00u},
+    {0x00003c00u, 0x00003c00u, 0x0000fc00u, 0xfc00u, 0xfc00u},
+    {0x0000581cu, 0x00005fc9u, 0x00000000u, 0x7bffu, 0x7bffu},
+    {0x00005810u, 0x00005fe0u, 0x00000000u, 0x7c00u, 0x7bffu},
+    {0x00005c00u, 0x00005c00u, 0x00000000u, 0x7c00u, 0x7bffu},
+    {0x0000dc00u, 0x00005c00u, 0x00000000u, 0xfc00u, 0xfbffu},
+}};
+
 float Quarter(std::uint32_t index) {
     return static_cast<float>(static_cast<int>(index % 17u) - 8) / 4.0f;
 }
@@ -168,15 +206,41 @@ std::array<std::uint32_t, 4> BufferDescriptor(const void* data, std::uint32_t co
     return {static_cast<std::uint32_t>(address), static_cast<std::uint32_t>((address >> 32u) & 0xffffu) | (4u << 16u), count, 0x11016facu};
 }
 
-void FillRoundingInput() {
+void ClearInput() {
     Input.fill(0u);
-    for (std::uint32_t tid = 0; tid < Threads; ++tid) {
-        const auto& row = RoundingRows[tid];
+}
+
+void FillInputFrom(std::span<const RoundingRow> rows) {
+    Require(rows.size() <= Threads, "FillInputFrom: more rows than the dispatch has threads for");
+    ClearInput();
+    for (std::uint32_t tid = 0; tid < rows.size(); ++tid) {
+        const auto& row = rows[tid];
         std::copy_n(std::array<std::uint32_t, 3>{row.a, row.b, row.c}.begin(), 3, Input.begin() + tid * Inputs);
     }
 }
 
-void Run(AgcDriver::VulkanDevice& device, std::span<const std::uint32_t> code) {
+void FillInputRange(std::span<const OverflowProbe> probes, std::uint32_t tidOffset) {
+    Require(tidOffset + probes.size() <= Threads, "FillInputRange: more rows than the dispatch has threads for");
+    for (std::uint32_t i = 0; i < probes.size(); ++i) {
+        const std::uint32_t tid = tidOffset + i;
+        Input[tid * Inputs + 0] = probes[i].a;
+        Input[tid * Inputs + 1] = probes[i].b;
+        Input[tid * Inputs + 2] = probes[i].c;
+    }
+}
+
+void FillInputFrom(std::span<const OverflowProbe> probes) {
+    ClearInput();
+    FillInputRange(probes, 0u);
+}
+
+void FillOverflowInput() {
+    ClearInput();
+    FillInputRange(F32OverflowProbes, 0u);
+    FillInputRange(F16OverflowProbes, static_cast<std::uint32_t>(F32OverflowProbes.size()));
+}
+
+void Run(AgcDriver::VulkanDevice& device, std::span<const std::uint32_t> code, std::optional<ShaderRecompiler::ShaderFloatMode> floatMode = std::nullopt) {
     Output.fill(0xdeadbeefu);
     std::vector<std::uint32_t> userData(8, 0u);
     const auto input = BufferDescriptor(Input.data(), static_cast<std::uint32_t>(Input.size()));
@@ -187,7 +251,7 @@ void Run(AgcDriver::VulkanDevice& device, std::span<const std::uint32_t> code) {
     const ShaderRecompiler::ShaderComputeStageInfo compute{{Threads, 1, 1}, 0, {false, false, false}, false, 1};
     ShaderRecompiler::RecompileRequest request{
         {ShaderStage::Compute, reinterpret_cast<std::uintptr_t>(code.data()), code, 0, {}},
-        {32, 0, userData, compute, std::nullopt, std::nullopt, memory},
+        {32, 0, userData, compute, std::nullopt, std::nullopt, memory, floatMode},
         device.Target(),
         {0, 0, 0, 128}
     };
@@ -222,16 +286,31 @@ void Check() {
     }
 }
 
-void CheckRounding() {
-    for (std::uint32_t tid = 0; tid < Threads; ++tid) {
-        const auto& row = RoundingRows[tid];
-        const auto* out = &Output[tid * Results];
-        const std::uint32_t expected = 0xabcd0000u | row.expected;
-        const auto where = "mix rounding: thread " + std::to_string(tid) + " (" + Hex(row.a) + ", " + Hex(row.b) + ", " + Hex(row.c) + ") result " + std::to_string(row.result);
-        Require(out[row.result] == expected, where + " is " + Hex(out[row.result]) + ", expected " + Hex(expected));
-        if (row.result == 0u) {
-            Require(out[1] == ((row.expected << 16u) | 0xabcdu), where + ": v_fma_mixhi_f16 is " + Hex(out[1]));
-        }
+void CheckSlot(std::uint32_t tid, std::uint32_t slot, bool highHalf, std::uint32_t expectedValue, const std::string& where) {
+    const auto* out = &Output[tid * Results];
+    const std::uint32_t expected = highHalf ? ((expectedValue << 16u) | 0xabcdu) : (0xabcd0000u | expectedValue);
+    Require(out[slot] == expected, where + " is " + Hex(out[slot]) + ", expected " + Hex(expected));
+}
+
+void CheckRow(std::span<const RoundingRow> rows, std::uint32_t tid, std::string_view label) {
+    const auto& row = rows[tid];
+    const auto where = std::string(label) + ": thread " + std::to_string(tid) + " (" + Hex(row.a) + ", " + Hex(row.b) + ", " + Hex(row.c) + ") result " + std::to_string(row.result);
+    CheckSlot(tid, row.result, false, row.expected, where);
+    if (row.result == 0u) CheckSlot(tid, 1u, true, row.expected, where + ": v_fma_mixhi_f16");
+}
+
+void CheckRows(std::span<const RoundingRow> rows, std::string_view label) {
+    for (std::uint32_t tid = 0; tid < rows.size(); ++tid) CheckRow(rows, tid, label);
+}
+
+void CheckOverflowProbes(std::span<const OverflowProbe> probes, std::uint32_t tidOffset, std::uint32_t slot, bool highHalf, bool fp16Overflow, std::string_view label) {
+    for (std::uint32_t i = 0; i < probes.size(); ++i) {
+        const std::uint32_t tid = tidOffset + i;
+        const auto& p = probes[i];
+        const std::uint32_t expectedValue = fp16Overflow ? p.set : p.clear;
+        const auto where = std::string(label) + ": thread " + std::to_string(tid) + " (" + Hex(p.a) + ", " + Hex(p.b) + ", " + Hex(p.c) + ") result " + std::to_string(slot);
+        CheckSlot(tid, slot, highHalf, expectedValue, where);
+        if (slot == 0u && !highHalf) CheckSlot(tid, 1u, true, expectedValue, where + ": v_fma_mixhi_f16");
     }
 }
 
@@ -249,9 +328,31 @@ int main() {
         FillInput();
         Run(*device, MixCode);
         Check();
-        FillRoundingInput();
+        FillInputFrom(RoundingRows);
         Run(*device, RoundingCode);
-        CheckRounding();
+        CheckRows(RoundingRows, "mix rounding");
+
+        for (const bool ieee : {true, false}) {
+            const ShaderRecompiler::ShaderFloatMode overflowClear{0xc0u, true, ieee, false};
+            const ShaderRecompiler::ShaderFloatMode overflowSet{0xc0u, true, ieee, true};
+            const std::string ieeeLabel = ieee ? "IEEE=1" : "IEEE=0";
+            const auto f16Offset = static_cast<std::uint32_t>(F32OverflowProbes.size());
+
+            FillOverflowInput();
+            Run(*device, RoundingCode, overflowClear);
+            CheckOverflowProbes(F32OverflowProbes, 0u, 0u, false, false, "mix overflow (FP16_OVFL clear, " + ieeeLabel + ")");
+            CheckOverflowProbes(F16OverflowProbes, f16Offset, 2u, false, false, "mix overflow (FP16_OVFL clear, " + ieeeLabel + ")");
+            Run(*device, RoundingCode, overflowSet);
+            CheckOverflowProbes(F32OverflowProbes, 0u, 0u, false, true, "mix overflow (FP16_OVFL set, " + ieeeLabel + ")");
+            CheckOverflowProbes(F16OverflowProbes, f16Offset, 2u, false, true, "mix overflow (FP16_OVFL set, " + ieeeLabel + ")");
+
+            FillInputFrom(F16OverflowProbes);
+            Run(*device, MixHiF16Code, overflowClear);
+            CheckOverflowProbes(F16OverflowProbes, 0u, 0u, true, false, "mixhi f16 overflow (FP16_OVFL clear, " + ieeeLabel + ")");
+            Run(*device, MixHiF16Code, overflowSet);
+            CheckOverflowProbes(F16OverflowProbes, 0u, 0u, true, true, "mixhi f16 overflow (FP16_OVFL set, " + ieeeLabel + ")");
+        }
+
         std::puts("mix precision tests passed");
         return 0;
     } catch (const std::exception& error) {
