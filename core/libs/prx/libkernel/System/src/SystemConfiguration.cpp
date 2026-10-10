@@ -15,6 +15,13 @@
 
 extern "C" int* APS5_VABI __error_nid_postfix();
 
+struct SceKernelSystemSwVersion {
+    std::uint32_t size;
+    char versionString[0x1C];
+    std::uint32_t version;
+    std::uint32_t unk_24;
+};
+
 namespace {
 
 int CopyOut(const void* value, std::size_t size, void* oldValue, std::size_t* oldLength) {
@@ -105,5 +112,21 @@ int APS5_VABI sysctlbyname_nid_postfix(const char* name, void* oldValue, std::si
     if (std::strcmp(name, "hw.ncpu") != 0) throw std::runtime_error(std::string(__func__) + ": unsupported name " + name);
     static constexpr int mib[] = {6, 3};
     return sysctl_nid_postfix(mib, 2, oldValue, oldLength, newValue, newLength);
+}
+
+int APS5_VABI sceKernelGetSystemSwVersion_nid_postfix(SceKernelSystemSwVersion* version) {
+    if (version == nullptr) {
+        *__error_nid_postfix() = 14;
+        return -1;
+    }
+    if (version->size != sizeof(SceKernelSystemSwVersion)) {
+        *__error_nid_postfix() = 22;
+        return -1;
+    }
+    std::memset(version->versionString, 0, sizeof(version->versionString));
+    std::memcpy(version->versionString, "01.000.000", sizeof("01.000.000"));
+    version->version = 0x01000000;
+    version->unk_24 = 0;
+    return 0;
 }
 }

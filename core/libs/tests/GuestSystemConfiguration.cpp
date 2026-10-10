@@ -2,13 +2,21 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <stdexcept>
+struct SceKernelSystemSwVersion {
+    std::uint32_t size;
+    char versionString[0x1C];
+    std::uint32_t version;
+    std::uint32_t unk_24;
+};
 extern "C" {
 std::int64_t APS5_VABI sysconf_nid_postfix(int);
 int APS5_VABI getpagesize_nid_postfix();
 int* APS5_VABI __error_nid_postfix();
 int APS5_VABI sysctl_nid_postfix(const int*, std::uint32_t, void*, std::size_t*, const void*, std::size_t);
 int APS5_VABI sysctlbyname_nid_postfix(const char*, void*, std::size_t*, const void*, std::size_t);
+int APS5_VABI sceKernelGetSystemSwVersion_nid_postfix(SceKernelSystemSwVersion*);
 extern char** environ_nid_postfix;
 }
 static void Require(bool value) { if (!value) std::abort(); }
@@ -52,8 +60,34 @@ static void CheckProcessorCountSysctl() {
     }
     Require(threw);
 }
+static void CheckSystemSwVersion() {
+    *__error_nid_postfix() = 13;
+    Require(sceKernelGetSystemSwVersion_nid_postfix(nullptr) == -1 && *__error_nid_postfix() == 14);
+    SceKernelSystemSwVersion version{};
+    version.size = 0;
+    *__error_nid_postfix() = 13;
+    Require(sceKernelGetSystemSwVersion_nid_postfix(&version) == -1 && *__error_nid_postfix() == 22);
+    version.size = sizeof(SceKernelSystemSwVersion) - 1;
+    *__error_nid_postfix() = 13;
+    Require(sceKernelGetSystemSwVersion_nid_postfix(&version) == -1 && *__error_nid_postfix() == 22);
+    version.size = sizeof(SceKernelSystemSwVersion) + 1;
+    *__error_nid_postfix() = 13;
+    Require(sceKernelGetSystemSwVersion_nid_postfix(&version) == -1 && *__error_nid_postfix() == 22);
+    std::memset(&version, 0xaa, sizeof(version));
+    version.size = sizeof(SceKernelSystemSwVersion);
+    *__error_nid_postfix() = 13;
+    Require(sceKernelGetSystemSwVersion_nid_postfix(&version) == 0 && *__error_nid_postfix() == 13);
+    Require(version.size == sizeof(SceKernelSystemSwVersion));
+    Require(std::strcmp(version.versionString, "01.000.000") == 0);
+    for (std::size_t i = sizeof("01.000.000"); i < sizeof(version.versionString); ++i) {
+        Require(version.versionString[i] == 0);
+    }
+    Require(version.version == 0x01000000);
+    Require(version.unk_24 == 0);
+}
 int main() {
     CheckProcessorCountSysctl();
+    CheckSystemSwVersion();
     *__error_nid_postfix() = 13;
     Require(sysconf_nid_postfix(47) == 0x4000);
     Require(getpagesize_nid_postfix() == sysconf_nid_postfix(47));
