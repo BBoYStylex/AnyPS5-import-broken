@@ -173,6 +173,16 @@ if(BUILD_TESTING)
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceHttp>")
     endif()
 
+    add_test_executable(guest_acm_tests ${LIBS_INCLUDE_DIR}/tests/GuestAcm.cpp)
+    target_include_directories(guest_acm_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_acm_tests PRIVATE libSceAcm libc)
+    configure_windows_unwind(guest_acm_tests)
+    add_test(NAME guest_acm COMMAND guest_acm_tests)
+    if(WIN32)
+        set_tests_properties(guest_acm PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceAcm>")
+    endif()
+
     if(UNIX AND (CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$" OR CMAKE_OSX_ARCHITECTURES STREQUAL "x86_64"))
         add_subdirectory(tests/register_context)
     endif()
