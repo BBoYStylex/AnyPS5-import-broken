@@ -5,8 +5,6 @@
 extern "C" int* APS5_VABI __error_nid_postfix();
 
 namespace {
-// Guest FreeBSD errno numbering, not the host CRT's numbering.
-// Messages from FreeBSD releng/11.4 lib/libc/gen/errlst.c (sys_errlist).
 constexpr const char* messages[] = {
     "No error: 0", "Operation not permitted", "No such file or directory", "No such process",
     "Interrupted system call", "Input/output error", "Device not configured", "Argument list too long",

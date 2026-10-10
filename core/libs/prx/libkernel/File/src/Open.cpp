@@ -56,6 +56,7 @@ static int MapFlags(int sceFlags) {
     if (sceFlags & SCE_KERNEL_O_CREAT) f |= _O_CREAT;
     if (sceFlags & SCE_KERNEL_O_TRUNC) f |= _O_TRUNC;
     if (sceFlags & SCE_KERNEL_O_EXCL) f |= _O_EXCL;
+    if (sceFlags & SCE_KERNEL_O_DIRECTORY) f |= _O_DIRECTORY;
     f |= _O_BINARY;
     return f;
 }
