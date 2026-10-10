@@ -279,6 +279,7 @@ int DirectMemoryAlloc(int64_t searchStart, int64_t searchEnd, size_t len, size_t
 
 void DirectMemoryFree(int64_t start, size_t len) {
     if (start < 0 || len == 0) return;
+    // Exceptions intentionally leak across the guest ABI to surface physical backing cleanup failures
     (void)PhysicalMemoryPool::Instance().Free(static_cast<uint64_t>(start), len);
 }
 
@@ -302,6 +303,7 @@ bool DirectMemoryFind(int64_t offset, bool findNext, int64_t* start, int64_t* en
 
 void DirectMemoryRetype(int64_t start, size_t len, int memoryType) {
     if (start < 0 || len == 0) return;
+    // Exceptions intentionally leak across the guest ABI to surface map node allocation failures
     (void)PhysicalMemoryPool::Instance().Retype(static_cast<uint64_t>(start), len, memoryType);
 }
 
