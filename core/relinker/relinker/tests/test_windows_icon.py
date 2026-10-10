@@ -20,6 +20,15 @@ def png(width, height):
             chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
 
 
+def palette_png(depth=8, color=3, palettes=(bytes((15, 65, 200)),), after_data=False):
+    header = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 32, 32, depth, color, 0, 0, 0))
+    palette = b"".join(chunk(b"PLTE", entries) for entries in palettes)
+    channels = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}[color]
+    rows = b"".join(b"\0" + bytes((32 * depth * channels + 7) // 8) for _ in range(32))
+    data = chunk(b"IDAT", zlib.compress(rows))
+    return header + (data + palette if after_data else palette + data) + chunk(b"IEND", b"")
+
+
 def resources(pe):
     header = struct.unpack_from("<I", pe, 0x3c)[0]
     optional = header + 24
@@ -126,22 +135,39 @@ def main():
             if os.name == "nt":
                 assert subprocess.run([str(output)], timeout=20).returncode == 42
 
+        palette_images = [palette_png(depth=depth) for depth in (1, 2, 4, 8)]
+        palette_images += [palette_png(depth=1, palettes=(bytes(2 * 3),)),
+                           palette_png(palettes=(bytes(256 * 3),)),
+                           palette_png(color=2), palette_png(color=6)]
+        for index, image in enumerate(palette_images):
+            icon.write_bytes(image)
+            result, output = relink(f"palette-{index}")
+            assert result.returncode == 0, (result.stdout, result.stderr)
+            assert resources(output.read_bytes())[3] == image
+            check_extraction(output)
+
         valid = png(32, 32)
         bad_crc = bytearray(valid)
         bad_crc[29] ^= 1
         malformed = (b"not a PNG", valid[:32], valid[:8] + struct.pack(">I", 12) + valid[12:],
                      png(0, 32), png(32, 0), bytes(bad_crc), valid[:-1], valid[:-12],
                      valid + b"garbage", valid[:33] + chunk(b"IEND", b""),
-                     valid[:8] + chunk(b"IHDR", struct.pack(">IIBBBBB", 32, 32, 8, 6, 1, 0, 0)) + valid[33:])
+                     valid[:8] + chunk(b"IHDR", struct.pack(">IIBBBBB", 32, 32, 8, 6, 1, 0, 0)) + valid[33:],
+                     palette_png(palettes=()), palette_png(palettes=(b"",)),
+                     palette_png(palettes=(b"\0\0",)), palette_png(palettes=(bytes(257 * 3),)),
+                     palette_png(depth=1, palettes=(bytes(3 * 3),)),
+                     palette_png(palettes=(bytes(3), bytes(3))), palette_png(after_data=True),
+                     palette_png(color=0), palette_png(color=4),
+                     palette_png()[:33] + chunk(b"IDAT", b"") + palette_png()[33:])
         for index, image in enumerate(malformed):
             icon.write_bytes(image)
             result, output = relink(f"malformed-{index}")
-            assert result.returncode != 0 and not output.exists(), (result.stdout, result.stderr)
+            assert result.returncode != 0 and not output.exists(), (index, result.stdout, result.stderr)
             assert "Invalid Windows icon PNG" in result.stderr and str(icon) in result.stderr, result.stderr
         icon.unlink()
         result, output = relink("missing-final")
         assert result.returncode == 0 and resources(output.read_bytes()) is None
-    print("Windows icon integration tests passed (5 images, 11 malformed files, missing icon)")
+    print("Windows icon integration tests passed (13 images, 21 malformed files, missing icon)")
 
 
 if __name__ == "__main__":
