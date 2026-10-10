@@ -67,6 +67,27 @@ class DatabaseCacheTests(unittest.TestCase):
                 self.assertEqual(nid_names.load_db(cache), {"nid1": "sceExisting"})
                 download.assert_not_called()
 
+    def test_utf8_bom_does_not_change_the_first_nid(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory) / "aerolib.csv"
+            nid = nid_names.compute_nid("sceExample")
+            cache.write_text(f"{nid} sceExample\n", encoding="utf-8-sig")
+            self.assertEqual(nid_names.load_db(cache), {nid: "sceExample"})
+
+    def test_comment_rows_do_not_become_database_entries(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory) / "aerolib.csv"
+            nid = nid_names.compute_nid("sceExample")
+            cache.write_text(f"# Database names\n{nid} sceExample\n", encoding="utf-8")
+            self.assertEqual(nid_names.load_db(cache), {nid: "sceExample"})
+
+    def test_annotations_do_not_change_hash_inputs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory) / "aerolib.csv"
+            nid = nid_names.compute_nid("sceExample")
+            cache.write_text(f"{nid}#A#B sceExample#verified\n", encoding="utf-8")
+            self.assertEqual(nid_names.load_db(cache), {nid: "sceExample"})
+
 
 if __name__ == "__main__":
     unittest.main()

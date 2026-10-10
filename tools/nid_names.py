@@ -49,11 +49,13 @@ def load_db(path):
         finally:
             temporary.unlink(missing_ok=True)
     db = {}
-    with open(path, errors="replace") as handle:
+    with open(path, encoding="utf-8-sig", errors="replace") as handle:
         for line in handle:
             parts = line.strip().split()
-            if len(parts) >= 2:
-                db.setdefault(parts[0], parts[1])
+            if len(parts) >= 2 and not parts[0].startswith("#"):
+                nid, name = (part.split("#", 1)[0] for part in parts[:2])
+                if nid and name:
+                    db.setdefault(nid, name)
     return db
 
 

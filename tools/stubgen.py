@@ -27,10 +27,12 @@ def parse_nids(path):
     nids = []
     seen = set()
     with open(path, "r", encoding="utf-8-sig", errors="replace") as f:
-        for line in f:
+        for number, line in enumerate(f, 1):
             nid = strip_nid_token(line)
             if not nid:
                 continue
+            if re.fullmatch(r"[A-Za-z0-9+\-]{11}", nid) is None:
+                raise ValueError(f"{path}:{number}: invalid NID {nid!r}")
             if nid in seen:
                 continue
             seen.add(nid)
@@ -178,7 +180,12 @@ def main(argv=None):
     ap.add_argument("--td-out", required=False, default=None, help="output file for TechnicalDebt lines, default stdout")
     ap.add_argument("--td-only", action="store_true", help="print only TechnicalDebt lines, no code")
     args = ap.parse_args(argv)
-    nids = parse_nids(args.nids)
+    if not args.td_only and args.out and args.td_out and Path(args.out).resolve() == Path(args.td_out).resolve():
+        ap.error("--out and --td-out must name different files")
+    try:
+        nids = parse_nids(args.nids)
+    except (OSError, ValueError) as error:
+        ap.error(str(error))
     db = {}
     if args.db:
         db = parse_db(args.db)
