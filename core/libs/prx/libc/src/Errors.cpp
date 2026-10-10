@@ -5,7 +5,6 @@
 extern "C" int* APS5_VABI __error_nid_postfix();
 
 namespace {
-// Guest FreeBSD errno numbering, not the host CRT's numbering.
 constexpr const char* messages[] = {
     "No error: 0", "Operation not permitted", "No such file or directory",
     "No such process", "Interrupted system call", "Input/output error",
