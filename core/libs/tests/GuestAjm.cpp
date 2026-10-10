@@ -34,6 +34,7 @@ int APS5_VABI sceAjmBatchJobSetResampleParameters(AjmBatchInfo*, std::uint32_t, 
 int APS5_VABI sceAjmBatchJobGetResampleInfo(AjmBatchInfo*, std::uint32_t, void*);
 int APS5_VABI sceAjmBatchJobSetResampleParametersEx(AjmBatchInfo*, std::uint32_t, float, float, std::uint32_t, void*);
 int APS5_VABI sceAjmBatchJobDecodeSplit(AjmBatchInfo*, std::uint32_t, const AjmBuffer*, std::size_t, const AjmBuffer*, std::size_t, void*);
+const char* APS5_VABI sceAjmStrError(int);
 }
 
 static void Require(bool value) { if (!value) std::abort(); }
@@ -1073,6 +1074,21 @@ void TestAt9RunDecodesWholeInput(std::uint32_t context) {
     Require(sceAjmInstanceDestroy(context, instance) == 0);
 }
 
+void TestStrError() {
+    const int implemented[] = {static_cast<int>(0x80930002), static_cast<int>(0x80930003), static_cast<int>(0x80930004), static_cast<int>(0x80930005), static_cast<int>(0x80930007)};
+    for (int code : implemented) {
+        const char* text = sceAjmStrError(code);
+        Require(text != nullptr && std::strlen(text) > 0);
+        Require(sceAjmStrError(code) == text);
+    }
+    const char* fallback = sceAjmStrError(0);
+    Require(fallback != nullptr && std::strlen(fallback) > 0);
+    for (int code : {static_cast<int>(0x80930001), 0x7fffffff})
+        Require(sceAjmStrError(code) == fallback);
+    for (int code : implemented)
+        Require(sceAjmStrError(code) != fallback);
+}
+
 }
 
 int main() {
@@ -1120,5 +1136,6 @@ int main() {
     TestResampleAt9(context);
     TestAt9GaplessSegments(context);
     TestAt9RunDecodesWholeInput(context);
+    TestStrError();
     Require(sceAjmFinalize(context) == 0);
 }
