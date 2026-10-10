@@ -330,11 +330,14 @@ void resolveTableImage(const IrResourcePlan& plan, std::uint32_t imageIndex, con
     const auto slots = ResourceMaterializer::BindlessSlots();
     DescriptorValue heapValue;
     walker.EvaluateDescriptorSource(plan, table.heapSource, runtime, heapValue);
-    const ShaderBufferResource heap = decodeBufferDescriptor(heapValue);
+    const ShaderBufferResource heap = table.heapAddress ? ShaderBufferResource{} : decodeBufferDescriptor(heapValue);
+    const std::uint64_t heapBase = table.heapAddress ? (static_cast<std::uint64_t>(heapValue.dwords[1]) << 32u) | heapValue.dwords[0] : heap.Base48();
     const std::uint64_t heapSize = heap.GetSize();
-    if (heap.Type() != 0u || heap.Base48() > std::numeric_limits<std::uint64_t>::max() - heapSize) throw std::runtime_error("bindless heap buffer is invalid");
-    if (heapSize != 0u && (heapSize < table.entryOffset || (heapSize - table.entryOffset) % TableEntryBytes != 0u)) throw std::runtime_error("bindless heap contains a partial descriptor");
-    const auto entries = heapSize > table.entryOffset ? static_cast<std::uint32_t>(std::min<std::uint64_t>((heapSize - table.entryOffset) / TableEntryBytes, std::numeric_limits<std::uint32_t>::max())) : 0u;
+    if (!table.heapAddress) {
+        if (heap.Type() != 0u || heapBase > std::numeric_limits<std::uint64_t>::max() - heapSize) throw std::runtime_error("bindless heap buffer is invalid");
+        if (heapSize != 0u && (heapSize < table.entryOffset || (heapSize - table.entryOffset) % TableEntryBytes != 0u)) throw std::runtime_error("bindless heap contains a partial descriptor");
+    }
+    const auto entries = table.heapAddress ? std::numeric_limits<std::uint32_t>::max() : heapSize > table.entryOffset ? static_cast<std::uint32_t>(std::min<std::uint64_t>((heapSize - table.entryOffset) / TableEntryBytes, std::numeric_limits<std::uint32_t>::max())) : 0u;
     const auto readWord = [&](std::uint64_t address, std::uint32_t& word) {
         if (!runtime.readMemory(runtime.userContext, address, &word)) {
             throw std::runtime_error("failed to read a bindless image table from memory");
@@ -347,29 +350,39 @@ void resolveTableImage(const IrResourcePlan& plan, std::uint32_t imageIndex, con
     std::uint32_t materialEntries = 0;
     std::uint64_t materialBase = 0;
     std::uint32_t outOfRange = 0;
-    if (table.hasMaterial) {
-        if (table.selectorStride < sizeof(std::uint32_t) || table.selectorOffset > table.selectorStride - sizeof(std::uint32_t)) throw std::runtime_error("bindless material selector is outside its record");
+    if (table.hasMaterial && (table.selectorStride != 0u || table.materialStrideFromDescriptor)) {
         DescriptorValue materialValue;
         walker.EvaluateDescriptorSource(plan, table.materialSource, runtime, materialValue);
         const ShaderBufferResource material = decodeBufferDescriptor(materialValue);
         materialBase = material.Base48();
         const std::uint64_t materialSize = material.GetSize();
-        if (material.Type() != 0u || materialSize % table.selectorStride != 0u) throw std::runtime_error("bindless material buffer has an invalid layout");
-        materialEntries = static_cast<std::uint32_t>(std::min<std::uint64_t>(materialSize / table.selectorStride, std::numeric_limits<std::uint32_t>::max()));
-        if (materialSize / table.selectorStride > MaterialScanLimit()) rejectTable(BindlessRejection::MaterialScan, "bindless material scan capacity exceeded");
+        const auto selectorStride = table.materialStrideFromDescriptor ? material.Stride() : table.selectorStride;
+        if (selectorStride < sizeof(std::uint32_t) || table.selectorOffset > selectorStride - sizeof(std::uint32_t) || (table.materialStrideFromDescriptor && (material.SwizzleEnabled() || material.AddTid()))) {
+            rejectTable(BindlessRejection::MaterialScan, "bindless material buffer has unsupported record layout");
+        }
+        if (material.Type() != 0u || materialSize % selectorStride != 0u || materialBase > std::numeric_limits<std::uint64_t>::max() - materialSize) throw std::runtime_error("bindless material buffer has an invalid layout");
+        materialEntries = static_cast<std::uint32_t>(std::min<std::uint64_t>(materialSize / selectorStride, std::numeric_limits<std::uint32_t>::max()));
+        materialEntries = std::min(materialEntries, table.selectorLimit);
+        if (table.hasSelectorCount) {
+            DescriptorValue count;
+            walker.EvaluateDescriptorSource(plan, table.selectorCountSource, runtime, count);
+            materialEntries = std::min(materialEntries, count.dwords[0] <= 0x7fffffffu ? count.dwords[0] : 0u);
+        }
+        if (materialEntries > MaterialScanLimit()) rejectTable(BindlessRejection::MaterialScan, "bindless material scan capacity exceeded");
         if (materialEntries <= MaterialScanLimit()) {
             materialMode = true;
             for (std::uint32_t record = 0; record < materialEntries; record++) {
-                const std::uint64_t offset = static_cast<std::uint64_t>(record) * table.selectorStride + table.selectorOffset;
+                const std::uint64_t offset = static_cast<std::uint64_t>(record) * selectorStride + table.selectorOffset;
                 if (offset + sizeof(std::uint32_t) > materialSize) throw std::runtime_error("bindless material selector exceeds its buffer");
                 std::uint32_t key = 0;
                 readWord(materialBase + offset, key);
-                if (key >= entries) {
+                if (key >= entries || key > table.keyMax) {
                     outOfRange++;
                     continue;
                 }
                 keys.push_back(key);
             }
+            if (table.materialIncludesZero && entries != 0u) keys.push_back(0u);
             std::sort(keys.begin(), keys.end());
             keys.erase(std::unique(keys.begin(), keys.end()), keys.end());
             if (keys.size() > slots) {
@@ -378,6 +391,9 @@ void resolveTableImage(const IrResourcePlan& plan, std::uint32_t imageIndex, con
         }
     }
     if (!materialMode) {
+        if (table.heapAddress) {
+            rejectTable(BindlessRejection::MaterialScan, "address-backed image table requires a bounded material scan");
+        }
         if (entries > slots) {
             rejectTable(table.hasMaterial ? BindlessRejection::MaterialScan : BindlessRejection::Capacity, "bindless image table has " + std::to_string(entries) + " entries (" + std::to_string(materialEntries) + " materials), limit " + std::to_string(slots));
         }
@@ -385,7 +401,6 @@ void resolveTableImage(const IrResourcePlan& plan, std::uint32_t imageIndex, con
         for (std::uint32_t key = 0; key < entries; key++) keys[key] = key;
     }
     counters.outOfRange.fetch_add(outOfRange, std::memory_order_relaxed);
-    const std::uint64_t heapBase = heap.Base48();
     std::vector<DescriptorValue> candidates(keys.size());
     std::vector<std::uint8_t> valid(keys.size(), 0u);
     std::uint32_t paddedNull = 0u;

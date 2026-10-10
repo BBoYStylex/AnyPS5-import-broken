@@ -7,9 +7,10 @@
 using namespace ShaderRecompiler;
 static void Require(bool value) { if (!value) throw std::runtime_error("image sample/gather regression"); }
 static void Check(std::uint32_t encoding, RdnaOpcode opcode, std::uint32_t dmask) {
-    const std::array<std::uint32_t, 2> code{(0x3cu << 26u) | (encoding << 18u) | (dmask << 8u) | (1u << 3u), 0u};
+    const std::array<std::uint32_t, 2> code{(0x3cu << 26u) | ((encoding & 0x7fu) << 18u) | ((encoding >> 7u) & 1u) | (dmask << 8u) | (1u << 3u), 0u};
     const RdnaInstruction instruction = DecodeRdnaMimg(0u, code, 0u);
     Require(instruction.op == opcode);
+    if (encoding == 0xb8u) Require(instruction.imageSampleFlags == (RdnaImageSampleFlagCompare | RdnaImageSampleFlagOffset | RdnaImageSampleFlagAdjust));
     Require(instruction.family == RdnaInstructionFamily::MIMG);
     Require(IsImageOpcode(instruction.op));
     IrProgram program;
@@ -19,7 +20,7 @@ static void Check(std::uint32_t encoding, RdnaOpcode opcode, std::uint32_t dmask
     context.TranslateInstruction(instruction);
 }
 static void CheckPck(std::uint32_t encoding, RdnaOpcode opcode, std::uint32_t dmask, std::uint32_t dataComponents) {
-    const std::array<std::uint32_t, 2> code{(0x3cu << 26u) | (encoding << 18u) | (dmask << 8u) | (1u << 3u), 0u};
+    const std::array<std::uint32_t, 2> code{(0x3cu << 26u) | ((encoding & 0x7fu) << 18u) | ((encoding >> 7u) & 1u) | (dmask << 8u) | (1u << 3u), 0u};
     const RdnaInstruction instruction = DecodeRdnaMimg(0u, code, 0u);
     Require(instruction.op == opcode);
     Require(instruction.imageOpcodeId == encoding);
@@ -53,7 +54,7 @@ static void CheckSamplerVccTupleOverflow() {
     Require(rejected);
 }
 static void CheckPckRejectsZeroMask(std::uint32_t encoding) {
-    const std::array<std::uint32_t, 2> code{(0x3cu << 26u) | (encoding << 18u) | (1u << 3u), 0u};
+    const std::array<std::uint32_t, 2> code{(0x3cu << 26u) | ((encoding & 0x7fu) << 18u) | ((encoding >> 7u) & 1u) | (1u << 3u), 0u};
     bool rejected = false;
     try {
         DecodeRdnaMimg(0u, code, 0u);
@@ -93,6 +94,20 @@ int main() {
     Check(0x3fu, RdnaOpcode::ImageSampleCLzO, 0xfu);
     Check(0x3cu, RdnaOpcode::ImageSampleCLO, 0xfu);
     Check(0x38u, RdnaOpcode::ImageSampleCO, 0xfu);
+    Check(0xb8u, RdnaOpcode::ImageSampleCO, 0xfu);
+    Check(0xa1u, RdnaOpcode::ImageSample, 0xfu);
+    Check(0xa6u, RdnaOpcode::ImageSampleBCl, 0xfu);
+    Check(0xa9u, RdnaOpcode::ImageSampleCCl, 0xfu);
+    Check(0xadu, RdnaOpcode::ImageSampleCB, 0xfu);
+    Check(0xaeu, RdnaOpcode::ImageSampleCBCl, 0xfu);
+    Check(0xb1u, RdnaOpcode::ImageSampleClO, 0xfu);
+    Check(0xb5u, RdnaOpcode::ImageSampleBO, 0xfu);
+    Check(0xb6u, RdnaOpcode::ImageSampleBClO, 0xfu);
+    Check(0xb9u, RdnaOpcode::ImageSampleCClO, 0xfu);
+    Check(0xbdu, RdnaOpcode::ImageSampleCBO, 0xfu);
+    Check(0xbeu, RdnaOpcode::ImageSampleCBClO, 0xfu);
+    Check(0xc8u, RdnaOpcode::ImageGather4C, 1u);
+    Check(0xd8u, RdnaOpcode::ImageGather4CO, 1u);
     Check(0x21u, RdnaOpcode::ImageSampleCl, 0xfu);
     Check(0x31u, RdnaOpcode::ImageSampleClO, 0xfu);
     Check(0x22u, RdnaOpcode::ImageSampleD, 0xfu);

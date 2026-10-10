@@ -373,7 +373,7 @@ private:
     }
 
     const MemoryInfo* ScalarReadMemory(const IrValue& read, std::uint32_t& index) const {
-        if (read.Opcode() != IrOpcode::ReadConstBuffer || read.ArgumentCount() != 2u) {
+        if ((read.Opcode() != IrOpcode::ReadConstBuffer || read.ArgumentCount() != 2u) && (read.Opcode() != IrOpcode::LoadAddressU32 || read.ArgumentCount() != 4u)) {
             return nullptr;
         }
         index = read.Flags<MemoryFlags>().index;
@@ -381,7 +381,7 @@ private:
             return nullptr;
         }
         const auto& memory = m_program.Resources().memoryInfo[index];
-        return memory.kind == ResourceKind::ScalarBuffer && memory.dataBits == 32u && memory.dataDwords == 1u ? &memory : nullptr;
+        return (memory.kind == ResourceKind::ScalarBuffer || memory.kind == ResourceKind::ScalarAddress) && memory.dataBits == 32u && memory.dataDwords == 1u ? &memory : nullptr;
     }
 
     static bool AccessesMemory(IrOpcode op) {
@@ -417,16 +417,113 @@ private:
         return true;
     }
 
-    bool MakeRuntimeBufferSource(const IrValue& handle, std::uint32_t& source, DescriptorSource& descriptor) {
-        if (handle.Opcode() != IrOpcode::GetBufferResource) {
+    bool MakeRuntimeBufferSource(const IrValue& handle, std::uint32_t& source, DescriptorSource& descriptor, bool allowAddress = false) {
+        const bool address = allowAddress && handle.Opcode() == IrOpcode::GetAddressResource;
+        if (!address && handle.Opcode() != IrOpcode::GetBufferResource) {
             return false;
         }
-        MakeSource(handle, 4u, false, false, descriptor);
+        MakeSource(handle, address ? 2u : 4u, false, false, descriptor);
         std::uint32_t badDword = 0;
         if (!ValidateSource(descriptor, badDword)) {
             return false;
         }
         source = InternSource(descriptor);
+        return true;
+    }
+
+    const BlockInfo* BlockMetadata(const IrBlock* block) const {
+        const auto& blocks = m_program.Blocks();
+        const auto found = std::ranges::find_if(blocks, [&](const auto& candidate) { return candidate.get() == block; });
+        const auto index = static_cast<std::size_t>(found - blocks.begin());
+        return index < m_program.Metadata().blockInfo.size() ? &m_program.Metadata().blockInfo[index] : nullptr;
+    }
+
+    bool GuardedBy(const IrBlock* use, const IrValue* predicate) const {
+        std::vector<const IrBlock*> pending{use};
+        for (std::size_t i = 0; i < pending.size(); i++) {
+            const auto* current = pending[i];
+            if (current->Predecessors().empty()) return false;
+            for (const auto* previous : current->Predecessors()) {
+                const auto* found = BlockMetadata(previous);
+                const auto* currentInfo = BlockMetadata(current);
+                bool guarded = false;
+                if (found != nullptr && currentInfo != nullptr && found->terminator.trueBlock != found->terminator.falseBlock && found->terminator.kind == TerminatorKind::ConditionalBranch && found->condition != nullptr) {
+                    auto* condition = found->condition->Resolve();
+                    bool positive = found->terminator.trueBlock == currentInfo->id;
+                    while (condition->Opcode() == IrOpcode::LogicalNot) {
+                        condition = condition->Argument(0)->Resolve();
+                        positive = !positive;
+                    }
+                    guarded = positive && condition == predicate;
+                }
+                if (!guarded && std::ranges::find(pending, previous) == pending.end()) pending.push_back(previous);
+            }
+        }
+        return true;
+    }
+
+    void BoundTableKey(IrValue* key, const IrBlock* use, DescriptorSource::IndirectImage& table) const {
+        for (const auto* user : key->Uses()) {
+            std::uint32_t zero = 1;
+            if (user->Opcode() == IrOpcode::SGreaterThanEqual32 && user->Argument(0)->Resolve() == key && immediateU32(user->Argument(1), zero) && zero == 0u && GuardedBy(use, user)) {
+                table.keyMax = 0x7fffffffu;
+            }
+        }
+    }
+
+    std::uint32_t MaterialSelectorLimit(IrValue* selector, const IrBlock* use, IrValue*& count) const {
+        if (!selector->IsPhi() || selector->ArgumentCount() != 2u) return std::numeric_limits<std::uint32_t>::max();
+        IrValue* increment = nullptr;
+        for (std::size_t i = 0; i < 2u; i++) {
+            std::uint32_t zero = 1;
+            auto* step = selector->Argument(i ^ 1u)->Resolve();
+            if (!immediateU32(selector->Argument(i), zero) || zero != 0u || step->Opcode() != IrOpcode::IAdd32) continue;
+            std::uint32_t one = 0;
+            if (step->Argument(0)->Resolve() == selector && immediateU32(step->Argument(1), one) && one == 1u) increment = step;
+        }
+        if (increment == nullptr) return std::numeric_limits<std::uint32_t>::max();
+        for (const auto* compare : selector->Uses()) {
+            if (compare->Opcode() != IrOpcode::SLessThan32 || compare->Argument(0)->Resolve() != selector || !GuardedBy(use, compare) || !GuardedBy(increment->Parent(), compare)) continue;
+            auto* bound = compare->Argument(1)->Resolve();
+            if (bound->Opcode() != IrOpcode::SMin32) continue;
+            std::uint32_t cap = 0;
+            if ((immediateU32(bound->Argument(0), cap) || immediateU32(bound->Argument(1), cap)) && cap > 0u && cap <= 0x7fffffffu) {
+                constexpr SrtWalker walker;
+                if (walker.ValidateRuntimeValue(m_program.Resources(), bound)) count = bound;
+                return cap;
+            }
+        }
+        return std::numeric_limits<std::uint32_t>::max();
+    }
+
+    bool MakeLaneMaterialSource(IrValue* key, DescriptorSource::IndirectImage& table, DescriptorSource& source) {
+        if ((key->Opcode() != IrOpcode::ReadLane && key->Opcode() != IrOpcode::ReadFirstLane) || key->ArgumentCount() == 0u) return false;
+        auto* value = key->Argument(0)->Resolve();
+        while (value->Opcode() == IrOpcode::SelectU32 && value->ArgumentCount() == 3u) {
+            std::uint32_t fallback = 1;
+            if (!immediateU32(value->Argument(2), fallback) || fallback != 0u) return false;
+            table.materialIncludesZero = true;
+            value = value->Argument(1)->Resolve();
+        }
+        std::uint32_t component = 0;
+        if (value->Opcode() == IrOpcode::CompositeExtractU32x2 || value->Opcode() == IrOpcode::CompositeExtractU32x3 || value->Opcode() == IrOpcode::CompositeExtractU32x4) {
+            if (!immediateU32(value->Argument(1), component)) return false;
+            value = value->Argument(0)->Resolve();
+        }
+        if (value->Opcode() != IrOpcode::LoadBufferU32 && value->Opcode() != IrOpcode::LoadBufferU32x2 && value->Opcode() != IrOpcode::LoadBufferU32x3 && value->Opcode() != IrOpcode::LoadBufferU32x4) return false;
+        std::uint32_t offset = 1, scalarOffset = 1;
+        if (value->ArgumentCount() != 5u || !immediateU32(value->Argument(2), offset) || offset != 0u || !immediateU32(value->Argument(3), scalarOffset) || scalarOffset != 0u) return false;
+        const auto* enabled = value->Argument(4)->Resolve();
+        if (enabled->Type() != IrType::U1) return false;
+        if (!enabled->HasImmediate() || !enabled->ImmediateBool()) table.materialIncludesZero = true;
+        const auto index = value->Flags<MemoryFlags>().index;
+        if (index >= m_program.Resources().memoryInfo.size()) return false;
+        const auto& memory = m_program.Resources().memoryInfo[index];
+        if (memory.kind != ResourceKind::Buffer || !memory.idxen || memory.offen || memory.formatted || memory.typed || memory.dataBits != 32u || component >= memory.dataDwords || memory.offset > 0xffffffffu - component * 4u) return false;
+        if (!MakeRuntimeBufferSource(*value->Argument(0)->Resolve(), table.materialSource, source)) return false;
+        table.hasMaterial = true;
+        table.materialStrideFromDescriptor = true;
+        table.selectorOffset = memory.offset + component * 4u;
         return true;
     }
 
@@ -456,7 +553,7 @@ private:
         } else {
             return false;
         }
-        return stride != 0u && selector->Opcode() == IrOpcode::ReadFirstLane;
+        return stride != 0u && (selector->Opcode() == IrOpcode::ReadFirstLane || selector->IsPhi());
     }
 
     // The table entry offset `key * 32` (a shift or a multiply), optionally plus an immediate.
@@ -551,18 +648,20 @@ private:
 
         DescriptorSource heapSource;
         std::uint32_t heapSourceIndex = 0;
-        if (!MakeRuntimeBufferSource(*heapHandle, heapSourceIndex, heapSource)) {
+        if (!MakeRuntimeBufferSource(*heapHandle, heapSourceIndex, heapSource, true)) {
             return false;
         }
 
         DescriptorSource::IndirectImage table;
         table.heapSource = heapSourceIndex;
+        table.heapAddress = heapHandle->Opcode() == IrOpcode::GetAddressResource;
         table.materialSource = heapSourceIndex;
         table.entryOffset = entryOffset;
+        BoundTableKey(key, handle.Parent(), table);
         DescriptorSource materialSource = heapSource;
         std::uint32_t materialMemoryIndex = 0;
         const MemoryInfo* materialMemory = ScalarReadMemory(*key, materialMemoryIndex);
-        if (materialMemory != nullptr && MemoryIndexBelongsTo(materialMemoryIndex, *key)) {
+        if (materialMemory != nullptr && materialMemory->kind == ResourceKind::ScalarBuffer && MemoryIndexBelongsTo(materialMemoryIndex, *key)) {
             IrValue* selector = nullptr;
             std::uint32_t selectorStride = 0;
             std::uint32_t selectorOffset = 0;
@@ -572,14 +671,31 @@ private:
                 table.hasMaterial = true;
                 table.materialSource = candidateIndex;
                 table.selectorStride = selectorStride;
+                IrValue* count = nullptr;
+                table.selectorLimit = MaterialSelectorLimit(selector, handle.Parent(), count);
+                if (count != nullptr) {
+                    DescriptorSource countSource;
+                    countSource.dwordCount = 1u;
+                    countSource.dwords[0] = count;
+                    table.selectorCountSource = InternSource(countSource);
+                    table.hasSelectorCount = true;
+                }
                 table.selectorOffset = selectorOffset + materialMemory->offset;
                 materialSource = candidateSource;
             }
         }
 
+        if (!table.hasMaterial) {
+            MakeLaneMaterialSource(key, table, materialSource);
+        }
+        if (table.heapAddress && !table.hasMaterial) {
+            return false;
+        }
+
         DescriptorSource imageSource;
         imageSource.dwordCount = 8u;
-        std::copy(heapSource.dwords.begin(), heapSource.dwords.begin() + 4u, imageSource.dwords.begin());
+        imageSource.dwords.fill(heapSource.dwords[0]);
+        std::copy_n(heapSource.dwords.begin(), heapSource.dwordCount, imageSource.dwords.begin());
         std::copy(materialSource.dwords.begin(), materialSource.dwords.begin() + 4u, imageSource.dwords.begin() + 4u);
         imageSource.indirectImage = table;
 

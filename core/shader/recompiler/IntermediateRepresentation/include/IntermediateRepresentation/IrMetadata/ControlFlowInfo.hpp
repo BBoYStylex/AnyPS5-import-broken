@@ -32,6 +32,13 @@ struct DescriptorSource {
         std::uint32_t keyArg = 0;
         std::uint32_t entryOffset = 0;
         bool hasMaterial = false;
+        bool heapAddress = false;
+        bool materialStrideFromDescriptor = false;
+        bool materialIncludesZero = false;
+        std::uint32_t keyMax = 0xffffffffu;
+        std::uint32_t selectorLimit = 0xffffffffu;
+        std::uint32_t selectorCountSource = 0;
+        bool hasSelectorCount = false;
 
         bool operator==(const IndirectImage& other) const = default;
     };

@@ -467,6 +467,11 @@ void Registration(bool indirect) {
     header.specials.dispatch_modifier = 0x8000;
     header.registers = {{{0x20c, static_cast<std::uint32_t>(address >> 8u)}, {0x20d, static_cast<std::uint32_t>(address >> 40u)}, {0x207, 2}, {0x208, 1}, {0x209, 1}, {0x212, 0}, {0x213, 0}, {0x207, 1}, {0x207, 1}}};
     const auto threadRegisterIndex = header.registers.size() - 1;
+    for (const auto type : {4u, 5u}) {
+        header.shader.type = static_cast<std::uint8_t>(type);
+        AgcDriverRegisterShader_nid_postfix(&header.shader);
+    }
+    header.shader.type = 0;
     AgcDriverRegisterShader_nid_postfix(&header.shader);
     std::barrier start(4);
     std::vector<std::future<void>> registrations;
