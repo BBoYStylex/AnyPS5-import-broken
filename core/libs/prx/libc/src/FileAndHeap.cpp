@@ -62,8 +62,16 @@ FileStream* APS5_VABI freopen_nid_postfix(const char* filename, const char* mode
     for (const auto* candidate : supported) if (std::strcmp(mode, candidate) == 0) valid = true;
     if (!valid) { errno = 22; return nullptr; }
     try {
+#ifdef _WIN32
+        const auto path = *filename ? ResolvePath_nid_no_patch(filename).wstring() : std::wstring{};
+        const auto wmode = NativeFileMode(mode);
+        std::wstring wmode_str(wmode.begin(), wmode.end());
+        const bool ok = stream->Reopen(path.c_str(), wmode_str.c_str());
+#else
         const auto path = *filename ? ResolvePath_nid_no_patch(filename).string() : std::string{};
-        if (stream->Reopen(path.c_str(), NativeFileMode(mode).c_str())) {
+        const bool ok = stream->Reopen(path.c_str(), NativeFileMode(mode).c_str());
+#endif
+        if (ok) {
             if (!path.empty() && WritesFile(mode)) RecordWrittenPath_nid_no_patch(path);
             return stream;
         }
@@ -78,8 +86,15 @@ FileStream* APS5_VABI freopen_nid_postfix(const char* filename, const char* mode
 FileStream* APS5_VABI fopen_nid_postfix(const char* filename, const char* mode) {
     if (!filename || !mode) throw std::runtime_error(std::string(__func__) + ": " + FOPEN_MSG_NULL_ARG);
     const std::filesystem::path fpath = ResolvePath_nid_no_patch(filename);
+#ifdef _WIN32
+    const auto abs_path = fpath.wstring();
+    const auto wmode = NativeFileMode(mode);
+    std::wstring wmode_str(wmode.begin(), wmode.end());
+    std::unique_ptr<std::FILE, decltype(&std::fclose)> handle(_wfopen(abs_path.c_str(), wmode_str.c_str()), std::fclose);
+#else
     const auto abs_path = fpath.string();
     std::unique_ptr<std::FILE, decltype(&std::fclose)> handle(std::fopen(abs_path.c_str(), NativeFileMode(mode).c_str()), std::fclose);
+#endif
     if (!handle) {
         const int error = errno;
         if (error == ENOENT) {
@@ -97,12 +112,10 @@ FileStream* APS5_VABI fopen_nid_postfix(const char* filename, const char* mode) 
             }
         }
         if (!sibling.empty()) {
-            // APS5_LOG_OUT("%s: \"%s\": %s. Sibling: \"%s\"", FOPEN_MSG_NOT_FOUND, abs_path.c_str(), reason, sibling.filename().string().c_str());
             return nullptr;
         }
-        throw std::runtime_error(std::string(__func__) + ": " + FOPEN_MSG_OPEN_FAILED + ": \"" + abs_path + "\": " + reason);
+        throw std::runtime_error(std::string(__func__) + ": " + FOPEN_MSG_OPEN_FAILED + ": \"" + fpath.string() + "\": " + reason);
     }
-    // APS5_LOG_OUT("success: \"%s\"", abs_path.c_str());
     if (WritesFile(mode)) RecordWrittenPath_nid_no_patch(fpath);
     auto stream = std::make_unique<FileStream>(handle.get(), true);
     handle.release();

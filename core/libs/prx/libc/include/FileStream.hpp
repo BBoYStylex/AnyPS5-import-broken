@@ -66,6 +66,7 @@ public:
     }
 
     GuestFilePrefix& GuestState() { return _guest; }
+
     bool Reopen(const char* filename, const char* mode) {
         auto* previous = GetHandle();
         _guest = {};
@@ -81,6 +82,21 @@ public:
         _guest.descriptor = descriptor >= 0 && descriptor <= 32767 ? static_cast<std::int16_t>(descriptor) : -1;
         return true;
     }
+
+#ifdef _WIN32
+    bool Reopen(const wchar_t* filename, const wchar_t* mode) {
+        auto* previous = GetHandle();
+        _guest = {};
+        encodingError = false;
+        _handle = _wfreopen(filename, mode, previous);
+        if (!_handle) return false;
+        _guest.flags = 0x10;
+        const int descriptor = _fileno(_handle);
+        _guest.descriptor = descriptor >= 0 && descriptor <= 32767 ? static_cast<std::int16_t>(descriptor) : -1;
+        return true;
+    }
+#endif
+
     void SyncStatus() {
         _guest.readRemaining = 0;
         _guest.writeRemaining = 0;
