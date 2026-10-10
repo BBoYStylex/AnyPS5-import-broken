@@ -9,21 +9,21 @@ def fixture():
     struct.pack_into("<HHIQQQIHHHHHH", image, 16, 3, 62, 1, 0x4000, 64, 0, 0, 64, 56, 4, 64, 0, 0)
     struct.pack_into("<IIQQQQQQ", image, 64, 1, 5, 0x4000, 0x4000, 0x4000, 0x1000, 0x1000, 0x1000)
     struct.pack_into("<IIQQQQQQ", image, 120, 1, 6, 0x5000, 0x5000, 0x5000, 0x1000, 0x1000, 0x1000)
-    struct.pack_into("<IIQQQQQQ", image, 232, 7, 4, 0x5200, 0x5200, 0x5200, 8, 16, 8)   # PT_TLS
-    struct.pack_into("<Q", image, 0x5200, 0x2a)                                         # TLS init value
+    struct.pack_into("<IIQQQQQQ", image, 232, 7, 4, 0x5200, 0x5200, 0x5200, 8, 16, 8)
+    struct.pack_into("<Q", image, 0x5200, 0x2a)
     code = bytearray()
-    code += b"\x48\x83\xec\x08"                                  # sub rsp, 8
-    code += b"\x31\xc0"                                          # xor eax, eax (ZF = 1)
-    code += b"\x64\x48\x8b\x04\x25\x00\x00\x00\x00"              # mov rax, fs:[0]
-    jnz = len(code); code += b"\x0f\x85\x00\x00\x00\x00"          # jnz bad (flags must survive)
-    code += b"\x48\x8b\x78\xf0"                                  # mov rdi, [rax - 16]
-    code += b"\x64\x48\x8b\x0c\x25\xf0\xff\xff\xff"              # mov rcx, fs:[-16]
-    code += b"\x48\x01\xcf"                                      # add rdi, rcx
-    code += b"\x64\xc7\x04\x25\x28\x00\x00\x00\x34\x12\x00\x00"  # mov dword fs:[0x28], 0x1234
-    code += b"\x64\x48\x8b\x14\x25\x28\x00\x00\x00"              # mov rdx, fs:[0x28]
-    code += b"\x48\x01\xd7"                                      # add rdi, rdx
-    call = len(code); code += b"\xff\x15" + struct.pack("<i", 0x5000 - (0x4000 + call + 6))  # call [got.exit]
-    bad = len(code); code += b"\x0f\x0b"                          # ud2
+    code += b"\x48\x83\xec\x08"
+    code += b"\x31\xc0"
+    code += b"\x64\x48\x8b\x04\x25\x00\x00\x00\x00"
+    jnz = len(code); code += b"\x0f\x85\x00\x00\x00\x00"
+    code += b"\x48\x8b\x78\xf0"
+    code += b"\x64\x48\x8b\x0c\x25\xf0\xff\xff\xff"
+    code += b"\x48\x01\xcf"
+    code += b"\x64\xc7\x04\x25\x28\x00\x00\x00\x34\x12\x00\x00"
+    code += b"\x64\x48\x8b\x14\x25\x28\x00\x00\x00"
+    code += b"\x48\x01\xd7"
+    call = len(code); code += b"\xff\x15" + struct.pack("<i", 0x5000 - (0x4000 + call + 6))
+    bad = len(code); code += b"\x0f\x0b"
     struct.pack_into("<i", code, jnz + 2, bad - (jnz + 6))
     image[0x4000:0x4000 + len(code)] = code
     strings = b"\0libc.prx\0" + (nid("exit") + "#A#B").encode() + b"\0"

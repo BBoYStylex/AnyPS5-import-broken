@@ -10,7 +10,6 @@ namespace Nid {
 
 constexpr std::uint32_t kMachOMagic64 = 0xfeedfacfu;
 
-// One entry of a dyld export trie. Mach-O C symbols keep their leading underscore here.
 struct MachOExport {
     std::string Name;
     std::uint64_t Flags = 0;
@@ -19,7 +18,6 @@ struct MachOExport {
     std::string ImportName;
 };
 
-// The export trie of a 64-bit Mach-O image (LC_DYLD_EXPORTS_TRIE or LC_DYLD_INFO).
 std::vector<MachOExport> ReadMachOExports(const std::vector<std::uint8_t>& binary);
 
 class MachONidPatcher final : public IBinaryPatcher {

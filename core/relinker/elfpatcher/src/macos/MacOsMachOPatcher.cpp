@@ -25,15 +25,13 @@ std::vector<std::string> ReadNeededLibraries(const Domain::SysVDynamicSection& d
         const auto nameOffset = Io::ReadU64(bytes, offset + 8);
         if (nameOffset >= dynamicSection.DynStrData.size()) throw Domain::RelinkerException("DT_NEEDED string offset is out of bounds", nameOffset);
         auto name = Windows::ReadString(dynamicSection.DynStrData, static_cast<std::size_t>(nameOffset));
-        if (name.empty() || !unique.insert(name).second) throw Domain::RelinkerException("Invalid or duplicate DT_NEEDED library: " + name);
-        result.push_back(std::move(name));
+        if (name.empty()) throw Domain::RelinkerException("Invalid DT_NEEDED library: " + name);
+        if (unique.insert(name).second) result.push_back(std::move(name));
     }
-    // AnyPS5 implements the C runtime in libc.prx; keep it loaded beside the module that asks for it.
     if (unique.contains("libSceLibcInternal.prx") && !unique.contains("libc.prx")) result.push_back("libc.prx");
     return result;
 }
 
-// Guest modules ($ORIGIN paths) load from beside the executable; system libraries through the rpath.
 std::string MachODependency(const std::string& name, const std::string& origin) {
     if (name.starts_with("$ORIGIN")) return MachOLoadPath(name, origin);
     if (name.find('/') != std::string::npos) throw Domain::RelinkerException("Unsupported dependency path: " + name);
@@ -60,7 +58,6 @@ std::vector<std::uint8_t> MacOsMachOPatcher::Patch(const std::vector<std::uint8_
         input.Binds.push_back({"_" + import.Name, import.TargetRva, static_cast<std::int64_t>(import.Addend)});
     for (const auto& library : ReadNeededLibraries(dynamicSection))
         input.Dylibs.push_back(MachODependency(library, "@executable_path"));
-    // Images with TLS bind the allocator and the registration from libkernel.
     if (std::find(input.Dylibs.begin(), input.Dylibs.end(), "@rpath/libkernel.prx") == input.Dylibs.end())
         input.Dylibs.push_back("@rpath/libkernel.prx");
     input.RunPaths.push_back(MachOLoadPath(runPath, "@executable_path"));

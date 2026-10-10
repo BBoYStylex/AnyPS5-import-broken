@@ -19,9 +19,6 @@ namespace Elfpatcher::MacOs {
 
 namespace {
 
-// The guest image keeps the layout the PE writer gives it: ImageBase + RVA, with the first LoadRva
-// bytes free for the headers. On macOS that range is __TEXT (Mach-O header, load commands and, in an
-// executable, the entry stub), and in an executable __PAGEZERO covers everything below ImageBase.
 using Windows::ImageBase;
 using Windows::LoadRva;
 
@@ -35,7 +32,6 @@ constexpr std::uint32_t MhDylib = 6;
 constexpr std::uint32_t MhNoUndefs = 0x1;
 constexpr std::uint32_t MhDyldLink = 0x4;
 constexpr std::uint32_t MhTwoLevel = 0x80;
-constexpr std::uint32_t MhPie = 0x200000;
 
 constexpr std::uint32_t LcSegment64 = 0x19;
 constexpr std::uint32_t LcSymtab = 0x2;
@@ -71,32 +67,16 @@ constexpr std::uint8_t BindOpcodeSetAddendSleb = 0x60;
 constexpr std::uint8_t BindOpcodeSetSegmentAndOffsetUleb = 0x70;
 constexpr std::uint8_t BindOpcodeDoBind = 0x90;
 
-// __APS5DATA,__meta describes the guest image to the runtime: libc's GuestImages.cpp emulates
-// dl_iterate_phdr from it and libkernel's GuestTlsMacOs.cpp reads the TLS descriptor.
 constexpr std::uint64_t MetaVersion = 2;
-constexpr std::size_t MetaLoadBias = 0x08;          // runtime address of ELF vaddr 0
-constexpr std::size_t MetaAllocateSlot = 0x10;      // -> Aps5GuestTlsAllocate
-constexpr std::size_t MetaRegisterSlot = 0x18;      // -> Aps5GuestTlsRegister
-constexpr std::size_t MetaTlsDescriptor = 0x20;     // version, template, template size, block size, alignment, key
+constexpr std::size_t MetaLoadBias = 0x08;
+constexpr std::size_t MetaAllocateSlot = 0x10;
+constexpr std::size_t MetaRegisterSlot = 0x18;
+constexpr std::size_t MetaTlsDescriptor = 0x20;
 constexpr std::size_t MetaTlsKey = MetaTlsDescriptor + 0x28;
-constexpr std::size_t MetaCxaAtexitSlot = 0x50;     // -> __cxa_atexit, for guest finalizers
+constexpr std::size_t MetaCxaAtexitSlot = 0x50;
 constexpr std::size_t MetaHeaderCount = 0x58;
-constexpr std::size_t MetaHeaders = 0x60;           // the original ELF program headers
+constexpr std::size_t MetaHeaders = 0x60;
 
-// dyld calls main(argc, argv, envp). The stub rebuilds the initial stack block a FreeBSD/Linux entry
-// point reads (argc, argv[0..argc-1], NULL, envp..., NULL) and hands it with the guest entry to
-// libkernel's Aps5StartGuest, which calls entry(block, 0) like the Linux entry stub does, but on
-// another thread: AppKit needs the main thread, and the guest never gives it back. Neither returns.
-//
-//     xor ecx, ecx                        count envp
-//  1: cmp qword ptr [rdx + rcx*8], 0 / je 2f / inc rcx / jmp 1b
-//  2: lea rax, [rdi + rcx + 3] / shl rax, 3 / sub rsp, rax / and rsp, -16
-//     mov [rsp], rdi / xor r8d, r8d
-//  3: cmp r8, rdi / je 4f / mov r9, [rsi + r8*8] / mov [rsp + r8*8 + 8], r9 / inc r8 / jmp 3b
-//  4: mov qword ptr [rsp + rdi*8 + 8], 0 / lea r10, [rsp + rdi*8 + 16] / xor r8d, r8d
-//  5: cmp r8, rcx / je 6f / mov r9, [rdx + r8*8] / mov [r10 + r8*8], r9 / inc r8 / jmp 5b
-//  6: mov qword ptr [r10 + rcx*8], 0 / mov rsi, rsp / lea rdi, [rip + entry]
-//     call [rip + Aps5StartGuest slot] / ud2
 constexpr std::uint8_t EntryStub[] = {
     0x31, 0xc9, 0x48, 0x83, 0x3c, 0xca, 0x00, 0x74, 0x05, 0x48, 0xff, 0xc1, 0xeb, 0xf4, 0x48, 0x8d,
     0x44, 0x0f, 0x03, 0x48, 0xc1, 0xe0, 0x03, 0x48, 0x29, 0xc4, 0x48, 0x83, 0xe4, 0xf0, 0x48, 0x89,
@@ -172,7 +152,6 @@ void PadTo(std::vector<std::uint8_t>& out, const std::size_t alignment) {
     while (out.size() % alignment != 0) out.push_back(0);
 }
 
-// The segment index (in load command order) and offset that hold an image RVA.
 std::pair<std::uint8_t, std::uint64_t> Locate(const std::vector<Segment>& segments, const std::uint64_t rva, const std::uint64_t size) {
     for (std::size_t index = 0; index < segments.size(); ++index) {
         const auto& segment = segments[index];
@@ -213,8 +192,6 @@ void AppendPathCommand(std::vector<std::uint8_t>& out, const std::uint32_t cmd, 
     out.resize(start + size, 0);
 }
 
-// A guest %fs access the stubs can replace: a 64-bit load from fs:disp32 into a register, or the
-// 32-bit immediate store to the stack guard at fs:0x28. The same forms the Windows target handles.
 struct TlsAccess {
     std::uint32_t Rva;
     std::size_t Length;
@@ -274,8 +251,6 @@ TlsScan ScanTls(const std::vector<std::uint8_t>& source, const std::vector<Domai
     return scan;
 }
 
-// A dyld export trie (regular exports only), laid out the way ld64 does: node offsets are uleb128, so
-// the layout is recomputed until every offset is stable.
 class TrieBuilder {
 public:
     explicit TrieBuilder(const std::vector<MacOsExport>& exports) {
@@ -389,13 +364,11 @@ std::vector<std::uint8_t> WriteMacOsImage(MacOsImageInput& input) {
     if (!hasTls && !tls.Accesses.empty()) throw Domain::RelinkerException("Guest TLS access without a non-empty PT_TLS");
     if (!hasTls && !input.TlsModuleSlots.empty()) throw Domain::RelinkerException("Guest TLS module relocation without a non-empty PT_TLS");
 
-    // __PAGEZERO (executables), __TEXT with the headers, then the guest pages.
     std::vector<Segment> segments;
     if (input.Executable) segments.push_back({"__PAGEZERO", 0, 0, 0, {}, {}});
     segments.push_back({"__TEXT", 0, LoadRva, VmProtRead | VmProtExecute, {}, {}});
     const auto guestSegments = segments.size();
     auto sections = image.BuildSections();
-    // --to-intel stubs go after the guest pages, as on Windows; each site becomes a jump to its stub.
     if (input.Trampolines != nullptr && !input.Trampolines->empty()) {
         for (const auto& access : tls.Accesses) {
             for (const auto& site : *input.Trampolines) {
@@ -418,7 +391,6 @@ std::vector<std::uint8_t> WriteMacOsImage(MacOsImageInput& input) {
         segments.push_back({std::move(name), section.Rva, section.Data.size(), protection, std::move(section.Data), {}});
     }
 
-    // __APS5DATA: the metadata and, when the image has an initializer, its __mod_init_func pointer.
     const auto metaRva = static_cast<std::uint32_t>(AlignUp(guestEnd, PageSize));
     const auto metaSize = MetaHeaders + headers.size() * 56;
     std::vector<std::uint8_t> meta(metaSize, 0);
@@ -441,8 +413,6 @@ std::vector<std::uint8_t> WriteMacOsImage(MacOsImageInput& input) {
         Io::WriteU64(meta, at + 48, header.Alignment);
     }
     const auto descriptor = metaRva + static_cast<std::uint32_t>(MetaTlsDescriptor);
-    // After the metadata: the __mod_init_func pointer, the executable's Aps5StartGuest slot, the TLS
-    // indexes of the exported TLS variables and the slots bound to the TLS indexes this image imports.
     const auto initPointer = AlignUp(metaSize, 8);
     const auto startSlot = initPointer + 8;
     const auto tlsExports = startSlot + 8;
@@ -468,8 +438,6 @@ std::vector<std::uint8_t> WriteMacOsImage(MacOsImageInput& input) {
     const auto codeRva = static_cast<std::uint32_t>(AlignUp(metaRva + metaEnd, PageSize));
     Windows::WindowsStubEmitter code(codeRva);
 
-    // Guest TLS: every %fs access becomes a stub that reads this image's thread pointer from its
-    // pthread key (in the descriptor), or allocates it on the thread's first access.
     if (hasTls) {
         const auto& header = *tls.Tls;
         const auto blockSize = GuestTlsBlockSize(header);
@@ -502,31 +470,30 @@ std::vector<std::uint8_t> WriteMacOsImage(MacOsImageInput& input) {
                 throw Domain::RelinkerException("Branch enters a guest TLS instruction", *target);
             const auto stub = code.GetRva();
             const bool preserveAccumulator = access.StoreImmediate || access.Register != 0;
-            code.Emit({0x48, 0x8d, 0x64, 0x24, 0x80});                       // lea rsp, [rsp - 0x80]: skip the red zone
-            code.Emit({0x9c});                                               // pushfq
-            if (preserveAccumulator) code.Emit({0x50});                      // push rax
-            code.Rip({0x48, 0x8b, 0x05}, metaRva + static_cast<std::uint32_t>(MetaTlsKey)); // mov rax, [rip + key]
-            code.Emit({0x65, 0x48, 0x8b, 0x04, 0xc5, 0, 0, 0, 0});           // mov rax, gs:[rax * 8]
-            code.Emit({0x48, 0x85, 0xc0});                                   // test rax, rax
-            const auto allocated = code.Branch({0x0f, 0x85});                // jnz
-            code.Rip({0x48, 0x8d, 0x05}, descriptor);                        // lea rax, [rip + descriptor]
-            code.Rip({0xff, 0x15}, metaRva + static_cast<std::uint32_t>(MetaAllocateSlot)); // call [rip + allocate]
+            code.Emit({0x48, 0x8d, 0x64, 0x24, 0x80});
+            code.Emit({0x9c});
+            if (preserveAccumulator) code.Emit({0x50});
+            code.Rip({0x48, 0x8b, 0x05}, metaRva + static_cast<std::uint32_t>(MetaTlsKey));
+            code.Emit({0x65, 0x48, 0x8b, 0x04, 0xc5, 0, 0, 0, 0});
+            code.Emit({0x48, 0x85, 0xc0});
+            const auto allocated = code.Branch({0x0f, 0x85});
+            code.Rip({0x48, 0x8d, 0x05}, descriptor);
+            code.Rip({0xff, 0x15}, metaRva + static_cast<std::uint32_t>(MetaAllocateSlot));
             code.PatchBranch(allocated, code.GetRva());
             if (access.StoreImmediate) {
-                code.Emit({0xc7, 0x40, 0x28});                               // mov dword [rax + 0x28], imm32
+                code.Emit({0xc7, 0x40, 0x28});
                 code.U32(access.Immediate);
             } else if (access.Displacement != 0) {
-                code.Emit({0x48, 0x8b, 0x80});                               // mov rax, [rax + disp32]
+                code.Emit({0x48, 0x8b, 0x80});
                 code.U32(access.Displacement);
             }
-            if (!access.StoreImmediate && access.Register != 0)               // mov reg, rax
+            if (!access.StoreImmediate && access.Register != 0)
                 code.Emit({static_cast<std::uint8_t>(0x48 | (access.Register >> 3)), 0x89, static_cast<std::uint8_t>(0xc0 | (access.Register & 7))});
-            if (preserveAccumulator) code.Emit({0x58});                       // pop rax
-            code.Emit({0x9d});                                               // popfq
-            code.Emit({0x48, 0x8d, 0xa4, 0x24, 0x80, 0, 0, 0});              // lea rsp, [rsp + 0x80]
+            if (preserveAccumulator) code.Emit({0x58});
+            code.Emit({0x9d});
+            code.Emit({0x48, 0x8d, 0xa4, 0x24, 0x80, 0, 0, 0});
             code.Rip({0xe9}, static_cast<std::uint32_t>(access.Rva + access.Length));
 
-            // The guest instruction becomes a jump to its stub.
             auto& site = SegmentAt(segments, access.Rva, access.Length);
             const auto at = access.Rva - site.Rva;
             const auto displacement = static_cast<std::int64_t>(stub) - static_cast<std::int64_t>(access.Rva + 5);
@@ -536,50 +503,46 @@ std::vector<std::uint8_t> WriteMacOsImage(MacOsImageInput& input) {
         }
     }
 
-    // Guest finalizers run through __cxa_atexit registered against this image, so they run at exit
-    // or when the image is unloaded, in reverse order of registration.
     const bool hasFini = input.FiniRva != 0 || !input.FiniArrayRvas.empty();
     std::uint32_t finiStub = 0;
-    const auto callZeroArgs = [&] { code.Emit({0x31, 0xff, 0x31, 0xf6, 0x31, 0xd2}); };     // xor edi, esi, edx
+    const auto callZeroArgs = [&] { code.Emit({0x31, 0xff, 0x31, 0xf6, 0x31, 0xd2}); };
     const auto callSlot = [&](const std::uint32_t slot) {
-        code.Rip({0x48, 0x8b, 0x05}, slot);                                  // mov rax, [rip + slot]
-        code.Emit({0x48, 0x85, 0xc0, 0x74, 0x08});                           // test rax, rax / jz +8
+        code.Rip({0x48, 0x8b, 0x05}, slot);
+        code.Emit({0x48, 0x85, 0xc0, 0x74, 0x08});
         callZeroArgs();
-        code.Emit({0xff, 0xd0});                                             // call rax
+        code.Emit({0xff, 0xd0});
     };
     if (hasFini) {
         finiStub = code.GetRva();
-        code.Emit({0x55, 0x48, 0x89, 0xe5});                                 // push rbp / mov rbp, rsp
+        code.Emit({0x55, 0x48, 0x89, 0xe5});
         for (auto slot = input.FiniArrayRvas.rbegin(); slot != input.FiniArrayRvas.rend(); ++slot) callSlot(*slot);
         if (input.FiniRva != 0) {
             callZeroArgs();
             code.Rip({0xe8}, input.FiniRva);
         }
-        code.Emit({0x5d, 0xc3});                                             // pop rbp / ret
+        code.Emit({0x5d, 0xc3});
         input.Binds.push_back({"___cxa_atexit", metaRva + static_cast<std::uint32_t>(MetaCxaAtexitSlot)});
     }
 
-    // The image initializer: register the TLS descriptor, fill the imported TLS slots, run the guest
-    // initializers, then hand the finalizers to __cxa_atexit.
     const bool hasInit = hasTls || !input.TlsImports.empty() || input.InitRva != 0 || !input.InitArrayRvas.empty() || hasFini;
     std::vector<Section> dataSections{{"__meta", 0, metaSize, 0, 3}};
     if (hasInit) {
         const auto initStub = code.GetRva();
-        code.Emit({0x55, 0x48, 0x89, 0xe5});                                 // push rbp / mov rbp, rsp
+        code.Emit({0x55, 0x48, 0x89, 0xe5});
         if (hasTls) {
-            code.Rip({0x48, 0x8d, 0x3d}, descriptor);                        // lea rdi, [rip + descriptor]
-            code.Rip({0xff, 0x15}, metaRva + static_cast<std::uint32_t>(MetaRegisterSlot)); // call [rip + register]
+            code.Rip({0x48, 0x8d, 0x3d}, descriptor);
+            code.Rip({0xff, 0x15}, metaRva + static_cast<std::uint32_t>(MetaRegisterSlot));
         }
         for (const auto& import : input.TlsImports) {
-            code.Rip({0x48, 0x8b, 0x05}, metaRva + static_cast<std::uint32_t>(tlsImportSlots.at(import.Symbol))); // mov rax, [rip + TLS index]
-            if (import.Module) code.Emit({0x48, 0x8b, 0x00});               // mov rax, [rax]: module id
-            else code.Emit({0x48, 0x8b, 0x40, 0x08});                        // mov rax, [rax + 8]: offset
+            code.Rip({0x48, 0x8b, 0x05}, metaRva + static_cast<std::uint32_t>(tlsImportSlots.at(import.Symbol)));
+            if (import.Module) code.Emit({0x48, 0x8b, 0x00});
+            else code.Emit({0x48, 0x8b, 0x40, 0x08});
             if (import.Addend != 0) {
-                code.Emit({0x48, 0xba});                                     // mov rdx, addend
+                code.Emit({0x48, 0xba});
                 code.U64(static_cast<std::uint64_t>(import.Addend));
-                code.Emit({0x48, 0x01, 0xd0});                               // add rax, rdx
+                code.Emit({0x48, 0x01, 0xd0});
             }
-            code.Rip({0x48, 0x89, 0x05}, import.Rva);                        // mov [rip + slot], rax
+            code.Rip({0x48, 0x89, 0x05}, import.Rva);
         }
         if (input.InitRva != 0) {
             callZeroArgs();
@@ -587,12 +550,12 @@ std::vector<std::uint8_t> WriteMacOsImage(MacOsImageInput& input) {
         }
         for (const auto slot : input.InitArrayRvas) callSlot(slot);
         if (hasFini) {
-            code.Rip({0x48, 0x8d, 0x3d}, finiStub);                          // lea rdi, [rip + fini]
-            code.Emit({0x31, 0xf6});                                         // xor esi, esi
-            code.Rip({0x48, 0x8d, 0x15}, 0);                                 // lea rdx, [rip + header]: the dso handle
-            code.Rip({0xff, 0x15}, metaRva + static_cast<std::uint32_t>(MetaCxaAtexitSlot)); // call [rip + __cxa_atexit]
+            code.Rip({0x48, 0x8d, 0x3d}, finiStub);
+            code.Emit({0x31, 0xf6});
+            code.Rip({0x48, 0x8d, 0x15}, 0);
+            code.Rip({0xff, 0x15}, metaRva + static_cast<std::uint32_t>(MetaCxaAtexitSlot));
         }
-        code.Emit({0x5d, 0xc3});                                             // pop rbp / ret
+        code.Emit({0x5d, 0xc3});
         Io::WriteU64(meta, initPointer, ImageBase + initStub);
         input.Rebases.push_back(metaRva + static_cast<std::uint32_t>(initPointer));
         dataSections.push_back({"__mod_init_func", initPointer, 8, SectionModInitFuncPointers, 3});
@@ -607,8 +570,6 @@ std::vector<std::uint8_t> WriteMacOsImage(MacOsImageInput& input) {
 
     std::sort(segments.begin() + static_cast<std::ptrdiff_t>(guestSegments), segments.end(), [](const Segment& left, const Segment& right) { return left.Rva < right.Rva; });
     for (std::size_t index = guestSegments; index < segments.size(); ++index) {
-        // Trailing zero pages (bss) need no file bytes; the rest of a segment is page-padded. Segments
-        // with sections keep all their bytes so the sections stay inside the file.
         auto& data = segments[index].Data;
         if (segments[index].Sections.empty()) {
             auto used = data.size();
@@ -618,7 +579,6 @@ std::vector<std::uint8_t> WriteMacOsImage(MacOsImageInput& input) {
         data.resize(AlignUp(data.size(), PageSize), 0);
     }
 
-    // dyld fixups: rebases, flat-namespace binds, and the export trie.
     std::vector<std::uint8_t> rebase;
     rebase.push_back(RebaseOpcodeSetTypeImm | RebaseTypePointer);
     auto rebaseTargets = input.Rebases;
@@ -650,7 +610,6 @@ std::vector<std::uint8_t> WriteMacOsImage(MacOsImageInput& input) {
 
     const auto exports = input.Exports.empty() ? std::vector<std::uint8_t>{} : TrieBuilder(input.Exports).Build();
 
-    // Load commands. Segment commands come first so the fixup segment indexes match.
     std::vector<std::uint8_t> commands;
     std::uint32_t commandCount = 0;
     std::vector<std::size_t> segmentCommandOffsets;
@@ -751,7 +710,6 @@ std::vector<std::uint8_t> WriteMacOsImage(MacOsImageInput& input) {
         ++commandCount;
     }
 
-    // __TEXT: header, load commands, then the executable's entry stub.
     std::vector<std::uint8_t> file;
     constexpr std::size_t HeaderSize = 32;
     const auto stubOffset = AlignUp(HeaderSize + commands.size(), 16);
@@ -776,7 +734,6 @@ std::vector<std::uint8_t> WriteMacOsImage(MacOsImageInput& input) {
         file.insert(file.end(), segment.Data.begin(), segment.Data.end());
     }
 
-    // __LINKEDIT: rebase, bind, exports, an empty symbol table and its one-byte string table.
     const auto linkeditOffset = file.size();
     const auto rebaseOffset = file.size();
     file.insert(file.end(), rebase.begin(), rebase.end());
@@ -791,7 +748,6 @@ std::vector<std::uint8_t> WriteMacOsImage(MacOsImageInput& input) {
     if (file.size() > std::numeric_limits<std::uint32_t>::max())
         throw Domain::RelinkerException("Mach-O output exceeds 4 GiB");
 
-    // Fill in the commands now that the layout is known.
     const auto writeSegment = [&](const std::size_t at, const std::uint64_t vmaddr, const std::uint64_t vmsize, const std::uint64_t fileoff, const std::uint64_t filesize) {
         Io::WriteU64(commands, at + 24, vmaddr);
         Io::WriteU64(commands, at + 32, vmsize);
@@ -823,7 +779,6 @@ std::vector<std::uint8_t> WriteMacOsImage(MacOsImageInput& input) {
     Io::WriteU32(commands, symtabCommand + 20, 8);
     if (input.Executable) Io::WriteU64(commands, mainCommand + 8, stubOffset);
 
-    // A content hash as the UUID, so identical inputs give identical outputs.
     std::uint64_t hash = 0xcbf29ce484222325ull;
     for (const auto byte : file) hash = (hash ^ byte) * 0x100000001b3ull;
     Io::WriteU64(commands, uuidCommand + 8, hash);
@@ -836,7 +791,7 @@ std::vector<std::uint8_t> WriteMacOsImage(MacOsImageInput& input) {
     Io::WriteU32(file, 12, input.Executable ? MhExecute : MhDylib);
     Io::WriteU32(file, 16, commandCount);
     Io::WriteU32(file, 20, static_cast<std::uint32_t>(commands.size()));
-    Io::WriteU32(file, 24, MhNoUndefs | MhDyldLink | MhTwoLevel | (input.Executable ? MhPie : 0));
+    Io::WriteU32(file, 24, MhNoUndefs | MhDyldLink | MhTwoLevel);
     std::copy(commands.begin(), commands.end(), file.begin() + HeaderSize);
     return file;
 }

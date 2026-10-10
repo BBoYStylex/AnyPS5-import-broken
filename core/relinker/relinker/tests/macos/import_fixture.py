@@ -7,15 +7,14 @@ def fixture(message=b"hello from a PS5 ELF on macOS\0"):
     image = bytearray(0x6000)
     image[:16] = b"\x7fELF\x02\x01\x01" + bytes(9)
     struct.pack_into("<HHIQQQIHHHHHH", image, 16, 3, 62, 1, 0x4000, 64, 0, 0, 64, 56, 3, 64, 0, 0)
-    # R+X code, R+W data (GOT, message, dynamic tables), PT_DYNAMIC; identity mapped.
     struct.pack_into("<IIQQQQQQ", image, 64, 1, 5, 0x4000, 0x4000, 0x4000, 0x1000, 0x1000, 0x1000)
     struct.pack_into("<IIQQQQQQ", image, 120, 1, 6, 0x5000, 0x5000, 0x5000, 0x1000, 0x1000, 0x1000)
-    code = bytearray(b"\x48\x83\xec\x08")                                   # sub rsp, 8
-    code += b"\x48\x8d\x3d" + struct.pack("<i", 0x5100 - (0x4004 + 7))       # lea rdi, [rip+msg]
-    code += b"\xff\x15" + struct.pack("<i", 0x5000 - (0x400b + 6))           # call [rip+got.puts]
-    code += b"\x31\xff"                                                     # xor edi, edi
-    code += b"\xff\x15" + struct.pack("<i", 0x5008 - (0x4013 + 6))           # call [rip+got.exit]
-    code += b"\x0f\x0b"                                                     # ud2
+    code = bytearray(b"\x48\x83\xec\x08")
+    code += b"\x48\x8d\x3d" + struct.pack("<i", 0x5100 - (0x4004 + 7))
+    code += b"\xff\x15" + struct.pack("<i", 0x5000 - (0x400b + 6))
+    code += b"\x31\xff"
+    code += b"\xff\x15" + struct.pack("<i", 0x5008 - (0x4013 + 6))
+    code += b"\x0f\x0b"
     image[0x4000:0x4000 + len(code)] = code
     image[0x5100:0x5100 + len(message)] = message
     strings = b"\0libc.prx\0" + (nid("puts") + "#A#B").encode() + b"\0" + (nid("exit") + "#A#B").encode() + b"\0"

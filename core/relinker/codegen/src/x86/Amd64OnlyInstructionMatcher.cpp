@@ -107,8 +107,6 @@ bool _isClzeroOpcode(const DecodedInstruction& instr) {
     return pos + 2 < instr.Length && instr.Data[pos] == X64OpcodeConstants::TwoByteOpcodeEscape && instr.Data[pos + 1] == X64OpcodeConstants::TwoByteGrp7 && instr.Data[pos + 2] == 0xFC;
 }
 
-// RDPID r64 becomes mov r32, 0 (zero-extended, flags kept): Rosetta's TSC_AUX is a constant that is
-// no processor index, so every thread reports processor 0.
 std::vector<std::uint8_t> _rdpidReplacement(const DecodedInstruction& instr) {
     using namespace X64OpcodeConstants;
     const auto opcode = instr.OpcodeOffset();
@@ -199,16 +197,13 @@ Amd64OnlyMatch Amd64OnlyInstructionMatcher::_matchClzero(const DecodedInstructio
 std::optional<Amd64OnlyMatch> Amd64OnlyInstructionMatcher::_matchRosetta(const DecodedInstruction& instr, std::span<const std::uint8_t> trailing) const {
     if (_target != Amd64OnlyTarget::Rosetta)
         return std::nullopt;
-    // RDSEED becomes RDRAND (/6 instead of /7): both return a random value and set CF.
     if (instr.IsRdseed()) {
         std::vector<std::uint8_t> replacement(instr.Data, instr.Data + instr.Length);
         replacement[instr.OpcodeOffset() + 2] &= static_cast<std::uint8_t>(~(1u << X64OpcodeConstants::ModRmRegShift));
         return Amd64OnlyMatch{kRdseed.Name, instr.Length, Amd64OnlyLowering::InPlace, std::move(replacement), {}, 0};
     }
-    // CLWB only writes a cache line back; values do not change.
     if (instr.IsClwb())
         return _inPlace(kClwb, instr.Length, {});
-    // Optional: code that checks CPUID never reaches it under Rosetta, which reports no RDPID.
     if (instr.IsRdpid())
         return _trampoline(kRdpid.Name, instr.Length, _outOfLine(instr.Length, trailing, [&](StubBodyBuilder& body) { body.Raw(_rdpidReplacement(instr)); }), true);
     return std::nullopt;

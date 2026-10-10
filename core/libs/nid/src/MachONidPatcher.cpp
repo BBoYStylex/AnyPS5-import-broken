@@ -166,7 +166,6 @@ Image ParseImage(const std::vector<std::uint8_t>& binary) {
     return image;
 }
 
-// Where the export trie lives: the command offset and the offsets of its data offset/size fields.
 struct TrieLocation {
     std::size_t OffsetField;
     std::size_t SizeField;
@@ -232,8 +231,6 @@ std::vector<MachOExport> ParseTrie(const std::vector<std::uint8_t>& binary, std:
     return exports;
 }
 
-// A radix tree of export names, serialized the way ld64 does: node offsets are uleb128, so the layout
-// is recomputed until every offset is stable.
 class TrieBuilder {
 public:
     explicit TrieBuilder(const std::vector<MachOExport>& exports) {
@@ -354,7 +351,6 @@ bool IsGuestFacingImport(const std::string& name) {
     return hasNidPostfix || hasScePrefix;
 }
 
-// The dylib load commands in ordinal order (1-based in binds), with whether each one is a prx.
 std::vector<bool> DylibOrdinalsArePrx(const std::vector<std::uint8_t>& binary, const Image& image) {
     std::vector<bool> result;
     for (const auto offset : image.Commands) {
@@ -408,7 +404,6 @@ void PatchChainedImports(std::vector<std::uint8_t>& binary, const Image& image) 
     for (const auto& item : imports) nameOffsets.insert(item.NameOffset);
     std::set<std::uint32_t> rewritten;
     for (const auto& item : imports) {
-        // Ordinals 1..N name a dylib load command; 0 and the special negative ordinals are not a prx.
         const bool special = header.ImportsFormat == kImportFormatAddend64 ? item.Ordinal >= 0xfff0 : item.Ordinal >= 0xf0;
         if (item.Ordinal == 0 || special || item.Ordinal > prx.size() || !prx[item.Ordinal - 1]) continue;
         if (rewritten.contains(item.NameOffset)) continue;
@@ -420,7 +415,6 @@ void PatchChainedImports(std::vector<std::uint8_t>& binary, const Image& image) 
         if (bare == name || !IsGuestFacingImport(bare)) continue;
         const auto patched = "_" + ResolveOneName(bare);
         if (patched.size() > name.size()) throw std::runtime_error("import NID longer than original name: " + name);
-        // Another import pointing into the tail of this string would see the rewrite.
         const auto inside = nameOffsets.upper_bound(item.NameOffset);
         if (inside != nameOffsets.end() && *inside <= item.NameOffset + name.size()) throw std::runtime_error("chained import names share storage: " + name);
         std::memcpy(binary.data() + at, patched.data(), patched.size());
@@ -438,7 +432,6 @@ void WriteTrie(std::vector<std::uint8_t>& binary, const Image& image, const Trie
         Write(binary, location.SizeField, static_cast<std::uint32_t>(trie.size()));
         return;
     }
-    // Larger than before: append it to __LINKEDIT, which has to be the last thing in the file.
     std::optional<std::size_t> linkedit;
     for (const auto offset : image.Commands) {
         const auto cmd = Read<LoadCommand>(binary, offset).Cmd;
@@ -478,7 +471,6 @@ void MachONidPatcher::PatchNids(std::vector<std::uint8_t>& binary, const std::st
     auto exports = ParseTrie(binary, Read<std::uint32_t>(binary, location->OffsetField), Read<std::uint32_t>(binary, location->SizeField));
     if (exports.empty()) throw std::runtime_error("no exported names");
 
-    // NIDs are computed from the C name, without Mach-O's leading underscore.
     std::vector<std::string> names;
     names.reserve(exports.size());
     for (const auto& entry : exports) {
@@ -487,8 +479,6 @@ void MachONidPatcher::PatchNids(std::vector<std::uint8_t>& binary, const std::st
     }
     const auto nidMap = ResolveNids(names, libraryName, excludedExports);
     for (std::size_t index = 0; index < exports.size(); ++index) {
-        // dyld coalesces weak definitions (inline statics, template instances) across images by name,
-        // so the host ones keep it; guest-facing exports are never weak.
         const auto& name = names[index];
         const bool marked = name.ends_with(Internal::kNidPostfix) || Internal::IsNidNoPatch(name) || Internal::IsNidNoPatchCut(name);
         if ((exports[index].Flags & kExportWeakDefinition) != 0 && !marked) continue;
