@@ -197,7 +197,6 @@ private:
         AllocMap::iterator ait = _allocs.find(start);
         if (ait == _allocs.end() || ait->second != start + alignedLen) return false;
 
-
         ForgetDirectMemory(static_cast<int64_t>(start), alignedLen);
 
         const uint64_t end = start + alignedLen;
