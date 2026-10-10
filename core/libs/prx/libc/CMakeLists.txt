@@ -31,6 +31,7 @@ target_sources(libc PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src/RuntimeSupport.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/LocaleSupport.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/Process.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/Threads.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/Environment.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/Directory.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/Filesystem.cpp
@@ -163,6 +164,16 @@ if(BUILD_TESTING)
     set_tests_properties(guest_fiopen PROPERTIES TIMEOUT 20)
     if(WIN32)
         set_tests_properties(guest_fiopen PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+    endif()
+    add_test_executable(guest_threads_tests ${LIBS_INCLUDE_DIR}/tests/GuestThreads.cpp)
+    target_include_directories(guest_threads_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_threads_tests PRIVATE libc)
+    configure_windows_unwind(guest_threads_tests)
+    add_test(NAME guest_threads COMMAND guest_threads_tests)
+    set_tests_properties(guest_threads PROPERTIES TIMEOUT 20)
+    if(WIN32)
+        set_tests_properties(guest_threads PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
     endif()
     add_test_executable(guest_working_directory_tests ${LIBS_INCLUDE_DIR}/tests/GuestWorkingDirectory.cpp)
