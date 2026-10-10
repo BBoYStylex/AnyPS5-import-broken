@@ -728,7 +728,7 @@ int APS5_VABI sceKernelAprSubmitCommandBufferAndGetResult(const Apr::CommandBuff
 }
 
 int APS5_VABI sceKernelAprWaitCommandBuffer(uint32_t id) {
-    (void)id;
+    if (!AmmSubmitted_nid_no_patch(id)) return _fail(GUEST_EINVAL);
     return 0;
 }
 
