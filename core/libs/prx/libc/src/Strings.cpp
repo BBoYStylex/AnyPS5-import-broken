@@ -47,6 +47,27 @@ auto ParseAsciiPrefix(const char16_t* text, char16_t** end, TParse parse) {
 }
 
 extern "C" {
+const void* APS5_VABI __std_find_trivial_8_nid_postfix(
+    const void* first, const void* last, std::uint64_t value) noexcept {
+    if (first == last) return last;
+    const auto begin = reinterpret_cast<std::uintptr_t>(first);
+    const auto end = reinterpret_cast<std::uintptr_t>(last);
+
+
+    if (begin == 0 || end < begin || (end - begin) % sizeof(value) != 0) std::terminate();
+    auto* current = static_cast<const unsigned char*>(first);
+    const auto count = (end - begin) / sizeof(value);
+    for (std::uintptr_t index = 0; index < count; ++index, current += sizeof(value)) {
+        std::uint64_t element;
+
+
+        std::memcpy(&element, current, sizeof(element));
+        if (element == value) return current;
+    }
+    return last;
+}
+
+
 
 void* APS5_VABI memset_nid_postfix(void* s, int c, size_t n) {
     // APS5_LOG_OUT("s=%p c=%d n=%zu", s, c, n);
