@@ -5,12 +5,15 @@ import tarfile
 import zipfile
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parent.parent
+
 
 def package(platform, build, output, version):
     if not re.fullmatch(r"v[0-9A-Za-z][0-9A-Za-z._-]*", version) or version.endswith("."):
         raise ValueError(f"Invalid release tag for asset filenames: {version}")
     libraries = sorted((build / "core/libs/libs").glob("*.prx"))
-    expected = {f"{directory.name}.prx" for directory in Path("core/libs/prx").iterdir() if directory.is_dir()}
+    expected = {f"{directory.name}.prx" for directory in (ROOT / "core/libs/prx").iterdir()
+                if directory.is_dir() and not directory.name.startswith(".")}
     missing = expected - {library.name for library in libraries}
     if missing:
         raise RuntimeError(f"Missing patched libraries: {', '.join(sorted(missing))}")
@@ -27,7 +30,7 @@ def package(platform, build, output, version):
     with zipfile.ZipFile(output / f"prx-{platform}-{version}.zip", "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
         for file in files:
             archive.write(file, arcname=f"libs/{file.name}")
-    with tarfile.open(output / f"prx-{platform}-{version}.tar.gz", "w:gz", compresslevel=9) as archive:
+    with tarfile.open(output / f"prx-{platform}-{version}.tar.gz", "w:gz", compresslevel=9, dereference=True) as archive:
         for file in files:
             archive.add(file, arcname=f"libs/{file.name}")
     asset = f"relinker-{version}.exe" if platform == "windows" else f"relinker-{version}"
