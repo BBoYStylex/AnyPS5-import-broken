@@ -32,6 +32,7 @@ std::uint64_t APS5_VABI sceAmprMeasureCommandSizePopMarker();
 std::uint64_t APS5_VABI sceAmprMeasureCommandSizeSetMarker(const char*);
 std::uint64_t APS5_VABI sceAmprMeasureCommandSizeSetMarkerWithColor(const char*, std::uint32_t);
 int APS5_VABI sceKernelAprSubmitCommandBuffer(const Apr::CommandBufferObject*, std::uint32_t);
+int APS5_VABI sceKernelAprWaitCommandBuffer(std::uint32_t);
 int APS5_VABI sceAmprCommandBufferWaitOnAddress(Apr::CommandBufferObject*, volatile std::uint64_t*, std::uint64_t, std::uint8_t, std::uint8_t);
 int APS5_VABI sceAmprCommandBufferWaitOnCounter(Apr::CommandBufferObject*, std::uint8_t, std::uint32_t, std::uint8_t, std::uint8_t);
 int APS5_VABI sceAmprCommandBufferWriteCounterOnCompletion(Apr::CommandBufferObject*, std::uint8_t, std::uint32_t);
@@ -675,6 +676,9 @@ void TestAmm() {
     Require(sceAmprAmmSubmitCommandBuffer3(maps.memory.data(), maps.Offset(), 0, &id) == 0 && id != 0);
     Require(sceAmprAmmWaitCommandBufferCompletion(id) == 0);
     Require(sceAmprAmmWaitCommandBufferCompletion(id + 1000) == noSuchSubmission);
+    Require(sceKernelAprWaitCommandBuffer(id) == 0);
+    Require(sceKernelAprWaitCommandBuffer(id + 1000) == -1);
+    Require(sceKernelAprWaitCommandBuffer(0) == -1);
     At(automatic) = 0x1111;
     At(automatic + 2 * page - 8) = 0x2222;
     Require(At(automatic) == 0x1111 && At(automatic + 2 * page - 8) == 0x2222);
