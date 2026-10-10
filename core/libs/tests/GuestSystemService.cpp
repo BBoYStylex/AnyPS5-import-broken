@@ -14,15 +14,6 @@ constexpr int browserUnavailable = static_cast<int>(0x8002002Du);
 
 void Require(bool value) { if (!value) std::abort(); }
 
-bool ParamGetStringThrows(int paramId, char* buf, std::size_t bufSize) {
-    try {
-        static_cast<void>(sceSystemServiceParamGetString(paramId, buf, bufSize));
-    } catch (const std::runtime_error&) {
-        return true;
-    }
-    return false;
-}
-
 }
 
 extern "C" int APS5_VABI sceSystemServicePowerTick(void);
@@ -65,8 +56,8 @@ int main() {
     std::memset(name, 'x', sizeof(name));
     Require(sceSystemServiceParamGetString(SYSTEM_SERVICE_PARAM_ID_SYSTEM_NAME, nullptr, sizeof(name)) == SYSTEM_SERVICE_ERROR_PARAMETER);
     Require(sceSystemServiceParamGetString(SYSTEM_SERVICE_PARAM_ID_SYSTEM_NAME, name, 0) == SYSTEM_SERVICE_ERROR_PARAMETER);
-    Require(ParamGetStringThrows(SYSTEM_SERVICE_PARAM_ID_SYSTEM_NAME, name, sizeof(name) - 1));
-    Require(ParamGetStringThrows(SYSTEM_SERVICE_PARAM_ID_LANG, name, sizeof(name)));
+    Require(sceSystemServiceParamGetString(SYSTEM_SERVICE_PARAM_ID_SYSTEM_NAME, name, sizeof(name) - 1) == SYSTEM_SERVICE_ERROR_PARAMETER);
+    Require(sceSystemServiceParamGetString(SYSTEM_SERVICE_PARAM_ID_LANG, name, sizeof(name)) == SYSTEM_SERVICE_ERROR_PARAMETER);
     Require(name[0] == 'x');
     Require(sceSystemServiceParamGetString(SYSTEM_SERVICE_PARAM_ID_SYSTEM_NAME, name, sizeof(name)) == SYSTEM_SERVICE_OK);
     Require(std::strcmp(name, "PS5") == 0);
