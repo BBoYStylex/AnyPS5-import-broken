@@ -784,6 +784,7 @@ struct InitParameter2 {
     void* allocator;
     void* userData;
     std::size_t fileBufferSize;
+    std::uint32_t specialFloatFormatType;
 };
 static_assert(sizeof(InitParameter2) <= 40);
 
@@ -831,9 +832,8 @@ int APS5_VABI _ZN3sce4Json5Value21setNullAccessCallBackEPFRKS1_NS0_9ValueTypeEPS
     return 0;
 }
 
-int APS5_VABI _ZN3sce4Json14InitParameter225setSpecialFloatFormatTypeENS0_22SpecialFloatFormatTypeE(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+void APS5_VABI _ZN3sce4Json14InitParameter225setSpecialFloatFormatTypeENS0_22SpecialFloatFormatTypeE(InitParameter2* self, std::uint32_t type) {
+    self->specialFloatFormatType = type;
 }
 
 int APS5_VABI _ZN3sce4Json5Value30setElementAccessFailureHandlerEPFviPKNS0_6StringEPKmPKS1_S8_PvES9_(void) {

@@ -85,6 +85,7 @@ Value* APS5_VABI _ZN3sce4Json5Value10referValueEm(Value*, std::size_t);
 void APS5_VABI _ZN3sce4Json14InitParameter2C1Ev(void*);
 void APS5_VABI _ZN3sce4Json14InitParameter212setAllocatorEPNS0_12MemAllocatorEPv(void*, void*, void*);
 void APS5_VABI _ZN3sce4Json14InitParameter217setFileBufferSizeEm(void*, std::size_t);
+void APS5_VABI _ZN3sce4Json14InitParameter225setSpecialFloatFormatTypeENS0_22SpecialFloatFormatTypeE(void*, std::uint32_t);
 int APS5_VABI _ZN3sce4Json11Initializer10initializeEPKNS0_14InitParameter2E(void*, const void*);
 }
 
@@ -351,9 +352,14 @@ static void ValueAccess() {
     int userData = 0;
     _ZN3sce4Json14InitParameter212setAllocatorEPNS0_12MemAllocatorEPv(parameter, &allocator, &userData);
     _ZN3sce4Json14InitParameter217setFileBufferSizeEm(parameter, 4096);
+    _ZN3sce4Json14InitParameter225setSpecialFloatFormatTypeENS0_22SpecialFloatFormatTypeE(parameter, 2);
     void* stored[3]{};
     std::memcpy(stored, parameter, sizeof(stored));
     Require(stored[0] == &allocator && stored[1] == &userData && reinterpret_cast<std::uintptr_t>(stored[2]) == 4096);
+    std::uint32_t storedType = 0;
+    std::memcpy(&storedType, parameter + sizeof(stored), sizeof(storedType));
+    Require(storedType == 2);
+    for (std::size_t index = 32; index < sizeof(parameter); ++index) Require(parameter[index] == 0xff);
     alignas(16) std::uint8_t initializer[16]{};
     Require(_ZN3sce4Json11InitializerC1Ev(initializer) == 0);
     Require(_ZN3sce4Json11Initializer10initializeEPKNS0_14InitParameter2E(initializer, parameter) == 0);
