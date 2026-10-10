@@ -8,6 +8,7 @@
 #ifdef _WIN32
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <windows.h>
 using NativeStat = struct __stat64;
 static int DoStat(const std::filesystem::path& p, NativeStat* st) {
     return _wstat64(p.wstring().c_str(), st);
@@ -20,6 +21,13 @@ static int DoLstat(const std::filesystem::path& p, NativeStat* st) {
     std::error_code error;
     if (std::filesystem::is_symlink(std::filesystem::symlink_status(p, error))) NotImplemented_nid_no_patch("lstat of a Windows symbolic link");
     return DoStat(p, st);
+}
+static void FillFileIdentity(HANDLE handle, FileStat* sb) {
+    BY_HANDLE_FILE_INFORMATION info{};
+    if (GetFileInformationByHandle(handle, &info)) {
+        sb->st_dev = info.dwVolumeSerialNumber;
+        sb->st_ino = (static_cast<std::uint64_t>(info.nFileIndexHigh) << 32) | info.nFileIndexLow;
+    }
 }
 #else
 #include <sys/stat.h>
@@ -91,6 +99,13 @@ void FillFileStat(const std::filesystem::path& nativePath, FileStat* sb) {
         throw std::runtime_error(std::string("FillFileStat: stat failed for ") + nativePath.string());
     }
     CopyNativeStat(st, sb);
+#ifdef _WIN32
+    HANDLE handle = CreateFileW(nativePath.wstring().c_str(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+    if (handle != INVALID_HANDLE_VALUE) {
+        FillFileIdentity(handle, sb);
+        CloseHandle(handle);
+    }
+#endif
 }
 
 void FillFileStat(int nativeDescriptor, FileStat* sb) {
@@ -99,12 +114,24 @@ void FillFileStat(int nativeDescriptor, FileStat* sb) {
         throw std::runtime_error(std::string("FillFileStat: fstat failed for fd ") + std::to_string(nativeDescriptor));
     }
     CopyNativeStat(st, sb);
+#ifdef _WIN32
+    HANDLE handle = reinterpret_cast<HANDLE>(_get_osfhandle(nativeDescriptor));
+    if (handle != INVALID_HANDLE_VALUE) {
+        FillFileIdentity(handle, sb);
+    }
+#endif
 }
 
 bool FillFileStatFromDescriptor(int fd, FileStat* sb) {
     NativeStat st{};
     if (DoFstat(fd, &st) != 0) return false;
     CopyNativeStat(st, sb);
+#ifdef _WIN32
+    HANDLE handle = reinterpret_cast<HANDLE>(_get_osfhandle(fd));
+    if (handle != INVALID_HANDLE_VALUE) {
+        FillFileIdentity(handle, sb);
+    }
+#endif
     return true;
 }
 
