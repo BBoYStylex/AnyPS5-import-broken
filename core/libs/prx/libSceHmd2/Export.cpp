@@ -1,24 +1,42 @@
-#include <cstdint>
-#include <cstddef>
-#include "SceTypes.hpp"
+#include "Hmd2.hpp"
+
 #include "prx/libc/include/General.hpp"
-
-namespace {
-
-constexpr std::int32_t SCE_HMD2_ERROR_UNSUPPORTED_FEATURE = static_cast<std::int32_t>(0x81110016);
-
-}
 
 extern "C" {
 
 std::int32_t APS5_VABI sceHmd2Initialize(const void* param) {
     (void)param;
-    return SCE_HMD2_ERROR_UNSUPPORTED_FEATURE;
+    return Hmd2::RuntimeUnavailable;
 }
 
-int APS5_VABI sceHmd2Close() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+std::int32_t APS5_VABI sceHmd2Open(std::int32_t userId, std::int32_t type, std::int32_t index,
+                                 const Hmd2::OpenParam* param) {
+    (void)userId;
+    (void)type;
+    (void)index;
+    (void)param;
+    return Hmd2::NotInitialized;
+}
+
+std::int32_t APS5_VABI sceHmd2Close(std::int32_t handle) {
+    (void)handle;
+    return Hmd2::NotInitialized;
+}
+
+std::int32_t APS5_VABI sceHmd2GetDeviceInformation(Hmd2::DeviceInformation* info) {
+    if (!info) return Hmd2::ParameterNull;
+    return Hmd2::NotInitialized;
+}
+
+std::int32_t APS5_VABI sceHmd2GetFieldOfViewWithoutHandle(Hmd2::FieldOfView* fieldOfView) {
+    if (!fieldOfView) return Hmd2::ParameterNull;
+    return Hmd2::NotInitialized;
+}
+
+std::int32_t APS5_VABI sceHmd2SetVibration(std::int32_t handle, std::int32_t strength) {
+    (void)handle;
+    (void)strength;
+    return Hmd2::NotInitialized;
 }
 
 int APS5_VABI sceHmd2GazeGetResultForFoveatedRendering() {
@@ -26,54 +44,39 @@ int APS5_VABI sceHmd2GazeGetResultForFoveatedRendering() {
     return 0;
 }
 
-int APS5_VABI sceHmd2GetDeviceInformation() {
+std::int32_t APS5_VABI sceHmd2ReprojectionInitialize(const void*, const void*) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceHmd2GetFieldOfViewWithoutHandle() {
+std::int32_t APS5_VABI sceHmd2ReprojectionEnableVrMode(std::uint64_t) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceHmd2Open() {
+std::int32_t APS5_VABI sceHmd2ReprojectionDisableVrMode() {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceHmd2ReprojectionBeginFrame() {
+std::int32_t APS5_VABI sceHmd2ReprojectionBeginFrame(std::uint64_t) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceHmd2ReprojectionDisableVrMode() {
+std::int32_t APS5_VABI sceHmd2ReprojectionGetPredictedDisplayTime(std::uint64_t, std::uint64_t*) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceHmd2ReprojectionEnableVrMode() {
+Hmd2::SizeAlign APS5_VABI sceHmd2ReprojectionQueryBufferSizeAlign() {
     NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return {};
 }
 
-int APS5_VABI sceHmd2ReprojectionGetPredictedDisplayTime() {
+Hmd2::SizeAlign APS5_VABI sceHmd2ReprojectionQueryDisplayBufferSizeAlign() {
     NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceHmd2ReprojectionInitialize() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceHmd2ReprojectionQueryBufferSizeAlign() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceHmd2ReprojectionQueryDisplayBufferSizeAlign() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return {};
 }
 
 int APS5_VABI sceHmd2ReprojectionSetAllowPositionalReprojection() {
@@ -87,11 +90,6 @@ int APS5_VABI sceHmd2ReprojectionSetParamWithBuffer() {
 }
 
 int APS5_VABI sceHmd2ReprojectionSetRenderConfig() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceHmd2SetVibration() {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
