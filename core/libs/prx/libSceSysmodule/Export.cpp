@@ -27,6 +27,7 @@ const char* findModuleName(const std::uint32_t id) {
 
 std::mutex gMutex;
 std::unordered_map<std::uint32_t, std::int32_t> gLoadCount;
+std::unordered_map<std::uint32_t, std::int32_t> gModuleHandles;
 
 bool fillModuleInfoForUnwind(std::uint64_t addr, ModuleInfoForUnwind* info) {
 #ifdef _WIN32
@@ -93,6 +94,8 @@ bool fillModuleInfoForUnwind(std::uint64_t addr, ModuleInfoForUnwind* info) {
 }
 
 extern "C" {
+
+void* HostLibraryHandle_nid_no_patch(const char* fileName);
 
 int APS5_VABI sceSysmoduleGetModuleInfoForUnwind(std::uint64_t addr, int flags, ModuleInfoForUnwind* info) {
     (void)flags;
@@ -177,6 +180,34 @@ int APS5_VABI sceSysmoduleLoadModuleInternal(std::uint32_t id) {
     }
     std::lock_guard<std::mutex> lock(gMutex);
     gLoadCount[id]++;
+    return 0;
+}
+
+int APS5_VABI sceSysmoduleGetModuleHandleInternal(std::uint32_t id, std::int32_t* handle) {
+    if ((id & 0x7fffffffu) == 0) {
+        throw std::runtime_error("sceSysmoduleGetModuleHandleInternal: invalid id 0");
+    }
+    if (handle == nullptr) {
+        throw std::invalid_argument("sceSysmoduleGetModuleHandleInternal: null handle");
+    }
+    const char* name = findModuleName(id);
+    if (!name) {
+        return SCE_SYSMODULE_ERROR_UNLOADED;
+    }
+    std::lock_guard<std::mutex> lock(gMutex);
+    const auto loaded = gLoadCount.find(id);
+    if (loaded == gLoadCount.end() || loaded->second < 1) {
+        return SCE_SYSMODULE_ERROR_UNLOADED;
+    }
+    auto cached = gModuleHandles.find(id);
+    if (cached == gModuleHandles.end()) {
+        void* module = HostLibraryHandle_nid_no_patch((std::string(name) + ".prx").c_str());
+        if (!module) {
+            throw std::runtime_error(std::string("sceSysmoduleGetModuleHandleInternal: cannot open ") + name);
+        }
+        cached = gModuleHandles.emplace(id, static_cast<std::int32_t>(reinterpret_cast<std::intptr_t>(module))).first;
+    }
+    *handle = cached->second;
     return 0;
 }
 

@@ -145,6 +145,39 @@ void* APS5_VABI dlopen_nid_postfix(const char* path, int flags) {
         return reinterpret_cast<void*>(handle);
     } catch (const std::exception& error) { Error(error.what()); return nullptr; }
 }
+void* HostLibraryHandle_nid_no_patch(const char* fileName) {
+    if (!fileName || !*fileName) { Error("host library: empty file name"); return nullptr; }
+    try {
+        auto module = std::make_shared<Module>();
+#ifdef _WIN32
+        HMODULE self = nullptr;
+        if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, reinterpret_cast<LPCWSTR>(&HostLibraryHandle_nid_no_patch), &self)) {
+            Error("host library: cannot locate the loader module"); return nullptr;
+        }
+        std::wstring selfPath(MAX_PATH, L'\0');
+        for (;;) {
+            const auto length = GetModuleFileNameW(self, selfPath.data(), static_cast<DWORD>(selfPath.size()));
+            if (length == 0) { Error("host library: cannot read the loader module path"); return nullptr; }
+            if (length < selfPath.size()) { selfPath.resize(length); break; }
+            selfPath.resize(selfPath.size() * 2);
+        }
+        const auto path = std::filesystem::path(selfPath).parent_path() / std::filesystem::path(fileName);
+        module->native = LoadLibraryExW(path.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
+#else
+        Dl_info self{};
+        if (!::dladdr(reinterpret_cast<void*>(&HostLibraryHandle_nid_no_patch), &self) || self.dli_fname == nullptr) {
+            Error("host library: cannot locate the loader module"); return nullptr;
+        }
+        const auto path = std::filesystem::path(self.dli_fname).parent_path() / fileName;
+        module->native = ::dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
+#endif
+        if (!module->native) { Error("host library: cannot load the library"); return nullptr; }
+        std::lock_guard lock(modulesMutex);
+        const auto handle = nextHandle++;
+        modules.emplace(handle, std::move(module));
+        return reinterpret_cast<void*>(handle);
+    } catch (const std::exception& error) { Error(error.what()); return nullptr; }
+}
 void* APS5_VABI dlsym_nid_postfix(void* handle, const char* name) {
     if (!name || !*name) { Error("dlsym: empty symbol name"); return nullptr; }
     try {
