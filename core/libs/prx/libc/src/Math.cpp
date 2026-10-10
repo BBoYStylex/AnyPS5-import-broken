@@ -9,6 +9,8 @@
 #include "prx/libc/include/General.hpp"
 
 extern "C" {
+double APS5_VABI nextafter_nid_postfix(double x, double y) { return std::nextafter(x, y); }
+
 
 std::lldiv_t APS5_VABI lldiv_nid_postfix(long long numerator, long long denominator) {
     return std::lldiv(numerator, denominator);
