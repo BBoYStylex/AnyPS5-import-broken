@@ -48,9 +48,14 @@ def elf_exports(path, data):
     ident, section_offset, section_size, section_count = header[0], header[6], header[11], header[12]
     if ident[4] != 2 or ident[5] != 1 or section_size != 64:
         raise AuditError(f"{path}: only little-endian ELF64 with 64-byte section headers is supported (class {ident[4]}, data {ident[5]}, shentsize {section_size})")
+    if not section_offset:
+        raise AuditError(f"{path}: ELF exports without a section header table are not supported")
+    if not section_count:
+        section_count = unpack("<IIQQQQIIQQ", data, section_offset, path, "extended section count")[5]
+    take(data, section_offset, section_count * 64, path, "section header table")
     sections = [unpack("<IIQQQQIIQQ", data, section_offset + index * 64, path, f"section header {index}") for index in range(section_count)]
     names = set()
-    for section in sections:
+    for section_index, section in enumerate(sections):
         kind, offset, size, link, entry = section[1], section[4], section[5], section[6], section[9]
         if kind != 11:
             continue
@@ -58,8 +63,17 @@ def elf_exports(path, data):
             raise AuditError(f"{path}: invalid dynamic symbol table (entry size {entry}, size {size}, string table section {link})")
         strings_offset, strings_size = sections[link][4], sections[link][5]
         take(data, strings_offset, strings_size, path, "dynamic string table")
+        indexes = [candidate for candidate in sections if candidate[1] == 18 and candidate[6] == section_index]
+        if len(indexes) > 1:
+            raise AuditError(f"{path}: multiple extended section index tables for section {section_index}")
         for position in range(0, size, 24):
             name, info, other, index, _, _ = unpack("<IBBHQQ", data, offset + position, path, "dynamic symbol")
+            if index == 0xffff:
+                if not indexes or indexes[0][9] != 4 or indexes[0][5] != size // 24 * 4:
+                    raise AuditError(f"{path}: invalid or missing extended section index table for section {section_index}")
+                index = unpack("<I", data, indexes[0][4] + position // 24 * 4, path, "extended symbol section index")[0]
+                if index >= len(sections):
+                    raise AuditError(f"{path}: extended symbol section index {index} lies outside the section table")
             binding, visibility = info >> 4, other & 3
             if index == 0 or binding not in (1, 2, 10) or visibility not in (0, 3):
                 continue
@@ -79,12 +93,19 @@ def pe_exports(path, data):
     directory = PE_DIRECTORY_OFFSET[magic]
     if optional_size < directory + 8:
         raise AuditError(f"{path}: PE optional header of {optional_size} bytes has no export directory")
+    take(data, optional, optional_size, path, "PE optional header")
+    if unpack("<I", data, optional + directory - 4, path, "data directory count")[0] == 0:
+        raise AuditError(f"{path}: PE file declares no data directories")
+    headers_size = unpack("<I", data, optional + 60, path, "header size")[0]
     rva, size = unpack("<II", data, optional + directory, path, "export data directory")
     if not rva or size < 40:
         raise AuditError(f"{path}: PE file has no export table")
     sections = [unpack("<8sIIIIIIHHI", data, optional + optional_size + index * 40, path, f"PE section {index}") for index in range(section_count)]
 
     def to_offset(address, length):
+        if address < headers_size and length <= headers_size - address:
+            take(data, address, length, path, f"header data at RVA 0x{address:x}")
+            return address, min(headers_size, len(data))
         for section in sections:
             virtual, raw_size, raw_offset = section[2], section[3], section[4]
             if address < virtual:
@@ -93,19 +114,29 @@ def pe_exports(path, data):
             if relative >= raw_size or length > raw_size - relative:
                 continue
             take(data, raw_offset + relative, length, path, f"data at RVA 0x{address:x}")
-            return raw_offset + relative
+            return raw_offset + relative, min(raw_offset + raw_size, len(data))
         raise AuditError(f"{path}: RVA 0x{address:x} is not inside any section")
 
-    table = unpack("<IIHHIIIIIII", data, to_offset(rva, 40), path, "export directory")
-    name_count, names_rva = table[7], table[9]
+    table = unpack("<IIHHIIIIIII", data, to_offset(rva, 40)[0], path, "export directory")
+    function_count, name_count, functions_rva, names_rva, ordinals_rva = table[6:11]
     names = set()
     if not name_count:
         return names
-    names_offset = to_offset(names_rva, name_count * 4)
+    if not functions_rva or not names_rva or not ordinals_rva:
+        raise AuditError(f"{path}: named PE exports require address, name and ordinal tables")
+    functions_offset = to_offset(functions_rva, function_count * 4)[0]
+    names_offset = to_offset(names_rva, name_count * 4)[0]
+    ordinals_offset = to_offset(ordinals_rva, name_count * 2)[0]
     for index in range(name_count):
+        ordinal = unpack("<H", data, ordinals_offset + index * 2, path, "export ordinal")[0]
+        if ordinal >= function_count:
+            raise AuditError(f"{path}: export ordinal {ordinal} lies outside the address table ({function_count} entries)")
+        function_rva = unpack("<I", data, functions_offset + ordinal * 4, path, "export address")[0]
+        if not function_rva:
+            continue
         name_rva = unpack("<I", data, names_offset + index * 4, path, "export name RVA")[0]
-        offset = to_offset(name_rva, 1)
-        names.add(cstring(data, offset, len(data), path, "export name"))
+        offset, limit = to_offset(name_rva, 1)
+        names.add(cstring(data, offset, limit, path, "export name"))
     return names
 
 

@@ -47,21 +47,26 @@ def exporting(*names):
 def build_pe(names):
     section_rva, raw_offset = 0x1000, 0x200
     strings, rvas = b"", []
-    start = 40 + 4 * len(names)
+    start = 40 + 10 * len(names)
     for name in names:
         rvas.append(section_rva + start + len(strings))
         strings += name.encode() + b"\0"
-    raw = struct.pack("<IIHHIIIIIII", 0, 0, 0, 0, 0, 1, len(names), len(names), 0, section_rva + 40, 0)
-    raw += b"".join(struct.pack("<I", rva) for rva in rvas) + strings
+    raw = struct.pack("<IIHHIIIIIII", 0, 0, 0, 0, 0, 1, len(names), len(names), section_rva + 40, section_rva + 40 + 4 * len(names), section_rva + 40 + 8 * len(names))
+    raw += b"".join(struct.pack("<I", 0x2000 + 16 * index) for index in range(len(names)))
+    raw += b"".join(struct.pack("<I", rva) for rva in rvas)
+    raw += b"".join(struct.pack("<H", index) for index in range(len(names))) + strings
     image = bytearray(raw_offset)
     image[0:2] = b"MZ"
     image[0x3c:0x40] = struct.pack("<I", 0x40)
     image[0x40:0x44] = b"PE\0\0"
-    image[0x44:0x58] = struct.pack("<HHIIIHH", 0x8664, 1, 0, 0, 0, 240, 0x2022)
+    image[0x44:0x58] = struct.pack("<HHIIIHH", 0x8664, 2, 0, 0, 0, 240, 0x2022)
     image[0x58:0x5a] = struct.pack("<H", 0x20b)
+    image[0x58 + 60:0x58 + 64] = struct.pack("<I", raw_offset)
+    image[0x58 + 108:0x58 + 112] = struct.pack("<I", 16)
     image[0x58 + 112:0x58 + 120] = struct.pack("<II", section_rva, len(raw))
     image[0x58 + 240:0x58 + 280] = struct.pack("<8sIIIIIIHHI", b".edata", len(raw), section_rva, len(raw), raw_offset, 0, 0, 0, 0, 0x40000040)
-    return bytes(image) + raw
+    image[0x58 + 280:0x58 + 320] = struct.pack("<8sIIIIIIHHI", b".text", 16 * max(1, len(names)), 0x2000, 16 * max(1, len(names)), raw_offset + len(raw), 0, 0, 0, 0, 0x60000020)
+    return bytes(image) + raw + b"\xc3" * (16 * max(1, len(names)))
 
 
 def write_source(root, library, text):
@@ -203,6 +208,77 @@ class ImportAuditTests(unittest.TestCase):
         for cut in (0x3c, 0x60, 0x210):
             with self.assertRaisesRegex(import_audit.AuditError, "lib.prx"):
                 import_audit.pe_exports(path, image[:cut])
+
+    def test_pe_ignores_bytes_after_the_declared_directory_count(self):
+        image = bytearray(build_pe(["alpha"]))
+        struct.pack_into("<I", image, 0x58 + 108, 0)
+        with self.assertRaises(import_audit.AuditError):
+            import_audit.pe_exports(Path("lib.prx"), image)
+
+    def test_pe_null_export_address_is_not_an_export(self):
+        image = bytearray(build_pe(["alpha"]))
+        struct.pack_into("<I", image, 0x200 + 40, 0)
+        self.assertEqual(import_audit.pe_exports(Path("lib.prx"), image), set())
+
+    def test_pe_export_ordinal_must_index_the_address_table(self):
+        image = bytearray(build_pe(["alpha"]))
+        struct.pack_into("<H", image, 0x200 + 48, 1)
+        with self.assertRaises(import_audit.AuditError):
+            import_audit.pe_exports(Path("lib.prx"), image)
+
+    def test_pe_export_name_cannot_terminate_in_unmapped_overlay(self):
+        image = bytearray(build_pe(["alpha"]))
+        image[0x200 + 55] = ord("x")
+        image[0x238:] = b"y" * (len(image) - 0x238)
+        image += b"\0"
+        with self.assertRaises(import_audit.AuditError):
+            import_audit.pe_exports(Path("lib.prx"), image)
+
+    def test_pe_exports_can_reside_in_headers(self):
+        image = bytearray(build_pe(["alpha"]))
+        raw = bytes(image[0x200:0x238])
+        image[0x200:0x200] = bytes(0x200)
+        image[0x200:0x238] = raw
+        struct.pack_into("<I", image, 0x58 + 60, 0x400)
+        struct.pack_into("<I", image, 0x58 + 112, 0x200)
+        struct.pack_into("<III", image, 0x200 + 28, 0x228, 0x22c, 0x230)
+        struct.pack_into("<I", image, 0x22c, 0x232)
+        struct.pack_into("<I", image, 0x58 + 240 + 20, 0x400)
+        struct.pack_into("<I", image, 0x58 + 280 + 20, 0x438)
+        self.assertEqual(import_audit.pe_exports(Path("lib.prx"), image), {"alpha"})
+
+    def test_elf_extended_section_count_keeps_exports(self):
+        image = bytearray(exporting("alpha"))
+        section_offset = struct.unpack_from("<Q", image, 40)[0]
+        image.extend(bytes((0xff00 - 3) * 64))
+        struct.pack_into("<H", image, 60, 0)
+        struct.pack_into("<Q", image, section_offset + 32, 0xff00)
+        self.assertEqual(import_audit.elf_exports(Path("lib.prx"), image), {"alpha"})
+
+    def test_elf_extended_undefined_index_is_not_an_export(self):
+        image = bytearray(exporting("alpha"))
+        section_offset = struct.unpack_from("<Q", image, 40)[0]
+        symbol_offset = struct.unpack_from("<Q", image, section_offset + 64 + 24)[0]
+        index_offset = len(image) + 64
+        image.extend(struct.pack("<IIQQQQIIQQ", 0, 18, 0, 0, index_offset, 8, 1, 0, 4, 4))
+        image.extend(struct.pack("<II", 0, 0))
+        struct.pack_into("<H", image, 60, 4)
+        struct.pack_into("<H", image, symbol_offset + 24 + 6, 0xffff)
+        self.assertEqual(import_audit.elf_exports(Path("lib.prx"), image), set())
+        struct.pack_into("<I", image, index_offset + 4, 1)
+        self.assertEqual(import_audit.elf_exports(Path("lib.prx"), image), {"alpha"})
+
+    def test_pe_export_aliases_share_an_address(self):
+        image = bytearray(build_pe(["alpha", "beta"]))
+        struct.pack_into("<H", image, 0x200 + 56 + 2, 0)
+        self.assertEqual(import_audit.pe_exports(Path("lib.prx"), image), {"alpha", "beta"})
+
+    def test_pe32_uses_its_own_directory_layout(self):
+        image = bytearray(build_pe(["alpha"]))
+        struct.pack_into("<H", image, 0x58, 0x10b)
+        struct.pack_into("<I", image, 0x58 + 92, 16)
+        struct.pack_into("<II", image, 0x58 + 96, 0x1000, 56)
+        self.assertEqual(import_audit.pe_exports(Path("lib.prx"), image), {"alpha"})
 
     def test_library_directories(self):
         work = self.work
