@@ -7,10 +7,55 @@ import tempfile
 from test_guest_intel_trampolines import PLAIN_SITE, guest_fixture, main_fixture
 
 
+def registry_input_aliases(relinker, work):
+    for windows in (False, True):
+        for bundled in (False, True):
+            for alias in ("direct", "hardlink", "symlink"):
+                case = work / f"registry-{windows}-{bundled}-{alias}"
+                case.mkdir()
+                output = case / ("output.exe" if windows else "output.elf")
+                registry = case / "output.registry.json"
+                module_registry = case / "output.sample.prx.guest.prx.registry.json"
+                target = module_registry if bundled else registry
+                source = target if alias == "direct" else case / "input.elf"
+                original = main_fixture()
+                source.write_bytes(original)
+                module = None
+                if bundled:
+                    modules = case / "sce_module"
+                    modules.mkdir()
+                    module = modules / "sample.prx"
+                    module.write_bytes(guest_fixture(PLAIN_SITE))
+                if alias == "hardlink":
+                    os.link(source, target)
+                elif alias == "symlink":
+                    try:
+                        target.symlink_to(source)
+                    except OSError as error:
+                        if os.name != "nt" or error.winerror != 1314:
+                            raise
+                        print("Symbolic-link case skipped: Windows symlink privilege unavailable")
+                        continue
+                options = ["--windows"] if windows else []
+                if not bundled:
+                    options.append("--skip-sce-module")
+                result = subprocess.run([str(relinker), *options, "--registry", str(source), str(output)],
+                                        capture_output=True, text=True, timeout=20)
+                expected = "Registry output would overwrite the input executable"
+                if (result.returncode != 2 or expected not in result.stderr
+                        or source.read_bytes() != original or target.read_bytes() != original
+                        or output.exists() or (case / "app0").exists()
+                        or (bundled and registry.exists())
+                        or (module is not None and module.read_bytes() != guest_fixture(PLAIN_SITE))):
+                    raise AssertionError((windows, bundled, alias, result.returncode,
+                                          result.stdout, result.stderr))
+
+
 def main():
     relinker = Path(sys.argv[1]).resolve()
     with tempfile.TemporaryDirectory(prefix="anyps5-input-preservation-") as directory:
         work = Path(directory)
+        registry_input_aliases(relinker, work)
         for windows in (False, True):
             options = ["--windows"] if windows else []
             for bundled in (False, True):
