@@ -70,6 +70,10 @@ static void* APS5_VABI CheckThread(void* arg) {
     return arg;
 }
 
+static void* APS5_VABI BurstWorker(void* arg) {
+    return arg;
+}
+
 int main() {
     for (int iteration = 0; iteration < 10000; ++iteration) {
         ThreadContext context;
@@ -100,5 +104,18 @@ int main() {
         context.checked.get_future().get();
     }
 #endif
-    std::cout << "PASS: 10000 thread starts, committed stacks, large frames, explicit exits and joins; 100 detach checks\n";
+    constexpr int burstCount = 32;
+    for (int burst = 0; burst < 10; ++burst) {
+        Pthread threads[burstCount]{};
+        for (int i = 0; i < burstCount; ++i) {
+            if (scePthreadCreate(&threads[i], nullptr, BurstWorker, reinterpret_cast<void*>(static_cast<std::uintptr_t>(i)), "burstWorker") != 0)
+                throw std::runtime_error("Burst thread creation failed");
+        }
+        for (int i = 0; i < burstCount; ++i) {
+            void* res = nullptr;
+            if (scePthreadJoin(threads[i], &res) != 0 || res != reinterpret_cast<void*>(static_cast<std::uintptr_t>(i)))
+                throw std::runtime_error("Burst thread join failed");
+        }
+    }
+    std::cout << "PASS: 10000 thread starts, committed stacks, large frames, explicit exits and joins; 100 detach checks; 10 bursts of 32 threads\n";
 }
