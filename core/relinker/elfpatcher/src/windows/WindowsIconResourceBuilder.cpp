@@ -30,6 +30,8 @@ void validatePng(const std::vector<std::uint8_t>& bytes, const std::filesystem::
                             ((color == 2 || color == 4 || color == 6) && (depth == 8 || depth == 16));
     if (!validDepth || bytes[26] != 0 || bytes[27] != 0 || bytes[28] > 1) fail("invalid IHDR encoding");
     bool hasData = false;
+    bool seenData = false;
+    bool hasPalette = false;
     for (std::size_t offset = 8; offset < bytes.size();) {
         if (bytes.size() - offset < 12) fail("truncated chunk");
         const auto length = readBigEndian(bytes, offset);
@@ -42,7 +44,18 @@ void validatePng(const std::vector<std::uint8_t>& bytes, const std::filesystem::
         }
         if ((crc ^ 0xffffffffu) != readBigEndian(bytes, offset + 8 + length)) fail("invalid chunk CRC");
         if (type == 0x49484452 && offset != 8) fail("duplicate IHDR");
-        if (type == 0x49444154 && length != 0) hasData = true;
+        if (type == 0x504c5445) {
+            if (hasPalette || seenData) fail("duplicate PLTE or PLTE after IDAT");
+            if (color == 0 || color == 4) fail("PLTE is forbidden for greyscale images");
+            if (length == 0 || length % 3 != 0 || length > 256 * 3) fail("invalid PLTE size");
+            if (color == 3 && length / 3 > (1u << depth)) fail("PLTE exceeds indexed-color bit depth");
+            hasPalette = true;
+        }
+        if (type == 0x49444154) {
+            if (color == 3 && !hasPalette) fail("indexed-color image is missing PLTE before IDAT");
+            seenData = true;
+            if (length != 0) hasData = true;
+        }
         offset += length + 12;
         if (type == 0x49454e44) {
             if (length != 0 || offset != bytes.size() || !hasData) fail("invalid IEND or missing IDAT");
