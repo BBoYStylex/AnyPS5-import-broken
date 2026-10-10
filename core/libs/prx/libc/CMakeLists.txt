@@ -13,6 +13,7 @@ target_sources(libc PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src/StringExtensions.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/Math.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/Time.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/Threads.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/FileAndHeap.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/StdioExtras.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/StandardStreams.cpp
@@ -124,6 +125,15 @@ if(BUILD_TESTING)
     add_test(NAME guest_character COMMAND guest_character_tests)
     if(WIN32)
         set_tests_properties(guest_character PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+    endif()
+    add_test_executable(guest_c11_threads_tests ${LIBS_INCLUDE_DIR}/tests/GuestC11Threads.cpp)
+    target_include_directories(guest_c11_threads_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_c11_threads_tests PRIVATE libc)
+    configure_windows_unwind(guest_c11_threads_tests)
+    add_test(NAME guest_c11_threads COMMAND guest_c11_threads_tests)
+    if(WIN32)
+        set_tests_properties(guest_c11_threads PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
     endif()
     add_test_executable(guest_math_tests ${LIBS_INCLUDE_DIR}/tests/GuestMath.cpp)
