@@ -147,6 +147,7 @@ inline const std::unordered_map<std::uint32_t, const char*> kModuleTable = {
     {0x00000107, "libSceGic"},
     {0x00000108, "libScePlayReady2"},
     {0x00000109, "libSceHdrScopes"},
+    {0x0000010b, "libSceAcm"},
     {0x0000010c, "libSceCesCs"},
     {0x0000010d, "libScePlayerInvitationDialog"},
     {0x00000112, "libSceNpSessionSignaling"},
