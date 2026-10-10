@@ -1,7 +1,10 @@
 #include "SceTypes.hpp"
+#include "prx/libkernel/Pthread/include/Pthread.hpp"
+#include <array>
 #include <cstddef>
 #include <cstdlib>
 #include <future>
+#include <limits>
 
 extern "C" {
 int APS5_VABI scePthreadCreate(Pthread* thread, const PthreadAttr* attr, PthreadEntry entry, void* arg, const char* name);
@@ -20,11 +23,13 @@ int APS5_VABI scePthreadAttrGetaffinity(const PthreadAttr* attr, KernelCpumask* 
 int APS5_VABI scePthreadAttrGetstacksize(const PthreadAttr* attr, std::size_t* stackSize);
 int APS5_VABI scePthreadAttrGetdetachstate(const PthreadAttr* attr, int* state);
 int APS5_VABI pthread_attr_setstacksize_nid_postfix(PthreadAttr* attr, std::size_t stackSize);
+int APS5_VABI pthread_attr_setinheritsched_nid_postfix(PthreadAttr* attr, int inheritSched);
 }
 
 static constexpr int SCE_OK = 0;
 static constexpr int SCE_KERNEL_ERROR_EINVAL = static_cast<int>(0x80020016);
 static constexpr int EXPLICIT_SCHED = 0;
+static constexpr int INHERIT_SCHED = 4;
 static constexpr int DETACH_JOINABLE = 0;
 static constexpr int CREATION_PRIORITY = 256;
 static constexpr int UPDATED_PRIORITY = 767;
@@ -33,6 +38,7 @@ static constexpr KernelCpumask UPDATED_AFFINITY = 0x1000;
 static constexpr std::size_t STACK_SIZE = 2u << 20;
 static constexpr std::size_t MIN_STACK_SIZE = 16384;
 static constexpr int GUEST_EINVAL = 22;
+static constexpr int GUEST_ENOTSUP = 45;
 
 static void Require(bool value) { if (!value) std::abort(); }
 
@@ -76,6 +82,27 @@ static void CheckStackSizeLimit() {
     Require(scePthreadAttrDestroy(&attr) == SCE_OK);
 }
 
+static void CheckInheritSched() {
+    PthreadAttr attr = nullptr;
+    const std::array invalidModes{-1, 1, 2, 3, 5, std::numeric_limits<int>::min(), std::numeric_limits<int>::max()};
+    Require(pthread_attr_setinheritsched_nid_postfix(nullptr, EXPLICIT_SCHED) == GUEST_EINVAL);
+    Require(pthread_attr_setinheritsched_nid_postfix(nullptr, -1) == GUEST_EINVAL);
+    Require(pthread_attr_setinheritsched_nid_postfix(&attr, INHERIT_SCHED) == GUEST_EINVAL);
+    Require(pthread_attr_setinheritsched_nid_postfix(&attr, -1) == GUEST_EINVAL);
+    Require(scePthreadAttrInit(&attr) == SCE_OK);
+    for (const int mode : {EXPLICIT_SCHED, INHERIT_SCHED}) {
+        Require(pthread_attr_setinheritsched_nid_postfix(&attr, mode) == SCE_OK);
+        Require(attr->_inheritsched == mode);
+        for (const int invalidMode : invalidModes) {
+            Require(pthread_attr_setinheritsched_nid_postfix(&attr, invalidMode) == GUEST_ENOTSUP);
+            Require(attr->_inheritsched == mode);
+        }
+    }
+    Require(scePthreadAttrDestroy(&attr) == SCE_OK);
+    Require(pthread_attr_setinheritsched_nid_postfix(&attr, EXPLICIT_SCHED) == GUEST_EINVAL);
+    Require(pthread_attr_setinheritsched_nid_postfix(&attr, -1) == GUEST_EINVAL);
+}
+
 static void* APS5_VABI Worker(void* arg) {
     static_cast<std::future<void>*>(arg)->get();
     return nullptr;
@@ -83,6 +110,7 @@ static void* APS5_VABI Worker(void* arg) {
 
 int main() {
     CheckStackSizeLimit();
+    CheckInheritSched();
     PthreadAttr attr = nullptr;
     Require(scePthreadAttrInit(&attr) == SCE_OK);
     Require(scePthreadAttrSetinheritsched(&attr, EXPLICIT_SCHED) == SCE_OK);

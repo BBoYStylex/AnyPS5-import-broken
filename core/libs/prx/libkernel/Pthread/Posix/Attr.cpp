@@ -88,9 +88,13 @@ int APS5_VABI pthread_attr_setguardsize_nid_postfix(PthreadAttr* attr, size_t gu
     return 0;
 }
 
-int APS5_VABI pthread_attr_setinheritsched_nid_postfix(PthreadAttr* attr, int inherit_sched) {
+int APS5_VABI pthread_attr_setinheritsched_nid_postfix(PthreadAttr* attr, int inheritSched) {
+    constexpr int explicitSched = 0;
+    constexpr int inheritedSched = 4;
+    constexpr int guestEnotsup = 45;
     if (!Valid(attr)) return PosixThread::GUEST_EINVAL;
-    (*attr)->_inheritsched = inherit_sched;
+    if (inheritSched != explicitSched && inheritSched != inheritedSched) return guestEnotsup;
+    (*attr)->_inheritsched = inheritSched;
     return 0;
 }
 
