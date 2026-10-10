@@ -1,5 +1,28 @@
 # Relinker usage
 
+## Release setup
+
+Prebuilt Linux and Windows files are available on the [releases page](https://github.com/boykopovar/AnyPS5/releases). Download the relinker and the `prx` archive for the same release and target OS. GitHub's source code archives do not contain the built tools or system libraries.
+
+On Windows, download `relinker-<version>.exe` and `prx-windows-<version>.zip`. Place the executable in a working directory and extract the archive there, preserving its `libs/` directory. The archive includes the MinGW runtime DLLs; keep them in `libs/` with the `.prx` files.
+
+On Linux, download `relinker-<version>` and `prx-linux-<version>.tar.gz`. Place both files in a working directory, then extract the archive and make the relinker executable. Replace `<version>` with the selected release tag:
+
+```sh
+tar -xzf prx-linux-<version>.tar.gz
+chmod +x relinker-<version>
+```
+
+Open a terminal in that directory. Invoke the relinker without arguments to check that it starts; it prints usage and exits with an error because no input was supplied. In Windows PowerShell, for example, release `v0.1.1` uses:
+
+```powershell
+.\relinker-v0.1.1.exe
+```
+
+The working directory now contains the relinker and `libs/`. Put the converted executable there so it can find those libraries, and follow [input and conversion](#input-and-conversion) and [runtime layout](#runtime-layout) for the input modules and application resources. Use the downloaded relinker's filename in place of `relinker` in the examples; PowerShell also requires the `.\` prefix. Windows conversion requires `--windows` even when the output filename ends in `.exe`.
+
+Released binaries can lag behind `main`. Check the selected release notes and the relinker's usage output before using options documented on `main`. Use the [build instructions](../dev/BUILD.md) to build current source.
+
 ## Input and conversion
 
 Use a clean ELF executable. Place its bundled ELF modules in `sce_module/`, `sce_modules/`, or `prx/` beside the input executable, or under the parent directory selected with `--sce-module-path <path>`. The option accepts absolute paths and paths relative to the current working directory; do not include the `sce_module` directory itself. Only files directly inside the module directories are processed. A bundled module in a SELF container is an error, as the executable is. `prx/` can coexist with either `sce_module/` or `sce_modules/`. Both `sce_module/` and `sce_modules/` present, or all three absent, is an error.
