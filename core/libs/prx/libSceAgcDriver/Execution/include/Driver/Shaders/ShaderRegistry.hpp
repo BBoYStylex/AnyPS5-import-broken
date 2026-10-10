@@ -73,10 +73,10 @@ struct RegisteredShaderState {
 
 struct ShaderSnapshot {
     std::uint64_t codeAddress;
-    std::uint64_t headerAddress;
+    mutable std::uint64_t headerAddress;
     std::uint8_t type;
     std::vector<std::uint32_t> code;
-    std::vector<std::byte> header;
+    mutable std::vector<std::byte> header;
     std::shared_ptr<PreparedShaders> prepared = std::make_shared<PreparedShaders>();
     std::shared_ptr<const RegisteredShaderState> registeredState;
 };

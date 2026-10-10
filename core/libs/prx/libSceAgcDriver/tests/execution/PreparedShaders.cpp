@@ -397,6 +397,9 @@ void Registration(bool indirect) {
     Shader copy = header.shader;
     copy.user_data = reinterpret_cast<ShaderUserData*>(&copy);
     AgcDriverResolveShaderAbi_nid_postfix(&copy, {}, {});
+    Header fullCopy = header;
+    fullCopy.shader.user_data = reinterpret_cast<ShaderUserData*>(&fullCopy.specials);
+    AgcDriverResolveShaderAbi_nid_postfix(&fullCopy.shader, {}, {});
     alignas(Shader) std::array<std::byte, sizeof(Shader)> padded{};
     std::memcpy(padded.data(), &copy, sizeof(Shader));
     padded.back() = std::byte{0x7d};

@@ -207,6 +207,14 @@ bool SameHeader(const ShaderSnapshot& snapshot, const Shader* shader) {
     return std::memcmp(&used, &registered, offsetof(Shader, num_sh_registers) + sizeof(Shader::num_sh_registers)) == 0;
 }
 
+void UpdateSnapshotHeader(const ShaderSnapshot& snapshot, const Shader* shader) {
+    if (snapshot.headerAddress == reinterpret_cast<std::uintptr_t>(shader)) return;
+    GuestMemory::CheckRange(shader, shader->header_size, 1);
+    snapshot.headerAddress = reinterpret_cast<std::uintptr_t>(shader);
+    snapshot.header.resize(shader->header_size);
+    std::memcpy(snapshot.header.data(), static_cast<const void*>(shader), shader->header_size);
+}
+
 void PublishRegisteredShader(std::shared_ptr<ShaderRegistry>& registry, const std::shared_ptr<const ShaderSnapshot>& snapshot) {
     ShaderPreparationTransaction transaction;
     if (registry != nullptr) {
@@ -684,6 +692,7 @@ void Driver::ResolveGraphicsStagesAbi(std::span<const Shader* const> stages, std
             if (owner == nullptr) owner = registry->at(address);
             const auto& snapshot = *registry->at(address);
             require(SameHeader(snapshot, shader), "graphics ABI refers to a replaced shader header");
+            UpdateSnapshotHeader(snapshot, shader);
             require(snapshot.registeredState != nullptr, "registered shader state is missing");
             const auto& registered = *snapshot.registeredState;
             for (const auto& [offset, value] : registered.shader) state.shader.insert_or_assign(offset, value);
@@ -749,6 +758,7 @@ void Driver::ResolveShaderAbi(const Shader* shader, std::span<const ShaderRegist
         require(shaders != nullptr && shaders->contains(address), "static ABI refers to an unregistered shader");
         snapshot = shaders->at(address);
         require(SameHeader(*snapshot, shader), "static ABI refers to a replaced shader header");
+        UpdateSnapshotHeader(*snapshot, shader);
     }
     require(snapshot->registeredState != nullptr, "registered shader state is missing");
     QueueState state{};
@@ -811,6 +821,7 @@ void Driver::ResolveGraphicsAbi(const Shader* vertex, const Shader* pixel, std::
             require(shaders != nullptr && shaders->contains(address), "rectangle ABI refers to an unregistered shader");
             const auto snapshot = shaders->at(address);
             require(SameHeader(*snapshot, shader), "rectangle ABI refers to a replaced shader header");
+            UpdateSnapshotHeader(*snapshot, shader);
             return snapshot;
         };
         front = lookup(vertex);
