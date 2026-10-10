@@ -36,6 +36,10 @@ std::lldiv_t APS5_VABI ldiv_nid_postfix(std::int64_t numerator, std::int64_t den
     return std::lldiv(numerator, denominator);
 }
 
+int APS5_VABI abs_nid_postfix(int value) {
+    return value < 0 ? static_cast<int>(0u - static_cast<unsigned int>(value)) : value;
+}
+
 float APS5_VABI fmodf_nid_postfix(float x, float y) { return std::fmod(x, y); }
 float APS5_VABI asinf_nid_postfix(float x) {
     const int saved_errno = errno;
@@ -144,6 +148,18 @@ float APS5_VABI __powisf2_nid_postfix(float base, int exponent) {
         base *= base;
     }
     return reciprocal ? 1.0f / result : result;
+}
+
+double APS5_VABI __powidf2_nid_postfix(double base, int exponent) {
+    const bool reciprocal = exponent < 0;
+    double result = 1;
+    while (true) {
+        if ((exponent & 1) != 0) result *= base;
+        exponent /= 2;
+        if (exponent == 0) break;
+        base *= base;
+    }
+    return reciprocal ? 1 / result : result;
 }
 float APS5_VABI expf_nid_postfix(float x) { return std::exp(x); }
 float APS5_VABI exp2f_nid_postfix(float x) { return std::exp2(x); }
