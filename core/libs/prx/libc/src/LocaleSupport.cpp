@@ -181,14 +181,16 @@ void ValidateCharacter(int value) {
 }
 
 int ClassifyCharacter(int value, std::ctype_base::mask mask) {
-    ValidateCharacter(value);
+    // FreeBSD returns 0 for values outside 0..UCHAR_MAX (except EOF)
     if (value == EOF) return 0;
+    if (value < 0 || value > UCHAR_MAX) return 0;
     return std::use_facet<std::ctype<char>>(std::locale::classic()).is(mask, static_cast<char>(value));
 }
 
 int ConvertCharacter(int value, bool upper) {
-    ValidateCharacter(value);
+    // FreeBSD returns the argument unchanged for values outside 0..UCHAR_MAX (except EOF)
     if (value == EOF) return EOF;
+    if (value < 0 || value > UCHAR_MAX) return value;
     const auto& facet = std::use_facet<std::ctype<char>>(std::locale::classic());
     const auto character = static_cast<char>(value);
     return static_cast<unsigned char>(upper ? facet.toupper(character) : facet.tolower(character));
