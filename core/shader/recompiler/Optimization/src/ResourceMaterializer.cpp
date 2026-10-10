@@ -231,7 +231,7 @@ constexpr std::uint32_t TableEntryBytes = 32;
 std::uint32_t MaterialScanLimit() {
     static const std::uint32_t limit = [] {
         const char* text = std::getenv("APS5_BINDLESS_MATERIAL_SCAN");
-        return text != nullptr ? static_cast<std::uint32_t>(std::strtoul(text, nullptr, 0)) : 256u;
+        return text != nullptr ? static_cast<std::uint32_t>(std::strtoul(text, nullptr, 0)) : 4096u;
     }();
     return limit;
 }
@@ -368,7 +368,7 @@ void resolveTableImage(const IrResourcePlan& plan, std::uint32_t imageIndex, con
             walker.EvaluateDescriptorSource(plan, table.selectorCountSource, runtime, count);
             materialEntries = std::min(materialEntries, count.dwords[0] <= 0x7fffffffu ? count.dwords[0] : 0u);
         }
-        if (materialEntries > MaterialScanLimit()) rejectTable(BindlessRejection::MaterialScan, "bindless material scan capacity exceeded");
+        if (materialEntries > MaterialScanLimit()) rejectTable(BindlessRejection::MaterialScan, "bindless material scan capacity exceeded: " + std::to_string(materialEntries) + " records, stride " + std::to_string(selectorStride) + ", offset " + std::to_string(table.selectorOffset) + ", buffer bytes " + std::to_string(materialSize) + ", limit " + std::to_string(MaterialScanLimit()));
         if (materialEntries <= MaterialScanLimit()) {
             materialMode = true;
             for (std::uint32_t record = 0; record < materialEntries; record++) {
