@@ -106,4 +106,48 @@ int APS5_VABI swscanf_s_nid_postfix(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
+
+int APS5_VABI _Cnd_timedwait_nid_postfix(void*, void*, const void*) {
+    return 0;
 }
+
+int APS5_VABI _Cnd_signal_nid_postfix(void*) {
+    return 0;
+}
+
+int APS5_VABI _Thrd_sleep_nid_postfix(const void*) {
+    return 0;
+}
+
+int APS5_VABI _Mtx_trylock_nid_postfix(void*) {
+    return 0;
+}
+
+float APS5_VABI nearbyintf_nid_postfix(float x) {
+    return __builtin_nearbyintf(x);
+}
+
+double APS5_VABI nextafter_nid_postfix(double x, double y) {
+    return __builtin_nextafter(x, y);
+}
+
+std::size_t APS5_VABI mbstowcs_nid_postfix(wchar_t* dest, const char* src, std::size_t max) {
+    return ::mbstowcs(dest, src, max);
+}
+
+void* APS5_VABI _ZnwmSt11align_val_t_nid_postfix(std::size_t size, std::size_t alignment) {
+    return ::aligned_alloc(alignment, (size + alignment - 1) & ~(alignment - 1));
+}
+
+typedef unsigned __int128 u128;
+u128 APS5_VABI __udivti3_nid_postfix(u128 a, u128 b) {
+    return a / b;
+}
+
+int APS5_VABI __isinf_nid_postfix(double x) {
+    return __builtin_isinf(x) ? 1 : 0;
+}
+
+}
+
+

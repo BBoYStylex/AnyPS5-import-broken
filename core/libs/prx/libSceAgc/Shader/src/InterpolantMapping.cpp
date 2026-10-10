@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <stdexcept>
 #include <prx/libc/include/General.hpp>
+#include <prx/libc/include/Shutdown.hpp>
 
 #include "SceShaders.hpp"
 #include "prx/libSceAgcDriver/Execution/include/ShaderPreparationScope.hpp"
@@ -110,13 +111,17 @@ int CreateInterpolantMapping(const char* fn, ShaderRegister* regs, const Shader*
 
 extern "C" {
 
-int APS5_VABI sceAgcCreateInterpolantMapping_0100(ShaderRegister* regs, const Shader* gs, const Shader* ps) {
+int APS5_VABI sceAgcCreateInterpolantMapping_0100(ShaderRegister* regs, const Shader* gs, const Shader* ps) try {
     return CreateInterpolantMapping(__func__, regs, gs, ps, CreateInterpolantValue);
+} catch (const ProcessShutdown&) {
+    LibcAwaitExit_nid_postfix();
 }
 
 APS5_EXPORT("dbOlWdppb4o", sceAgcUnknownCreateInterpolantMapping);
-int APS5_VABI sceAgcUnknownCreateInterpolantMapping(ShaderRegister* regs, const Shader* gs, const Shader* ps) {
+int APS5_VABI sceAgcUnknownCreateInterpolantMapping(ShaderRegister* regs, const Shader* gs, const Shader* ps) try {
     return CreateInterpolantMapping(__func__, regs, gs, ps, CreateInterpolantValueSplitF16);
+} catch (const ProcessShutdown&) {
+    LibcAwaitExit_nid_postfix();
 }
 
 }

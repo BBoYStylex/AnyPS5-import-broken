@@ -574,6 +574,8 @@ void VideoOutDriver::presentLoop(std::stop_token token, std::promise<void>& star
             SDL_Event event;
             while (SDL_PollEvent(&event)) {
                 if (event.type == SDL_QUIT) {
+                    std::fprintf(stderr, "[videoout] SDL_QUIT event polled from window subsystem!\n");
+                    std::fflush(stderr);
                     LibcRequestExit_nid_postfix(0);
                     throw ProcessShutdown{};
                 }

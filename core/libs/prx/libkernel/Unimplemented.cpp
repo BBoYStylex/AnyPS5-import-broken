@@ -1,5 +1,6 @@
 #include <cstdint>
 #include <cstddef>
+#include <cerrno>
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
 
@@ -116,4 +117,18 @@ int APS5_VABI sceKernelUnknown19(void) {
     NotImplemented_nid_no_patch("uDGXwUKqi8s");
     return 0;
 }
+
+APS5_EXPORT("f7uOxY9mM1U", __stack_chk_guard_export);
+uintptr_t __stack_chk_guard_export = 0x595e9fbd94fda766ULL;
+
+APS5_EXPORT("Ou3iL1abvng", __stack_chk_fail_export);
+void APS5_VABI __stack_chk_fail_export(void) {
+    std::abort();
 }
+
+APS5_EXPORT("9BcDykPmo1I", __error_export);
+int* APS5_VABI __error_export(void) {
+    return &errno;
+}
+}
+

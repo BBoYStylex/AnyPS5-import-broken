@@ -12,6 +12,11 @@
 #include <stdexcept>
 #ifdef _WIN32
 #include <windows.h>
+#else
+#include <signal.h>
+#include <ucontext.h>
+#include <pthread.h>
+#include <algorithm>
 #endif
 
 extern "C" Pthread APS5_VABI scePthreadSelf();
@@ -99,6 +104,64 @@ GuestExceptionHandler Handler(int signum) {
     std::lock_guard lock(handlersLock);
     return reinterpret_cast<GuestExceptionHandler>(handlers[signum]);
 }
+
+#ifndef _WIN32
+void HostSignalHandler(int sig, siginfo_t* info, void* ucontext_raw) {
+    (void)info;
+    auto handler = Handler(sig);
+    if (!handler) return;
+
+    ucontext_t* luc = reinterpret_cast<ucontext_t*>(ucontext_raw);
+    alignas(16) GuestUcontext gucontext{};
+    auto& m = gucontext.mcontext;
+
+    m.r8  = luc->uc_mcontext.gregs[REG_R8];
+    m.r9  = luc->uc_mcontext.gregs[REG_R9];
+    m.r10 = luc->uc_mcontext.gregs[REG_R10];
+    m.r11 = luc->uc_mcontext.gregs[REG_R11];
+    m.r12 = luc->uc_mcontext.gregs[REG_R12];
+    m.r13 = luc->uc_mcontext.gregs[REG_R13];
+    m.r14 = luc->uc_mcontext.gregs[REG_R14];
+    m.r15 = luc->uc_mcontext.gregs[REG_R15];
+    m.rdi = luc->uc_mcontext.gregs[REG_RDI];
+    m.rsi = luc->uc_mcontext.gregs[REG_RSI];
+    m.rbp = luc->uc_mcontext.gregs[REG_RBP];
+    m.rbx = luc->uc_mcontext.gregs[REG_RBX];
+    m.rdx = luc->uc_mcontext.gregs[REG_RDX];
+    m.rax = luc->uc_mcontext.gregs[REG_RAX];
+    m.rcx = luc->uc_mcontext.gregs[REG_RCX];
+    m.rsp = luc->uc_mcontext.gregs[REG_RSP];
+    m.rip = luc->uc_mcontext.gregs[REG_RIP];
+    m.rflags = luc->uc_mcontext.gregs[REG_EFL];
+    m.cs  = luc->uc_mcontext.gregs[REG_CSGSFS] & 0xffff;
+    m.len = sizeof(GuestMcontext);
+
+    if (luc->uc_mcontext.fpregs) {
+        std::memcpy(m.fpstate, luc->uc_mcontext.fpregs, std::min(sizeof(m.fpstate), sizeof(struct _fpstate)));
+    }
+
+    handler(sig, &gucontext);
+
+    luc->uc_mcontext.gregs[REG_R8]  = m.r8;
+    luc->uc_mcontext.gregs[REG_R9]  = m.r9;
+    luc->uc_mcontext.gregs[REG_R10] = m.r10;
+    luc->uc_mcontext.gregs[REG_R11] = m.r11;
+    luc->uc_mcontext.gregs[REG_R12] = m.r12;
+    luc->uc_mcontext.gregs[REG_R13] = m.r13;
+    luc->uc_mcontext.gregs[REG_R14] = m.r14;
+    luc->uc_mcontext.gregs[REG_R15] = m.r15;
+    luc->uc_mcontext.gregs[REG_RDI] = m.rdi;
+    luc->uc_mcontext.gregs[REG_RSI] = m.rsi;
+    luc->uc_mcontext.gregs[REG_RBP] = m.rbp;
+    luc->uc_mcontext.gregs[REG_RBX] = m.rbx;
+    luc->uc_mcontext.gregs[REG_RDX] = m.rdx;
+    luc->uc_mcontext.gregs[REG_RAX] = m.rax;
+    luc->uc_mcontext.gregs[REG_RCX] = m.rcx;
+    luc->uc_mcontext.gregs[REG_RSP] = m.rsp;
+    luc->uc_mcontext.gregs[REG_RIP] = m.rip;
+    luc->uc_mcontext.gregs[REG_EFL] = m.rflags;
+}
+#endif
 
 #ifdef _WIN32
 constexpr std::size_t RedZone = 128;
@@ -349,6 +412,13 @@ int APS5_VABI sceKernelInstallExceptionHandler(int signum, void* handler) {
  std::lock_guard lock(handlersLock);
  if (handlers[signum] != nullptr) return SCE_KERNEL_ERROR_EAGAIN;
  handlers[signum] = handler;
+#ifndef _WIN32
+ struct sigaction sa{};
+ sa.sa_sigaction = HostSignalHandler;
+ sa.sa_flags = SA_SIGINFO | SA_RESTART;
+ sigemptyset(&sa.sa_mask);
+ sigaction(signum, &sa, nullptr);
+#endif
  return 0;
 }
 
@@ -356,6 +426,12 @@ int APS5_VABI sceKernelRemoveExceptionHandler(int signum) {
  if (!Allowed(signum)) return SCE_KERNEL_ERROR_EINVAL;
  std::lock_guard lock(handlersLock);
  handlers[signum] = nullptr;
+#ifndef _WIN32
+ struct sigaction sa{};
+ sa.sa_handler = SIG_DFL;
+ sigemptyset(&sa.sa_mask);
+ sigaction(signum, &sa, nullptr);
+#endif
  return 0;
 }
 
@@ -367,7 +443,15 @@ int APS5_VABI sceKernelRaiseException(Pthread thread, int signum) {
 #ifdef _WIN32
  return RaiseOn(thread, handler, signum) ? 0 : SCE_KERNEL_ERROR_ESRCH;
 #else
- NotImplemented_nid_no_patch(__func__);
+ pthread_t target = thread->hostThread;
+ if (target == 0) {
+     if (thread == scePthreadSelf()) {
+         target = pthread_self();
+     }
+ }
+ const int res = pthread_kill(target, signum);
+ if (res == ESRCH) return SCE_KERNEL_ERROR_ESRCH;
+ if (res != 0) return SCE_KERNEL_ERROR_EINVAL;
  return 0;
 #endif
 }

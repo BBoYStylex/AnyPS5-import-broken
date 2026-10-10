@@ -471,6 +471,9 @@ int APS5_VABI scePthreadCreate(Pthread* thread, const PthreadAttr* attr, Pthread
     if (attr && *attr) detached = ((*attr)->_detachstate == DETACH_DETACHED);
     p->_detached = detached;
     p->stackSize = attr ? (*attr)->_stacksize : DEFAULT_STACK_SIZE;
+    if (p->stackSize < 8 * 1024 * 1024) {
+        p->stackSize = 8 * 1024 * 1024;
+    }
     if (attr) {
         p->affinity.store((*attr)->_affinity, std::memory_order_relaxed);
         p->priority.store((*attr)->_schedpriority, std::memory_order_relaxed);
@@ -509,7 +512,8 @@ int APS5_VABI scePthreadCreate(Pthread* thread, const PthreadAttr* attr, Pthread
     const auto page = static_cast<std::size_t>(sysconf(_SC_PAGESIZE));
     if (p->stackSize < 16384 || p->stackSize > std::numeric_limits<std::size_t>::max() - reserve - page)
         throw std::runtime_error("scePthreadCreate: invalid stack size");
-    const std::size_t nativeStack = (p->stackSize + reserve + page - 1) / page * page;
+    const std::size_t minNativeStack = 8 * 1024 * 1024;
+    const std::size_t nativeStack = std::max(minNativeStack, (p->stackSize + reserve + page - 1) / page * page);
     auto native = std::make_unique<NativeThreadArgs>(NativeThreadArgs{std::move(args), start.get_future(), {}});
     auto initialized = native->initialized.get_future();
     pthread_attr_t nativeAttr;
@@ -619,6 +623,7 @@ Pthread APS5_VABI scePthreadSelf() {
         adoptedThread = std::make_unique<PthreadPrivate>();
         adoptedThread->_detached = true;
         adoptedThread->_adopted = true;
+        adoptedThread->hostThread = pthread_self();
         BindHostCpuClock(adoptedThread.get());
         adoptedThread->threadId = std::this_thread::get_id();
         SetStackFromHost(adoptedThread.get());

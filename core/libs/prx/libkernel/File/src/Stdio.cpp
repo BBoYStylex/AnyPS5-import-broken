@@ -727,7 +727,14 @@ int APS5_VABI rmdir_nid_postfix(const char* path) {
     return PosixResult(sceKernelRmdir(path));
 }
 
+int APS5_VABI rename_nid_postfix(const char* from, const char* to) {
+    if (const int error = PathError(from)) return PosixFailure(error);
+    if (const int error = PathError(to)) return PosixFailure(error);
+    return PosixResult(sceKernelRename(from, to));
 }
+
+}
+
 
 extern "C" {
 

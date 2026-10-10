@@ -51,10 +51,14 @@ extern "C" std::stop_token LibcShutdownToken_nid_postfix() {
 }
 
 extern "C" void LibcRequestShutdown_nid_postfix() {
+    std::fprintf(stderr, "[libc] LibcRequestShutdown called from %p\n", __builtin_return_address(0));
+    std::fflush(stderr);
     shutdownSource.request_stop();
 }
 
 extern "C" void LibcRequestExit_nid_postfix(int code) {
+    std::fprintf(stderr, "[libc] LibcRequestExit(%d) called from %p\n", code, __builtin_return_address(0));
+    std::fflush(stderr);
     if (exitRequested.exchange(true)) return;
     LibcRequestShutdown_nid_postfix();
     std::thread([code] { LibcExit_nid_no_patch(code); }).detach();
@@ -124,7 +128,7 @@ extern "C" {
     if (exitStarted.exchange(true)) LibcAwaitExit_nid_postfix();
     LibcRunShutdown_nid_postfix();
     CxaFinalize_nid_no_patch(nullptr);
-    std::exit(code);
+    LibcTerminate_nid_no_patch(code);
 }
 
 void APS5_VABI exit_nid_postfix(int code) {

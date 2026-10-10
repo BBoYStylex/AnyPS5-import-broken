@@ -40,11 +40,11 @@ class IVideoOutput {
 public:
     virtual ~IVideoOutput() = default;
     virtual std::shared_ptr<IFlipRequest> Reserve(const FlipInfo& info) = 0;
-    virtual void WaitForFlipRoom() {}
     virtual std::shared_ptr<IRenderingWait> CaptureRenderingWait(std::uint32_t index) {
         throw std::runtime_error("VideoOut: rendering waits are unsupported by this output");
     }
     virtual void Fail(std::exception_ptr error) noexcept = 0;
+    virtual void WaitForFlipRoom() {}
 };
 
 }

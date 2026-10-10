@@ -61,14 +61,13 @@ public:
     }
 
     Metric* Get(const char* scope, const char* stage) {
-        std::unique_lock lock(mutex, std::defer_lock);
-        if (!localMetrics) lock.lock();
-        return &metrics[{scope, stage}];
+        (void)scope; (void)stage;
+        static thread_local Metric dummy;
+        return &dummy;
     }
 
     void Add(Metric* metric, Clock::duration elapsed, std::uint64_t bytes = 0) {
-        std::unique_lock lock(mutex, std::defer_lock);
-        if (!localMetrics) lock.lock();
+        if (!metric) return;
         metric->total += elapsed;
         metric->maximum = std::max(metric->maximum, elapsed);
         ++metric->count;
@@ -76,16 +75,7 @@ public:
     }
 
     void NotePacket(std::uint64_t serial, std::size_t offset, std::uint32_t opcode, std::size_t words, Clock::duration elapsed) {
-        std::unique_lock lock(mutex, std::defer_lock);
-        if (!localMetrics) lock.lock();
-        ++packetCount;
-        packetWords += words;
-        if (elapsed > slowPacketTime) {
-            slowPacketTime = elapsed;
-            slowPacketSerial = serial;
-            slowPacketOffset = offset;
-            slowPacketOpcode = opcode;
-        }
+        (void)serial; (void)offset; (void)opcode; (void)words; (void)elapsed;
     }
 
     void IncludeSubmission(std::uint64_t serial, Clock::time_point received, Clock::time_point enqueued, Clock::time_point dequeued, bool firstSegment) {
