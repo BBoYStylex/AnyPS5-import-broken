@@ -17,6 +17,13 @@ EXPORT_ALIAS = re.compile(r'APS5_EXPORT\("([A-Za-z0-9+\-]{11})",\s*(\w+)\)')
 NID_POSTFIX = "_nid_postfix"
 CLASSES = ("implemented", "stub", "absent", "module")
 PE_DIRECTORY_OFFSET = {0x20b: 112, 0x10b: 96}
+MACH_O_MAGIC_64 = 0xFEEDFACF
+MACH_O_LC_DYLD_INFO = 0x22
+MACH_O_LC_DYLD_INFO_ONLY = 0x80000022
+MACH_O_LC_DYLD_EXPORTS_TRIE = 0x80000033
+MACH_O_EXPORT_WEAK_DEFINITION = 0x04
+MACH_O_EXPORT_REEXPORT = 0x08
+MACH_O_EXPORT_STUB_AND_RESOLVER = 0x10
 
 
 class AuditError(Exception):
@@ -109,13 +116,106 @@ def pe_exports(path, data):
     return names
 
 
+def read_uleb(data, cursor, end, path):
+    value = 0
+    shift = 0
+    while True:
+        if cursor >= end:
+            raise AuditError(f"{path}: truncated ULEB128 at 0x{cursor:x}")
+        byte = data[cursor]
+        cursor += 1
+        value |= (byte & 0x7F) << shift
+        if not byte & 0x80:
+            return value, cursor
+        shift += 7
+        if shift > 63:
+            raise AuditError(f"{path}: ULEB128 at 0x{cursor:x} is longer than 64 bits")
+
+
+def parse_trie(data, start, end, node, prefix, path, visited, out):
+    if node >= end - start:
+        raise AuditError(f"{path}: export trie node at 0x{start + node:x} is out of bounds")
+    if node in visited:
+        raise AuditError(f"{path}: export trie has a cycle at 0x{start + node:x}")
+    visited.add(node)
+    cursor = start + node
+    terminal_size, cursor = read_uleb(data, cursor, end, path)
+    if terminal_size > end - cursor:
+        raise AuditError(f"{path}: export trie terminal at 0x{cursor:x} runs past the trie")
+    children = cursor + terminal_size
+    if terminal_size != 0:
+        flags, cursor = read_uleb(data, cursor, children, path)
+        if flags & MACH_O_EXPORT_REEXPORT:
+            _, cursor = read_uleb(data, cursor, children, path)
+        else:
+            _, cursor = read_uleb(data, cursor, children, path)
+            if flags & MACH_O_EXPORT_STUB_AND_RESOLVER:
+                _, cursor = read_uleb(data, cursor, children, path)
+        # A weak definition is an export the linker may drop, which the ELF
+        # reader skips too.
+        if not flags & MACH_O_EXPORT_WEAK_DEFINITION:
+            out.add(prefix)
+    cursor = children
+    if cursor >= end:
+        raise AuditError(f"{path}: export trie child count at 0x{cursor:x} is out of bounds")
+    child_count = data[cursor]
+    cursor += 1
+    for _ in range(child_count):
+        label, cursor = read_trie_string(data, cursor, end, path)
+        child, cursor = read_uleb(data, cursor, end, path)
+        parse_trie(data, start, end, child, prefix + label, path, visited, out)
+
+
+def read_trie_string(data, cursor, end, path):
+    stop = data.find(b"\0", cursor, end)
+    if cursor >= end or stop < 0:
+        raise AuditError(f"{path}: export trie string at 0x{cursor:x} is not NUL-terminated")
+    return data[cursor:stop].decode("utf-8", "replace"), stop + 1
+
+
+def macho_exports(path, data):
+    header = unpack("<IiiIIIII", data, 0, path, "Mach-O header")
+    if header[0] != MACH_O_MAGIC_64:
+        raise AuditError(f"{path}: only 64-bit little-endian Mach-O is supported (magic 0x{header[0]:x})")
+    _, _, _, _, command_count, command_size, _, _ = header
+    if command_size < 8:
+        raise AuditError(f"{path}: Mach-O declares {command_size} load command bytes, too few for any command")
+    take(data, 32, command_size, path, "Mach-O load commands")
+    trie = None
+    at = 32
+    for index in range(command_count):
+        if at + 8 > 32 + command_size:
+            raise AuditError(f"{path}: Mach-O load command {index} runs past the {command_size} load command bytes")
+        kind, size = unpack("<II", data, at, path, f"Mach-O load command {index}")
+        if size < 8:
+            raise AuditError(f"{path}: Mach-O load command {index} declares a size of {size}")
+        if kind in (MACH_O_LC_DYLD_INFO, MACH_O_LC_DYLD_INFO_ONLY):
+            export_offset, export_size = unpack("<12I", data, at, path, "LC_DYLD_INFO")[10:12]
+            trie = (export_offset, export_size)
+        elif kind == MACH_O_LC_DYLD_EXPORTS_TRIE:
+            export_offset, export_size = unpack("<IIII", data, at, path, "LC_DYLD_EXPORTS_TRIE")[2:4]
+            trie = (export_offset, export_size)
+        at += size
+    if trie is None or trie[0] == 0 or trie[1] == 0:
+        return set()
+    start, size = trie
+    take(data, start, size, path, "export trie")
+    names = set()
+    parse_trie(data, start, start + size, 0, "", path, set(), names)
+    # Mach-O prefixes C symbols with an underscore; dyld strips it again when it
+    # binds, so the name the game sees is the one without it.
+    return {name[1:] if name.startswith("_") else name for name in names}
+
+
 def read_exports(path):
     data = path.read_bytes()
     if data[:4] == b"\x7fELF":
         return elf_exports(path, data)
     if data[:2] == b"MZ":
         return pe_exports(path, data)
-    raise AuditError(f"{path}: neither ELF nor PE (first bytes {data[:4]!r})")
+    if data[:4] in (b"\xcf\xfa\xed\xfe", b"\xce\xfa\xed\xfe"):
+        return macho_exports(path, data)
+    raise AuditError(f"{path}: neither ELF, PE nor Mach-O (first bytes {data[:4]!r})")
 
 
 def directory_files(directory, pattern):

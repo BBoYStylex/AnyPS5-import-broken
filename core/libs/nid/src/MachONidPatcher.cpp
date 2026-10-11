@@ -348,7 +348,16 @@ bool IsGuestFacingImport(const std::string& name) {
         std::tolower(static_cast<unsigned char>(name[0])) == 's' &&
         std::tolower(static_cast<unsigned char>(name[1])) == 'c' &&
         std::tolower(static_cast<unsigned char>(name[2])) == 'e';
-    return hasNidPostfix || hasScePrefix;
+    // The compiler's stack-protector symbols have no NID postfix and no sce
+    // prefix, but the guest imports them by NID like anything else, so the
+    // reference has to follow the rename or the dependent library will look for
+    // a name the provider no longer exports.
+    static const char* const AbiImports[]{
+        "__stack_chk_guard", "__stack_chk_guard_local", "__stack_chk_fail",
+        "__stack_chk_fail_local", "__pthread_key_create"};
+    const bool isAbiImport = std::any_of(std::begin(AbiImports), std::end(AbiImports),
+        [&](const char* candidate) { return name == candidate; });
+    return hasNidPostfix || hasScePrefix || isAbiImport;
 }
 
 std::vector<bool> DylibOrdinalsArePrx(const std::vector<std::uint8_t>& binary, const Image& image) {

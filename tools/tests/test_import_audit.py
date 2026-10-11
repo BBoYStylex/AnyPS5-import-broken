@@ -74,6 +74,63 @@ def write_registry(path, entries, encoding="utf-8"):
     path.write_text(json.dumps([{"nid": nid, "library": library, "relocationType": "R_X86_64_GLOB_DAT"} for nid, library in entries]), encoding=encoding)
 
 
+MACH_O_MAGIC = 0xFEEDFACF
+MACH_O_LC_DYLD_EXPORTS_TRIE = 0x80000033
+MACH_O_EXPORT_WEAK_DEFINITION = 0x04
+
+
+def uleb(value):
+    out = bytearray()
+    while True:
+        byte = value & 0x7F
+        value >>= 7
+        out.append(byte | (0x80 if value else 0))
+        if not value:
+            return bytes(out)
+
+
+def build_trie(names, weak=False):
+    """An export trie listing `names`.
+
+    A node's terminal entry exports the prefix accumulated along the path, so a
+    root with one child per name and a terminal child under each exports them
+    directly. A node is terminalSize (uleb), its terminal data, the child count,
+    then one entry per child: label, NUL, child offset (uleb).
+    """
+    flags = MACH_O_EXPORT_WEAK_DEFINITION if weak else 0
+    terminal = uleb(len(uleb(flags) + uleb(0x1000))) + uleb(flags) + uleb(0x1000) + bytes([0])
+
+    root = bytearray()
+    root.append(0)                       # terminalSize
+    root.append(len(names))              # childCount
+    offset_at = []
+    for name in names:
+        root += name.encode() + b"\0"    # label and its NUL
+        offset_at.append(len(root))
+        root.append(0)                   # placeholder for the ULEB child offset
+
+    children_at = len(root)
+    for index, at in enumerate(offset_at):
+        encoded = uleb(children_at + index * len(terminal))
+        if len(encoded) != 1:
+            raise AssertionError("fixture offsets must stay under 128")
+        root[at] = encoded[0]
+    return bytes(root) + terminal * len(names)
+
+
+def build_macho(names, weak=False):
+    """A minimal x86_64 Mach-O dylib whose export trie lists `names`."""
+    trie = build_trie(names, weak)
+    command = struct.pack("<IIII", MACH_O_LC_DYLD_EXPORTS_TRIE, 16, 0x1000, len(trie))
+    header = struct.pack("<IiiIIIII", MACH_O_MAGIC, 0x01000007, 3, 6,
+                         1, len(command), 0, 0)
+    image = bytearray(0x1000 + len(trie))
+    image[0:len(header)] = header
+    image[32:32 + len(command)] = command
+    image[0x1000:] = trie
+    return bytes(image)
+
+
 class Workspace:
     def __init__(self):
         self._directory = tempfile.TemporaryDirectory()
@@ -220,6 +277,41 @@ class ImportAuditTests(unittest.TestCase):
             with self.assertRaisesRegex(import_audit.AuditError, "lib.prx"):
                 import_audit.pe_exports(path, image[:cut])
 
+
+    def test_macho_reader_strips_the_leading_underscore(self):
+        work = self.work
+        names = ["_AAAAAAAAAAA", "_BBBBBBBBBBB"]
+        (work.libs / "libSceA.prx").write_bytes(build_macho(names))
+        self.assertEqual(import_audit.read_exports(work.libs / "libSceA.prx"),
+                         {"AAAAAAAAAAA", "BBBBBBBBBBB"})
+
+    def test_macho_skips_weak_definitions(self):
+        work = self.work
+        (work.libs / "libSceA.prx").write_bytes(
+            build_macho(["_AAAAAAAAAAA", "_BBBBBBBBBBB"], weak=True))
+        self.assertEqual(import_audit.read_exports(work.libs / "libSceA.prx"), set())
+
+    def test_macho_library_directory_and_classification(self):
+        work = self.work
+        (work.libs / "libSceA.prx").write_bytes(build_macho(["_AAAAAAAAAAA"]))
+        exports, libraries = import_audit.built_libraries([work.libs])
+        self.assertEqual(exports, {"AAAAAAAAAAA": ["libSceA.prx"]})
+        self.assertEqual(libraries, {"libSceA.prx"})
+
+    def test_macho_rejects_a_trie_outside_the_file(self):
+        work = self.work
+        broken = bytearray(build_macho(["_AAAAAAAAAAA"]))
+        struct.pack_into("<I", broken, 32 + 8, 0xFFFFFF)
+        (work.libs / "libSceA.prx").write_bytes(bytes(broken))
+        with self.assertRaisesRegex(import_audit.AuditError, r"export trie"):
+            import_audit.read_exports(work.libs / "libSceA.prx")
+
+    def test_macho_rejects_a_short_header(self):
+        work = self.work
+        (work.libs / "libSceA.prx").write_bytes(b"\xcf\xfa\xed\xfe" + b"\0" * 12)
+        with self.assertRaisesRegex(import_audit.AuditError, r"Mach-O header"):
+            import_audit.read_exports(work.libs / "libSceA.prx")
+
     def test_library_directories(self):
         work = self.work
         (work.libs / "libSceA.prx").write_bytes(build_pe(["AAAAAAAAAAA"]))
@@ -228,7 +320,7 @@ class ImportAuditTests(unittest.TestCase):
         self.assertEqual(exports, {"AAAAAAAAAAA": ["libSceA.prx", "libSceB.prx"], "BBBBBBBBBBB": ["libSceB.prx"]})
         self.assertEqual(libraries, {"libSceA.prx", "libSceB.prx"})
         (work.libs / "libSceC.prx").write_bytes(b"text")
-        with self.assertRaisesRegex(import_audit.AuditError, r"libSceC.prx: neither ELF nor PE"):
+        with self.assertRaisesRegex(import_audit.AuditError, r"libSceC.prx: neither ELF, PE nor Mach-O"):
             import_audit.built_libraries([work.libs])
         with self.assertRaisesRegex(import_audit.AuditError, "no .prx files"):
             import_audit.built_libraries([work.modules])
