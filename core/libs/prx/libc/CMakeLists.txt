@@ -1,5 +1,6 @@
 target_sources(libc PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/Export.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/GuestWideConcatenation.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/General.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/CreationMask.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/specifics/gcc/StackGuard.cpp
@@ -65,6 +66,16 @@ if(BUILD_TESTING)
     set_tests_properties(guest_time_conversion PROPERTIES TIMEOUT 20)
     if(WIN32)
         set_tests_properties(guest_time_conversion PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+    endif()
+    add_test_executable(guest_libc_wide_concatenation_tests ${LIBS_INCLUDE_DIR}/tests/GuestLibcWideConcatenation.cpp)
+    target_include_directories(guest_libc_wide_concatenation_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_libc_wide_concatenation_tests PRIVATE libc)
+    configure_windows_unwind(guest_libc_wide_concatenation_tests)
+    add_test(NAME guest_libc_wide_concatenation COMMAND guest_libc_wide_concatenation_tests)
+    set_tests_properties(guest_libc_wide_concatenation PROPERTIES TIMEOUT 10)
+    if(WIN32)
+        set_tests_properties(guest_libc_wide_concatenation PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
     endif()
     add_test_executable(precise_wait_tests ${LIBS_INCLUDE_DIR}/tests/PreciseWait.cpp)
