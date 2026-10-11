@@ -30,6 +30,7 @@ target_sources(libc PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src/ApplicationProcessParameters.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/JumpBuffer.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/Formatting.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/GuestGammaFunctions.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/FormattingWide.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/ScanningWide.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/RuntimeSupport.cpp
@@ -348,6 +349,16 @@ if(BUILD_TESTING)
     add_test(NAME guest_errors COMMAND guest_error_tests)
     if(WIN32)
         set_tests_properties(guest_errors PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+    endif()
+    add_test_executable(guest_libc_gamma_functions_tests ${LIBS_INCLUDE_DIR}/tests/GuestLibcGammaFunctions.cpp)
+    target_include_directories(guest_libc_gamma_functions_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_libc_gamma_functions_tests PRIVATE libc)
+    configure_windows_unwind(guest_libc_gamma_functions_tests)
+    add_test(NAME guest_libc_gamma_functions COMMAND guest_libc_gamma_functions_tests)
+    set_tests_properties(guest_libc_gamma_functions PROPERTIES TIMEOUT 10)
+    if(WIN32)
+        set_tests_properties(guest_libc_gamma_functions PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
     endif()
     add_test_executable(guest_syslog_tests ${LIBS_INCLUDE_DIR}/tests/GuestSyslog.cpp)
