@@ -19,7 +19,13 @@
 #include <cstdlib>
 #include <system_error>
 #include <pthread.h>
+#ifdef __APPLE__
+// <ucontext.h> on Darwin only offers the deprecated getcontext family and
+// errors out without _XOPEN_SOURCE. Only the mcontext types are needed here.
+#include <sys/ucontext.h>
+#else
 #include <ucontext.h>
+#endif
 #include <unistd.h>
 #endif
 
@@ -306,6 +312,41 @@ bool RaiseOn(Pthread thread, GuestExceptionHandler handler, int signum) {
 constexpr int HostSignal = SIGUSR1;
 constexpr std::size_t FxsaveRegisterBytes = 416;
 
+#ifdef __APPLE__
+// Darwin has no gregs[] index array: the x86-64 mcontext names each register, and
+// the interrupted thread state lives in __ss. cs and ss are separate members
+// rather than the packed REG_CSGSFS slot glibc uses.
+void FromHost(const mcontext_t& hostRef, GuestMcontext& m) {
+    // mcontext_t is itself a pointer on Darwin.
+    const auto& host = *hostRef;
+    const auto& s = host.__ss;
+    m.rdi = s.__rdi;
+    m.rsi = s.__rsi;
+    m.rdx = s.__rdx;
+    m.rcx = s.__rcx;
+    m.r8 = s.__r8;
+    m.r9 = s.__r9;
+    m.rax = s.__rax;
+    m.rbx = s.__rbx;
+    m.rbp = s.__rbp;
+    m.r10 = s.__r10;
+    m.r11 = s.__r11;
+    m.r12 = s.__r12;
+    m.r13 = s.__r13;
+    m.r14 = s.__r14;
+    m.r15 = s.__r15;
+    m.rip = s.__rip;
+    m.rsp = s.__rsp;
+    m.rflags = s.__rflags;
+    m.cs = s.__cs;
+    // The Darwin thread state has no stack selector; in 64-bit long mode the
+    // segment is ignored and always reads back as zero.
+    m.ss = 0;
+    m.len = sizeof(GuestMcontext);
+    static_assert(sizeof(host.__fs) <= sizeof(m.fpstate) && FxsaveRegisterBytes <= sizeof(host.__fs));
+    std::memcpy(m.fpstate, &host.__fs, sizeof(host.__fs));
+}
+#else
 void FromHost(const mcontext_t& host, GuestMcontext& m) {
     const auto* g = host.gregs;
     m.rdi = g[REG_RDI];
@@ -332,7 +373,33 @@ void FromHost(const mcontext_t& host, GuestMcontext& m) {
     static_assert(sizeof(*host.fpregs) <= sizeof(m.fpstate) && FxsaveRegisterBytes <= sizeof(*host.fpregs));
     if (host.fpregs != nullptr) std::memcpy(m.fpstate, host.fpregs, sizeof(*host.fpregs));
 }
+#endif
 
+#ifdef __APPLE__
+void ToHost(const GuestMcontext& m, mcontext_t& hostRef) {
+    auto& host = *hostRef;
+    auto& s = host.__ss;
+    s.__rdi = m.rdi;
+    s.__rsi = m.rsi;
+    s.__rdx = m.rdx;
+    s.__rcx = m.rcx;
+    s.__r8 = m.r8;
+    s.__r9 = m.r9;
+    s.__rax = m.rax;
+    s.__rbx = m.rbx;
+    s.__rbp = m.rbp;
+    s.__r10 = m.r10;
+    s.__r11 = m.r11;
+    s.__r12 = m.r12;
+    s.__r13 = m.r13;
+    s.__r14 = m.r14;
+    s.__r15 = m.r15;
+    s.__rip = m.rip;
+    s.__rsp = m.rsp;
+    s.__rflags = m.rflags;
+    std::memcpy(&host.__fs, m.fpstate, FxsaveRegisterBytes);
+}
+#else
 void ToHost(const GuestMcontext& m, mcontext_t& host) {
     auto* g = host.gregs;
     g[REG_RDI] = static_cast<greg_t>(m.rdi);
@@ -355,6 +422,7 @@ void ToHost(const GuestMcontext& m, mcontext_t& host) {
     g[REG_EFL] = static_cast<greg_t>(m.rflags);
     if (host.fpregs != nullptr) std::memcpy(host.fpregs, m.fpstate, FxsaveRegisterBytes);
 }
+#endif
 
 void Deliver(int, siginfo_t*, void* context) {
     const auto handler = Handler(RaisedSignal);

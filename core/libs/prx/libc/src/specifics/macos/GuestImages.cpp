@@ -34,6 +34,9 @@ extern "C" int dl_iterate_phdr(int (*callback)(dl_phdr_info*, std::size_t, void*
         info.dlpi_name = header->filetype == MH_EXECUTE ? "" : _dyld_get_image_name(index);
         info.dlpi_phdr = reinterpret_cast<const Elf64_Phdr*>(meta + HeadersOffset);
         info.dlpi_phnum = static_cast<std::uint16_t>(count);
+        // glibc exposes the TLS module id; dyld has no equivalent, so the image
+        // index stands in as a stable per-image identifier.
+        info.dlpi_tls_modid = index;
         if (const int result = callback(&info, sizeof(info), data); result != 0) return result;
     }
     return 0;

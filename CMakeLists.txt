@@ -99,7 +99,10 @@ add_subdirectory(3rdparty/ffmpeg-core)
 if(MINGW)
     target_link_libraries(ffmpeg INTERFACE bcrypt ole32 user32 ws2_32)
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    target_link_options(ffmpeg INTERFACE LINKER:--exclude-libs,ALL)
+    # --exclude-libs is an ELF linker option; Mach-O has no equivalent.
+    if(NOT APPLE)
+        target_link_options(ffmpeg INTERFACE LINKER:--exclude-libs,ALL)
+    endif()
 endif()
 
 set(FT_DISABLE_ZLIB ON CACHE BOOL "" FORCE)

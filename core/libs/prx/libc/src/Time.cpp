@@ -42,8 +42,13 @@ std::tm toHostTm(const GuestTm& guest) {
     host.tm_yday = guest.tm_yday;
     host.tm_isdst = guest.tm_isdst;
 #ifndef _WIN32
+#ifndef __APPLE__
     host.tm_gmtoff = static_cast<long>(guest.tm_gmtoff);
     host.tm_zone = guest.tm_zone;
+#else
+    // Darwin's struct tm has no tm_gmtoff or tm_zone; localtime_r reports those
+    // in its own result. The guest values stay on GuestTm either way.
+#endif
 #endif
     return host;
 }

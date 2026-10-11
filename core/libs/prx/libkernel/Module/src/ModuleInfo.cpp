@@ -21,7 +21,7 @@
 #include <filesystem>
 #else
 #include <dlfcn.h>
-#include <link.h>
+#include "prx/libc/include/specifics/linux/ElfTypes.hpp"
 #include <unistd.h>
 #endif
 
@@ -154,11 +154,15 @@ std::vector<GuestImage> GuestImages() {
     dl_iterate_phdr(CollectGuestImage, &addresses);
     std::vector<GuestImage> images;
     for (const auto address : addresses) {
+#if defined(__APPLE__)
+        images.push_back({reinterpret_cast<void*>(address), address});
+#else
         Dl_info symbol{};
         link_map* native = nullptr;
         if (!dladdr1(reinterpret_cast<const void*>(address), &symbol, reinterpret_cast<void**>(&native), RTLD_DL_LINKMAP) || !native)
             throw std::runtime_error("sceKernelGetModuleList: no link map for a loaded image");
         images.push_back({native, address});
+#endif
     }
     return images;
 }
@@ -281,14 +285,18 @@ int APS5_VABI sceKernelGetModuleInfoFromAddr(std::uint64_t address, int flags, M
 #ifdef _WIN32
     if (!Fill(static_cast<std::uintptr_t>(address), result)) return SCE_KERNEL_ERROR_ESRCH;
 #else
+    ImageSearch<ModuleInfoEx> search{static_cast<std::uintptr_t>(address), &result, false};
+    dl_iterate_phdr(FindImage<ModuleInfoEx>, &search);
+    if (!search.found) return SCE_KERNEL_ERROR_ESRCH;
+#if defined(__APPLE__)
+    result.id = ModuleIdForImage_nid_no_patch(reinterpret_cast<void*>(address));
+#else
     Dl_info symbol{};
     link_map* native = nullptr;
     if (!dladdr1(reinterpret_cast<const void*>(address), &symbol, reinterpret_cast<void**>(&native), RTLD_DL_LINKMAP) || !native)
         return SCE_KERNEL_ERROR_ESRCH;
-    ImageSearch<ModuleInfoEx> search{static_cast<std::uintptr_t>(address), &result, false};
-    dl_iterate_phdr(FindImage<ModuleInfoEx>, &search);
-    if (!search.found) return SCE_KERNEL_ERROR_ESRCH;
     result.id = ModuleIdForImage_nid_no_patch(native);
+#endif
 #endif
     *info = result;
     return 0;

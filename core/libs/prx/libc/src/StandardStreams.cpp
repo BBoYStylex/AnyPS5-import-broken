@@ -38,6 +38,10 @@ int APS5_VABI getc_nid_postfix(FileStream* stream) { return fgetc_nid_postfix(st
 int APS5_VABI getc_unlocked_nid_postfix(FileStream* stream) {
 #ifdef _WIN32
     const int result = _fgetc_nolock(GetNativeStream(stream));
+#elif defined(__APPLE__)
+    // Darwin declares getc_unlocked as a macro, so the qualified form will not
+    // parse; the underlying function takes the stream pointer directly.
+    const int result = getc_unlocked(GetNativeStream(stream));
 #else
     const int result = ::getc_unlocked(GetNativeStream(stream));
 #endif
@@ -55,6 +59,9 @@ int APS5_VABI putc_nid_postfix(int value, FileStream* stream) { return fputc_nid
 int APS5_VABI putc_unlocked_nid_postfix(int value, FileStream* stream) {
 #ifdef _WIN32
     const int result = _fputc_nolock(value, GetNativeStream(stream));
+#elif defined(__APPLE__)
+    // Darwin declares putc_unlocked as a macro; see getc_unlocked above.
+    const int result = putc_unlocked(value, GetNativeStream(stream));
 #else
     const int result = ::putc_unlocked(value, GetNativeStream(stream));
 #endif

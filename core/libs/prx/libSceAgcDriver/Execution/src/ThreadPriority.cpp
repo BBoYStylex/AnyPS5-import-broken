@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
+#include <cerrno>
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
@@ -12,6 +13,13 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#elif defined(__APPLE__)
+#include <dlfcn.h>
+#include <pthread.h>
+#include <sched.h>
+#include <sys/qos.h>
+#include <sys/resource.h>
+#include <unistd.h>
 #else
 #include <dlfcn.h>
 #include <sched.h>
@@ -212,6 +220,9 @@ bool RtkitProperty(const char* name, std::int64_t& value, std::string& failure) 
     return ok;
 }
 
+#if !defined(__APPLE__)
+// Darwin has no rtkit, no RLIMIT_RTTIME and no SCHED_RESET_ON_FORK; Raise below
+// uses the QoS and nice interfaces instead.
 bool PrepareRealtime(std::uint32_t priority, const char* role, std::string& failure) {
     std::int64_t maxPriority = 0;
     std::int64_t maxRttime = 0;
@@ -249,7 +260,27 @@ bool PrepareRealtime(std::uint32_t priority, const char* role, std::string& fail
     return true;
 }
 
+#endif
+
 void Raise(const char* role) {
+#if defined(__APPLE__)
+    // Darwin offers no rtkit. QoS classes cover the raised-priority case, and
+    // a negative nice value is the closest match for "high".
+    const bool realtime = RequestedMode() == ThreadPriorityMode::Realtime;
+    if (realtime) {
+        pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
+    } else {
+        const std::int32_t nice = static_cast<std::int32_t>(
+            std::max(-20, std::min(19, EnvInt("APS5_THREAD_NICE", -10))));
+        if (setpriority(PRIO_PROCESS, 0, nice) != 0 && errno != EPERM) {
+            throw std::runtime_error(
+                std::string("APS5_THREAD_PRIORITY: ") + role + " setpriority failed (error "
+                + std::to_string(errno) + ")");
+        }
+    }
+    LogOnce(role, realtime ? "user-interactive QoS" : "nice");
+    return;
+#else
     const auto tid = static_cast<std::uint64_t>(syscall(SYS_gettid));
     std::string failure;
     if (RequestedMode() == ThreadPriorityMode::Realtime) {
@@ -266,6 +297,7 @@ void Raise(const char* role) {
         throw std::runtime_error(std::string("APS5_THREAD_PRIORITY=high: ") + role + " nice " + std::to_string(nice) + " refused: " + failure);
     }
     LogOnce(role, "nice " + std::to_string(nice) + " via rtkit");
+#endif
 }
 
 #else

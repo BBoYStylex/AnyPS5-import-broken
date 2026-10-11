@@ -350,21 +350,27 @@ static int NativeFstatfs(int descriptor, KernelStatfs* fs) {
 }
 #else
 #include <sys/statvfs.h>
-#include <sys/vfs.h>
 static int NativeFstatfs(int descriptor, KernelStatfs* fs) {
-    constexpr long PipeFilesystem = 0x50495045;
     struct stat file{};
     if (::fstat(descriptor, &file) != 0) return SceErrorFromErrno(errno) & 0xffff;
     if (S_ISSOCK(file.st_mode)) return GUEST_EINVAL;
     if (S_ISFIFO(file.st_mode)) {
+#ifdef __linux__
+        // Linux identifies a pipe filesystem by type; Darwin has no fstatfs.
+        constexpr long PipeFilesystem = 0x50495045;
         struct statfs kind{};
         if (::fstatfs(descriptor, &kind) == 0 && static_cast<long>(kind.f_type) == PipeFilesystem) return GUEST_EINVAL;
+#else
+        return GUEST_EINVAL;
+#endif
     }
     struct statvfs host{};
     if (::fstatvfs(descriptor, &host) != 0) return SceErrorFromErrno(errno) & 0xffff;
     if (host.f_flag & ST_RDONLY) fs->f_flags |= KERNEL_MNT_RDONLY;
     if (host.f_flag & ST_NOSUID) fs->f_flags |= KERNEL_MNT_NOSUID;
+#ifdef ST_NOEXEC
     if (host.f_flag & ST_NOEXEC) fs->f_flags |= KERNEL_MNT_NOEXEC;
+#endif
     fs->f_bsize = host.f_frsize != 0 ? host.f_frsize : host.f_bsize;
     fs->f_iosize = host.f_bsize;
     fs->f_blocks = host.f_blocks;
@@ -720,7 +726,12 @@ int APS5_VABI sceKernelFdatasync(int fd) {
 #ifdef _WIN32
     if (::_commit(fd) != 0) return SceErrorFromErrno(errno);
 #else
+#ifdef __APPLE__
+    // Darwin has no fdatasync; fsync is the same call without the size hint.
+    if (::fsync(fd) != 0) return SceErrorFromErrno(errno);
+#else
     if (::fdatasync(fd) != 0) return SceErrorFromErrno(errno);
+#endif
 #endif
     return 0;
 }
@@ -747,6 +758,57 @@ int APS5_VABI sceKernelGetdents(int fd, char* buf, int nbytes) {
     return sceKernelGetdirentries(fd, buf, nbytes, nullptr);
 }
 
+#else
+#ifdef __APPLE__
+// Darwin has no getdents64 syscall; fdopendir/readdir walk the directory in the
+// same order. The guest sees the same 8-byte header plus name records, and the
+// "resume" position is the index of the next entry, which readdir cannot seek
+// to, so the offset the guest passes back is honoured by skipping that many.
+int APS5_VABI sceKernelGetdirentries(int fd, char* buf, int nbytes, int64_t* basep) {
+    constexpr std::size_t GuestHeaderBytes = 8;
+    constexpr std::size_t GuestMaxName = 255;
+    if (buf == nullptr) return SceErrorFromErrno(GUEST_EFAULT);
+    if (nbytes <= 0) return SceErrorFromErrno(GUEST_EINVAL);
+    const off_t base = ::lseek(fd, 0, SEEK_CUR);
+    if (base < 0) return SceErrorFromErrno(errno);
+
+    DIR* const directory = ::fdopendir(fd);
+    if (directory == nullptr) return SceErrorFromErrno(errno);
+    std::size_t written = 0;
+    std::int64_t index = 0;
+    while (const dirent* const entry = ::readdir(directory)) {
+        if (index++ < static_cast<std::int64_t>(base)) continue;
+        const auto nameLength = std::strlen(entry->d_name);
+        const auto record = (GuestHeaderBytes + nameLength + 1 + 3) & ~std::size_t{3};
+        if (nameLength > GuestMaxName || written + record > static_cast<std::size_t>(nbytes)) {
+            ::closedir(directory);
+            if (::lseek(fd, base, SEEK_SET) < 0) return SceErrorFromErrno(errno);
+            if (written != 0) return static_cast<int>(written);
+            return nameLength > GuestMaxName
+                ? static_cast<int>(0x80020000u | GUEST_ENAMETOOLONG) : SceErrorFromErrno(GUEST_EINVAL);
+        }
+        char* const out = buf + written;
+        std::memset(out, 0, record);
+        const auto fileNumber = static_cast<std::uint32_t>(entry->d_ino);
+        const auto recordLength = static_cast<std::uint16_t>(record);
+        const auto nameBytes = static_cast<std::uint8_t>(nameLength);
+        std::memcpy(out, &fileNumber, sizeof(fileNumber));
+        std::memcpy(out + 4, &recordLength, sizeof(recordLength));
+        out[6] = static_cast<char>(entry->d_type);
+        out[7] = static_cast<char>(nameBytes);
+        std::memcpy(out + GuestHeaderBytes, entry->d_name, nameLength);
+        written += record;
+    }
+    const int error = errno;
+    ::closedir(directory);
+    if (error != 0 && written == 0) return SceErrorFromErrno(error);
+    if (basep != nullptr) *basep = static_cast<int64_t>(index);
+    return static_cast<int>(written);
+}
+
+int APS5_VABI sceKernelGetdents(int fd, char* buf, int nbytes) {
+    return sceKernelGetdirentries(fd, buf, nbytes, nullptr);
+}
 #else
 
 int APS5_VABI sceKernelGetdirentries(int fd, char* buf, int nbytes, int64_t* basep) {
@@ -793,6 +855,7 @@ int APS5_VABI sceKernelGetdents(int fd, char* buf, int nbytes) {
     return sceKernelGetdirentries(fd, buf, nbytes, nullptr);
 }
 
+#endif
 #endif
 
 int APS5_VABI getdirentries_nid_postfix(int fd, char* buf, int nbytes, int64_t* basep) {

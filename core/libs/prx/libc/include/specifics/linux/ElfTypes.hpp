@@ -4,6 +4,14 @@
 #include <cstdint>
 #include <cstddef>
 
+#ifdef __APPLE__
+
+// Darwin has no <link.h>. The dynamic loader is Mach-O there, but the guest
+// images this project relinks stay ELF-shaped: the relinker writes their
+// program headers into an __APS5DATA/__meta section and a dyld-backed shim
+// replays them through dl_iterate_phdr. These declarations describe that
+// ELF view of a Mach-O process.
+
 struct Elf64_Phdr {
     std::uint32_t p_type;
     std::uint32_t p_flags;
@@ -20,17 +28,41 @@ struct dl_phdr_info {
     const char* dlpi_name;
     const Elf64_Phdr* dlpi_phdr;
     std::uint16_t dlpi_phnum;
+    std::size_t dlpi_tls_modid;
+};
+
+struct Elf64_Dyn {
+    std::int64_t d_tag;
+    union {
+        std::uint64_t d_val;
+        std::uint64_t d_ptr;
+    } d_un;
 };
 
 static constexpr std::uint32_t PT_LOAD = 1;
+static constexpr std::uint32_t PT_DYNAMIC = 2;
+static constexpr std::uint32_t PT_TLS = 7;
 static constexpr std::uint32_t PT_GNU_EH_FRAME = 0x6474e550;
+static constexpr std::uint32_t PT_GNU_STACK = 0x6474e551;
+static constexpr std::uint32_t PT_DYNAMIC_PRESENT = 0x6474e553;
 static constexpr std::uint32_t PF_X = 1;
 static constexpr std::uint32_t PF_W = 2;
+static constexpr std::uint32_t PF_R = 4;
 
-#ifdef __APPLE__
+static constexpr std::int64_t DT_NULL = 0;
+static constexpr std::int64_t DT_INIT = 12;
+static constexpr std::int64_t DT_FINI = 13;
+
+// glibc's name selector; this project only ever targets 64-bit guests.
+#define ElfW(type) Elf64_##type
+
+// Implemented over _dyld_image_count() in src/specifics/macos/GuestImages.cpp.
 extern "C" int dl_iterate_phdr(int (*callback)(dl_phdr_info*, std::size_t, void*), void* data) __asm__("_dl_iterate_phdr_nid_no_patch");
+
 #else
-extern "C" int dl_iterate_phdr(int (*callback)(dl_phdr_info*, std::size_t, void*), void* data);
+
+#include <link.h>
+
 #endif
 
 #endif

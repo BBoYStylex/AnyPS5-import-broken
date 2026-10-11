@@ -104,12 +104,21 @@ static void CopyNativeStat(const NativeStat& st, FileStat* sb) {
     sb->st_rdev = static_cast<std::uint32_t>(st.st_rdev);
     sb->st_blksize = static_cast<std::uint32_t>(st.st_blksize);
     sb->st_blocks = static_cast<std::int64_t>(st.st_blocks);
-    sb->st_atim.tv_sec = static_cast<std::int64_t>(st.st_atim.tv_sec);
-    sb->st_atim.tv_nsec = static_cast<std::int64_t>(st.st_atim.tv_nsec);
-    sb->st_mtim.tv_sec = static_cast<std::int64_t>(st.st_mtim.tv_sec);
-    sb->st_mtim.tv_nsec = static_cast<std::int64_t>(st.st_mtim.tv_nsec);
-    sb->st_ctim.tv_sec = static_cast<std::int64_t>(st.st_ctim.tv_sec);
-    sb->st_ctim.tv_nsec = static_cast<std::int64_t>(st.st_ctim.tv_nsec);
+#if defined(__APPLE__)
+    const auto& stAtime = st.st_atimespec;
+    const auto& stMtime = st.st_mtimespec;
+    const auto& stCtime = st.st_ctimespec;
+#else
+    const auto& stAtime = st.st_atim;
+    const auto& stMtime = st.st_mtim;
+    const auto& stCtime = st.st_ctim;
+#endif
+    sb->st_atim.tv_sec = static_cast<std::int64_t>(stAtime.tv_sec);
+    sb->st_atim.tv_nsec = static_cast<std::int64_t>(stAtime.tv_nsec);
+    sb->st_mtim.tv_sec = static_cast<std::int64_t>(stMtime.tv_sec);
+    sb->st_mtim.tv_nsec = static_cast<std::int64_t>(stMtime.tv_nsec);
+    sb->st_ctim.tv_sec = static_cast<std::int64_t>(stCtime.tv_sec);
+    sb->st_ctim.tv_nsec = static_cast<std::int64_t>(stCtime.tv_nsec);
 #if defined(__APPLE__)
     sb->st_birthtim.tv_sec = static_cast<std::int64_t>(st.st_birthtimespec.tv_sec);
     sb->st_birthtim.tv_nsec = static_cast<std::int64_t>(st.st_birthtimespec.tv_nsec);

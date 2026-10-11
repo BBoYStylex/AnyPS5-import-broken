@@ -5,6 +5,8 @@
 #else
 #include <sys/socket.h>
 #include <netdb.h>
+#include <arpa/inet.h>
+#include <netdb.h>
 #include <netinet/in.h>
 #endif
 #include "prx/libc/include/general/VabiMacros.hpp"
@@ -120,8 +122,28 @@ GuestResolver::HostEntry* APS5_VABI gethostbyname_nid_postfix(const char* name) 
         int error = 0;
         if (!numeric) {
             buffer.resize(1024);
+#ifdef __APPLE__
+            // Darwin has no gethostbyname_r. getaddrinfo is thread-safe and is
+            // the supported replacement; the result is read before returning.
+            addrinfo hints{};
+            hints.ai_family = AF_INET;
+            hints.ai_socktype = SOCK_STREAM;
+            addrinfo* result = nullptr;
+            const int resolved = ::getaddrinfo(name, nullptr, &hints, &result);
+            if (resolved == 0 && result != nullptr) {
+                auto* sockaddrIn = reinterpret_cast<sockaddr_in*>(const_cast<addrinfo*>(result)->ai_addr);
+                nativeEntry.h_addr_list[0] = reinterpret_cast<char*>(&sockaddrIn->sin_addr);
+                native = &nativeEntry;
+                ::freeaddrinfo(result);
+            } else {
+                native = nullptr;
+                hostError = resolved;
+                error = resolved;
+            }
+#else
             while ((error = ::gethostbyname_r(name, &nativeEntry, buffer.data(), buffer.size(), &native, &hostError)) == ERANGE)
                 buffer.resize(buffer.size() * 2);
+#endif
         }
         if (error != 0 || !native) {
             *sceNetErrnoLoc() = hostError != 0 ? hostError : 3;

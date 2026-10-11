@@ -103,6 +103,10 @@ public:
 #ifdef _WIN32
         const bool endOfFile = std::feof(GetHandle()) != 0;
         const bool error = std::ferror(GetHandle()) != 0;
+#elif defined(__APPLE__)
+        // Darwin has no feof_unlocked/ferror_unlocked; the locked calls are cheap here.
+        const bool endOfFile = ::feof(GetHandle()) != 0;
+        const bool error = ::ferror(GetHandle()) != 0;
 #else
         const bool endOfFile = ::feof_unlocked(GetHandle()) != 0;
         const bool error = ::ferror_unlocked(GetHandle()) != 0;

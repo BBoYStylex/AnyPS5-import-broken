@@ -16,7 +16,7 @@
 #include <windows.h>
 #else
 #include <dlfcn.h>
-#include <link.h>
+#include "prx/libc/include/specifics/linux/ElfTypes.hpp"
 #endif
 
 namespace {
@@ -37,12 +37,21 @@ const void* imageContaining(const void* address, bool reference, void*& handle, 
     return module;
 #else
     Dl_info info{};
+#if defined(__APPLE__)
+    // Darwin has no dladdr1/RTLD_DL_LINKMAP; dladdr gives the same information.
+    if (!dladdr(address, &info) || info.dli_fbase == nullptr)
+        throw std::runtime_error(std::string(caller) + ": address outside every loaded image");
+    void* const image = info.dli_fbase;
+    const char* const path = info.dli_fname;
+#else
     link_map* image = nullptr;
     if (!dladdr1(address, &info, reinterpret_cast<void**>(&image), RTLD_DL_LINKMAP) || !image)
         throw std::runtime_error(std::string(caller) + ": address outside every loaded image");
-    if (reference && image->l_name && *image->l_name) {
-        handle = dlopen(image->l_name, RTLD_LAZY | RTLD_NOLOAD);
-        if (!handle) throw std::runtime_error(std::string(caller) + ": cannot reference " + image->l_name);
+    const char* const path = image->l_name;
+#endif
+    if (reference && path && *path) {
+        handle = dlopen(path, RTLD_LAZY | RTLD_NOLOAD);
+        if (!handle) throw std::runtime_error(std::string(caller) + ": cannot reference " + path);
     }
     return image;
 #endif

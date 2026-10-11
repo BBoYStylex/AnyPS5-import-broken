@@ -25,6 +25,17 @@ std::unordered_map<std::string, std::string> ResolveNids(const std::vector<std::
 
     std::unordered_set<std::string> nameSet(exportedNames.begin(), exportedNames.end());
 
+    // Symbols the compiler injects into every translation unit are part of the
+    // platform ABI, not PS5 NIDs. Renaming them breaks the reference every other
+    // library already recorded against this one at link time.
+    static const std::unordered_set<std::string> AbiExports{
+        "__stack_chk_guard",
+        "__stack_chk_guard_local",
+        "__stack_chk_fail",
+        "__stack_chk_fail_local",
+        "__pthread_key_create",
+    };
+
     if (nameSet.size() != exportedNames.size()) {
         for (std::size_t i = 0u; i < exportedNames.size(); ++i) {
             for (std::size_t j = i + 1u; j < exportedNames.size(); ++j) {
@@ -39,6 +50,10 @@ std::unordered_map<std::string, std::string> ResolveNids(const std::vector<std::
 
     for (const std::string& name : exportedNames) {
         if (excludedExports.contains(NormalizeExportName(name))) {
+            result[name] = name;
+            continue;
+        }
+        if (AbiExports.contains(NormalizeExportName(name))) {
             result[name] = name;
             continue;
         }

@@ -21,7 +21,7 @@
 #include <system_error>
 #include <vector>
 
-#if defined(__linux__)
+#if defined(__linux__) || defined(__APPLE__)
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <unistd.h>
@@ -29,7 +29,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
-#else
+#elif defined(_WIN32)
 #include <windows.h>
 
 static constexpr int PROT_NONE = 0;
@@ -140,6 +140,36 @@ static int mprotect(void* addr, size_t len, int prot) {
 }
 #endif
 
+#ifdef __APPLE__
+// Darwin has no MAP_FIXED_NOREPLACE and no procfs, so the address is a plain
+// hint: mmap returns wherever it likes, and the range is accepted only when the
+// kernel placed it at or above the requested address.
+void* MapAtOrAbove(std::uintptr_t start, size_t len, int prot, size_t alignment) {
+    std::uintptr_t candidate = (start + alignment - 1) & ~(static_cast<std::uintptr_t>(alignment) - 1);
+    for (int attempt = 0; attempt < 64; ++attempt) {
+        void* const result = mmap(
+            reinterpret_cast<void*>(candidate), len, prot,
+            MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (result == MAP_FAILED)
+            throw std::system_error(errno, std::generic_category(), "Hinted mmap failed");
+        const auto placed = reinterpret_cast<std::uintptr_t>(result);
+        if (placed >= candidate) return result;
+        ::munmap(result, len);
+        candidate = (placed + len + alignment - 1) & ~(static_cast<std::uintptr_t>(alignment) - 1);
+    }
+    throw std::runtime_error("Hinted mmap never landed at or above the mapping address hint");
+}
+
+static void* mmap_aligned(size_t len, int prot, size_t alignment, std::uintptr_t hint = 0) {
+    if (hint == 0) {
+        void* const result = mmap(nullptr, len, prot, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (result == MAP_FAILED) throw std::system_error(errno, std::generic_category(), "mmap failed");
+        return result;
+    }
+    return MapAtOrAbove(hint, len, prot, alignment);
+}
+#endif
+
 namespace {
 
 constexpr int GuestMapFixedFlag = 0x10;
@@ -226,7 +256,26 @@ void Trace(const char* format, ...) {
     va_end(args);
 }
 
-#if defined(__linux__)
+#if defined(__linux__) || defined(__APPLE__)
+#if defined(__APPLE__)
+// Darwin has neither memfd_create nor F_ADD_SEALS. An unlinked temporary file
+// has the same properties: sparse, private, and gone when the process exits.
+int PhysicalFile() {
+    static const int file = [] {
+        char path[] = "/tmp/anyps5-direct-memory.XXXXXX";
+        const int created = mkstemp(path);
+        if (created < 0) throw std::system_error(errno, std::generic_category(), "create direct memory backing");
+        ::unlink(path);
+        if (ftruncate(created, static_cast<off_t>(DIRECT_MEMORY_SIZE)) != 0) {
+            const int error = errno;
+            ::close(created);
+            throw std::system_error(error, std::generic_category(), "size direct memory backing");
+        }
+        return created;
+    }();
+    return file;
+}
+#else
 int PhysicalFile() {
     static const int file = [] {
         const int created = memfd_create("direct memory", MFD_CLOEXEC | MFD_ALLOW_SEALING);
@@ -240,6 +289,7 @@ int PhysicalFile() {
     }();
     return file;
 }
+#endif
 
 std::vector<bool> g_physicalUsed(DIRECT_MEMORY_SIZE / PS5_PAGE_SIZE);
 
@@ -535,6 +585,9 @@ void Unmap(void* addr, size_t len) {
     else if (munmap(addr, len) != 0) throw std::system_error(errno, std::generic_category(), "munmap failed");
     ArenaForget(addr, len);
     GuestWriteWatch::GuestWriteWatchUnregister_nid_postfix(addr, len);
+#elif defined(__APPLE__)
+    if (::munmap(addr, len) != 0) throw std::system_error(errno, std::generic_category(), "munmap failed");
+    GuestWriteWatch::GuestWriteWatchUnregister_nid_postfix(addr, len);
 #else
     if (KernelArena::Get().Contains(addr, len)) munmap(addr, len);
     else munmap_release(addr);
@@ -740,6 +793,8 @@ void UnmapRegistered(GuestAllocations::Mutation& mutation, void* addr, size_t le
         std::lock_guard lock(g_directLock);
         EraseMappings(reinterpret_cast<std::uintptr_t>(piece), reinterpret_cast<std::uintptr_t>(piece) + pieceBytes);
 #if defined(__linux__)
+        Unmap(pieceAddress, pieceBytes);
+#elif defined(__APPLE__)
         Unmap(pieceAddress, pieceBytes);
 #else
         if (KernelArena::Get().Contains(pieceAddress, pieceBytes)) munmap(pieceAddress, pieceBytes);

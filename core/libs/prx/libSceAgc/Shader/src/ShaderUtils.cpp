@@ -1,3 +1,4 @@
+#include <string>
 #include <stdexcept>
 #include "prx/libSceAgc/Shader/include/ShaderUtils.hpp"
 

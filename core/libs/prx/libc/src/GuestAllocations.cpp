@@ -23,7 +23,7 @@
 #include <sstream>
 #include <system_error>
 #include <vector>
-#include <link.h>
+#include "prx/libc/include/specifics/linux/ElfTypes.hpp"
 #include <sys/mman.h>
 #include <unistd.h>
 #endif
@@ -75,6 +75,14 @@ void recordChange(void* mutation, const void* pointer, std::size_t bytes) {
 }
 
 #ifndef _WIN32
+#ifdef __APPLE__
+bool backWritableImageAnonymously() {
+    // Darwin maps an executable's writable segments copy-on-write from the file
+    // already, so a write lands on an anonymous page and never reaches the file.
+    // There is no procfs to walk and nothing to detach.
+    return true;
+}
+#else
 std::vector<std::pair<std::uintptr_t, std::size_t>> fileBackedWritableImage() {
     const auto image = std::filesystem::read_symlink("/proc/self/exe").string();
     std::ifstream maps("/proc/self/maps");
@@ -102,6 +110,7 @@ bool backWritableImageAnonymously() {
     }
     return true;
 }
+#endif
 
 [[maybe_unused]] const bool writableImageAnonymous = backWritableImageAnonymously();
 #endif
@@ -416,7 +425,10 @@ void GuestAllocationsRemove_nid_postfix(void* mutation, const void* pointer) {
 namespace {
 
 std::map<std::uint64_t, std::shared_ptr<const Range>> replaceRange(const void* pointer, std::size_t bytes, bool remove, bool readable, bool writable, bool gpu) {
-    const auto address = reinterpret_cast<std::uintptr_t>(pointer);
+    // The registry is keyed by std::uint64_t, so keep the whole computation in
+    // that type: std::uintptr_t is a distinct type from std::uint64_t on Darwin,
+    // and the std::min/std::max calls below would deduce no common operand.
+    const auto address = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(pointer));
     require(bytes != 0 && bytes <= std::numeric_limits<std::uint64_t>::max() - address, "invalid guest protection or unmap range");
     require(!writable || readable, "writable guest allocation must be readable");
     const auto end = address + bytes;

@@ -27,6 +27,11 @@
 #include <pthread.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#ifdef __APPLE__
+#include <mach/mach.h>
+#include <mach/thread_info.h>
+#include <time.h>
+#endif
 #endif
 
 static constexpr int SCE_OK = 0;
@@ -88,6 +93,14 @@ static bool HostStackLimits(std::uintptr_t* low, std::uintptr_t* high) {
     *low = lowLimit;
     *high = highLimit;
 #else
+#ifdef __APPLE__
+    // Darwin has no pthread_getattr_np; pthread_get_stackaddr_np plus
+    // pthread_get_stacksize_np cover the same ground.
+    void* address = const_cast<void*>(pthread_get_stackaddr_np(pthread_self()));
+    const std::size_t size = static_cast<std::size_t>(pthread_get_stacksize_np(pthread_self()));
+    if (address == nullptr || size == 0) return false;
+    const bool queried = true;
+#else
     pthread_attr_t attr;
     if (pthread_getattr_np(pthread_self(), &attr) != 0)
         return false;
@@ -95,6 +108,7 @@ static bool HostStackLimits(std::uintptr_t* low, std::uintptr_t* high) {
     std::size_t size = 0;
     const bool queried = pthread_attr_getstack(&attr, &address, &size) == 0;
     pthread_attr_destroy(&attr);
+#endif
     if (!queried)
         return false;
     *low = reinterpret_cast<std::uintptr_t>(address);
@@ -213,9 +227,15 @@ static void BindHostCpuClock(PthreadPrivate* self) {
     (void)self;
 #else
     clockid_t clock{};
+#ifdef __APPLE__
+    // Darwin has no pthread_getcpuclockid; CLOCK_THREAD_CPUTIME_ID is the
+    // per-thread CPU clock it offers instead.
+    clock = CLOCK_THREAD_CPUTIME_ID;
+#else
     const int error = pthread_getcpuclockid(pthread_self(), &clock);
     if (error != 0)
         throw std::system_error(error, std::generic_category(), "Querying the guest thread CPU clock");
+#endif
     auto& registry = CpuClocks();
     std::lock_guard lock(registry.lock);
     self->hostCpuClock = clock;

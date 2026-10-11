@@ -14,7 +14,10 @@ function(add_sce_ngs2_library target)
     target_include_directories(${target} PRIVATE ${LIBS_INCLUDE_DIR} ${CMAKE_SOURCE_DIR}/3rdparty/LibAtrac9/C/src)
     target_link_libraries(${target} PRIVATE atrac9 libc libkernel)
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-        target_link_options(${target} PRIVATE LINKER:--exclude-libs,ALL)
+# --exclude-libs is an ELF linker option; Mach-O has no equivalent.
+        if(NOT APPLE)
+            target_link_options(${target} PRIVATE LINKER:--exclude-libs,ALL)
+        endif()
     endif()
     set_target_properties(${target} PROPERTIES
             CXX_EXTENSIONS OFF

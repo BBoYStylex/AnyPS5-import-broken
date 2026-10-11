@@ -15,6 +15,10 @@
 #include <random>
 #else
 #include <sys/mman.h>
+#ifdef __APPLE__
+#include <cstdlib>
+#include <unistd.h>
+#endif
 #endif
 
 extern "C" int* APS5_VABI __error_nid_postfix();
@@ -67,6 +71,14 @@ int CreateAnonymousFile() {
     }
     errno = EEXIST;
     return -1;
+#elif defined(__APPLE__)
+    // Darwin has no memfd_create. An unlinked temporary file stands in: it is
+    // created with close-on-exec and disappears when the process exits.
+    char path[] = "/tmp/anyps5-shm.XXXXXX";
+    const int created = mkstemp(path);
+    if (created < 0) return -1;
+    ::unlink(path);
+    return created;
 #else
     return memfd_create("anyps5 shm_open", MFD_CLOEXEC);
 #endif

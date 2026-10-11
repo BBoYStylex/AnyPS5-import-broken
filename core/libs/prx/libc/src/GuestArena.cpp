@@ -133,6 +133,8 @@ private:
     Arena() {
 #if defined(__linux__)
         SeedLinuxUsedRanges();
+#elif defined(__APPLE__)
+        SeedAppleUsedRanges();
 #elif defined(_WIN32)
         _writeWatched = std::getenv("APS5_NO_WRITE_WATCH") == nullptr;
         SYSTEM_INFO system{};
@@ -164,7 +166,28 @@ private:
 #endif
     }
 
-#if defined(__linux__)
+#if defined(__APPLE__)
+    // Darwin has no procfs and no MAP_FIXED_NOREPLACE, and mach_vm_region faults
+    // under Rosetta, so occupied ranges are discovered by probing: mmap treats the
+    // address as a hint, so a chunk that comes back exactly where it was asked for
+    // is free and ours to hand to MAP_FIXED later; anything else stays with the
+    // host and is marked used so the allocator avoids it.
+    void SeedAppleUsedRanges() {
+        constexpr std::uintptr_t Chunk = 1ULL << 30;
+        for (std::uintptr_t cursor = ArenaStart; cursor < ApplicationAreaEnd; cursor += Chunk) {
+            const auto end = std::min(cursor + Chunk, ApplicationAreaEnd);
+            void* const wanted = reinterpret_cast<void*>(cursor);
+            void* const placed = mmap(wanted, end - cursor, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+            if (placed != MAP_FAILED && placed != wanted) ::munmap(placed, end - cursor);
+            _used.emplace(cursor, end);
+            _hostRegions.emplace_back(cursor, end);
+        }
+        _used.emplace(SystemReservedStart, SystemReservedEnd);
+        _hostRegions.emplace_back(SystemReservedStart, SystemReservedEnd);
+        _base = ArenaStart;
+        _end = ApplicationAreaEnd;
+    }
+#elif defined(__linux__)
     void SeedLinuxUsedRanges() {
         std::ifstream maps("/proc/self/maps");
         if (!maps.is_open()) throw std::runtime_error("guest arena: cannot open /proc/self/maps");
@@ -192,8 +215,13 @@ private:
         for (std::uintptr_t cursor = from; cursor < to; cursor += kChunk) {
             const auto end = std::min(cursor + kChunk, to);
             void* const wanted = reinterpret_cast<void*>(cursor);
+#if defined(__APPLE__)
+            void* const placed = mmap(wanted, end - cursor, PROT_NONE,
+                MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+#else
             void* const placed = mmap(wanted, end - cursor, PROT_NONE,
                 MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED_NOREPLACE, -1, 0);
+#endif
             if (placed == wanted) continue;
             const int failed = placed == MAP_FAILED ? errno : EINVAL;
             if (placed != MAP_FAILED) munmap(placed, end - cursor);
@@ -354,7 +382,7 @@ void GuestArenaUnmapAlias_nid_postfix(void* alias) {
 }
 #endif
 
-#if defined(__linux__)
+#if defined(__linux__) || defined(__APPLE__)
 namespace {
 int PosixProtection(std::uint32_t windowsProtection) {
     switch (windowsProtection) {
@@ -375,7 +403,7 @@ void* PlaceAt(void* pointer, std::size_t bytes, std::uint32_t protection) {
 }
 #endif
 
-#if defined(__linux__)
+#if defined(__linux__) || defined(__APPLE__)
 void GuestArenaSetProtection_nid_postfix(std::uintptr_t address, std::size_t bytes, std::uint32_t protection) {
     if (!Arena::Get().Contains(reinterpret_cast<void*>(address), bytes)) throw OutsideArena("set protection", reinterpret_cast<void*>(address), bytes);
     if (mprotect(reinterpret_cast<void*>(address), bytes, PosixProtection(protection)) != 0)

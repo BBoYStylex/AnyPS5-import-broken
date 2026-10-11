@@ -18,7 +18,7 @@
 #include <windows.h>
 #else
 #include <dlfcn.h>
-#include <link.h>
+#include "prx/libc/include/specifics/linux/ElfTypes.hpp"
 #endif
 
 namespace {

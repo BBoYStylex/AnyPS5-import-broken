@@ -34,6 +34,7 @@ function(add_jpeg_decoder target runtimeTarget)
                 -DCMAKE_C_VISIBILITY_PRESET=hidden
                 -DCMAKE_VISIBILITY_INLINES_HIDDEN=ON
                 -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+                -DCMAKE_OSX_ARCHITECTURES=${CMAKE_OSX_ARCHITECTURES}
                 -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
                 -DCMAKE_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}
                 -DCMAKE_C_COMPILER_LAUNCHER=${CMAKE_C_COMPILER_LAUNCHER}
