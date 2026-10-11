@@ -62,7 +62,8 @@ struct PthreadRwlockPrivate {
 };
 
 struct PthreadCondattrPrivate {
-    int _clockid;
+    int _clockid = 0;
+    int _pshared = 0;
 };
 
 struct PthreadCondPrivate {

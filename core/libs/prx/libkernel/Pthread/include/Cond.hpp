@@ -13,6 +13,9 @@ extern "C" {
 int APS5_VABI scePthreadCondattrInit(PthreadCondattr* attr);
 int APS5_VABI scePthreadCondattrDestroy(PthreadCondattr* attr);
 int APS5_VABI scePthreadCondattrSetclock(PthreadCondattr* attr, KernelClockid clockId);
+int APS5_VABI scePthreadCondattrGetclock(const PthreadCondattr* attr, KernelClockid* clockId);
+int APS5_VABI scePthreadCondattrSetpshared(PthreadCondattr* attr, int pshared);
+int APS5_VABI scePthreadCondattrGetpshared(const PthreadCondattr* attr, int* pshared);
 int APS5_VABI scePthreadCondInit(PthreadCond* cond, const PthreadCondattr* attr, const char* name);
 int APS5_VABI scePthreadCondDestroy(PthreadCond* cond);
 int APS5_VABI scePthreadCondSignal(PthreadCond* cond);
