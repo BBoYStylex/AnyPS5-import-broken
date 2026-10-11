@@ -33,6 +33,7 @@ std::uint32_t TypeStorageBufferPointer(SpirvEmitterState& state);
 std::uint32_t TypeStorageBufferElementPointer(SpirvEmitterState& state);
 std::uint32_t TypeStorageBufferU64Pointer(SpirvEmitterState& state);
 std::uint32_t TypeStorageBufferU64ElementPointer(SpirvEmitterState& state);
+std::uint32_t StorageBufferNarrowBlockType(SpirvEmitterState& state, std::uint32_t bits);
 std::uint32_t TypePhysicalU32Pointer(SpirvEmitterState& state);
 std::uint32_t TypePushConstantElementPointer(SpirvEmitterState& state);
 std::uint32_t TypeU32ArrayPointer(SpirvEmitterState& state, std::uint32_t storageClass, std::uint32_t dwords);

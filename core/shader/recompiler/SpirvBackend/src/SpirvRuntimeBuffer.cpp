@@ -194,7 +194,7 @@ void writeBuffer(SpirvValueEmitContext& context, const IrValue& instruction, std
     const auto unaligned = nonzero(state, misalignment);
     const auto next = EmitAddU32(state, index, ConstantU32(state, 1u));
     const auto last = Select(state, u32, unaligned, next, index);
-    EmitIfCondition(state, EmitMemoryElementInBounds(state, access, last), [&] {
+    const auto updateWords = [&] {
         auto mask = ConstantU32(state, bits == 32u ? 0xffffffffu : (1u << bits) - 1u);
         auto masked = Binary(state, spv::OpBitwiseAnd, u32, value, mask);
         if (bits != 32u) {
@@ -222,6 +222,42 @@ void writeBuffer(SpirvValueEmitContext& context, const IrValue& instruction, std
                 update(next, Binary(state, spv::OpShiftRightLogical, u32, mask, remaining), Binary(state, spv::OpShiftRightLogical, u32, masked, remaining));
             });
         });
+    };
+    EmitIfCondition(state, EmitMemoryElementInBounds(state, access, last), [&] {
+        if (bits == 32u || state.storageBufferU8Variable == 0u) {
+            updateWords();
+            return;
+        }
+        const auto byte = EmitAddU32(state, EmitAddU32(state, EmitAndConstant(state, access.byteOffset, ~3u), misalignment), address);
+        const auto element = ConstantU32(state, ResourceForDescriptor(state, DescriptorBindingKind::Buffers, context.Memory(instruction).resource));
+        const auto store = [&](std::uint32_t view, std::uint32_t storeBits, std::uint32_t index, std::uint32_t data) {
+            const auto narrow = state.module.Type(spv::OpTypeInt, storeBits, 0u);
+            const auto block = state.module.AllocateId();
+            state.module.AddFunction(spv::OpAccessChain, TypePointer(state, spv::StorageClassStorageBuffer, StorageBufferNarrowBlockType(state, storeBits)), block, view, element);
+            const auto pointer = state.module.AllocateId();
+            state.module.AddFunction(spv::OpAccessChain, TypePointer(state, spv::StorageClassStorageBuffer, narrow), pointer, block, ConstantU32(state, 0u), index);
+            const auto narrowed = Unary(state, spv::OpUConvert, narrow, data);
+            if (access.memoryAccess != 0u) state.module.AddFunction(spv::OpStore, pointer, narrowed, access.memoryAccess);
+            else state.module.AddFunction(spv::OpStore, pointer, narrowed);
+        };
+        if (bits == 8u) {
+            store(state.storageBufferU8Variable, 8u, byte, value);
+            return;
+        }
+        const auto bytes = [&] {
+            store(state.storageBufferU8Variable, 8u, byte, value);
+            const auto second = EmitAddU32(state, byte, ConstantU32(state, 1u));
+            EmitIfCondition(state, EmitMemoryElementInBounds(state, access, Binary(state, spv::OpShiftRightLogical, u32, second, ConstantU32(state, 2u))), [&] {
+                store(state.storageBufferU8Variable, 8u, second, Binary(state, spv::OpShiftRightLogical, u32, value, ConstantU32(state, 8u)));
+            });
+        };
+        if (state.storageBufferU16Variable == 0u) {
+            bytes();
+            return;
+        }
+        const auto even = Binary(state, spv::OpIEqual, TypeBool(state), EmitAndConstant(state, byte, 1u), ConstantU32(state, 0u));
+        EmitIfCondition(state, even, [&] { store(state.storageBufferU16Variable, 16u, Binary(state, spv::OpShiftRightLogical, u32, byte, ConstantU32(state, 1u)), value); });
+        EmitIfCondition(state, Unary(state, spv::OpLogicalNot, TypeBool(state), even), bytes);
     });
 }
 

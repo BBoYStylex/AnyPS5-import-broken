@@ -245,6 +245,7 @@ Module Inspect(const CompiledShader& compiled, const State& state, const VkPhysi
                     capability == spv::CapabilityDenormPreserve ||
                     capability == spv::CapabilityFloat64 ||
                     capability == spv::CapabilityStorageBuffer8BitAccess ||
+                    capability == spv::CapabilityStorageBuffer16BitAccess ||
                     capability == spv::CapabilityPhysicalStorageBufferAddresses ||
                     capability == spv::CapabilitySampledImageArrayDynamicIndexing ||
                     capability == spv::CapabilityStorageImageArrayDynamicIndexing;

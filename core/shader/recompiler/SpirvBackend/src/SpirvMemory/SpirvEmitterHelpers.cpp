@@ -389,14 +389,25 @@ void DefineDescriptors(SpirvEmitterState& state) {
             state.storageBufferVariable = Define(ArrayType(StorageBufferBlockType(state)), "buffers");
             if (state.requirements.coherentBufferAlias) state.storageBufferCoherentVariable = Define(ArrayType(StorageBufferBlockType(state)), "buffers_coherent");
             if (state.requirements.bufferInt64Atomics) state.storageBufferU64Variable = Define(ArrayType(StorageBufferU64BlockType(state)), "buffers_u64");
-            if (state.storageBufferU64Variable != 0u || state.storageBufferCoherentVariable != 0u) {
-                for (const auto variable : {state.storageBufferVariable, state.storageBufferCoherentVariable, state.storageBufferU64Variable}) {
+            if ((state.requirements.bufferByteStores || state.requirements.bufferShortStores) && std::ranges::find(state.supportedCapabilities, static_cast<std::uint32_t>(spv::CapabilityStorageBuffer8BitAccess)) != state.supportedCapabilities.end()) {
+                state.module.EmitCapability(spv::CapabilityStorageBuffer8BitAccess);
+                state.module.EmitExtension("SPV_KHR_8bit_storage");
+                state.storageBufferU8Variable = Define(ArrayType(StorageBufferNarrowBlockType(state, 8u)), "buffers_u8");
+            }
+            if (state.requirements.bufferShortStores && std::ranges::find(state.supportedCapabilities, static_cast<std::uint32_t>(spv::CapabilityStorageBuffer16BitAccess)) != state.supportedCapabilities.end()) {
+                state.module.EmitCapability(spv::CapabilityStorageBuffer16BitAccess);
+                state.storageBufferU16Variable = Define(ArrayType(StorageBufferNarrowBlockType(state, 16u)), "buffers_u16");
+            }
+            if (state.storageBufferU64Variable != 0u || state.storageBufferCoherentVariable != 0u || state.storageBufferU8Variable != 0u || state.storageBufferU16Variable != 0u) {
+                for (const auto variable : {state.storageBufferVariable, state.storageBufferCoherentVariable, state.storageBufferU64Variable, state.storageBufferU8Variable, state.storageBufferU16Variable}) {
                     if (variable != 0u) state.module.AddAnnotation(spv::OpDecorate, variable, spv::DecorationAliased);
                 }
             }
             if (state.requirements.coherentBuffers) {
                 state.module.AddAnnotation(spv::OpDecorate, state.storageBufferCoherentVariable != 0u ? state.storageBufferCoherentVariable : state.storageBufferVariable, spv::DecorationCoherent);
-                if (state.storageBufferU64Variable != 0u) state.module.AddAnnotation(spv::OpDecorate, state.storageBufferU64Variable, spv::DecorationCoherent);
+                for (const auto variable : {state.storageBufferU64Variable, state.storageBufferU8Variable, state.storageBufferU16Variable}) {
+                    if (variable != 0u) state.module.AddAnnotation(spv::OpDecorate, variable, spv::DecorationCoherent);
+                }
             }
             break;
         case DescriptorBindingKind::BdaPagetable:

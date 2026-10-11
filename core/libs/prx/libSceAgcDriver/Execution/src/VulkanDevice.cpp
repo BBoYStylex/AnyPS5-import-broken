@@ -883,6 +883,15 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window) : state(std::make_u
         state->capabilities.push_back(spv::CapabilityShaderClockKHR);
         state->spirvExtensions.push_back("SPV_KHR_shader_clock");
     }
+    VkPhysicalDevice16BitStorageFeatures shortFeatures{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES};
+    {
+        VkPhysicalDeviceFeatures2 features{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &shortFeatures};
+        state->InstanceFunction<PFN_vkGetPhysicalDeviceFeatures2>("vkGetPhysicalDeviceFeatures2")(selected, &features);
+    }
+    const bool shortStorage = shortFeatures.storageBuffer16BitAccess == VK_TRUE;
+    shortFeatures = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES};
+    shortFeatures.storageBuffer16BitAccess = VK_TRUE;
+    if (shortStorage) state->capabilities.push_back(spv::CapabilityStorageBuffer16BitAccess);
     VkPhysicalDeviceShaderAtomicInt64FeaturesKHR atomicInt64Features{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_INT64_FEATURES_KHR};
     if (hasExtension(VK_KHR_SHADER_ATOMIC_INT64_EXTENSION_NAME)) {
         VkPhysicalDeviceFeatures2 features{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &atomicInt64Features};
@@ -1216,6 +1225,10 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window) : state(std::make_u
     if (float16Rte) {
         float16Features.pNext = byteFeatures.pNext;
         byteFeatures.pNext = &float16Features;
+    }
+    if (shortStorage) {
+        shortFeatures.pNext = byteFeatures.pNext;
+        byteFeatures.pNext = &shortFeatures;
     }
     if (bufferInt64Atomics) {
         atomicInt64Features.pNext = byteFeatures.pNext;
