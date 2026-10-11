@@ -1117,13 +1117,16 @@ std::uint32_t EmitFPUnordEqual32(SpirvEmitterState& state, std::uint32_t arg0, s
     return EmitNative<spv::OpFUnordEqual, IrType::U1>(state, arg0, arg1);
 }
 
-std::uint32_t EmitFPOrdNotEqual32(SpirvEmitterState& state, std::uint32_t arg0, std::uint32_t arg1) {
+static std::uint32_t BothOrderedBits32(SpirvEmitterState& state, std::uint32_t arg0, std::uint32_t arg1) {
     const auto ordered = [&](std::uint32_t value) {
         const auto magnitude = EmitNative<spv::OpBitwiseAnd, IrType::U32>(state, EmitNative<spv::OpBitcast, IrType::U32>(state, value), ConstantU32(state, 0x7fffffffu));
         return EmitNative<spv::OpULessThanEqual, IrType::U1>(state, magnitude, ConstantU32(state, 0x7f800000u));
     };
-    const auto bothOrdered = EmitNative<spv::OpLogicalAnd, IrType::U1>(state, ordered(arg0), ordered(arg1));
-    return EmitNative<spv::OpLogicalAnd, IrType::U1>(state, EmitNative<spv::OpFUnordNotEqual, IrType::U1>(state, arg0, arg1), bothOrdered);
+    return EmitNative<spv::OpLogicalAnd, IrType::U1>(state, ordered(arg0), ordered(arg1));
+}
+
+std::uint32_t EmitFPOrdNotEqual32(SpirvEmitterState& state, std::uint32_t arg0, std::uint32_t arg1) {
+    return EmitNative<spv::OpLogicalAnd, IrType::U1>(state, EmitNative<spv::OpFUnordNotEqual, IrType::U1>(state, arg0, arg1), BothOrderedBits32(state, arg0, arg1));
 }
 
 std::uint32_t EmitFPUnordNotEqual32(SpirvEmitterState& state, std::uint32_t arg0, std::uint32_t arg1) {
@@ -1131,7 +1134,7 @@ std::uint32_t EmitFPUnordNotEqual32(SpirvEmitterState& state, std::uint32_t arg0
 }
 
 std::uint32_t EmitFPOrdLessThan32(SpirvEmitterState& state, std::uint32_t arg0, std::uint32_t arg1) {
-    return EmitNative<spv::OpFOrdLessThan, IrType::U1>(state, arg0, arg1);
+    return EmitNative<spv::OpLogicalAnd, IrType::U1>(state, EmitNative<spv::OpFOrdLessThan, IrType::U1>(state, arg0, arg1), BothOrderedBits32(state, arg0, arg1));
 }
 
 std::uint32_t EmitFPUnordLessThan32(SpirvEmitterState& state, std::uint32_t arg0, std::uint32_t arg1) {
@@ -1139,7 +1142,7 @@ std::uint32_t EmitFPUnordLessThan32(SpirvEmitterState& state, std::uint32_t arg0
 }
 
 std::uint32_t EmitFPOrdGreaterThan32(SpirvEmitterState& state, std::uint32_t arg0, std::uint32_t arg1) {
-    return EmitNative<spv::OpFOrdGreaterThan, IrType::U1>(state, arg0, arg1);
+    return EmitNative<spv::OpLogicalAnd, IrType::U1>(state, EmitNative<spv::OpFOrdGreaterThan, IrType::U1>(state, arg0, arg1), BothOrderedBits32(state, arg0, arg1));
 }
 
 std::uint32_t EmitFPUnordGreaterThan32(SpirvEmitterState& state, std::uint32_t arg0, std::uint32_t arg1) {
