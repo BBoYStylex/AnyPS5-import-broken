@@ -363,6 +363,20 @@ int APS5_VABI sched_get_priority_min_nid_postfix(int policy) {
     return 767;
 }
 
+int APS5_VABI getpriority_nid_postfix(int which, int who) {
+    if (which != guestPriorityProcess && which != guestPriorityGroup && which != guestPriorityUser) {
+        *__error_nid_postfix() = guestInvalid;
+        return -1;
+    }
+    const bool found = which == guestPriorityUser ? (who == 0 ? getuid_nid_postfix() : who) == getuid_nid_postfix()
+                                                  : who == 0 || who == getpid_nid_postfix();
+    if (!found) {
+        *__error_nid_postfix() = guestNoProcess;
+        return -1;
+    }
+    return guestNice;
+}
+
 int APS5_VABI getrusage_nid_postfix(int who, GuestResourceUsage* usage) {
     if (usage == nullptr)
         throw std::invalid_argument("getrusage: usage is null");
@@ -452,20 +466,6 @@ int APS5_VABI getrlimit_nid_postfix(int resource, GuestResourceLimit* limit) {
     limit->rlim_max = toGuestLimit(native.rlim_max);
 #endif
     return 0;
-}
-
-int APS5_VABI getpriority_nid_postfix(int which, int who) {
-    if (which != guestPriorityProcess && which != guestPriorityGroup && which != guestPriorityUser) {
-        *__error_nid_postfix() = guestInvalid;
-        return -1;
-    }
-    const bool found = which == guestPriorityUser ? (who == 0 ? getuid_nid_postfix() : who) == getuid_nid_postfix()
-                                                  : who == 0 || who == getpid_nid_postfix();
-    if (!found) {
-        *__error_nid_postfix() = guestNoProcess;
-        return -1;
-    }
-    return guestNice;
 }
 
 int APS5_VABI sceKernelIsTrinityMode(void) {
