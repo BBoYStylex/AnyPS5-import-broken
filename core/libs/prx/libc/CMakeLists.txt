@@ -8,6 +8,7 @@ target_sources(libc PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src/specifics/macos/GuestImages.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/Strings.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/AllocatingStrings.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/GuestByteCopyUntil.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/WideConversion.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/Multibyte.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/RuneLocale.cpp
@@ -140,6 +141,16 @@ if(BUILD_TESTING)
     add_test(NAME guest_character COMMAND guest_character_tests)
     if(WIN32)
         set_tests_properties(guest_character PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+    endif()
+    add_test_executable(guest_libc_byte_copy_until_tests ${LIBS_INCLUDE_DIR}/tests/GuestLibcByteCopyUntil.cpp)
+    target_include_directories(guest_libc_byte_copy_until_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_libc_byte_copy_until_tests PRIVATE libc)
+    configure_windows_unwind(guest_libc_byte_copy_until_tests)
+    add_test(NAME guest_libc_byte_copy_until COMMAND guest_libc_byte_copy_until_tests)
+    set_tests_properties(guest_libc_byte_copy_until PROPERTIES TIMEOUT 10)
+    if(WIN32)
+        set_tests_properties(guest_libc_byte_copy_until PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
     endif()
     add_test_executable(guest_math_tests ${LIBS_INCLUDE_DIR}/tests/GuestMath.cpp)
