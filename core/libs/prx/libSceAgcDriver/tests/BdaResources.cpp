@@ -762,6 +762,8 @@ void hostWriteWatchExclusionTests() {
                 Require(!AgcDriver::GuestMemory::UnchangedSince(cursor, 1, 1), "an arena host hole passed an unchanged proof");
                 const std::array queries{AgcDriver::GuestMemory::UnchangedQuery{cursor, 1, 1}};
                 Require(!AgcDriver::GuestMemory::UnchangedSinceAll(queries), "an arena host hole passed a bulk unchanged proof");
+                Require(!AgcDriver::GuestMemory::UnchangedSinceCollected(cursor, 1, 1), "an arena host hole passed a collected unchanged proof");
+                Require(AgcDriver::GuestMemory::StoredOver(cursor, 1, 1), "an arena host hole was proven not stored over");
                 found = true;
                 break;
             }
