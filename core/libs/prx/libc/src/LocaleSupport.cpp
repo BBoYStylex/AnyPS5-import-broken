@@ -16,6 +16,7 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 
 #include "prx/libc/include/General.hpp"
 #include "prx/libc/include/SonyCrt.hpp"
@@ -80,10 +81,10 @@ const GuestLocale::FacetVtable g_copiedLocaleVtable{DestroyCopiedLocale, Destroy
 GuestLocale::Facet* g_classicFacets[1]{};
 GuestLocale::Implementation g_classicLocale{{&g_localeVtable, 1, 0}, g_classicFacets, 1, 0, false, "C"};
 
-constexpr std::size_t GuestStringInlineCapacity = 15;
 constexpr std::size_t GuestStringLargeAllocation = 0x1000;
 
-void ValidateCharacterRange(const char* first, const char* last, const char* function) {
+template<typename TChar>
+void ValidateCharacterRange(const TChar* first, const TChar* last, const char* function) {
     if ((first == nullptr) != (last == nullptr) || last < first) throw std::invalid_argument(std::string(function) + ": invalid character range");
 }
 
@@ -104,46 +105,69 @@ GuestLocale::Facet* APS5_VABI ReleaseFacet(GuestLocale::Facet* self) {
     return std::atomic_ref<std::uint32_t>(self->references).fetch_sub(1) == 1 ? self : nullptr;
 }
 
-int APS5_VABI CollateCompare(const GuestLocale::CollateFacet*, const char* first1, const char* last1, const char* first2, const char* last2) {
+template<typename TChar>
+int APS5_VABI CollateCompare(const GuestLocale::CollateFacet*, const TChar* first1, const TChar* last1, const TChar* first2, const TChar* last2) {
+    using Unit = std::make_unsigned_t<TChar>;
     ValidateCharacterRange(first1, last1, "collate::do_compare");
     ValidateCharacterRange(first2, last2, "collate::do_compare");
-    const auto length1 = static_cast<std::size_t>(last1 - first1);
-    const auto length2 = static_cast<std::size_t>(last2 - first2);
-    const auto common = std::min(length1, length2);
-    const int order = common == 0 ? 0 : std::memcmp(first1, first2, common);
-    if (order != 0) return order < 0 ? -1 : 1;
-    if (length1 == length2) return 0;
-    return length1 < length2 ? -1 : 1;
+    for (; first1 != last1 && first2 != last2; ++first1, ++first2) {
+        const auto left = static_cast<Unit>(*first1);
+        const auto right = static_cast<Unit>(*first2);
+        if (left != right) return left < right ? -1 : 1;
+    }
+    if (first1 != last1) return 1;
+    return first2 == last2 ? 0 : -1;
 }
 
-GuestLocale::String* APS5_VABI CollateTransform(GuestLocale::String* result, const GuestLocale::CollateFacet*, const char* first, const char* last) {
+template<typename TChar>
+GuestLocale::BasicString<TChar>* APS5_VABI CollateTransform(GuestLocale::BasicString<TChar>* result, const GuestLocale::CollateFacet*, const TChar* first, const TChar* last) {
     if (result == nullptr) throw std::invalid_argument("collate::do_transform: null result");
     ValidateCharacterRange(first, last, "collate::do_transform");
     const auto length = static_cast<std::size_t>(last - first);
-    if (length != 0 && std::memchr(first, 0, length) != nullptr) throw std::runtime_error("collate::do_transform: embedded null characters are not supported");
-    if (length + 1 >= GuestStringLargeAllocation) throw std::runtime_error("collate::do_transform: results of 4095 characters or more are not supported");
-    char* data = result->buffer;
-    std::size_t capacity = GuestStringInlineCapacity;
-    if (length > GuestStringInlineCapacity) {
+    if (std::find(first, last, TChar{}) != last) throw std::runtime_error("collate::do_transform: embedded null characters are not supported");
+    if ((length + 1) * sizeof(TChar) >= GuestStringLargeAllocation) throw std::runtime_error("collate::do_transform: results of 4096 bytes or more are not supported");
+    TChar* data = result->buffer;
+    std::size_t capacity = GuestLocale::BasicString<TChar>::InlineCapacity;
+    if (length > capacity) {
         capacity = length;
-        data = static_cast<char*>(_Znwm_nid_postfix(capacity + 1));
+        data = static_cast<TChar*>(_Znwm_nid_postfix((capacity + 1) * sizeof(TChar)));
     }
-    if (length != 0) std::memcpy(data, first, length);
-    data[length] = 0;
+    if (length != 0) std::memcpy(data, first, length * sizeof(TChar));
+    data[length] = TChar{};
     if (data != result->buffer) result->pointer = data;
     result->size = length;
     result->capacity = capacity;
     return result;
 }
 
-std::int64_t APS5_VABI CollateHash(const GuestLocale::CollateFacet*, const char* first, const char* last) {
+template<typename TChar>
+std::int64_t APS5_VABI CollateHash(const GuestLocale::CollateFacet*, const TChar* first, const TChar* last) {
     ValidateCharacterRange(first, last, "collate::do_hash");
     std::uint64_t hash = 0xcbf29ce484222325;
-    for (; first != last; ++first) hash = (hash ^ static_cast<unsigned char>(*first)) * 0x100000001b3;
+    for (; first != last; ++first) {
+        const auto unit = static_cast<std::make_unsigned_t<TChar>>(*first);
+        for (std::size_t byte = 0; byte < sizeof(TChar); ++byte) hash = (hash ^ ((unit >> (8 * byte)) & 0xff)) * 0x100000001b3;
+    }
     return static_cast<std::int64_t>(hash);
 }
 
-const GuestLocale::CollateVtable g_collateVtable{{DestroyCollate, DeleteCollate, RetainFacet, ReleaseFacet}, CollateCompare, CollateTransform, CollateHash};
+template<typename TChar>
+constexpr GuestLocale::BasicCollateVtable<TChar> MakeCollateVtable() {
+    return {{DestroyCollate, DeleteCollate, RetainFacet, ReleaseFacet}, CollateCompare<TChar>, CollateTransform<TChar>, CollateHash<TChar>};
+}
+
+const GuestLocale::CollateVtable g_collateVtable = MakeCollateVtable<char>();
+const GuestLocale::WideCollateVtable g_wideCollateVtable = MakeCollateVtable<char16_t>();
+
+std::size_t GetCollate(GuestLocale::Facet** facet, const GuestLocale::Implementation* const* locale, const GuestLocale::FacetVtable* vtable) {
+    if (facet != nullptr && *facet == nullptr) {
+        if (locale == nullptr || *locale == nullptr || (*locale)->name == nullptr || std::strcmp((*locale)->name, "C") != 0) throw std::invalid_argument("collate::_Getcat: only the C locale is supported");
+        auto* collate = static_cast<GuestLocale::CollateFacet*>(_Znwm_nid_postfix(sizeof(GuestLocale::CollateFacet)));
+        *collate = {{vtable, 0, 0}, nullptr, nullptr};
+        *facet = &collate->base;
+    }
+    return 1;
+}
 
 constexpr std::array<short, 257> MakeClassificationTable() {
     std::array<short, 257> table{};
@@ -259,18 +283,12 @@ GuestLocale::Implementation* APS5_VABI _ZNSt6locale16_GetgloballocaleEv_nid_post
     return &g_classicLocale;
 }
 
-void APS5_VABI _ZNSt7collateIwE7_GetcatEPPKNSt6locale5facetEPKS1__nid_postfix(GuestLocale::Facet**, const GuestLocale::Implementation*) {
-    NotImplemented_nid_no_patch(__func__);
+std::size_t APS5_VABI _ZNSt7collateIwE7_GetcatEPPKNSt6locale5facetEPKS1__nid_postfix(GuestLocale::Facet** facet, const GuestLocale::Implementation* const* locale) {
+    return GetCollate(facet, locale, &g_wideCollateVtable.facet);
 }
 
 std::size_t APS5_VABI _ZNSt7collateIcE7_GetcatEPPKNSt6locale5facetEPKS1__nid_postfix(GuestLocale::Facet** facet, const GuestLocale::Implementation* const* locale) {
-    if (facet != nullptr && *facet == nullptr) {
-        if (locale == nullptr || *locale == nullptr || (*locale)->name == nullptr || std::strcmp((*locale)->name, "C") != 0) throw std::invalid_argument("collate::_Getcat: only the C locale is supported");
-        auto* collate = static_cast<GuestLocale::CollateFacet*>(_Znwm_nid_postfix(sizeof(GuestLocale::CollateFacet)));
-        *collate = {{&g_collateVtable.facet, 0, 0}, nullptr, nullptr};
-        *facet = &collate->base;
-    }
-    return 1;
+    return GetCollate(facet, locale, &g_collateVtable.facet);
 }
 
 void APS5_VABI _ZNSt8_LocinfoC1EPKc_nid_postfix(GuestLocale::LocinfoStorage* self, const char* localeName) {
