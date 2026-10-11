@@ -462,7 +462,7 @@ void GuestAllocationsUnmap_nid_postfix(void* mutation, const void* pointer, std:
         const Range* containing = nullptr;
         if (found != registry().ranges.begin()) {
             const auto& candidate = *std::prev(found)->second;
-            if (cursor < candidate.allocationAddress + candidate.allocationBytes) containing = &candidate;
+            if (cursor < candidate.address + candidate.bytes) containing = &candidate;
         }
         if (containing == nullptr) {
             if (found == registry().ranges.end() || found->first >= end) break;
@@ -471,7 +471,9 @@ void GuestAllocationsUnmap_nid_postfix(void* mutation, const void* pointer, std:
         }
         const auto range = *containing;
         require(range.releasable, "guest image memory cannot be unmapped");
-        const auto pieceEnd = std::min<std::uint64_t>(end, range.allocationAddress + range.allocationBytes);
+        // Pieces stop at the containing range's end, not the allocation's, so a
+        // hole left by an earlier unmap ends the piece; the loop picks up after it.
+        const auto pieceEnd = std::min<std::uint64_t>(end, range.address + range.bytes);
         auto replacement = replaceRange(reinterpret_cast<const void*>(cursor), pieceEnd - cursor, true, false, false, false);
         bool last = true;
         for (const auto& [base, entry] : replacement) {
@@ -482,7 +484,7 @@ void GuestAllocationsUnmap_nid_postfix(void* mutation, const void* pointer, std:
         any = true;
         cursor = pieceEnd;
     }
-    require(any, "unmap address is not registered");
+    // A range with no mappings is not an error, as in FreeBSD's vm_map_delete.
 }
 
 Lease GuestAllocationsAcquire_nid_postfix() {

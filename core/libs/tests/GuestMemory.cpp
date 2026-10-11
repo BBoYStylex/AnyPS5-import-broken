@@ -1621,6 +1621,20 @@ static void CheckVirtualQueryPartialMunmap() {
     Require(munmap_nid_postfix(memory + page * 2, page) == 0);
 }
 
+static void CheckMunmapRangeWithUnmappedPage() {
+    constexpr std::size_t page = 0x4000;
+    const auto failed = reinterpret_cast<void*>(static_cast<std::uintptr_t>(-1));
+    void* raw = mmap_nid_postfix(nullptr, page * 3, 3, 0x1002, -1, 0);
+    Require(raw != failed);
+    auto* memory = static_cast<unsigned char*>(raw);
+    Require(munmap_nid_postfix(memory + page, page) == 0);
+    // FreeBSD's munmap removes whatever lies in the range and skips gaps.
+    Require(munmap_nid_postfix(memory, page * 3) == 0);
+    VirtualQueryInfo gone{};
+    Require(sceKernelVirtualQuery(memory, 0, &gone, sizeof(gone)) == SCE_KERNEL_ERROR_EACCES);
+    Require(munmap_nid_postfix(memory, page * 3) == 0); // POSIX: no mapping is no error
+}
+
 int main() {
 #ifdef _WIN32
     _putenv_s("APS5_PIN_WAIT_MS", "1000");
@@ -1629,6 +1643,7 @@ int main() {
     CheckVirtualQueryForNonReadableGuestRange();
     CheckReleaseFlexibleMemory();
     CheckVirtualQueryPartialMunmap();
+    CheckMunmapRangeWithUnmappedPage();
     CheckNamedAndHintedMappings();
     CheckInternalNamedFlexibleMapping();
     CheckBatchMapStopsAtInvalidEntry();
@@ -1740,7 +1755,7 @@ int main() {
     Require(munmap_nid_postfix(memory, page) == 0);
     Require(memory[page * 2] == 73);
     Require(munmap_nid_postfix(memory + page * 2, page) == 0);
-    Require(munmap_nid_postfix(memory, page) == -1);
+    Require(munmap_nid_postfix(memory, page) == 0); // a range with no mappings is not an error
     Require(madvise_nid_postfix(memory, page, 4) == 0);
     *__error_nid_postfix() = 0;
     Require(mprotect_nid_postfix(memory, page, 1) == -1 && *__error_nid_postfix() == 22);

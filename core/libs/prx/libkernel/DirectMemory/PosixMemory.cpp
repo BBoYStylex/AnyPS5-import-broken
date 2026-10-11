@@ -90,7 +90,7 @@ int APS5_VABI munmap_nid_postfix(void* address, std::size_t length) noexcept {
     } catch (const std::bad_alloc&) {
         return failed(GuestNoMemory);
     } catch (const std::exception&) {
-        // The allocation tracker rejects foreign, pinned, and noncontiguous ranges.
+        // The allocation tracker rejects foreign and pinned ranges.
         return failed(GuestInvalid);
     }
 }
