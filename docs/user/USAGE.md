@@ -167,3 +167,36 @@ The report also lists needed libraries that have no file in `--libs` or `--modul
 Exit codes: `0` nothing blocks loading, `1` there are `absent` imports or needed libraries without a file, `2` an input could not be read; the message names the file and the value.
 
 A module registry lists `nid`, `library` and `targetOffset` for each relocation against a function that no other bundled module exports, without the `#` suffix of the executable's NIDs.
+
+## Plan library contributions across titles
+
+[`tools/library_impact.py`](../../tools/library_impact.py) ranks missing and throwing-stub functions across several import audits. Generate one audit per title, passing all of its executable and module registries, then describe the reports in a collection manifest:
+
+```sh
+python3 tools/import_audit.py alpha.registry.json --libs build/core/libs/libs --json alpha.audit.json
+python3 tools/import_audit.py beta.registry.json --libs build/core/libs/libs --json beta.audit.json
+```
+
+```json
+{
+  "version": 1,
+  "titles": [
+    {"id": "alpha", "label": "Alpha", "audit": "alpha.audit.json"},
+    {"id": "beta", "label": "Beta", "audit": "beta.audit.json"}
+  ]
+}
+```
+
+```sh
+python3 tools/library_impact.py titles.json --budget 5
+python3 tools/library_impact.py titles.json --budget 5 --json > contribution-plan.json
+python3 tools/library_impact.py titles.json --baseline previous/titles.json --fail-on-regression --json
+```
+
+Audit paths are relative to the collection manifest. Every audit in a collection must have the same source commit and dirty-state stamp; use matching built libraries and platforms when generating them. The tool verifies import/reference totals, NIDs and classifications and rejects duplicate reports or title ids. The stamp describes the source tree rather than proving the binaries were built from it; unknown stamps remain unknown in the result.
+
+Candidates are keyed by library and NID. Rankings count distinct affected titles and callsite references separately, and prioritize functions that would close a title's final reported function gap. Bundled-module providers and implemented exports are excluded. JSON output includes complete sets of missing/stub functions for each title and a deterministic greedy plan within `--budget`; the plan prefers completing remaining sets, then wider title coverage. It is a prioritization heuristic, not an estimate of implementation effort or a proof of an optimal plan. Unverified symbol names are retained separately and omitted from the text labels.
+
+Missing library files and provider mismatches remain visible separately. Removing all reported function gaps does not demonstrate that a title runs correctly or renders; audit classifications cannot establish function semantics. Use the plan to choose contributions, then implement and test the actual functions.
+
+Snapshot comparisons distinguish resolved gaps, absent-to-stub partial progress, regressions, new gaps and removed imports. A removed import is not counted as an implemented function. Added and removed title ids are reported without comparing unrelated titles. With `--fail-on-regression`, exit code `1` indicates a worse import class, a new gap, a new missing library or a new provider mismatch in a title present in both snapshots. Exit code `2` indicates invalid inputs; otherwise the command returns `0`. No third-party packages, network access or title binaries are needed to analyze existing audit reports.
