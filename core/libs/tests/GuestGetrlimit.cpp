@@ -14,6 +14,7 @@ struct ResourceLimit {
 
 extern "C" int APS5_VABI getrlimit_nid_postfix(int resource, ResourceLimit* limit);
 extern "C" int* APS5_VABI __error_nid_postfix();
+extern "C" int APS5_VABI getdtablesize_nid_postfix(void);
 
 static constexpr int GUEST_EFAULT = 14;
 static constexpr int GUEST_EINVAL = 22;
@@ -73,6 +74,16 @@ static void RequireUnsupported(int resource) {
     Require(rejected);
 }
 
+static void RequireTableSizeUnsupported() {
+    bool rejected = false;
+    try {
+        getdtablesize_nid_postfix();
+    } catch (const std::runtime_error&) {
+        rejected = true;
+    }
+    Require(rejected);
+}
+
 int main() {
 #ifdef _WIN32
     GuestLimit(GUEST_RLIMIT_DATA);
@@ -87,4 +98,5 @@ int main() {
     RequireError(GUEST_RLIMIT_DATA, nullptr, GUEST_EFAULT);
     RequireUnsupported(GUEST_RLIMIT_NOFILE);
     RequireUnsupported(GUEST_RLIMIT_AS);
+    RequireTableSizeUnsupported();
 }
