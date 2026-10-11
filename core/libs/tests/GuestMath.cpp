@@ -3,6 +3,7 @@
 #include <cerrno>
 #include <cfenv>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -11,6 +12,7 @@
 #include <initializer_list>
 extern "C" {
 double APS5_VABI atof_nid_postfix(const char*);
+double APS5_VABI strtod_nid_postfix(const char*, char**);
 float APS5_VABI strtof_nid_postfix(const char*, char**);
 long double APS5_VABI strtold_nid_postfix(const char*, char**);
 std::int64_t APS5_VABI strtol_nid_postfix(const char*, char**, int);
@@ -328,6 +330,33 @@ static void CheckFloatClassification() {
     Require(_FDtest_nid_postfix(reinterpret_cast<const float*>(&_FNan_nid_postfix)) == 2);
 }
 
+static void CheckFloatingWithoutConversion() {
+    for (const char* text : {"-", "-.", "-x", "-.e1", "- 1", "-e5", "+", " -"}) {
+        char* end = nullptr;
+        const double value = strtod_nid_postfix(text, &end);
+        Require(value == 0. && !std::signbit(value) && end == text);
+        Require(!std::signbit(strtod_nid_postfix(text, nullptr)));
+        const float single = strtof_nid_postfix(text, &end);
+        Require(single == 0.f && !std::signbit(single) && end == text);
+        Require(!std::signbit(strtof_nid_postfix(text, nullptr)));
+        const long double extended = strtold_nid_postfix(text, &end);
+        Require(extended == 0.L && !std::signbit(extended) && end == text);
+        Require(!std::signbit(strtold_nid_postfix(text, nullptr)));
+        Require(!std::signbit(atof_nid_postfix(text)));
+    }
+    for (const char* text : {"-0", "-.0", "-0e5", "-0x0p0"}) {
+        char* end = nullptr;
+        const auto length = static_cast<std::ptrdiff_t>(std::strlen(text));
+        const double value = strtod_nid_postfix(text, &end);
+        Require(value == 0. && std::signbit(value) && end - text == length);
+        const float single = strtof_nid_postfix(text, &end);
+        Require(single == 0.f && std::signbit(single) && end - text == length);
+        const long double extended = strtold_nid_postfix(text, &end);
+        Require(extended == 0.L && std::signbit(extended) && end - text == length);
+        Require(std::signbit(atof_nid_postfix(text)));
+    }
+}
+
 static void CheckDoubleRounding(double value, std::int64_t expected, bool invalid) {
     for (const bool useLlround : {false, true}) {
         std::feclearexcept(FE_ALL_EXCEPT);
@@ -363,6 +392,7 @@ int main() {
     Require(std::isinf(strtof_nid_postfix("1e1000", nullptr)));
     Require(*__error_nid_postfix() == 34);
     Require(strtold_nid_postfix("1.0000000000000000001!", &end) > 1.L && *end == '!');
+    CheckFloatingWithoutConversion();
     Require(fmodf_nid_postfix(5.5f, 2.f) == 1.5f);
     Require(fmodf_nid_postfix(-5.5f, 2.f) == -1.5f);
     Require(std::signbit(fmodf_nid_postfix(-4.f, 2.f)));

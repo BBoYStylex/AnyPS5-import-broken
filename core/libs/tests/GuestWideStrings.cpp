@@ -1,5 +1,6 @@
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include <climits>
+#include <cmath>
 #include <cstddef>
 #include <cstdlib>
 #include <initializer_list>
@@ -141,6 +142,18 @@ int main() {
     require(wcstof_nid_postfix(u"0.25", nullptr) == 0.25f);
     const char16_t* half = u"-1.5é";
     require(wcstold_nid_postfix(half, &end) == -1.5L && end == half + 4);
+    for (const char16_t* sign : {u"-", u"-.", u"-x", u"-.e1", u"-e5", u"-é"}) {
+        const double value = wcstod_nid_postfix(sign, &end);
+        require(value == 0.0 && !std::signbit(value) && end == sign);
+        const float single = wcstof_nid_postfix(sign, &end);
+        require(single == 0.0f && !std::signbit(single) && end == sign);
+        const long double extended = wcstold_nid_postfix(sign, &end);
+        require(extended == 0.0L && !std::signbit(extended) && end == sign);
+    }
+    const char16_t* negativeZero = u"-0é";
+    require(std::signbit(wcstod_nid_postfix(negativeZero, &end)) && end == negativeZero + 2);
+    require(std::signbit(wcstof_nid_postfix(negativeZero, &end)) && end == negativeZero + 2);
+    require(std::signbit(wcstold_nid_postfix(negativeZero, &end)) && end == negativeZero + 2);
 
     require(wcscoll_nid_postfix(u"a", u"b") < 0);
     require(wcscoll_nid_postfix(u"￿", u"a") > 0);

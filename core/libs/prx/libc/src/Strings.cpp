@@ -45,6 +45,14 @@ auto ParseAsciiPrefix(const char16_t* text, char16_t** end, TParse parse) {
     return value;
 }
 
+template<typename TValue, typename TParse>
+TValue ParseFloating(const char* text, char** end, TParse parse) {
+    char* parsedEnd = nullptr;
+    const TValue value = parse(text, &parsedEnd);
+    if (end != nullptr) *end = parsedEnd;
+    return parsedEnd == text ? TValue{} : value;
+}
+
 }
 
 extern "C" {
@@ -165,14 +173,16 @@ unsigned long long APS5_VABI strtoull_nid_postfix(const char* str, char** endptr
 }
 
 double APS5_VABI strtod_nid_postfix(const char* str, char** endptr) {
-    return std::strtod(str, endptr);
+    return ParseFloating<double>(str, endptr, [](const char* text, char** end) { return std::strtod(text, end); });
 }
 
-double APS5_VABI atof_nid_postfix(const char* str) { return std::atof(str); }
-float APS5_VABI strtof_nid_postfix(const char* str, char** endptr) { return std::strtof(str, endptr); }
+double APS5_VABI atof_nid_postfix(const char* str) { return strtod_nid_postfix(str, nullptr); }
+float APS5_VABI strtof_nid_postfix(const char* str, char** endptr) {
+    return ParseFloating<float>(str, endptr, [](const char* text, char** end) { return std::strtof(text, end); });
+}
 long double APS5_VABI strtold_nid_postfix(const char* str, char** endptr) {
     static_assert(sizeof(long double) == 16, "Guest long double requires x87 extended precision storage");
-    return std::strtold(str, endptr);
+    return ParseFloating<long double>(str, endptr, [](const char* text, char** end) { return std::strtold(text, end); });
 }
 
 int APS5_VABI atoi_nid_postfix(const char* str) {
@@ -433,17 +443,17 @@ char16_t* APS5_VABI wmemset_nid_postfix(char16_t* s, char16_t c, size_t n) {
 }
 
 double APS5_VABI wcstod_nid_postfix(const char16_t* str, char16_t** endptr) {
-    return ParseAsciiPrefix(str, endptr, [](const char* text, char** end) { return std::strtod(text, end); });
+    return ParseAsciiPrefix(str, endptr, [](const char* text, char** end) { return strtod_nid_postfix(text, end); });
 }
 
 float APS5_VABI wcstof_nid_postfix(const char16_t* str, char16_t** endptr) {
-    return ParseAsciiPrefix(str, endptr, [](const char* text, char** end) { return std::strtof(text, end); });
+    return ParseAsciiPrefix(str, endptr, [](const char* text, char** end) { return strtof_nid_postfix(text, end); });
 }
 
 long double APS5_VABI wcstold_nid_postfix(const char16_t* str, char16_t** endptr) {
     static_assert(sizeof(long double) == 16);
     static_assert(std::numeric_limits<long double>::digits == 64);
-    return ParseAsciiPrefix(str, endptr, [](const char* text, char** end) { return std::strtold(text, end); });
+    return ParseAsciiPrefix(str, endptr, [](const char* text, char** end) { return strtold_nid_postfix(text, end); });
 }
 
 long long APS5_VABI wcstol_nid_postfix(const char16_t* str, char16_t** endptr, int base) {
