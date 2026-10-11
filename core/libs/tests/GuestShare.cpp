@@ -10,6 +10,7 @@ int APS5_VABI sceShareCaptureScreenshot(const void* param, std::int32_t* req_id)
 int APS5_VABI sceShareCaptureVideoClip(const void* param, std::int32_t* req_id);
 int APS5_VABI sceShareGetCurrentStatus(std::uint32_t feature_flag, void* status);
 int APS5_VABI sceShareOpenMenuForContent(const void* content_id);
+int APS5_VABI sceShareCaptureVideoClipExtended(void);
 int APS5_VABI sceShareGetRunningStatus(std::uint32_t* status);
 int APS5_VABI sceShareSetContentParamForApplicationTitle(const char* application_title);
 }
@@ -48,6 +49,7 @@ int main() {
 
     Require(sceShareOpenMenuForContent(param) == notSupported);
     Require(sceShareOpenMenuForContent(nullptr) == notSupported);
+    Require(sceShareCaptureVideoClipExtended() == notSupported);
 
     constexpr std::int32_t invalidParam = static_cast<std::int32_t>(0x81960002);
     std::uint8_t status[18];
