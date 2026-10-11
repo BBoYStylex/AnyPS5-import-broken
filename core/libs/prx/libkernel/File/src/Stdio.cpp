@@ -14,6 +14,7 @@
 #include "prx/libkernel/File/include/DirectoryDescriptor.hpp"
 #include "prx/libkernel/File/include/DescriptorControl.hpp"
 #include "prx/libkernel/File/include/FileLock.hpp"
+#include "prx/libkernel/File/include/PipeEnd.hpp"
 #include "prx/libkernel/File/include/RandomDevice.hpp"
 #include "prx/libkernel/KernelErrors.hpp"
 #include "prx/libkernel/Socket/include/SocketRuntime.hpp"
@@ -423,6 +424,10 @@ extern "C" int APS5_VABI pipe_nid_postfix(int* descriptors) {
     if (result != 0) return PosixFailure(SceErrorFromErrno(errno) & 0xffff);
     File::RememberDescriptor(native[0], 0);
     File::RememberDescriptor(native[1], 0);
+#ifdef _WIN32
+    File::RememberPipeEnd(native[0], File::PipeEnd::Read);
+    File::RememberPipeEnd(native[1], File::PipeEnd::Write);
+#endif
     std::memcpy(descriptors, native, sizeof(native));
     return 0;
 }
@@ -504,6 +509,7 @@ int APS5_VABI close_nid_postfix(int d) {
 #ifdef _WIN32
     File::ForgetDirectoryDescriptor(d);
     File::ForgetFileLock(d);
+    File::ForgetPipeEnd(d);
     return WithoutParameterHandler([d] { return ::_close(d); });
 #else
     return ::close(d);
@@ -550,6 +556,8 @@ int APS5_VABI dup_nid_postfix(int d) {
 #ifdef _WIN32
     RejectDirectoryDuplicate(d, __func__);
     const int duplicate = WithoutParameterHandler([d] { return ::_dup(d); });
+    if (duplicate >= 0)
+        if (const auto end = File::FindPipeEnd(d)) File::RememberPipeEnd(duplicate, *end);
 #else
     const int duplicate = ::dup(d);
 #endif
@@ -584,6 +592,8 @@ int APS5_VABI dup2_nid_postfix(int from, int to) {
     File::ForgetRandomDevice(to);
     if (sourceIsRandom) File::RememberRandomDevice(to);
     File::ShareDescriptor(from, to);
+    if (const auto end = File::FindPipeEnd(from)) File::RememberPipeEnd(to, *end);
+    else File::ForgetPipeEnd(to);
     return to;
 #else
     if (from == to) {
