@@ -24,6 +24,7 @@ constexpr int GuestEnoent = 2;
 constexpr int GuestEperm = 1;
 constexpr int GuestEio = 5;
 constexpr int GuestEfault = 14;
+constexpr int GuestEnotdir = 20;
 constexpr int GuestEinval = 22;
 constexpr int GuestEexist = 17;
 constexpr int GuestExdev = 18;
@@ -41,6 +42,15 @@ std::int64_t Fail(int error) {
 int GuestError(const std::error_code& error) {
     const int value = error.default_error_condition().value();
     return value > 0 && value <= 34 ? value : GuestEio;
+}
+
+bool HasFileAncestor(const std::filesystem::path& native) {
+    std::error_code error;
+    for (auto prefix = native.parent_path(); prefix.has_relative_path(); prefix = prefix.parent_path()) {
+        const auto status = std::filesystem::status(prefix, error);
+        if (std::filesystem::exists(status)) return !std::filesystem::is_directory(status);
+    }
+    return false;
 }
 }
 
@@ -112,6 +122,18 @@ int APS5_VABI fchdir_nid_postfix(int fd) {
     error = SetWorkingDirectory_nid_no_patch(path);
     if (error != 0) return static_cast<int>(Fail(error));
     return 0;
+}
+
+int APS5_VABI chroot_nid_postfix(const char* path) {
+    if (path == nullptr) return static_cast<int>(Fail(GuestEfault));
+    if (*path == '\0') return static_cast<int>(Fail(GuestEnoent));
+    const auto native = ResolvePath_nid_no_patch(path);
+    std::error_code error;
+    const auto status = std::filesystem::status(native, error);
+    if (status.type() == std::filesystem::file_type::not_found) return static_cast<int>(Fail(HasFileAncestor(native) ? GuestEnotdir : GuestEnoent));
+    if (error) return static_cast<int>(Fail(GuestError(error)));
+    if (!std::filesystem::is_directory(status)) return static_cast<int>(Fail(GuestEnotdir));
+    throw std::runtime_error(std::string("chroot: changing the root directory to ") + path + " is not supported, the guest path resolver keeps a fixed root");
 }
 
 int APS5_VABI symlink_nid_postfix(const char* target, const char* created) {
