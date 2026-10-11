@@ -973,6 +973,72 @@ void verifyDescriptorPhis() {
     expectFailure([&] { static_cast<void>(planImages(splitReloads(260u))); }, "GetImageResource dword 0 is not a valid runtime value", "descriptor Phi: a web over more than 512 descriptor tuples was accepted");
 }
 
+void verifyLaneSelectedDescriptors() {
+    std::vector<std::uint32_t> code{0xf40c0200u, 0xfa000000u, 0xf4080500u, 0xfa000020u, 0xf4080600u, 0xfa000040u, 0xf4000400u, 0xfa000050u, 0xf40c0800u, 0xfa000060u, 0xbf8cc07fu, 0x7d880090u, 0xbf068010u, 0xbf850011u};
+    for (std::uint32_t dword = 0; dword < 8u; dword++) {
+        const auto vgpr = 1u + dword;
+        code.push_back(0x7e000200u | (vgpr << 17u) | (32u + dword));
+        code.push_back(0x02000000u | (vgpr << 17u) | (vgpr << 9u) | (8u + dword));
+    }
+    code.push_back(0xbf820008u);
+    for (std::uint32_t dword = 0; dword < 8u; dword++) {
+        code.push_back(0x7e000200u | ((1u + dword) << 17u) | (8u + dword));
+    }
+    for (std::uint32_t dword = 0; dword < 8u; dword++) {
+        code.push_back(0x7e000400u | ((8u + dword) << 17u) | (257u + dword));
+    }
+    code.insert(code.end(), {0xf09c0f08u, 0x00a20000u, 0xbf8c3f70u, 0xe0700000u, 0x80060000u, 0xbf810000u});
+    using namespace ShaderRecompiler;
+    constexpr std::uint32_t Format8888UNorm = 56;
+    constexpr std::uint32_t Type2D = 9;
+    struct alignas(256) Texture { std::array<std::uint8_t, 256> bytes{}; };
+    static Texture textures[2];
+    const auto imageDescriptor = [&](const Texture& texture) {
+        const auto base = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(texture.bytes.data()));
+        return std::array<std::uint32_t, 8>{static_cast<std::uint32_t>(base >> 8u), static_cast<std::uint32_t>((base >> 40u) & 0xffu) | (Format8888UNorm << 20u) | (3u << 30u), 3u << 14u, 0xfacu | (Type2D << 28u), 0u, 0u, 0u, 0u};
+    };
+    std::array<std::uint32_t, 4> output{};
+    const auto outputAddress = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(output.data()));
+    std::array<std::uint32_t, 32> srt{};
+    const auto first = imageDescriptor(textures[0]);
+    const auto second = imageDescriptor(textures[1]);
+    std::copy(first.begin(), first.end(), srt.begin());
+    const std::array<std::uint32_t, 4> outputV{static_cast<std::uint32_t>(outputAddress), static_cast<std::uint32_t>((outputAddress >> 32u) & 0xffffu), 16u, 0xfacu};
+    std::copy(outputV.begin(), outputV.end(), srt.begin() + 16);
+    srt[20] = 1u;
+    std::copy(second.begin(), second.end(), srt.begin() + 24);
+    const auto srtAddress = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(srt.data()));
+    const std::array<std::uint32_t, 2> userData{static_cast<std::uint32_t>(srtAddress), static_cast<std::uint32_t>(srtAddress >> 32u)};
+    const std::array<std::uint32_t, 4> capabilities{29u, spv::CapabilityInt64, spv::CapabilityPhysicalStorageBufferAddresses, spv::CapabilityStorageBuffer8BitAccess};
+    const std::array<std::string_view, 2> extensions{"SPV_KHR_physical_storage_buffer", "SPV_KHR_8bit_storage"};
+    RecompileRequest request{};
+    request.shader = {ShaderStage::Compute, 0x22000u, code, 0, {}};
+    request.context.waveSize = 32u;
+    request.context.userDataBaseRegister = 0;
+    request.context.userData = userData;
+    request.context.compute = ShaderComputeStageInfo{{32u, 1u, 1u}, 0u, {false, false, false}, false, 1u};
+    request.target.vulkanVersion = 0x00401000u;
+    request.target.spirvVersion = 0x00010300u;
+    request.target.subgroupSize = 32;
+    request.target.supportedCapabilities = capabilities;
+    request.target.supportedExtensions = extensions;
+    request.target.bdaAbiVersion = BdaAbi::Version;
+    request.target.fragmentShaderBarycentricEnabled = false;
+    request.layout.pushConstantSizeBytes = 128;
+    const auto plan = GetResourcePlan(request);
+    require(plan->info.images.size() == 2u && plan->info.samplers.size() == 1u, "lane-selected T#: the T#s selected per lane were not planned as one image each");
+    AgcDriver::ShaderMemory memory({});
+    const auto capture = memory.Capture(request);
+    request.context.memory = memory.Regions();
+    static_cast<void>(Recompile(request, *capture));
+    const auto holds = [&](const std::array<std::uint32_t, 8>& words) {
+        return std::ranges::any_of(capture->snapshot.images, [&](const DescriptorValue& value) {
+            return std::equal(words.begin(), words.end(), value.dwords.begin());
+        });
+    };
+    require(holds(first) && holds(second), "lane-selected T#: the snapshot T#s are not the two SRT T#s");
+}
+
 void verifyProgramCounterRelativeData() {
     using namespace ShaderRecompiler;
     static const std::array<std::uint32_t, 15> code{
@@ -2615,6 +2681,7 @@ int main(int argc, char** argv) {
         verifyPureFlatSlots();
         verifyBindlessTable();
         verifyDescriptorPhis();
+        verifyLaneSelectedDescriptors();
         verifyProgramCounterRelativeData();
         verifyLanesOutsideHostSubgroup();
         verifyHalfWaveReduction();
