@@ -149,7 +149,10 @@ void* APS5_VABI dlopen_nid_postfix(const char* path, int flags) {
         } else {
             if (!*path) { Error("dlopen: empty module path"); return nullptr; }
             const auto resolved = RelinkedModulePath(ResolvePath_nid_no_patch(path));
+            DWORD oldMode = 0;
+            SetThreadErrorMode(SEM_FAILCRITICALERRORS, &oldMode);
             module->native = LoadLibraryExW(resolved.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
+            SetThreadErrorMode(oldMode, nullptr);
             if (module->native) InitializeDeferredModule(static_cast<HMODULE>(module->native));
         }
         if (!module->native) {
