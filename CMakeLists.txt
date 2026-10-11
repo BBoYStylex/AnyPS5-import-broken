@@ -68,6 +68,10 @@ if(BUILD_TESTING)
     endif()
 endif()
 
+if(BUILD_TESTING AND WIN32)
+    add_subdirectory(core/libs/tests/bmi2_shift)
+endif()
+
 if(ANYPS5_RELINKER_ONLY)
     add_subdirectory(core/relinker)
     return()

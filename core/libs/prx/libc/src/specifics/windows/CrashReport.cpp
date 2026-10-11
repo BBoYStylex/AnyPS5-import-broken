@@ -13,6 +13,7 @@
 #include <utility>
 #include <mutex>
 #include "Sse4aEmulation.hpp"
+#include "Bmi2ShiftEmulation.hpp"
 
 namespace {
 
@@ -238,12 +239,20 @@ bool HandleSse4a(EXCEPTION_POINTERS* info) {
     return true;
 }
 
+bool HandleBmi2Shift(EXCEPTION_POINTERS* info) {
+    if (info->ExceptionRecord->ExceptionCode != EXCEPTION_ILLEGAL_INSTRUCTION) return false;
+    std::uint8_t bytes[15];
+    const auto available = ReadCode(info->ContextRecord->Rip, bytes, sizeof(bytes));
+    return Bmi2Shift::Emulate(bytes, available, *info->ContextRecord);
+}
+
 LONG WINAPI ReportCrash(EXCEPTION_POINTERS* info) {
     static std::atomic<bool> reported{false};
     const auto* fault = info->ExceptionRecord;
     if (fault->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && fault->NumberParameters >= 2 && fault->ExceptionInformation[0] == 1 && GuestArena::GuestArenaHandleWrite_nid_postfix(fault->ExceptionInformation[1])) return EXCEPTION_CONTINUE_EXECUTION;
     if (HandleWatch(info)) return EXCEPTION_CONTINUE_EXECUTION;
     if (HandleSse4a(info)) return EXCEPTION_CONTINUE_EXECUTION;
+    if (HandleBmi2Shift(info)) return EXCEPTION_CONTINUE_EXECUTION;
     const auto* record = info->ExceptionRecord;
     if (!IsFatal(record->ExceptionCode)) return EXCEPTION_CONTINUE_SEARCH;
     if (reported.exchange(true)) {
