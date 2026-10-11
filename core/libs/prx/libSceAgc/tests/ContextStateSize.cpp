@@ -16,17 +16,6 @@ void check(bool condition, const char* message) {
     if (!condition) throw std::runtime_error(message);
 }
 
-template <typename TAction>
-void expectFailure(TAction action) {
-    try {
-        action();
-    } catch (const std::runtime_error& error) {
-        check(error.what()[0] != '\0', "empty exception message");
-        return;
-    }
-    throw std::runtime_error("expected an exception");
-}
-
 void testSizes() {
     const std::array<std::uint64_t, 4> sizes{20, 108, 108, 128};
     for (std::uint32_t operation = 0; operation < sizes.size(); ++operation) {
@@ -40,9 +29,9 @@ void testSizes() {
     }
 }
 
-void testRejections() {
-    expectFailure([] { sceAgcDcbContextStateOpGetSize(4); });
-    expectFailure([] { sceAgcDcbContextStateOpGetSize(0xffffffffu); });
+void testUnsupportedOperations() {
+    check(sceAgcDcbContextStateOpGetSize(4) == 0, "unsupported context state operation size was not zero");
+    check(sceAgcDcbContextStateOpGetSize(0xffffffffu) == 0, "unsupported context state operation size was not zero");
 }
 
 }
@@ -50,7 +39,7 @@ void testRejections() {
 int main() {
     try {
         testSizes();
-        testRejections();
+        testUnsupportedOperations();
         LibcRunShutdown_nid_postfix();
         std::puts("AGC context state size tests passed");
         return 0;
