@@ -21,7 +21,10 @@ static constexpr int UMTX_OP_WAIT_UINT = 11;
 static constexpr int UMTX_OP_WAIT_UINT_PRIVATE = 15;
 static constexpr int UMTX_OP_WAKE_PRIVATE = 16;
 static constexpr int UMTX_OP_NWAKE_PRIVATE = 21;
+static constexpr int UMTX_OP_SEM_WAIT = 19;
 static constexpr int UMTX_OP_SEM2_WAIT = 23;
+static constexpr int UMTX_OP_SEM2_WAKE = 24;
+static constexpr std::uint32_t USEM_HAS_WAITERS = 0x80000000u;
 static constexpr int UMTX_OP_MAX = 27;
 static constexpr std::uint32_t UMTX_ABSTIME = 1;
 static constexpr int CLOCK_MONOTONIC_ID = 4;
@@ -269,6 +272,91 @@ static void NwakeReadsOnlyTheCountedEntries() {
     Require(Umtx(addresses, UMTX_OP_NWAKE_PRIVATE, 1) == 0);
 }
 
+struct Usem2 {
+    std::uint32_t count;
+    std::uint32_t flags;
+};
+
+static void Sem2WaitReturnsWhileTheCountIsNonZero() {
+    Usem2 sem{3, 0};
+    Require(Umtx(&sem, UMTX_OP_SEM2_WAIT, 0) == 0);
+    Require(sem.count == 3);
+    sem.count = 1 | USEM_HAS_WAITERS;
+    Require(Umtx(&sem, UMTX_OP_SEM2_WAIT, 0) == 0);
+    Require(sem.count == (1 | USEM_HAS_WAITERS));
+}
+
+static void Sem2WaitSetsTheWaitersFlagAndTimesOut() {
+    Usem2 sem{0, 0};
+    KernelTimespec relative{0, 20000000};
+    const auto start = std::chrono::steady_clock::now();
+    Require(FailsWith(Umtx(&sem, UMTX_OP_SEM2_WAIT, 0, SizeOf(sizeof(relative)), &relative), GUEST_ETIMEDOUT));
+    Require(std::chrono::steady_clock::now() - start >= std::chrono::milliseconds(15));
+    Require(sem.count == USEM_HAS_WAITERS);
+
+    KernelTimespec none{0, 0};
+    Require(FailsWith(Umtx(&sem, UMTX_OP_SEM2_WAIT, 0, nullptr, &none), GUEST_ETIMEDOUT));
+    Require(sem.count == USEM_HAS_WAITERS);
+    KernelTimespec negative{-1, 0};
+    Require(FailsWith(Umtx(&sem, UMTX_OP_SEM2_WAIT, 0, SizeOf(sizeof(negative)), &negative), GUEST_EINVAL));
+}
+
+static void Sem2WakeReleasesOneWaiterAndClearsTheFlagForTheLast() {
+    Usem2 sem{0, 0};
+    std::atomic<int> started{0};
+    std::atomic<int> finished{0};
+    std::atomic<int> wordFinished{0};
+    std::vector<int> results(2, -2);
+    int wordResult = -2;
+
+    std::vector<std::thread> waiters;
+    for (int i = 0; i < 2; ++i) {
+        waiters.emplace_back([&, i] {
+            KernelTimespec failsafe = FailsafeTimeout();
+            ++started;
+            results[i] = Umtx(&sem, UMTX_OP_SEM2_WAIT, 0, nullptr, &failsafe);
+            ++finished;
+        });
+    }
+    std::thread wordWaiter([&] {
+        KernelTimespec failsafe = FailsafeTimeout();
+        ++started;
+        wordResult = Umtx(&sem, UMTX_OP_WAIT_UINT, 0x80000000u, nullptr, &failsafe);
+        ++wordFinished;
+    });
+    AwaitCount(started, 3);
+    std::this_thread::sleep_for(SETTLE);
+    Require(sem.count == USEM_HAS_WAITERS);
+
+    Require(Umtx(&sem, UMTX_OP_WAKE, INT_MAX) == 0);
+    std::this_thread::sleep_for(SETTLE);
+    Require(finished.load() == 0);
+    Require(wordFinished.load() == 1);
+
+    Require(Umtx(&sem, UMTX_OP_SEM2_WAKE, 0) == 0);
+    AwaitCount(finished, 1);
+    std::this_thread::sleep_for(SETTLE);
+    Require(finished.load() == 1);
+    Require(sem.count == USEM_HAS_WAITERS);
+
+    Require(Umtx(&sem, UMTX_OP_SEM2_WAKE, 0) == 0);
+    AwaitCount(finished, 2);
+    Require(sem.count == 0);
+
+    for (auto& waiter : waiters) waiter.join();
+    wordWaiter.join();
+    for (const int result : results) Require(result == 0);
+    Require(wordResult == 0);
+}
+
+static void Sem2WakeWithoutWaitersLeavesTheCount() {
+    Usem2 sem{USEM_HAS_WAITERS, 0};
+    Require(Umtx(&sem, UMTX_OP_SEM2_WAKE, 0) == 0);
+    Require(sem.count == USEM_HAS_WAITERS);
+    Require(FailsWith(Umtx(nullptr, UMTX_OP_SEM2_WAKE, 0), GUEST_EFAULT));
+    Require(FailsWith(Umtx(nullptr, UMTX_OP_SEM2_WAIT, 0), GUEST_EFAULT));
+}
+
 static void RejectsBadObjectsAndOperations() {
     Require(FailsWith(Umtx(nullptr, UMTX_OP_WAIT, 0), GUEST_EFAULT));
     Require(FailsWith(Umtx(nullptr, UMTX_OP_WAIT_UINT, 0), GUEST_EFAULT));
@@ -289,7 +377,7 @@ static void RejectsBadObjectsAndOperations() {
     catch (const std::runtime_error&) { threw = true; }
     Require(threw);
     threw = false;
-    try { Umtx(&value, UMTX_OP_SEM2_WAIT, 0); }
+    try { Umtx(&value, UMTX_OP_SEM_WAIT, 0); }
     catch (const std::runtime_error&) { threw = true; }
     Require(threw);
 }
@@ -304,5 +392,9 @@ int main() {
     WakeWithoutWaitersSucceeds();
     NwakeWakesEveryWaiterOnEachListedAddress();
     NwakeReadsOnlyTheCountedEntries();
+    Sem2WaitReturnsWhileTheCountIsNonZero();
+    Sem2WaitSetsTheWaitersFlagAndTimesOut();
+    Sem2WakeReleasesOneWaiterAndClearsTheFlagForTheLast();
+    Sem2WakeWithoutWaitersLeavesTheCount();
     RejectsBadObjectsAndOperations();
 }

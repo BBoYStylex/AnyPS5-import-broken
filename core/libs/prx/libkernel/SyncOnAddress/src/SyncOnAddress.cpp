@@ -28,8 +28,12 @@ constexpr int UMTX_OP_WAIT_UINT = 11;
 constexpr int UMTX_OP_WAIT_UINT_PRIVATE = 15;
 constexpr int UMTX_OP_WAKE_PRIVATE = 16;
 constexpr int UMTX_OP_NWAKE_PRIVATE = 21;
+constexpr int UMTX_OP_SEM2_WAIT = 23;
+constexpr int UMTX_OP_SEM2_WAKE = 24;
 constexpr int UMTX_OP_MAX = 27;
 constexpr std::uint32_t UMTX_ABSTIME = 1;
+constexpr std::uint32_t USEM_HAS_WAITERS = 0x80000000u;
+constexpr std::uint32_t USEM_MAX_COUNT = 0x7fffffffu;
 constexpr int GUEST_CLOCK_REALTIME = 0;
 
 constexpr int GUEST_EFAULT = 14;
@@ -46,6 +50,11 @@ struct UmtxTime {
     std::uint32_t clockId;
 };
 
+struct Usem2 {
+    std::uint32_t count;
+    std::uint32_t flags;
+};
+
 struct AddressWaiter {
     TimedWait::Condition condition;
     bool woken = false;
@@ -53,6 +62,7 @@ struct AddressWaiter {
 
 std::mutex g_waitersLock;
 std::unordered_map<std::uintptr_t, std::list<AddressWaiter*>> g_waiters;
+std::unordered_map<std::uintptr_t, std::list<AddressWaiter*>> g_semaphoreWaiters;
 
 template <class TValue>
 bool IsAlignedAddress(std::uintptr_t address) {
@@ -199,6 +209,80 @@ int UmtxNwakePrivate(void* object, std::uint64_t value) {
     return 0;
 }
 
+int UmtxSem2Wait(void* object, const void* sizeArgument, const void* timeArgument, const void* caller) {
+    std::optional<std::uint64_t> deadline;
+    if (const int error = UmtxDeadline(sizeArgument, timeArgument, deadline); error != 0) {
+        return error;
+    }
+    if (object == nullptr) {
+        return GUEST_EFAULT;
+    }
+    if (!IsAlignedAddress<Usem2>(reinterpret_cast<std::uintptr_t>(object))) {
+        APS5_INVALID_ARG_EX;
+    }
+    const auto key = reinterpret_cast<std::uintptr_t>(object);
+    std::atomic_ref<std::uint32_t> count(static_cast<Usem2*>(object)->count);
+    std::unique_lock<std::mutex> lock(g_waitersLock);
+    std::uint32_t value = count.load();
+    for (;;) {
+        if ((value & USEM_MAX_COUNT) != 0) {
+            return 0;
+        }
+        if (value == USEM_HAS_WAITERS || count.compare_exchange_strong(value, USEM_HAS_WAITERS)) {
+            break;
+        }
+    }
+
+    AddressWaiter waiter;
+    auto& queue = g_semaphoreWaiters[key];
+    const auto position = queue.insert(queue.end(), &waiter);
+    const auto isWoken = [&] { return waiter.woken; };
+    const auto waitStart = std::chrono::steady_clock::now();
+    if (!deadline) {
+        waiter.condition.Wait(lock, isWoken);
+    } else {
+        waiter.condition.WaitUntil(lock, *deadline, isWoken);
+    }
+    const auto waited = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - waitStart);
+
+    const bool woken = waiter.woken;
+    if (!woken) {
+        queue.erase(position);
+        if (queue.empty()) {
+            g_semaphoreWaiters.erase(key);
+        }
+    }
+    lock.unlock();
+    KernelTraceWait_nid_postfix("usem", caller, static_cast<std::uint64_t>(waited.count()), !woken);
+    return woken ? 0 : GUEST_ETIMEDOUT;
+}
+
+int UmtxSem2Wake(void* object) {
+    if (object == nullptr) {
+        return GUEST_EFAULT;
+    }
+    if (!IsAlignedAddress<Usem2>(reinterpret_cast<std::uintptr_t>(object))) {
+        APS5_INVALID_ARG_EX;
+    }
+    std::lock_guard<std::mutex> lock(g_waitersLock);
+    const auto entry = g_semaphoreWaiters.find(reinterpret_cast<std::uintptr_t>(object));
+    if (entry == g_semaphoreWaiters.end()) {
+        return 0;
+    }
+    auto& queue = entry->second;
+    if (queue.size() == 1) {
+        std::atomic_ref<std::uint32_t>(static_cast<Usem2*>(object)->count).fetch_and(~USEM_HAS_WAITERS);
+    }
+    AddressWaiter* waiter = queue.front();
+    queue.pop_front();
+    waiter->woken = true;
+    waiter->condition.NotifyOne();
+    if (queue.empty()) {
+        g_semaphoreWaiters.erase(entry);
+    }
+    return 0;
+}
+
 }  // namespace
 
 extern "C" {
@@ -270,6 +354,12 @@ int APS5_VABI _umtx_op_nid_postfix(void* object, int operation, std::uint64_t va
             break;
         case UMTX_OP_NWAKE_PRIVATE:
             error = UmtxNwakePrivate(object, value);
+            break;
+        case UMTX_OP_SEM2_WAIT:
+            error = UmtxSem2Wait(object, sizeArgument, timeArgument, caller);
+            break;
+        case UMTX_OP_SEM2_WAKE:
+            error = UmtxSem2Wake(object);
             break;
         default:
             if (operation < 0 || operation >= UMTX_OP_MAX) {
