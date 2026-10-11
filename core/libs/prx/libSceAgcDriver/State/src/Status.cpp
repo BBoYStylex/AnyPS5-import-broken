@@ -21,8 +21,7 @@ bool APS5_VABI sceAgcDriverIsSubmitValidationEnabled(void) {
     return false;
 }
 
-int APS5_VABI sceAgcDriverRequestCaptureStart(const char* path) {
-    (void)path;
+int APS5_VABI sceAgcDriverRequestCaptureStart() {
     return SCE_AGC_DRIVER_ERROR_DEBUG_UNAVAILABLE;
 }
 

@@ -27,7 +27,7 @@ int APS5_VABI sceAgcDriverFindResourcesPublic(const void*, void*);
 bool APS5_VABI sceAgcDriverIsCaptureInProgress(void);
 bool APS5_VABI sceAgcDriverIsTraceInProgress(void);
 bool APS5_VABI sceAgcDriverIsSubmitValidationEnabled(void);
-int APS5_VABI sceAgcDriverRequestCaptureStart(const char*);
+int APS5_VABI sceAgcDriverRequestCaptureStart();
 int APS5_VABI sceAgcDriverRequestCaptureStop(void);
 int APS5_VABI sceAgcDriverTriggerCapture(void);
 int APS5_VABI sceAgcDriverGetShaderDebuggingStatus(void);
@@ -96,7 +96,7 @@ int main() {
     Require(!sceAgcDriverIsCaptureInProgress());
     Require(!sceAgcDriverIsTraceInProgress());
     Require(!sceAgcDriverIsSubmitValidationEnabled());
-    Require(sceAgcDriverRequestCaptureStart("/data/capture") == DebugUnavailable);
+    Require(sceAgcDriverRequestCaptureStart() == DebugUnavailable);
     Require(sceAgcDriverTriggerCapture() == DebugUnavailable);
     Require(sceAgcDriverRequestCaptureStop() == DebugUnavailable);
     Require(!sceAgcDriverIsCaptureInProgress());
