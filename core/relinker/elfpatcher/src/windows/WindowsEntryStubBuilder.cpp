@@ -184,7 +184,13 @@ WindowsEntryStub WindowsEntryStubBuilder::Build(const std::uint32_t dataRva, con
     const bool unplacedModule = std::any_of(unmatched.begin(), unmatched.end(), [&](const auto& module) {
         return std::none_of(libraries.begin() + guestModules.size(), libraries.end(), [&](const auto& library) { return stem(library) == module; });
     });
-    const bool hostImport = std::any_of(imports.begin(), imports.end(), [&](const auto& import) { return import.Library.empty() && !guestExports.contains(import.Name); });
+    const auto exportMatches = [&](const std::string& name) {
+        const auto baseName = name.substr(0, name.find('#'));
+        return guestExports.contains(name) || std::any_of(guestExports.begin(), guestExports.end(), [&](const auto& exported) {
+            return exported.substr(0, exported.find('#')) == baseName;
+        });
+    };
+    const bool hostImport = std::any_of(imports.begin(), imports.end(), [&](const auto& import) { return import.Library.empty() && !exportMatches(import.Name); });
     if (unplacedModule && hostImport) std::fill(imported.begin() + guestModules.size(), imported.end(), true);
 
     const auto lastError = reserve(4);
