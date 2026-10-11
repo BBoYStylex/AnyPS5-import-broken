@@ -1,7 +1,10 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
+#include <mutex>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -12,12 +15,19 @@
 static constexpr std::uint32_t USER_FX2_FLAG_FIRST_PROCESS = 1;
 static constexpr std::uint32_t USER_FX2_FLAG_PARAM_CHANGED = 2;
 
-void Ngs2CheckCustomRack(const Ngs2CustomRackOption& option) {
+void Ngs2CheckCustomRack(const Ngs2CustomRackOption& option, bool builtInModules) {
     if (option.num_buffers != 1) throw std::runtime_error("NGS2: custom racks with " + std::to_string(option.num_buffers) + " buffers are not implemented");
     if (option.num_modules > SCE_NGS2_CUSTOM_MAX_MODULES || option.rack_option.max_ports > SCE_NGS2_CUSTOM_MAX_PORTS) APS5_INVALID_ARG_EX;
     for (std::uint32_t m = 0; m < option.num_modules; m++) {
         const auto& info = option.module[m];
-        if (info.module_id != SCE_NGS2_CUSTOM_MODULE_ID_USER_FX2) throw std::runtime_error("NGS2: custom module id " + Ngs2Hex(info.module_id) + " is not implemented");
+        if (info.module_id != SCE_NGS2_CUSTOM_MODULE_ID_USER_FX2) {
+            if (!builtInModules) throw std::runtime_error("NGS2: custom module id " + Ngs2Hex(info.module_id) + " is not implemented");
+            static std::mutex reportedMutex;
+            static std::set<std::uint32_t> reported;
+            std::lock_guard lock(reportedMutex);
+            if (reported.insert(info.module_id).second) std::fprintf(stderr, "[NGS2] built-in custom module 0x%x is not emulated\n", info.module_id);
+            continue;
+        }
         if (info.option == nullptr || info.option->size != sizeof(Ngs2CustomUserFx2ModuleOption)) APS5_INVALID_ARG_EX;
         if (info.source_buffer_id != 0 || info.dest_buffer_id != 0) APS5_INVALID_ARG_EX;
         if (reinterpret_cast<const Ngs2CustomUserFx2ModuleOption*>(info.option)->process_handler == nullptr) APS5_INVALID_ARG_EX;
@@ -38,6 +48,11 @@ void Ngs2SetupUserFx(Ngs2Rack& rack, const Ngs2CustomRackOption& option) {
     rack.userFxCommon.resize(option.num_modules);
     for (auto& voice : rack.voices) voice.userFx.resize(option.num_modules);
     for (std::uint32_t m = 0; m < option.num_modules; m++) {
+        if (option.module[m].module_id != SCE_NGS2_CUSTOM_MODULE_ID_USER_FX2) {
+            rack.userFx[m] = {};
+            for (auto& voice : rack.voices) voice.userFx[m].state.resize(option.module[m].state_size);
+            continue;
+        }
         const auto& module = *reinterpret_cast<const Ngs2CustomUserFx2ModuleOption*>(option.module[m].option);
         rack.userFx[m] = module;
         rack.userFxCommon[m].resize(module.common_size);
@@ -84,9 +99,23 @@ static void SetUserFxParam(Ngs2Voice& voice, std::uint32_t index, const Ngs2Cust
 }
 
 void Ngs2ApplyCustomParam(Ngs2Voice& voice, const Ngs2VoiceParamHeader& param) {
-    if (voice.rack->rackId != SCE_NGS2_RACK_ID_CUSTOM_SUBMIXER) throw std::invalid_argument("NGS2: voice param " + Ngs2Hex(param.id) + " belongs to another rack");
-    if (param.id == SCE_NGS2_CUSTOM_SUBMIXER_VOICE_PARAM_SETUP) {
+    const auto rackId = voice.rack->rackId;
+    if (rackId != SCE_NGS2_RACK_ID_CUSTOM_SUBMIXER && rackId != SCE_NGS2_RACK_ID_CUSTOM_SAMPLER && rackId != SCE_NGS2_RACK_ID_CUSTOM_MASTERING) throw std::invalid_argument("NGS2: voice param " + Ngs2Hex(param.id) + " belongs to another rack");
+    if (param.id == SCE_NGS2_CUSTOM_MASTERING_VOICE_PARAM_SETUP && rackId == SCE_NGS2_RACK_ID_CUSTOM_MASTERING) {
         SetupCustomSubmixer(voice, ParamAs<Ngs2CustomSubmixerVoiceSetupParam>(param));
+        return;
+    }
+    if (param.id == SCE_NGS2_CUSTOM_SUBMIXER_VOICE_PARAM_SETUP && rackId == SCE_NGS2_RACK_ID_CUSTOM_SUBMIXER) {
+        SetupCustomSubmixer(voice, ParamAs<Ngs2CustomSubmixerVoiceSetupParam>(param));
+        return;
+    }
+    if (rackId != SCE_NGS2_RACK_ID_CUSTOM_SUBMIXER && (param.id >> 16) == (SCE_NGS2_CUSTOM_VOICE_PARAM_USER_FX2 >> 16) && (param.id & ~0x1fu) != SCE_NGS2_CUSTOM_VOICE_PARAM_USER_FX2) {
+        const auto index = param.id & 0x1fu;
+        if (index >= voice.userFx.size()) APS5_INVALID_ARG_EX;
+        static std::mutex reportedMutex;
+        static std::set<std::uint32_t> reported;
+        std::lock_guard lock(reportedMutex);
+        if (reported.insert(param.id).second) std::fprintf(stderr, "[NGS2] control 0x%08x of a built-in custom module is ignored\n", param.id);
         return;
     }
     if ((param.id & ~0x1fu) == SCE_NGS2_CUSTOM_VOICE_PARAM_USER_FX2) {
@@ -103,6 +132,7 @@ void Ngs2ProcessUserFx(Ngs2Voice& voice, std::uint32_t grain, std::uint32_t samp
     for (std::size_t m = 0; m < voice.userFx.size(); m++) {
         auto& fx = voice.userFx[m];
         const auto& module = voice.rack->userFx[m];
+        if (module.process_handler == nullptr) continue;
         Ngs2UserFx2ProcessContext context{channels.data(), voice.rack->userFxCommon[m].data(), fx.param.data(), fx.work.data(), fx.state.data(),
                                           module.user_data, fx.flags, voice.channels, voice.channels, grain, sampleRate, 0, {}};
         const int result = module.process_handler(&context);

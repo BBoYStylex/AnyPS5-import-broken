@@ -2,10 +2,12 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <mutex>
 #include <numbers>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #include "prx/libc/include/General.hpp"
 #include "Ngs2Internal.hpp"
@@ -116,7 +118,7 @@ static void Patch(Ngs2Voice& voice, const Ngs2VoicePatchParam& patch) {
         return;
     }
     auto* dest = Ngs2FindVoice(patch.dest_handle);
-    if (dest == nullptr || dest->rack->system != voice.rack->system || dest->rack->rackId == SCE_NGS2_RACK_ID_SAMPLER) APS5_INVALID_ARG_EX;
+    if (dest == nullptr || dest->rack->system != voice.rack->system || dest->rack->kind == SCE_NGS2_RACK_ID_SAMPLER) APS5_INVALID_ARG_EX;
     port.dest = dest;
 }
 
@@ -315,7 +317,19 @@ static void ApplyParam(Ngs2Voice& voice, const Ngs2VoiceParamHeader& param) {
         Ngs2ApplyCustomParam(voice, param);
         return;
     }
-    if (rackId != voice.rack->rackId) throw std::invalid_argument("NGS2: voice param " + Ngs2Hex(param.id) + " belongs to another rack");
+    if (param.id == SCE_NGS2_CUSTOM_MASTERING_VOICE_PARAM_SETUP) {
+        Ngs2ApplyCustomParam(voice, param);
+        return;
+    }
+    if ((rackId == SCE_NGS2_RACK_ID_CUSTOM_SAMPLER || rackId == SCE_NGS2_RACK_ID_CUSTOM_MASTERING) && rackId == voice.rack->rackId) {
+        std::vector<std::byte> copy(std::max<std::size_t>(param.size, sizeof(Ngs2VoiceParamHeader)));
+        std::memcpy(copy.data(), &param, copy.size());
+        auto& remapped = *reinterpret_cast<Ngs2VoiceParamHeader*>(copy.data());
+        remapped.id = (Ngs2RackKind(rackId) << 16) | (param.id & 0xffffu);
+        ApplyParam(voice, remapped);
+        return;
+    }
+    if (Ngs2RackKind(rackId) != voice.rack->kind) throw std::invalid_argument("NGS2: voice param " + Ngs2Hex(param.id) + " belongs to another rack");
     switch (rackId) {
         case SCE_NGS2_RACK_ID_SAMPLER: ApplySamplerParam(voice, param); return;
         case SCE_NGS2_RACK_ID_SUBMIXER:
@@ -414,6 +428,24 @@ int APS5_VABI sceNgs2VoiceGetState(uintptr_t voice_handle, Ngs2VoiceState* state
     if (state == nullptr) return SCE_NGS2_ERROR_INVALID_OUT_ADDRESS;
     std::lock_guard lock(Ngs2Mutex());
     const auto& voice = CheckedVoice(voice_handle);
+    if (voice.rack->rackId == SCE_NGS2_RACK_ID_CUSTOM_SAMPLER) {
+        if (state_size != sizeof(Ngs2CustomSamplerVoiceState)) return SCE_NGS2_ERROR_INVALID_OUT_SIZE;
+        auto& sampler = *reinterpret_cast<Ngs2CustomSamplerVoiceState*>(state);
+        sampler = {};
+        sampler.voice_state.state_flags = voice.stateFlags;
+        sampler.waveform_data = voice.WaveformData();
+        sampler.num_decoded_samples = voice.decodedSamples;
+        sampler.decoded_data_size = voice.decodedBytes;
+        sampler.user_data = voice.blocks.empty() ? 0 : voice.blocks.front().info.user_data;
+        return SCE_NGS2_OK;
+    }
+    if (voice.rack->rackId == SCE_NGS2_RACK_ID_CUSTOM_MASTERING) {
+        if (state_size != sizeof(Ngs2CustomMasteringVoiceState)) return SCE_NGS2_ERROR_INVALID_OUT_SIZE;
+        auto& mastering = *reinterpret_cast<Ngs2CustomMasteringVoiceState*>(state);
+        mastering = {};
+        mastering.voice_state.state_flags = voice.stateFlags;
+        return SCE_NGS2_OK;
+    }
     switch (voice.rack->rackId) {
         case SCE_NGS2_RACK_ID_SAMPLER: {
             if (state_size != sizeof(Ngs2SamplerVoiceState)) return SCE_NGS2_ERROR_INVALID_OUT_SIZE;

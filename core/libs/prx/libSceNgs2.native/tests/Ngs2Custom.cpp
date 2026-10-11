@@ -224,8 +224,104 @@ static void TestRackOptions() {
     Require(calls.cleanupVoices == (std::vector<std::uint32_t>{0, 1}));
 }
 
+template <typename TOption>
+static TOption CustomOption(const Ngs2CustomUserFx2ModuleOption* module, std::uint32_t builtInModuleId) {
+    TOption option{};
+    auto& custom = option.custom_rack_option;
+    custom.rack_option.size = sizeof(TOption);
+    custom.rack_option.max_grain_samples = 512;
+    custom.rack_option.max_voices = 2;
+    custom.rack_option.max_matrices = 1;
+    custom.rack_option.max_ports = 1;
+    custom.num_buffers = 1;
+    custom.num_modules = 2;
+    custom.module[0].module_id = builtInModuleId;
+    custom.module[0].state_size = 16;
+    custom.module[1].option = &module->custom_module_option;
+    custom.module[1].module_id = SCE_NGS2_CUSTOM_MODULE_ID_USER_FX2;
+    custom.module[1].state_size = 16;
+    return option;
+}
+
+template <typename TOption>
+static uintptr_t CustomRackOf(uintptr_t system, std::uint32_t rackId, const TOption& option) {
+    Ngs2ContextBufferInfo query{};
+    Require(sceNgs2RackQueryBufferSize(rackId, &option.custom_rack_option.rack_option, &query) == SCE_NGS2_OK);
+    const auto info = Buffer(query);
+    uintptr_t rack = 0;
+    Require(sceNgs2RackCreate(system, rackId, &option.custom_rack_option.rack_option, &info, &rack) == SCE_NGS2_OK);
+    return rack;
+}
+
+// A custom sampler rack plays waveforms like a sampler (its params are the sampler params under
+// the custom rack id), runs its UserFx2 modules on the decoded grain, and accepts built-in modules.
+static void TestCustomSampler() {
+    calls = {};
+    const auto system = CreateSystem();
+    const auto master = Mastering(system, 2);
+    const auto module = Module(Gain);
+    auto option = CustomOption<Ngs2CustomSamplerRackOption>(&module, 0x13);
+    option.max_channel_works = 2;
+    option.max_waveform_blocks = 4;
+    const auto rack = CustomRackOf(system, SCE_NGS2_RACK_ID_CUSTOM_SAMPLER, option);
+    Require(calls.setupVoices == (std::vector<std::uint32_t>{0, 1}));
+
+    const auto voice = Voice(rack);
+    constexpr std::uint32_t Custom = SCE_NGS2_RACK_ID_CUSTOM_SAMPLER << 16;
+    Control(voice, Custom | (SCE_NGS2_SAMPLER_VOICE_PARAM_SETUP & 0xffffu), Ngs2SamplerVoiceSetupParam{{}, {SCE_NGS2_WAVEFORM_TYPE_PCM_I16L, 2, 48000, 0, 0, 0}});
+    std::vector<std::int16_t> pcm(Grain * 2 * 8, 16384);
+    const Ngs2WaveformBlock block{0, pcm.size() * sizeof(std::int16_t), 0, 0, static_cast<std::uint32_t>(pcm.size() / 2), 0, 0};
+    Control(voice, Custom | (SCE_NGS2_SAMPLER_VOICE_PARAM_ADD_WAVEFORM_BLOCKS & 0xffffu), Ngs2SamplerVoiceWaveformBlocksParam{{}, pcm.data(), 0, 1, &block});
+    // A control of the built-in module (id 0x13, index 0) is accepted without effect.
+    Control(voice, 0x40001300u, Ngs2CustomVoiceUserFx2Param{{}, nullptr, 0});
+    const float gain = 0.5f;
+    Control(voice, SCE_NGS2_CUSTOM_VOICE_PARAM_USER_FX2 | 1, Ngs2CustomVoiceUserFx2Param{{}, &gain, sizeof(gain)});
+    Patch(voice, master);
+    Event(voice, SCE_NGS2_VOICE_EVENT_PLAY);
+
+    const auto out = Render(system);
+    for (std::uint32_t i = 0; i < Grain * 2; i++) Require(out[i] == 0.25f);
+    Require(calls.processFlags.size() == 1);
+
+    Ngs2CustomSamplerVoiceState state{};
+    Require(sceNgs2VoiceGetState(voice, &state.voice_state, sizeof(state)) == SCE_NGS2_OK);
+    Require(state.num_decoded_samples == Grain);
+    Require(state.waveform_data == reinterpret_cast<const std::uint8_t*>(pcm.data()) + Grain * 2 * sizeof(std::int16_t));
+    Require(sceNgs2VoiceGetState(voice, &state.voice_state, sizeof(Ngs2SamplerVoiceState)) == SCE_NGS2_ERROR_INVALID_OUT_SIZE);
+    Require(sceNgs2SystemDestroy(system, nullptr) == SCE_NGS2_OK);
+}
+
+// A custom mastering rack is set up like a custom submixer, runs its UserFx2 modules and writes
+// the render buffer like a mastering rack.
+static void TestCustomMastering() {
+    calls = {};
+    const auto system = CreateSystem();
+    const auto module = Module(Gain);
+    auto option = CustomOption<Ngs2CustomMasteringRackOption>(&module, 0x13);
+    option.max_channels = 2;
+    option.max_inputs = 1;
+    const auto voice = Voice(CustomRackOf(system, SCE_NGS2_RACK_ID_CUSTOM_MASTERING, option));
+    Control(voice, SCE_NGS2_CUSTOM_MASTERING_VOICE_PARAM_SETUP, Ngs2CustomSubmixerVoiceSetupParam{{}, 2, 2, 0, 0});
+    Event(voice, SCE_NGS2_VOICE_EVENT_PLAY);
+
+    std::vector<std::int16_t> pcm(Grain * 2 * 8, 16384);
+    const auto sampler = Sampler(system, pcm);
+    Patch(sampler, voice);
+    Event(sampler, SCE_NGS2_VOICE_EVENT_PLAY);
+
+    const auto out = Render(system);
+    for (std::uint32_t i = 0; i < Grain * 2; i++) Require(out[i] == 0.5f);
+    Require(calls.processFlags.size() == 1);
+
+    Ngs2CustomMasteringVoiceState state{};
+    Require(sceNgs2VoiceGetState(voice, &state.voice_state, sizeof(state)) == SCE_NGS2_OK);
+    Require(sceNgs2SystemDestroy(system, nullptr) == SCE_NGS2_OK);
+}
+
 int main() {
     TestUserFxChain();
     TestRackOptions();
+    TestCustomSampler();
+    TestCustomMastering();
     return 0;
 }
