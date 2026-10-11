@@ -136,6 +136,31 @@ GPU results in storage images and render targets stay on the GPU until something
 
 `0`: conversion succeeded. `1`: invalid arguments. `2`: conversion failed; the error is printed to stderr. With `--autorun`, successful conversion returns the launched application's exit code.
 
+## Incremental multi-target builds
+
+[`tools/relinker_build.py`](../../tools/relinker_build.py) converts several independent targets from one JSON manifest. It uses Python's standard library and an already built relinker. Paths in the manifest, including `--sce-module-path`, are relative to the manifest directory. Each target needs its own output directory:
+
+```json
+{
+  "version": 1,
+  "builds": [
+    {"id": "linux", "input": "source/eboot.bin", "output": "converted/linux/title", "target": "linux", "options": ["--registry"]},
+    {"id": "windows", "input": "source/eboot.bin", "output": "converted/windows/title.exe", "target": "windows", "options": ["--registry"]},
+    {"id": "macos", "input": "source/eboot.bin", "output": "converted/macos/title", "target": "macos", "options": ["--registry"]}
+  ]
+}
+```
+
+```sh
+python3 tools/relinker_build.py targets.json --relinker build/core/relinker/relinker --jobs 3 --cache-dir conversion-cache
+```
+
+The runner hashes executable and guest-module contents, directory membership, `sce_sys/param.json`, `sce_sys/icon0.png`, relinker bytes, options, host architecture and absolute output paths. A matching cache entry skips conversion. Artifact hashes and permissions are verified before reuse; deleted or altered generated outputs are restored. Modified inputs invalidate the entry even if their timestamps stay the same. A failed conversion or inputs changing during conversion cannot publish a successful entry.
+
+Output directories must initially be empty. The runner records the files it owns in `.anyps5-build.json` and refuses a directory containing additional files. Keep runtime resources and system libraries in a separate deployment directory. Do not share or nest output directories, or place inputs or the cache inside them. A lock file beside each output directory prevents simultaneous writers; remove a leftover lock only after verifying its process is no longer running. The cache is local to the output location, because generated desktop entries contain absolute paths.
+
+The JSON report preserves manifest order and gives each build's `built`, `cached` or `failed` status, cache key, artifact count and elapsed seconds. Independent builds continue after another build fails. Exit codes are `0` for complete success, `1` for any failed conversion and `2` for invalid configuration. `--timeout` limits each relinker process in seconds (default 300). Conversion options use the existing CLI syntax; target selection comes from `target`, and `--help` and `--autorun` are unavailable in manifests. Conversion caching reduces repeated build work; it does not change runtime rendering or title compatibility.
+
 ## Import audit
 
 [`tools/import_audit.py`](../../tools/import_audit.py) lists the system functions a converted game imports and whether the built libraries provide them, before the game is launched. It needs Python 3 and nothing else.
