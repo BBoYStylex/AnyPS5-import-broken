@@ -23,6 +23,8 @@ int APS5_VABI _Mbtowcx_nid_postfix(std::uint16_t* dst, const char* src, std::siz
 int APS5_VABI _Wctombx_nid_postfix(char* dst, std::uint16_t src, std::mbstate_t* st);
 void APS5_VABI _Locksyslock_nid_postfix();
 void APS5_VABI _Unlocksyslock_nid_postfix();
+GuestLocale::GuestLconv* APS5_VABI localeconv_nid_postfix();
+int* APS5_VABI __error_nid_postfix();
 
 }
 
@@ -144,12 +146,45 @@ static void CheckStreamDestruction() {
     Require(object.stream.locale == &_ZSt21_sceLibcClassicLocale_nid_postfix);
 }
 
+static void CheckLocaleconv() {
+    *__error_nid_postfix() = 0x12345;
+    auto* lconv = localeconv_nid_postfix();
+    Require(lconv != nullptr);
+    Require(std::strcmp(lconv->decimal_point, ".") == 0);
+    Require(std::strcmp(lconv->thousands_sep, "") == 0);
+    Require(std::strcmp(lconv->grouping, "") == 0);
+    Require(std::strcmp(lconv->int_curr_symbol, "") == 0);
+    Require(std::strcmp(lconv->currency_symbol, "") == 0);
+    Require(std::strcmp(lconv->mon_decimal_point, "") == 0);
+    Require(std::strcmp(lconv->mon_thousands_sep, "") == 0);
+    Require(std::strcmp(lconv->mon_grouping, "") == 0);
+    Require(std::strcmp(lconv->positive_sign, "") == 0);
+    Require(std::strcmp(lconv->negative_sign, "") == 0);
+    Require(lconv->int_frac_digits == CHAR_MAX);
+    Require(lconv->frac_digits == CHAR_MAX);
+    Require(lconv->p_cs_precedes == CHAR_MAX);
+    Require(lconv->p_sep_by_space == CHAR_MAX);
+    Require(lconv->n_cs_precedes == CHAR_MAX);
+    Require(lconv->n_sep_by_space == CHAR_MAX);
+    Require(lconv->p_sign_posn == CHAR_MAX);
+    Require(lconv->n_sign_posn == CHAR_MAX);
+    Require(lconv->int_p_cs_precedes == CHAR_MAX);
+    Require(lconv->int_n_cs_precedes == CHAR_MAX);
+    Require(lconv->int_p_sep_by_space == CHAR_MAX);
+    Require(lconv->int_n_sep_by_space == CHAR_MAX);
+    Require(lconv->int_p_sign_posn == CHAR_MAX);
+    Require(lconv->int_n_sign_posn == CHAR_MAX);
+    Require(localeconv_nid_postfix() == lconv);
+    Require(*__error_nid_postfix() == 0x12345);
+}
+
 int main() {
     CheckGuestCalls();
     CheckLocinfoAlignment();
     CheckCharacterTables();
     CheckCharacterConversions();
     CheckStreamDestruction();
+    CheckLocaleconv();
     _Locksyslock_nid_postfix();
     _Locksyslock_nid_postfix();
     _Unlocksyslock_nid_postfix();
