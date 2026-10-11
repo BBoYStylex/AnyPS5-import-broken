@@ -3,6 +3,7 @@
 #include <ctime>
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
+#include "prx/libc/include/Threads.hpp"
 #include "prx/libc/include/SonyCrt.hpp"
 #include "prx/libkernel/Apr/include/AprCommandBuffer.hpp"
 #include "prx/libkernel/Time/include/Time.hpp"
@@ -895,18 +896,17 @@ int APS5_VABI _ZNSt7num_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE2idE_n
     return 0;
 }
 
-int APS5_VABI _Cnd_signal_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+int APS5_VABI _Cnd_signal_nid_postfix(void** handle) {
+    return DinkumwareConditionSignal_nid_no_patch(handle);
 }
 
 void APS5_VABI _Unlock_shared_ptr_spin_lock_nid_postfix(void) {
     sharedPtrSpinLock.clear(std::memory_order_release);
 }
 
-int APS5_VABI _Cnd_init_with_name_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+int APS5_VABI _Cnd_init_with_name_nid_postfix(void** handle, const char* name) {
+    static_cast<void>(name);
+    return DinkumwareConditionInit_nid_no_patch(handle);
 }
 
 int APS5_VABI _ZTVN10__cxxabiv120__function_type_infoE_nid_postfix(void) {

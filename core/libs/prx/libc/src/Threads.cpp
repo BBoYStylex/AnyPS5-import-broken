@@ -1,4 +1,5 @@
 #include "prx/libc/include/general/VabiMacros.hpp"
+#include "prx/libc/include/Threads.hpp"
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
@@ -170,6 +171,15 @@ int APS5_VABI _Cnd_wait_nid_postfix(void** conditionHandle, void** mutexHandle) 
 
 int APS5_VABI _Cnd_broadcast_nid_postfix(void** handle) {
     ResolveCondition(handle, "_Cnd_broadcast")->native.notify_all();
+    return threadSuccess;
+}
+
+int DinkumwareConditionInit_nid_no_patch(void** handle) {
+    return _Cnd_init_nid_postfix(handle);
+}
+
+int DinkumwareConditionSignal_nid_no_patch(void** handle) {
+    ResolveCondition(handle, "_Cnd_signal")->native.notify_one();
     return threadSuccess;
 }
 

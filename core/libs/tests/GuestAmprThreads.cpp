@@ -2,6 +2,7 @@
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -18,6 +19,14 @@ struct GuestXtime {
 extern "C" {
 int APS5_VABI _Thrd_join_nid_postfix(Pthread thread, int* code);
 int APS5_VABI _Thrd_sleep_nid_postfix(const GuestXtime* target, GuestXtime* remaining);
+int APS5_VABI _Mtx_init_nid_postfix(void** handle, int type);
+void APS5_VABI _Mtx_destroy_nid_postfix(void** handle);
+int APS5_VABI _Mtx_lock_nid_postfix(void** handle);
+int APS5_VABI _Mtx_unlock_nid_postfix(void** handle);
+int APS5_VABI _Cnd_wait_nid_postfix(void** condition, void** mutex);
+int APS5_VABI _Cnd_signal_nid_postfix(void** handle);
+int APS5_VABI _Cnd_init_with_name_nid_postfix(void** handle, const char* name);
+void APS5_VABI _Cnd_destroy_nid_postfix(void** handle);
 void APS5_VABI _Lock_shared_ptr_spin_lock_nid_postfix(void);
 void APS5_VABI _Unlock_shared_ptr_spin_lock_nid_postfix(void);
 int APS5_VABI wcstombs_s_nid_postfix(std::size_t* result, char* destination, std::size_t capacity, const std::uint16_t* source, std::size_t limit);
@@ -39,6 +48,16 @@ static constexpr auto Failed = static_cast<std::size_t>(-1);
 static void RequireAt(bool value, int line) {
     if (value) return;
     std::fprintf(stderr, "requirement failed at line %d\n", line);
+    std::abort();
+}
+
+template<typename TException, typename TCall>
+static void RequireThrows(TCall call) {
+    try {
+        call();
+    } catch (const TException&) {
+        return;
+    }
     std::abort();
 }
 
@@ -197,10 +216,68 @@ static void TestWcstombs() {
     Require(result == Failed);
 }
 
+static void TestConditionSignal() {
+    void* condition = nullptr;
+    void* mutex = nullptr;
+    Require(_Cnd_init_with_name_nid_postfix(&condition, "guest_ampr_threads") == ThrdSuccess && condition != nullptr);
+    Require(_Mtx_init_nid_postfix(&mutex, 0) == ThrdSuccess && mutex != nullptr);
+
+    int waiting = 0;
+    int permits = 0;
+    std::atomic<int> completed{0};
+    std::array<std::thread, 2> waiters;
+    for (auto& waiter : waiters) waiter = std::thread([&] {
+        Require(_Mtx_lock_nid_postfix(&mutex) == ThrdSuccess);
+        ++waiting;
+        while (permits == 0) Require(_Cnd_wait_nid_postfix(&condition, &mutex) == ThrdSuccess);
+        --permits;
+        ++completed;
+        Require(_Mtx_unlock_nid_postfix(&mutex) == ThrdSuccess);
+    });
+    for (;;) {
+        Require(_Mtx_lock_nid_postfix(&mutex) == ThrdSuccess);
+        const bool allWaiting = waiting == static_cast<int>(waiters.size());
+        Require(_Mtx_unlock_nid_postfix(&mutex) == ThrdSuccess);
+        if (allWaiting) break;
+        std::this_thread::yield();
+    }
+
+    Require(_Mtx_lock_nid_postfix(&mutex) == ThrdSuccess);
+    permits = 1;
+    Require(_Cnd_signal_nid_postfix(&condition) == ThrdSuccess);
+    Require(_Mtx_unlock_nid_postfix(&mutex) == ThrdSuccess);
+    const auto oneWakeDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (completed.load() != 1 && std::chrono::steady_clock::now() < oneWakeDeadline) std::this_thread::yield();
+    Require(completed.load() == 1);
+
+    Require(_Mtx_lock_nid_postfix(&mutex) == ThrdSuccess);
+    permits = 1;
+    Require(_Cnd_signal_nid_postfix(&condition) == ThrdSuccess);
+    Require(_Mtx_unlock_nid_postfix(&mutex) == ThrdSuccess);
+    const auto bothWakeDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (completed.load() != 2 && std::chrono::steady_clock::now() < bothWakeDeadline) std::this_thread::yield();
+    Require(completed.load() == 2);
+    for (auto& waiter : waiters) waiter.join();
+
+    _Cnd_destroy_nid_postfix(&condition);
+    _Mtx_destroy_nid_postfix(&mutex);
+    Require(condition == nullptr && mutex == nullptr);
+
+    void* named = nullptr;
+    Require(_Cnd_init_with_name_nid_postfix(&named, nullptr) == ThrdSuccess && named != nullptr);
+    Require(_Cnd_signal_nid_postfix(&named) == ThrdSuccess);
+    _Cnd_destroy_nid_postfix(&named);
+    Require(named == nullptr);
+
+    RequireThrows<std::invalid_argument>([] { _Cnd_signal_nid_postfix(nullptr); });
+    RequireThrows<std::invalid_argument>([] { _Cnd_init_with_name_nid_postfix(nullptr, nullptr); });
+}
+
 int main() {
     TestThreadJoin();
     TestThreadSleep();
     TestSpinLock();
     TestWcstombs();
+    TestConditionSignal();
     return 0;
 }
