@@ -10,6 +10,7 @@
 #include <system_error>
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
+#include "prx/libkernel/File/include/DirectoryDescriptor.hpp"
 
 extern "C" int* APS5_VABI __error_nid_postfix();
 
@@ -18,9 +19,9 @@ constexpr int GuestEnoent = 2;
 constexpr int GuestEperm = 1;
 constexpr int GuestEio = 5;
 constexpr int GuestEfault = 14;
+constexpr int GuestEinval = 22;
 constexpr int GuestEexist = 17;
 constexpr int GuestExdev = 18;
-constexpr int GuestEinval = 22;
 
 std::atomic<std::uint16_t> creationMask{022};
 
@@ -48,6 +49,12 @@ int APS5_VABI setsid_nid_postfix(void) {
 
 std::uint16_t APS5_VABI umask_nid_postfix(std::uint16_t mask) {
     return creationMask.exchange(static_cast<std::uint16_t>(mask & 07777));
+}
+
+int APS5_VABI _fstatfs_nid_postfix(int d, void* buf);
+
+int APS5_VABI fstatfs_nid_postfix(int d, void* buf) {
+    return _fstatfs_nid_postfix(d, buf);
 }
 
 std::int64_t APS5_VABI readlink_nid_postfix(const char* path, char* buffer, std::size_t size) {
@@ -84,6 +91,15 @@ int APS5_VABI link_nid_postfix(const char* existing, const char* created) {
     if (error == std::errc::cross_device_link) return static_cast<int>(Fail(GuestExdev));
     if (error) throw std::system_error(error, "link");
     RecordWrittenPath_nid_no_patch(destination);
+    return 0;
+}
+
+int APS5_VABI fchdir_nid_postfix(int fd) {
+    int error = 0;
+    const char* path = GetDirectoryDescriptorPath_nid_no_patch(fd, &error);
+    if (path == nullptr) return static_cast<int>(Fail(error));
+    error = SetWorkingDirectory_nid_no_patch(path);
+    if (error != 0) return static_cast<int>(Fail(error));
     return 0;
 }
 
