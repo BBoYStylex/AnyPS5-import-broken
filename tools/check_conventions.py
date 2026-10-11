@@ -56,6 +56,7 @@ class Check:
         self.status = {}
         self.numstat = {}
         self.tree = set(git("ls-tree", "-r", "--name-only", head).splitlines())
+        self.gitlinks = {line.split("\t", 1)[1] for line in git("ls-tree", "-r", head).splitlines() if line.startswith("160000 ")}
         self.dirs = {str(parent) for path in self.tree for parent in PurePosixPath(path).parents}
         for line in git("diff", "--name-status", "--no-renames", self.base, head).splitlines():
             status, path = line.split("\t", 1)
@@ -140,6 +141,9 @@ class Check:
     def repository(self):
         for path, (added, deleted) in self.numstat.items():
             if path.startswith("3rdparty/"):
+                continue
+            if path in self.gitlinks:
+                self.report("system-dependency", path, 0, "submodule outside 3rdparty/")
                 continue
             suffix = PurePosixPath(path).suffix.lower()
             if self.status.get(path) != "D" and (added == "-" or suffix in IMAGES or not utf8(git("show", f"{self.head}:{path}", text=False))):
