@@ -39,7 +39,9 @@ bool ThrowsRuntimeError(TFunction function) {
 constexpr std::uint16_t kFiberModuleId = 0x0006;
 constexpr std::uint16_t kUltModuleId = 0x0007;
 constexpr int kModuleUnloaded = static_cast<int>(0x805A1001);
+constexpr int kInvalidValue = static_cast<int>(0x805A1000);
 constexpr std::uint16_t kTrophy2ModuleId = 0x0110;
+constexpr std::uint16_t kUnsupportedAcmModuleId = 0x010b;
 
 #ifdef __linux__
 struct Mapping {
@@ -98,6 +100,10 @@ void CheckUnwindInfo() {
 }
 
 int main() {
+    Require(sceSysmoduleLoadModule(kUnsupportedAcmModuleId) == kInvalidValue);
+    Require(sceSysmoduleIsLoaded(kUnsupportedAcmModuleId) == kInvalidValue);
+    Require(sceSysmoduleUnloadModule(kUnsupportedAcmModuleId) == kInvalidValue);
+
     Require(sceSysmoduleIsLoaded(kFiberModuleId) == kModuleUnloaded);
     Require(sceSysmoduleLoadModuleInternal(kFiberModuleId) == 0);
     Require(sceSysmoduleIsLoaded(kFiberModuleId) == 0);
