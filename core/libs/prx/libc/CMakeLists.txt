@@ -28,6 +28,7 @@ target_sources(libc PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src/Mspace.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/ApplicationHeap.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/ApplicationProcessParameters.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/GuestErrorFunctions.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/JumpBuffer.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/Formatting.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/FormattingWide.cpp
@@ -329,6 +330,16 @@ if(BUILD_TESTING)
     add_test(NAME guest_standard_streams COMMAND guest_standard_stream_tests)
     if(WIN32)
         set_tests_properties(guest_standard_streams PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+    endif()
+    add_test_executable(guest_libc_error_functions_tests ${LIBS_INCLUDE_DIR}/tests/GuestLibcErrorFunctions.cpp)
+    target_include_directories(guest_libc_error_functions_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_libc_error_functions_tests PRIVATE libc)
+    configure_windows_unwind(guest_libc_error_functions_tests)
+    add_test(NAME guest_libc_error_functions COMMAND guest_libc_error_functions_tests)
+    set_tests_properties(guest_libc_error_functions PROPERTIES TIMEOUT 10)
+    if(WIN32)
+        set_tests_properties(guest_libc_error_functions PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
     endif()
     add_test_executable(file_streams_tests ${LIBS_INCLUDE_DIR}/tests/FileStreams.cpp)
