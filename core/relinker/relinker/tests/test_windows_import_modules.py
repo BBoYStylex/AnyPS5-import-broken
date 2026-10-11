@@ -298,6 +298,20 @@ def main():
             run = subprocess.run([str(output)], capture_output=True, text=True, timeout=30)
             assert run.returncode == 11, (run.returncode, run.stdout, run.stderr)
 
+        host_provider = output.parent / 'app0' / 'prx' / 'libFoo2.prx.guest.prx'
+        for index, (symbol, module_name) in enumerate([('shared#A#B', 'libFoo'), ('shared', None)]):
+            case = work / ('unscoped-host-import-' + str(index))
+            (case / 'libs').mkdir(parents=True)
+            (case / 'libs' / 'libFoo2.prx').write_bytes(host_provider.read_bytes())
+            source = case / 'input.elf'
+            source.write_bytes(executable('libFoo2.prx', symbol, module_name, extra_dependencies=('unused.prx',)))
+            output = case / 'output.exe'
+            result = subprocess.run([str(relinker), '--windows', '--skip-sce-module', str(source), str(output)], capture_output=True, text=True, timeout=30)
+            assert result.returncode == 0, result.stderr
+            if os.name == 'nt':
+                run = subprocess.run([str(output)], capture_output=True, text=True, timeout=30)
+                assert run.returncode == 22 and 'unused.prx' not in run.stderr, (symbol, run.returncode, run.stdout, run.stderr)
+
         for symbol, message in [('shared#A#C', 'Unknown import module ID'),
                                 ('shared#A#', 'Invalid qualified import'),
                                 ('shared#A#?', 'Invalid import module ID'),
