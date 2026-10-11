@@ -9,6 +9,7 @@
 #include "prx/libkernel/File/include/FileLock.hpp"
 #include "prx/libkernel/Socket/include/SocketRuntime.hpp"
 #include "prx/libkernel/File/include/RandomDevice.hpp"
+#include "prx/libkernel/File/include/HostStreams.hpp"
 #include "prx/libkernel/KernelErrors.hpp"
 #include "SceTypes.hpp"
 
@@ -224,6 +225,7 @@ int APS5_VABI sceKernelOpen(const char* path, int flags, std::uint16_t mode) {
 }
 
 int APS5_VABI sceKernelClose(int d) {
+    if (File::IsHostStream(d)) return SCE_KERNEL_ERROR_EBADF;
     File::ForgetRandomDevice(d);
 #ifdef _WIN32
     File::ForgetDirectoryDescriptor(d);

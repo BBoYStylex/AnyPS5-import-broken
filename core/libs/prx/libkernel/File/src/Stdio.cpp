@@ -14,6 +14,7 @@
 #include "prx/libkernel/File/include/DirectoryDescriptor.hpp"
 #include "prx/libkernel/File/include/FileLock.hpp"
 #include "prx/libkernel/File/include/RandomDevice.hpp"
+#include "prx/libkernel/File/include/HostStreams.hpp"
 #include "prx/libkernel/KernelErrors.hpp"
 #include "prx/libkernel/Socket/include/SocketRuntime.hpp"
 #include <cerrno>
@@ -465,6 +466,7 @@ int APS5_VABI chmod_nid_postfix(const char* path, int mode) {
 }
 
 int APS5_VABI close_nid_postfix(int d) {
+    if (File::IsHostStream(d)) return PosixFailure(GUEST_EBADF);
     if (d >= GuestSockets::FirstDescriptor) return GuestSockets::Close(d);
     File::ForgetRandomDevice(d);
 #ifdef _WIN32
