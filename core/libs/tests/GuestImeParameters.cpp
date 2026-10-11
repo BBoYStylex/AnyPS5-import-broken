@@ -15,6 +15,7 @@ int APS5_VABI sceImeSetTextGeometry(TextAreaMode mode, const TextGeometry* geome
 int APS5_VABI sceImeKeyboardOpen(int32_t user_id, const KeyboardParam* param);
 int APS5_VABI sceImeKeyboardClose(int32_t user_id);
 int APS5_VABI sceImeKeyboardGetResourceId(int32_t user_id, KeyboardResourceIdArray* resource_ids);
+int APS5_VABI sceImeOpen_nid_postfix(const Param* param, const void* extended);
 }
 
 static_assert(sizeof(Param) == 96);
@@ -154,10 +155,27 @@ static void CheckKeyboardResourceIds() {
     Require(sceImeKeyboardGetResourceId(1, &ids) == NotOpened, "closed keyboard reported as opened");
 }
 
+static void CheckOpen() {
+    constexpr int NotOpened = static_cast<int>(0x80bc0002u);
+    constexpr int InvalidAddress = static_cast<int>(0x80bc0031u);
+    constexpr int InvalidType = static_cast<int>(0x80bc0011u);
+    constexpr int InvalidOption = static_cast<int>(0x80bc0015u);
+    Param param{};
+    Require(sceImeOpen_nid_postfix(nullptr, nullptr) == InvalidAddress, "null open parameter");
+    param.type = 5;
+    Require(sceImeOpen_nid_postfix(&param, nullptr) == InvalidType, "invalid open type");
+    param.type = 0;
+    param.option = 0x8000;
+    Require(sceImeOpen_nid_postfix(&param, nullptr) == InvalidOption, "invalid open option");
+    param.option = 0;
+    Require(sceImeOpen_nid_postfix(&param, nullptr) == NotOpened, "open needs a panel backend");
+}
+
 int main() {
     CheckInitialization();
     CheckPanelSizes();
     CheckErrors();
     CheckClosedPanel();
     CheckKeyboardResourceIds();
+    CheckOpen();
 }
