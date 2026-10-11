@@ -259,7 +259,7 @@ int APS5_VABI sceHttpUnsetEpoll(int id) {
 
 int APS5_VABI sceHttpWaitRequest(HttpEpollHandle eh, HttpNBEvent* nbev, int maxevents, int timeout) {
     if (!eh || !nbev || maxevents <= 0) return ERROR_INVALID_VALUE;
-    if (timeout < 0) NotImplemented_nid_no_patch(__func__);
+    if (timeout < 0) return ERROR_INVALID_VALUE;
     std::this_thread::sleep_for(std::chrono::microseconds(timeout));
     return 0;
 }
@@ -435,7 +435,6 @@ int APS5_VABI sceHttpSetRedirectCallback(int id, HttpRedirectCallback cbfunc, vo
 }
 
 int APS5_VABI sceHttpAbortWaitRequest(void) {
-    NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 }
