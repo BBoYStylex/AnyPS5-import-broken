@@ -24,6 +24,7 @@ target_sources(libc PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src/GuestWriteWatch.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/Interfaces.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/GuestHeap.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/GuestBinaryExponent.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/HeapDiagnostics.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/Mspace.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/ApplicationHeap.cpp
@@ -291,6 +292,16 @@ if(BUILD_TESTING)
     set_tests_properties(guest_thread_callback_abi PROPERTIES TIMEOUT 20)
     if(WIN32)
         set_tests_properties(guest_thread_callback_abi PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+    endif()
+    add_test_executable(guest_libc_binary_exponent_tests ${LIBS_INCLUDE_DIR}/tests/GuestLibcBinaryExponent.cpp)
+    target_include_directories(guest_libc_binary_exponent_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_libc_binary_exponent_tests PRIVATE libc)
+    configure_windows_unwind(guest_libc_binary_exponent_tests)
+    add_test(NAME guest_libc_binary_exponent COMMAND guest_libc_binary_exponent_tests)
+    set_tests_properties(guest_libc_binary_exponent PROPERTIES TIMEOUT 10)
+    if(WIN32)
+        set_tests_properties(guest_libc_binary_exponent PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
     endif()
     add_test_executable(guest_interface_tests ${LIBS_INCLUDE_DIR}/tests/GuestInterfaces.cpp)
