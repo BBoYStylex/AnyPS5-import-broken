@@ -285,6 +285,7 @@ struct VulkanDevice::State {
     bool imageInt64Atomics = false;
     bool bufferInt64Atomics = false;
     bool viewportIndexLayer = false;
+    bool fmaFloat16 = false;
     bool primitiveListRestart = false;
     bool depthClipControl = false;
     bool graphicsPipelineLibrary = false;
@@ -1178,6 +1179,20 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window, bool compileOnly) :
     state->float16DenormPreserve = floatControls.shaderDenormPreserveFloat16 == VK_TRUE &&
         floatControls.denormBehaviorIndependence == VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_ALL;
     if (state->float16DenormPreserve && std::find(state->capabilities.begin(), state->capabilities.end(), static_cast<std::uint32_t>(spv::CapabilityDenormPreserve)) == state->capabilities.end()) state->capabilities.push_back(spv::CapabilityDenormPreserve);
+    VkPhysicalDeviceShaderFmaFeaturesKHR fmaFeatures{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FMA_FEATURES_KHR};
+    if (float16Rte && hasExtension(VK_KHR_SHADER_FMA_EXTENSION_NAME)) {
+        VkPhysicalDeviceFeatures2 features{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &fmaFeatures};
+        state->InstanceFunction<PFN_vkGetPhysicalDeviceFeatures2>("vkGetPhysicalDeviceFeatures2")(selected, &features);
+    }
+    const bool float16Fma = float16Rte && fmaFeatures.shaderFmaFloat16 == VK_TRUE;
+    fmaFeatures = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FMA_FEATURES_KHR};
+    fmaFeatures.shaderFmaFloat16 = VK_TRUE;
+    state->fmaFloat16 = float16Fma;
+    if (float16Fma) {
+        deviceExtensions.push_back(VK_KHR_SHADER_FMA_EXTENSION_NAME);
+        state->capabilities.push_back(spv::CapabilityFMAKHR);
+        state->spirvExtensions.push_back("SPV_KHR_fma");
+    }
     deviceExtensions.push_back(VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME);
     deviceExtensions.push_back(VK_KHR_8BIT_STORAGE_EXTENSION_NAME);
     state->capabilities.push_back(4448);
@@ -1516,6 +1531,10 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window, bool compileOnly) :
     if (float16Rte) {
         float16Features.pNext = byteFeatures.pNext;
         byteFeatures.pNext = &float16Features;
+    }
+    if (float16Fma) {
+        fmaFeatures.pNext = byteFeatures.pNext;
+        byteFeatures.pNext = &fmaFeatures;
     }
     if (bufferInt64Atomics) {
         atomicInt64Features.pNext = byteFeatures.pNext;
@@ -3153,6 +3172,7 @@ Graphics::Context VulkanDevice::buildContext() const {
     context.bufferInt64Atomics = state->bufferInt64Atomics;
     context.placeholderImages = state->placeholderImages.get();
     context.viewportIndexLayer = state->viewportIndexLayer;
+    context.fmaFloat16 = state->fmaFloat16;
     context.primitiveListRestart = state->primitiveListRestart;
     context.imageViewMinLod = state->imageViewMinLod;
     context.pipelineExecutableInfo = state->pipelineExecutableInfo;
