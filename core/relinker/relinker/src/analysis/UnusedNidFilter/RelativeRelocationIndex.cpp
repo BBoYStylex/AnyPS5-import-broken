@@ -168,10 +168,13 @@ std::unique_ptr<IRelativeRelocationIndex> BuildRelativeRelocationIndex(
         std::uint64_t segSz = read64(elfBytes, phPos + 32);
         if (segOff > elfBytes.size() || segSz > elfBytes.size() - segOff) throw RelinkerException("PT_DYNAMIC segment out of bounds");
 
+        if (segSz % 16 != 0)
+            throw RelinkerException("PT_DYNAMIC segment contains a partial entry", segOff);
         VirtualAddress relaVa = 0;
         std::uint64_t relaSz = 0;
         VirtualAddress jmprelVa = 0;
         std::uint64_t pltrelsz = 0;
+        std::optional<std::uint64_t> pltRelType;
         bool relaSce = false;
         bool jmprelSce = false;
 
@@ -181,6 +184,9 @@ std::unique_ptr<IRelativeRelocationIndex> BuildRelativeRelocationIndex(
             std::uint64_t val = read64(elfBytes, pos + 8);
 
             if (tag == DT_NULL) break;
+            if ((tag == DT_RELAENT || tag == DT_OS_RELAENT) && val != RelaEntSize)
+                throw RelinkerException("Unsupported relocation entry size", pos);
+            if (tag == DT_PLTREL || tag == DT_OS_PLTREL) pltRelType = val;
             if (tag == DT_RELA || tag == DT_OS_RELA) {
                 relaVa = val;
                 relaSce = tag == DT_OS_RELA;
@@ -192,6 +198,9 @@ std::unique_ptr<IRelativeRelocationIndex> BuildRelativeRelocationIndex(
             }
             if (tag == DT_PLTRELSZ || tag == DT_OS_PLTRELSZ) pltrelsz = val;
         }
+
+        if (pltrelsz != 0 && pltRelType && *pltRelType != DT_RELA)
+            throw RelinkerException("PLT relocations must use RELA entries", segOff);
 
         collectRelativeEntries(elfBytes, loads, relaVa, relaSz, relaSce, sceTableBase, targets);
         collectRelativeEntries(elfBytes, loads, jmprelVa, pltrelsz, jmprelSce, sceTableBase, targets);
