@@ -642,6 +642,10 @@ int64_t APS5_VABI fstat_nid_disambig1_nid_postfix(int d, FileStat* sb) {
     if (sb == nullptr) {
         APS5_INVALID_ARG_EX;
     }
+    if (d >= GuestSockets::FirstDescriptor) {
+        if (const int error = GuestSockets::Stat(d, sb)) return PosixFailure(error);
+        return 0;
+    }
     File::FillFileStat(d, sb);
     return 0;
 }
@@ -803,6 +807,10 @@ int APS5_VABI sceKernelCheckReachability(const char* path) {
 
 int APS5_VABI sceKernelFstat(int d, FileStat* sb) {
     if (sb == nullptr) throw std::invalid_argument("sceKernelFstat: sb is null");
+    if (d >= GuestSockets::FirstDescriptor) {
+        const int error = GuestSockets::Stat(d, sb);
+        return error == 0 ? 0 : SceErrorFromErrno(error);
+    }
     if (!File::FillFileStatFromDescriptor(d, sb)) return SceErrorFromErrno(errno);
     return 0;
 }
