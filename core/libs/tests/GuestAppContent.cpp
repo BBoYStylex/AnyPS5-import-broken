@@ -47,6 +47,11 @@ int main() {
     Require(sceAppContentDownloadDataGetAvailableSpaceKb(&download, &availableKb) == 0);
     Require(availableKb == 0);
     Require(sceAppContentDownloadDataGetAvailableSpaceKb(&download, nullptr) == ErrorParameter);
+    availableKb = 12345;
+    Require(sceAppContentDownloadDataGetAvailableSpaceKb(nullptr, &availableKb) == ErrorParameter);
+    AppContentMountPoint temporary{};
+    std::memcpy(temporary.data, "/temp0", 7);
+    Require(sceAppContentDownloadDataGetAvailableSpaceKb(&temporary, &availableKb) == ErrorNotMounted && availableKb == 12345);
 
     const int32_t expectedParams[] = {3, 23566, -7, 0, 2147483647};
     for (uint32_t id = 0; id < 5; ++id) {
