@@ -49,7 +49,7 @@ def load_db(path):
         finally:
             temporary.unlink(missing_ok=True)
     db = {}
-    with open(path, errors="replace") as handle:
+    with open(path, encoding="utf-8-sig", errors="replace") as handle:
         for line in handle:
             parts = line.strip().split()
             if len(parts) >= 2:
