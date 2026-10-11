@@ -32,6 +32,7 @@ target_sources(libc PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src/Formatting.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/FormattingWide.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/ScanningWide.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/GuestLog1pExtended.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/RuntimeSupport.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/LocaleSupport.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/Process.cpp
@@ -366,6 +367,16 @@ if(BUILD_TESTING)
     add_test(NAME mspace COMMAND mspace_tests)
     if(WIN32)
         set_tests_properties(mspace PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+    endif()
+    add_test_executable(guest_libc_log1p_extended_tests ${LIBS_INCLUDE_DIR}/tests/GuestLibcLog1pExtended.cpp)
+    target_include_directories(guest_libc_log1p_extended_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_libc_log1p_extended_tests PRIVATE libc)
+    configure_windows_unwind(guest_libc_log1p_extended_tests)
+    add_test(NAME guest_libc_log1p_extended COMMAND guest_libc_log1p_extended_tests)
+    set_tests_properties(guest_libc_log1p_extended PROPERTIES TIMEOUT 10)
+    if(WIN32)
+        set_tests_properties(guest_libc_log1p_extended PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
     endif()
     add_test_executable(guest_formatting_tests ${LIBS_INCLUDE_DIR}/tests/Formatting.cpp)
