@@ -133,8 +133,17 @@ PadInputState PadInput::sampleController() const {
     addButton(SDL_CONTROLLER_BUTTON_LEFTSHOULDER, Pad::PadButton::L1);
     addButton(SDL_CONTROLLER_BUTTON_RIGHTSHOULDER, Pad::PadButton::R1);
     const auto type = SDL_GameControllerGetType(controller);
-    const bool viewPressed = type != SDL_CONTROLLER_TYPE_PS4 && type != SDL_CONTROLLER_TYPE_PS5 && readButton(SDL_CONTROLLER_BUTTON_BACK);
-    if (viewPressed) result.buttons |= static_cast<std::uint32_t>(Pad::PadButton::TouchPad);
+    const bool isPlayStation = (type == SDL_CONTROLLER_TYPE_PS4 || type == SDL_CONTROLLER_TYPE_PS5);
+    const bool viewPressed = !isPlayStation && readButton(SDL_CONTROLLER_BUTTON_BACK);
+    const bool startPressed = readButton(SDL_CONTROLLER_BUTTON_START);
+    if (viewPressed) {
+        result.buttons |= static_cast<std::uint32_t>(Pad::PadButton::TouchPad);
+        result.touchLeft = true;
+    }
+    if (!isPlayStation && startPressed) {
+        result.buttons |= static_cast<std::uint32_t>(Pad::PadButton::TouchPad);
+        result.touchRight = true;
+    }
     addButton(SDL_CONTROLLER_BUTTON_START, Pad::PadButton::Options);
     addButton(SDL_CONTROLLER_BUTTON_LEFTSTICK, Pad::PadButton::L3);
     addButton(SDL_CONTROLLER_BUTTON_RIGHTSTICK, Pad::PadButton::R3);
@@ -188,8 +197,14 @@ PadInputState PadInput::sampleController() const {
             result.touch[finger].y = static_cast<std::uint16_t>(std::clamp(y, 0.0f, 1.0f) * 942.0f);
         }
     }
-    if (viewPressed && !result.touch[0].active && !result.touch[1].active) {
-        result.touch[0] = {true, 960, 471, 0};
+    if (!result.touch[0].active && !result.touch[1].active) {
+        if (result.touchRight) {
+            result.touch[0] = {true, 1440, 471, 0};
+        } else if (result.touchLeft) {
+            result.touch[0] = {true, 480, 471, 0};
+        } else if (viewPressed) {
+            result.touch[0] = {true, 960, 471, 0};
+        }
     }
     return result;
 }
