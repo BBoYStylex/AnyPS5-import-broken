@@ -187,6 +187,7 @@ int APS5_VABI select_nid_postfix(int nfds, void* readfds, void* writefds, void* 
         }
         if (devicesReady) waitMilliseconds = 0;
         if (!hosts.empty() && !sockets.empty()) {
+#ifndef _WIN32
             if (poller == nullptr) UnknownDescriptor(sockets.front().descriptor, false);
             const auto sliceEnd = std::chrono::steady_clock::now() + std::chrono::milliseconds(waitMilliseconds);
             for (;;) {
@@ -207,13 +208,16 @@ int APS5_VABI select_nid_postfix(int nfds, void* readfds, void* writefds, void* 
                 if (hostReady > 0 || socketReady > 0) break;
                 if (std::chrono::steady_clock::now() >= sliceEnd) break;
             }
+#endif
         } else if (!hosts.empty()) {
+#ifndef _WIN32
             for (auto& host : hosts) host.revents = 0;
             if (HostPoll(hosts.data(), hosts.size(), waitMilliseconds) < 0) {
                 *__error_nid_postfix() = errno;
                 return -1;
             }
             for (std::size_t index = 0; index < hosts.size(); ++index) requested[hostSlots[index]].revents = hosts[index].revents;
+#endif
         } else if (!sockets.empty()) {
             if (poller == nullptr) UnknownDescriptor(sockets.front().descriptor, false);
             for (auto& socket : sockets) socket.revents = 0;
