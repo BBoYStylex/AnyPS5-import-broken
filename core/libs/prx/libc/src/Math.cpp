@@ -104,6 +104,7 @@ void APS5_VABI sincosf_nid_postfix(float x, float* sinp, float* cosp) {
 double APS5_VABI sin_nid_postfix(double x) { return std::sin(x); }
 double APS5_VABI cos_nid_postfix(double x) { return std::cos(x); }
 double APS5_VABI sinh_nid_postfix(double x) { return std::sinh(x); }
+float APS5_VABI sinhf_nid_postfix(float x) { return std::sinh(x); }
 double APS5_VABI cosh_nid_postfix(double x) { return std::cosh(x); }
 float APS5_VABI coshf_nid_postfix(float x) { return std::cosh(x); }
 double APS5_VABI asinh_nid_postfix(double x) { return std::asinh(x); }

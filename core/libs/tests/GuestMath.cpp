@@ -62,6 +62,7 @@ float APS5_VABI frexpf_nid_postfix(float, int*);
 std::int64_t APS5_VABI lround_nid_postfix(double);
 std::div_t APS5_VABI div_nid_postfix(int, int);
 double APS5_VABI sinh_nid_postfix(double);
+float APS5_VABI sinhf_nid_postfix(float);
 double APS5_VABI cosh_nid_postfix(double);
 float APS5_VABI coshf_nid_postfix(float);
 double APS5_VABI asinh_nid_postfix(double);
@@ -284,6 +285,10 @@ static bool Near(double value, double expected, double tolerance) { return std::
 static void CheckHyperbolic() {
     const double infinity = std::numeric_limits<double>::infinity();
     Require(sinh_nid_postfix(0.) == 0. && std::signbit(sinh_nid_postfix(-0.)));
+    Require(sinhf_nid_postfix(0.f) == 0.f && std::signbit(sinhf_nid_postfix(-0.f)));
+    Require(sinhf_nid_postfix(1e-30f) == 1e-30f && sinhf_nid_postfix(INFINITY) == INFINITY && sinhf_nid_postfix(-INFINITY) == -INFINITY);
+    Require(std::isnan(sinhf_nid_postfix(NAN)) && sinhf_nid_postfix(90.f) == INFINITY && sinhf_nid_postfix(-90.f) == -INFINITY);
+    Require(std::isfinite(sinhf_nid_postfix(89.f)) && sinhf_nid_postfix(-89.f) < 0.f);
     Require(cosh_nid_postfix(0.) == 1. && coshf_nid_postfix(0.f) == 1.f);
     Require(asinh_nid_postfix(0.) == 0. && std::signbit(asinh_nid_postfix(-0.)) && std::signbit(asinhf_nid_postfix(-0.f)));
     Require(acosh_nid_postfix(1.) == 0. && acoshf_nid_postfix(1.f) == 0.f);
@@ -291,6 +296,8 @@ static void CheckHyperbolic() {
     Require(std::isnan(acosh_nid_postfix(0.5)) && std::isnan(acoshf_nid_postfix(0.5f)) && std::isnan(atanh_nid_postfix(2.)));
     Require(Near(sinh_nid_postfix(1.), 1.1752011936438014, 1e-15));
     Require(Near(cosh_nid_postfix(1.), 1.5430806348152437, 1e-15));
+    Require(Near(sinhf_nid_postfix(1.f), 1.1752011936438014, 1e-6));
+    Require(Near(sinhf_nid_postfix(-2.5f), -6.0502044810397875, 1e-6));
     Require(Near(coshf_nid_postfix(1.f), 1.5430806348152437, 1e-6));
     Require(Near(asinh_nid_postfix(1.), 0.881373587019543, 1e-15));
     Require(Near(asinhf_nid_postfix(1.f), 0.881373587019543, 1e-6));
