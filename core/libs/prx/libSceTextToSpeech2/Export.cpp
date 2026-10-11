@@ -40,6 +40,11 @@ int APS5_VABI sceTextToSpeech2Speak() {
     return SCE_KERNEL_ERROR_EOPNOTSUPP;
 }
 
+int APS5_VABI sceTextToSpeech2RegisterTextConversionItem() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
 int APS5_VABI sceTextToSpeech2Terminate() {
     return SCE_KERNEL_ERROR_EOPNOTSUPP;
 }

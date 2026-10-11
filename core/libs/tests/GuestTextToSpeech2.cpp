@@ -13,6 +13,7 @@ int APS5_VABI sceTextToSpeech2GetSpeechStatus();
 int APS5_VABI sceTextToSpeech2Speak();
 int APS5_VABI sceTextToSpeech2Terminate();
 int APS5_VABI sceTextToSpeech2GetSystemStatus();
+int APS5_VABI sceTextToSpeech2RegisterTextConversionItem();
 }
 
 int main() {
@@ -27,6 +28,16 @@ int main() {
         sceTextToSpeech2Speak() != unsupported || sceTextToSpeech2Terminate() != unsupported ||
         sceTextToSpeech2GetSystemStatus() != unsupported) {
         std::puts("TextToSpeech2: later calls did not report the unsupported operation");
+        std::abort();
+    }
+    threw = false;
+    try {
+        sceTextToSpeech2RegisterTextConversionItem();
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    if (!threw) {
+        std::puts("TextToSpeech2: registering a text conversion item did not throw");
         std::abort();
     }
     std::puts("TextToSpeech2 tests passed");
