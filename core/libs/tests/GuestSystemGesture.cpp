@@ -18,7 +18,26 @@ int APS5_VABI sceSystemGestureUpdateTouchRecognizerRectangle(std::int32_t, void*
 int APS5_VABI sceSystemGestureResetPrimitiveTouchRecognizer(std::int32_t);
 int APS5_VABI sceSystemGestureUpdateAllTouchRecognizer(std::int32_t);
 int APS5_VABI sceSystemGestureUpdatePrimitiveTouchRecognizer(std::int32_t, const void*);
+int APS5_VABI sceSystemGestureCreateTouchRecognizer(std::int32_t, void*, std::int32_t, const void*, const void*);
+int APS5_VABI sceSystemGestureGetTouchRecognizerInformation(std::int32_t, const void*, void*);
 }
+
+struct Rectangle {
+    float x;
+    float y;
+    float width;
+    float height;
+    std::uint8_t reserve[8];
+};
+
+struct RecognizerInformation {
+    std::int32_t gestureType;
+    Rectangle rectangle;
+    std::uint64_t updatedTime;
+    std::uint8_t reserve[256];
+};
+
+using Recognizer = std::array<std::uint64_t, 361>;
 
 static void Require(bool value) { if (!value) std::abort(); }
 
@@ -44,8 +63,8 @@ int main() {
     Require(sceSystemGestureGetPrimitiveTouchEventsCount(handle + 1) == invalidHandle);
 
     constexpr int indexOutOfArray = static_cast<int>(0x80D10005);
-    int recognizer = 0;
-    int rectangle = 0;
+    Recognizer recognizer{};
+    Rectangle rectangle{};
     count = 7;
     Require(sceSystemGestureGetTouchEvents(handle, &recognizer, buffer.data(), 4, &count) == 0 && count == 0);
     Require(sceSystemGestureGetTouchEvents(handle, &recognizer, buffer.data(), 4, nullptr) == invalidArgument);
@@ -76,5 +95,29 @@ int main() {
     Require(sceSystemGestureResetPrimitiveTouchRecognizer(handle + 1) == invalidHandle);
     Require(sceSystemGestureUpdateAllTouchRecognizer(handle + 1) == invalidHandle);
     Require(sceSystemGestureUpdatePrimitiveTouchRecognizer(handle + 1, nullptr) == invalidHandle);
+
+    Recognizer created{};
+    const Rectangle area{10.0f, 20.0f, 300.0f, 400.0f, {}};
+    Require(sceSystemGestureCreateTouchRecognizer(handle, &created, 2, &area, nullptr) == 0);
+    RecognizerInformation information{};
+    information.updatedTime = 7;
+    Require(sceSystemGestureGetTouchRecognizerInformation(handle, &created, &information) == 0);
+    Require(information.gestureType == 2);
+    Require(information.rectangle.x == 10.0f && information.rectangle.y == 20.0f);
+    Require(information.rectangle.width == 300.0f && information.rectangle.height == 400.0f);
+    Require(information.updatedTime == 0);
+
+    const Rectangle moved{5.0f, 6.0f, 70.0f, 80.0f, {}};
+    Require(sceSystemGestureUpdateTouchRecognizerRectangle(handle, &created, &moved) == 0);
+    Require(sceSystemGestureGetTouchRecognizerInformation(handle, &created, &information) == 0);
+    Require(information.gestureType == 2);
+    Require(information.rectangle.x == 5.0f && information.rectangle.y == 6.0f);
+    Require(information.rectangle.width == 70.0f && information.rectangle.height == 80.0f);
+
+    const auto unchanged = information.rectangle.width;
+    Require(sceSystemGestureGetTouchRecognizerInformation(handle + 1, &created, &information) == invalidHandle);
+    Require(sceSystemGestureGetTouchRecognizerInformation(handle, nullptr, &information) == invalidArgument);
+    Require(sceSystemGestureGetTouchRecognizerInformation(handle, &created, nullptr) == invalidArgument);
+    Require(information.rectangle.width == unchanged);
     return 0;
 }
