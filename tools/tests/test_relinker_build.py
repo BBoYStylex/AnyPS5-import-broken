@@ -61,7 +61,7 @@ class BuildTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name)
+        self.root = Path(self.temporary.name).resolve()
         self.source = self.root / "title.elf"
         self.source.write_bytes(b"title")
         self.fake = self.root / "fake.py"
