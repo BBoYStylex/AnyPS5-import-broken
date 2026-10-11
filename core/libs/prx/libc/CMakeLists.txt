@@ -10,6 +10,7 @@ target_sources(libc PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src/AllocatingStrings.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/WideConversion.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/Multibyte.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/GuestIntegerMagnitude.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/RuneLocale.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/StringExtensions.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/Math.cpp
@@ -158,6 +159,16 @@ if(BUILD_TESTING)
     add_test(NAME guest_random_state COMMAND guest_random_state_tests)
     if(WIN32)
         set_tests_properties(guest_random_state PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+    endif()
+    add_test_executable(guest_libc_integer_magnitude_tests ${LIBS_INCLUDE_DIR}/tests/GuestLibcIntegerMagnitude.cpp)
+    target_include_directories(guest_libc_integer_magnitude_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_libc_integer_magnitude_tests PRIVATE libc)
+    configure_windows_unwind(guest_libc_integer_magnitude_tests)
+    add_test(NAME guest_libc_integer_magnitude COMMAND guest_libc_integer_magnitude_tests)
+    set_tests_properties(guest_libc_integer_magnitude PROPERTIES TIMEOUT 10)
+    if(WIN32)
+        set_tests_properties(guest_libc_integer_magnitude PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
     endif()
     add_test_executable(guest_execute_once_tests ${LIBS_INCLUDE_DIR}/tests/GuestExecuteOnce.cpp)
