@@ -76,6 +76,11 @@ struct Socket {
 #endif
     }
 };
+int SendError(const Socket& socket) {
+    const int error = NativeError();
+    if (error == 57 && socket.type == 2) return 39;
+    return error;
+}
 struct Waker {
     NativeSocket value = Invalid;
     Waker() {
@@ -597,7 +602,7 @@ std::int64_t APS5_VABI send_nid_postfix(int descriptor, const void* buffer, std:
     if (length > INT_MAX) return Fail(40);
     if (!buffer && length) return Fail(14);
     const auto result = ::send(socket->value, static_cast<const char*>(buffer), static_cast<int>(length), NativeSendFlags(flags));
-    return result < 0 ? Fail(NativeError()) : result;
+    return result < 0 ? Fail(SendError(*socket)) : result;
 }
 std::int64_t APS5_VABI recv_nid_postfix(int descriptor, void* buffer, std::uint64_t length, int flags) {
     const auto socket = Lookup(descriptor);
@@ -690,7 +695,7 @@ std::int64_t APS5_VABI sendto_nid_postfix(int descriptor, const void* buffer, st
         result = static_cast<int>(::sendto(socket->value, static_cast<const char*>(buffer), static_cast<int>(length), NativeSendFlags(flags),
             reinterpret_cast<sockaddr*>(&native), size));
     }
-    return result < 0 ? Fail(NativeError()) : result;
+    return result < 0 ? Fail(SendError(*socket)) : result;
 }
 std::int64_t APS5_VABI recvfrom_nid_postfix(int descriptor, void* buffer, std::uint64_t length,
     int flags, void* address, std::uint32_t* addressLength) {
