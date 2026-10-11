@@ -389,8 +389,9 @@ static bool Untouched(const std::uint8_t* parameter, std::size_t from) {
 static void InitParameters() {
     using Constructor = void (APS5_VABI*)(void*);
     for (Constructor construct : {_ZN3sce4Json14InitParameter2C1Ev, _ZN3sce4Json14InitParameter2C2Ev}) {
-        alignas(16) std::uint8_t parameter[40];
-        std::memset(parameter, 0xff, sizeof(parameter));
+        alignas(16) std::uint8_t storage[72];
+        std::memset(storage, 0xff, sizeof(storage));
+        auto* parameter = storage + 16;
         construct(parameter);
         StoredInitParameter2 stored = Stored(parameter);
         Require(stored.allocator == nullptr && stored.userData == nullptr && stored.fileBufferSize == 0);
@@ -399,16 +400,23 @@ static void InitParameters() {
 
         int allocParam = 0;
         int userData = 0;
-        _ZN3sce4Json14InitParameter217setFileBufferSizeEm(parameter, 8192);
+        constexpr std::size_t fileBufferSize = (std::size_t{1} << 33) + 8192;
+        _ZN3sce4Json14InitParameter217setFileBufferSizeEm(parameter, fileBufferSize);
         _ZN3sce4Json14InitParameter225setSpecialFloatFormatTypeENS0_22SpecialFloatFormatTypeE(parameter, 2);
         _ZN3sce4Json18InitParameterRtti216setAllocatorRttiEPNS0_14AllocParamRttiEPv(parameter, &allocParam, &userData);
         stored = Stored(parameter);
-        Require(stored.allocator == &allocParam && stored.userData == &userData && stored.fileBufferSize == 8192);
+        Require(stored.allocator == &allocParam && stored.userData == &userData && stored.fileBufferSize == fileBufferSize);
         Require(stored.specialFloatFormatType == 2);
         Require(stored.reserved[0] == 0 && stored.reserved[1] == 0 && stored.reserved[2] == 0);
 
-        _ZN3sce4Json14InitParameter225setSpecialFloatFormatTypeENS0_22SpecialFloatFormatTypeE(parameter, 0);
-        Require(Stored(parameter).specialFloatFormatType == 0 && Stored(parameter).fileBufferSize == 8192);
+        for (std::uint32_t format : {0u, UINT32_MAX}) {
+            _ZN3sce4Json14InitParameter225setSpecialFloatFormatTypeENS0_22SpecialFloatFormatTypeE(parameter, format);
+            stored = Stored(parameter);
+            Require(stored.specialFloatFormatType == format && stored.fileBufferSize == fileBufferSize);
+            Require(stored.allocator == &allocParam && stored.userData == &userData);
+            Require(stored.reserved[0] == 0 && stored.reserved[1] == 0 && stored.reserved[2] == 0);
+        }
+        for (std::size_t i = 0; i < 16; ++i) Require(storage[i] == 0xff && storage[56 + i] == 0xff);
 
         alignas(16) std::uint8_t initializer[16]{};
         Require(_ZN3sce4Json11InitializerC1Ev(initializer) == 0);
