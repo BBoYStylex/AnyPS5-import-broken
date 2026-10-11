@@ -323,6 +323,18 @@ int APS5_VABI sceVideoOutVrrPegToFixedRate(int handle, uint64_t arg1, uint64_t a
     LibcAwaitExit_nid_postfix();
 }
 
+int APS5_VABI sceVideoOutSetFlipMaster(int slaveHandle, int masterHandle) try {
+    return VideoOutDriver::Get().SetFlipMaster(slaveHandle, masterHandle);
+} catch (const ProcessShutdown&) {
+    LibcAwaitExit_nid_postfix();
+}
+
+int APS5_VABI sceVideoOutClearFlipMaster(int slaveHandle) try {
+    return VideoOutDriver::Get().ClearFlipMaster(slaveHandle);
+} catch (const ProcessShutdown&) {
+    LibcAwaitExit_nid_postfix();
+}
+
 int APS5_VABI sceVideoOutAddVrrStatusFlagsPrivilege() {
     return 0;
 }

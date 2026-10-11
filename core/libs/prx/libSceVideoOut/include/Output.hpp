@@ -28,6 +28,8 @@ int APS5_VABI sceVideoOutColorSettingsSetGamma(VideoOutColorSettings* settings, 
 int APS5_VABI sceVideoOutAdjustColor(int handle, const VideoOutColorSettings* settings);
 int APS5_VABI sceVideoOutVrrPegToFixedRate(int handle, uint64_t arg1, uint64_t arg2);
 int APS5_VABI sceVideoOutVrrUnpegFromFixedRate(int handle);
+int APS5_VABI sceVideoOutSetFlipMaster(int slaveHandle, int masterHandle);
+int APS5_VABI sceVideoOutClearFlipMaster(int slaveHandle);
 
 }
 

@@ -39,6 +39,7 @@ static constexpr int VIDEO_OUT_ERROR_UNSUPPORTED_OUTPUT_MODE = -2144796650;
 static constexpr int VIDEO_OUT_ERROR_UNAVAILABLE_OUTPUT_MODE = -2144796647;
 static constexpr int VIDEO_OUT_ERROR_INVALID_EVENT = -2144796659;
 static constexpr int VIDEO_OUT_ERROR_UNKNOWN_OUTPUT_MODE = -2144796642;
+static constexpr int VIDEO_OUT_ERROR_UNSUPPORTED_OPERATION = -2144796644;
 
 static constexpr int VIDEO_OUT_BUS_TYPE_MAIN = 0;
 static constexpr int VIDEO_OUT_BUS_TYPE_OVERLAY = 1;
@@ -134,6 +135,8 @@ struct VideoOutConfig {
     std::chrono::steady_clock::time_point lastTimingFlip{};
     uint64_t outputMode = VIDEO_OUT_OUTPUT_MODE_DEFAULT;
     float gamma = 1.0f;
+    int flipMaster = 0;
+    std::uint32_t flipSlaves = 0;
 
     VideoOutFlipStatus flipStatus{};
     VideoOutVblankStatus vblankStatus{};
@@ -214,6 +217,8 @@ public:
     std::shared_ptr<VideoOutConfig> GetConfig(int handle);
     bool IsOpen(int handle);
     bool HasConfig(int handle);
+    int SetFlipMaster(int slaveHandle, int masterHandle);
+    int ClearFlipMaster(int slaveHandle);
 
     // 0, or VIDEO_OUT_ERROR_FLIP_QUEUE_FULL when the title has VIDEO_OUT_FLIP_QUEUE_CAPACITY flips pending.
     int SubmitFlip(int handle, int index, int flipMode, int64_t flipArg);

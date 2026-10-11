@@ -146,6 +146,7 @@ public:
         if (queue->stopping || cfg->shutdownToken.stop_requested()) throw ProcessShutdown{};
         std::lock_guard lock(cfg->mutex);
         checkConfig(*cfg);
+        require(cfg->flipMaster == 0 && cfg->flipSlaves == 0, "flips on a port tied by sceVideoOutSetFlipMaster are not modelled");
         request->generation = cfg->generation;
         request->flipRate = cfg->flipRate;
         if (info.index >= 0) request->reuseTicket = cfg->bufferReuse[info.index].Reserve();
@@ -352,6 +353,10 @@ int VideoOutDriver::Open(int busType) {
 bool VideoOutDriver::Close(int handle) {
     std::lock_guard lock(mutex);
     if (LibcShutdownToken_nid_postfix().stop_requested()) throw ProcessShutdown{};
+    if (handle > 0 && handle < VIDEO_OUT_NUM_MAX && contexts[handle] != nullptr) {
+        std::lock_guard cfgLock(contexts[handle]->mutex);
+        require(contexts[handle]->flipSlaves == 0, "closing a flip master that still has slave ports is not modelled");
+    }
     return close(handle);
 }
 
@@ -360,6 +365,12 @@ bool VideoOutDriver::close(int handle) {
     AgcDriverUnregisterVideoOutput_nid_postfix(static_cast<uint32_t>(handle), outputs[handle]);
     outputs[handle].reset();
     auto cfg = contexts[handle];
+    if (cfg->flipMaster != 0) {
+        auto& master = *contexts[cfg->flipMaster];
+        std::scoped_lock tieLock(cfg->mutex, master.mutex);
+        cfg->flipMaster = 0;
+        --master.flipSlaves;
+    }
     std::lock_guard cfgLock(cfg->mutex);
     cfg->opened = false;
     cfg->closing = true;
@@ -411,6 +422,55 @@ bool VideoOutDriver::HasConfig(int handle) {
     }
     std::lock_guard cfgLock(cfg->mutex);
     return cfg->opened && !cfg->closing;
+}
+
+int VideoOutDriver::SetFlipMaster(int slaveHandle, int masterHandle) {
+    std::lock_guard lock(mutex);
+    {
+        std::lock_guard queueLock(flipQueue->mutex);
+        if (flipQueue->failure) std::rethrow_exception(flipQueue->failure);
+        if (flipQueue->stopping || LibcShutdownToken_nid_postfix().stop_requested()) throw ProcessShutdown{};
+    }
+    if (slaveHandle <= 0 || slaveHandle >= VIDEO_OUT_NUM_MAX || contexts[slaveHandle] == nullptr) return VIDEO_OUT_ERROR_INVALID_HANDLE;
+    if (masterHandle <= 0 || masterHandle >= VIDEO_OUT_NUM_MAX || contexts[masterHandle] == nullptr) return VIDEO_OUT_ERROR_INVALID_HANDLE;
+    auto& slave = *contexts[slaveHandle];
+    auto& master = *contexts[masterHandle];
+    if (slaveHandle == masterHandle) {
+        std::lock_guard cfgLock(slave.mutex);
+        slave.CheckAlive();
+        return slave.Closed() ? VIDEO_OUT_ERROR_INVALID_HANDLE : VIDEO_OUT_ERROR_UNSUPPORTED_OPERATION;
+    }
+    std::scoped_lock cfgLock(slave.mutex, master.mutex);
+    slave.CheckAlive();
+    master.CheckAlive();
+    if (slave.Closed() || master.Closed()) return VIDEO_OUT_ERROR_INVALID_HANDLE;
+    if (slave.flipMaster != 0 || slave.flipSlaves != 0 || master.flipMaster != 0) return VIDEO_OUT_ERROR_UNSUPPORTED_OPERATION;
+    if (slave.flipStatus.flipPendingNum != 0 || master.flipStatus.flipPendingNum != 0) return VIDEO_OUT_ERROR_RESOURCE_BUSY;
+    slave.flipMaster = masterHandle;
+    ++master.flipSlaves;
+    return 0;
+}
+
+int VideoOutDriver::ClearFlipMaster(int slaveHandle) {
+    std::lock_guard lock(mutex);
+    {
+        std::lock_guard queueLock(flipQueue->mutex);
+        if (flipQueue->failure) std::rethrow_exception(flipQueue->failure);
+        if (flipQueue->stopping || LibcShutdownToken_nid_postfix().stop_requested()) throw ProcessShutdown{};
+    }
+    if (slaveHandle <= 0 || slaveHandle >= VIDEO_OUT_NUM_MAX || contexts[slaveHandle] == nullptr) return VIDEO_OUT_ERROR_INVALID_HANDLE;
+    auto& slave = *contexts[slaveHandle];
+    {
+        std::lock_guard cfgLock(slave.mutex);
+        slave.CheckAlive();
+        if (slave.Closed()) return VIDEO_OUT_ERROR_INVALID_HANDLE;
+        require(slave.flipMaster != 0, "sceVideoOutClearFlipMaster on a port without a flip master: the console's answer is unknown");
+    }
+    auto& master = *contexts[slave.flipMaster];
+    std::scoped_lock cfgLock(slave.mutex, master.mutex);
+    slave.flipMaster = 0;
+    --master.flipSlaves;
+    return 0;
 }
 
 int VideoOutDriver::SubmitFlip(int handle, int index, int flipMode, int64_t flipArg) {
