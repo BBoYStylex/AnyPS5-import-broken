@@ -4,9 +4,15 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <stdexcept>
 
 extern "C" {
 int APS5_VABI sceNpGetNpId(int user_id, NpId* np_id);
+}
+
+extern "C" {
+void APS5_VABI sceNpRegisterGamePresenceCallback(void* callback, void* userdata);
+int APS5_VABI sceNpSetContentRestriction(const NpContentRestriction* restriction);
 }
 
 extern "C" {
@@ -67,5 +73,16 @@ int main() {
     Require(sceNpGetNpId(0x10000, &npId) == SignedOut, "sceNpGetNpId must report the user as signed out");
     Require(std::memcmp(&npId, &untouched, sizeof(npId)) == 0, "sceNpGetNpId must leave the NpId untouched");
     Require(sceNpGetNpId(0x10000, nullptr) == InvalidArgument, "sceNpGetNpId must reject a null NpId");
+    bool presenceRejectedNull = false;
+    try {
+        sceNpRegisterGamePresenceCallback(nullptr, nullptr);
+    } catch (const std::invalid_argument&) {
+        presenceRejectedNull = true;
+    }
+    Require(presenceRejectedNull, "sceNpRegisterGamePresenceCallback must reject a null callback");
+    sceNpRegisterGamePresenceCallback(reinterpret_cast<void*>(&presenceRejectedNull), nullptr);
+    NpContentRestriction restriction{};
+    Require(sceNpSetContentRestriction(nullptr) == 0, "sceNpSetContentRestriction must accept a null restriction");
+    Require(sceNpSetContentRestriction(&restriction) == 0, "sceNpSetContentRestriction must accept a restriction");
     return 0;
 }
