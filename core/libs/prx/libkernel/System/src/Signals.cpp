@@ -40,8 +40,16 @@ constexpr int SaRestart = 0x2;
 constexpr int SaSiginfo = 0x40;
 std::atomic<GuestHandler> handlers[MaxSignal + 1]{};
 static_assert(std::atomic<GuestHandler>::is_always_lock_free);
-std::atomic<std::uint32_t> blockedMask{0};
-static_assert(std::atomic<std::uint32_t>::is_always_lock_free);
+constexpr int GuestSigBlock = 1;
+constexpr int GuestSigUnblock = 2;
+constexpr int GuestSigSetmask = 3;
+// FreeBSD keeps the blocked and pending sets per thread (kern_sigprocmask); a signal raised
+// while blocked waits until the thread unblocks it.
+thread_local GuestSignalSet blockedSignals{};
+thread_local GuestSignalSet pendingSignals{};
+std::uint32_t Bit(int guest) { return 1u << ((guest - 1) % 32); }
+std::uint32_t& Word(GuestSignalSet& set, int guest) { return set.bits[(guest - 1) / 32]; }
+bool Contains(GuestSignalSet& set, int guest) { return (Word(set, guest) & Bit(guest)) != 0; }
 std::mutex registration;
 GuestSigaction dispositions[MaxSignal + 1]{};
 int NativeSignal(int guest) {
@@ -64,7 +72,10 @@ void Dispatch(int native) {
     // Preserve the guest's persistent registration across CRT delivery.
     std::signal(native, Dispatch);
 #endif
-    if ((blockedMask.load() & (1u << (guest - 1))) != 0) return;
+    if (Contains(blockedSignals, guest)) {
+        Word(pendingSignals, guest) |= Bit(guest);
+        return;
+    }
     const auto callback = handlers[guest].load();
     if (reinterpret_cast<std::uintptr_t>(callback) > 1) callback(guest);
 }
@@ -188,9 +199,15 @@ int APS5_VABI sigaction_nid_postfix(int guest, const GuestSigaction* action, Gue
 int APS5_VABI raise_nid_postfix(int guest) {
     const int native = NativeSignal(guest);
     if (!native) { *__error_nid_postfix() = 22; return -1; }
+    bool ignored = false;
     {
         std::lock_guard lock(registration);
         if (dispositions[guest].handler > 1 && !Delivered(dispositions[guest])) throw std::runtime_error("raise: SA_SIGINFO handlers are not delivered");
+        ignored = dispositions[guest].handler == 1;
+    }
+    if (Contains(blockedSignals, guest)) {
+        if (!ignored) Word(pendingSignals, guest) |= Bit(guest);
+        return 0;
     }
     const int result = std::raise(native);
     if (result) *__error_nid_postfix() = 22;
@@ -222,20 +239,22 @@ int APS5_VABI sigaltstack_nid_postfix(const GuestStack* stack, GuestStack* previ
     return 0;
 }
 int APS5_VABI _sigprocmask_nid_postfix(int how, const GuestSignalSet* set, GuestSignalSet* previousSet) {
-    std::lock_guard lock(registration);
-    if (previousSet != nullptr) {
-        previousSet->bits[0] = blockedMask.load();
-        previousSet->bits[1] = 0;
-        previousSet->bits[2] = 0;
-        previousSet->bits[3] = 0;
-    }
+    const GuestSignalSet previous = blockedSignals;
     if (set != nullptr) {
-        switch (how) {
-            case 1: blockedMask.fetch_or(set->bits[0]); break;
-            case 2: blockedMask.fetch_and(~set->bits[0]); break;
-            case 3: blockedMask.store(set->bits[0]); break;
-            default: throw std::invalid_argument("_sigprocmask: invalid how");
+        if (how < GuestSigBlock || how > GuestSigSetmask) throw std::invalid_argument("_sigprocmask: invalid how");
+        for (int word = 0; word < 4; ++word) {
+            if (how == GuestSigBlock) blockedSignals.bits[word] |= set->bits[word];
+            else if (how == GuestSigUnblock) blockedSignals.bits[word] &= ~set->bits[word];
+            else blockedSignals.bits[word] = set->bits[word];
         }
+        Word(blockedSignals, GuestSigkill) &= ~Bit(GuestSigkill);
+        Word(blockedSignals, GuestSigstop) &= ~Bit(GuestSigstop);
+    }
+    if (previousSet != nullptr) *previousSet = previous;
+    for (int guest = 1; guest <= MaxSignal; ++guest) {
+        if (!Contains(pendingSignals, guest) || Contains(blockedSignals, guest)) continue;
+        Word(pendingSignals, guest) &= ~Bit(guest);
+        raise_nid_postfix(guest);
     }
     return 0;
 }
