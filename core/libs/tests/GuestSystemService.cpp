@@ -7,14 +7,26 @@
 
 extern "C" int APS5_VABI sceSystemServiceGetHdrToneMapLuminance(SystemServiceHdrToneMapLuminance* luminance);
 extern "C" int APS5_VABI sceSystemServiceParamGetString(int paramId, char* buf, std::size_t bufSize);
+extern "C" int APS5_VABI sceSystemServiceLaunchApp(const char* titleId, const char* const* arguments, const void* param);
 
 namespace {
+
+constexpr int browserUnavailable = static_cast<int>(0x8002002Du);
 
 void Require(bool value) { if (!value) std::abort(); }
 
 bool ParamGetStringThrows(int paramId, char* buf, std::size_t bufSize) {
     try {
         static_cast<void>(sceSystemServiceParamGetString(paramId, buf, bufSize));
+    } catch (const std::runtime_error&) {
+        return true;
+    }
+    return false;
+}
+
+bool LaunchAppThrows(const char* titleId, const char* const* arguments, const void* param) {
+    try {
+        static_cast<void>(sceSystemServiceLaunchApp(titleId, arguments, param));
     } catch (const std::runtime_error&) {
         return true;
     }
@@ -29,6 +41,7 @@ extern "C" int APS5_VABI sceSystemServiceDisableMusicPlayer(void);
 extern "C" int APS5_VABI sceSystemServiceReenableMusicPlayer(void);
 extern "C" int APS5_VABI sceSystemServiceDisableMediaPlay(void);
 extern "C" int APS5_VABI sceSystemServiceReenableMediaPlay(void);
+extern "C" int APS5_VABI sceSystemServiceLaunchWebBrowser(const char* uri, void* param);
 
 int main() {
     Require(sceSystemServicePowerTick() == SYSTEM_SERVICE_OK);
@@ -44,6 +57,21 @@ int main() {
     Require(sceSystemServiceDisableMediaPlay() == SYSTEM_SERVICE_OK);
     Require(sceSystemServiceReenableMediaPlay() == SYSTEM_SERVICE_OK);
     Require(sceSystemServiceReenableMediaPlay() == SYSTEM_SERVICE_OK);
+    Require(sceSystemServiceLaunchWebBrowser("http://127.0.0.1:8780/video?v=0", nullptr) == browserUnavailable);
+    unsigned char browserParam[64];
+    std::memset(browserParam, 0x5a, sizeof(browserParam));
+    Require(sceSystemServiceLaunchWebBrowser("https://example.com/", browserParam) == browserUnavailable);
+    for (unsigned char byte : browserParam) Require(byte == 0x5a);
+    Require(sceSystemServiceLaunchWebBrowser("", nullptr) == browserUnavailable);
+    Require(sceSystemServiceLaunchWebBrowser(nullptr, nullptr) == browserUnavailable);
+    Require(LaunchAppThrows("PPSA99109", nullptr, nullptr));
+    Require(LaunchAppThrows(nullptr, nullptr, nullptr));
+    const char* launchArguments[] = {"--backup", nullptr};
+    unsigned char launchParam[0x20];
+    std::memset(launchParam, 0x5a, sizeof(launchParam));
+    Require(LaunchAppThrows("PPSA99110", launchArguments, launchParam));
+    for (unsigned char byte : launchParam) Require(byte == 0x5a);
+    Require(std::strcmp(launchArguments[0], "--backup") == 0 && launchArguments[1] == nullptr);
     Require(sceSystemServiceGetHdrToneMapLuminance(nullptr) == SYSTEM_SERVICE_ERROR_PARAMETER);
     SystemServiceHdrToneMapLuminance luminance{-1.0f, -1.0f, -1.0f};
     Require(sceSystemServiceGetHdrToneMapLuminance(&luminance) == SYSTEM_SERVICE_OK);

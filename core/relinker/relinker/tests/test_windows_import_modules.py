@@ -11,16 +11,72 @@ from test_guest_intel_trampolines import main_fixture
 from test_guest_module_directories import module_with_symbol, needed_libraries
 
 
+def check_native_load_paths(output, libraries):
+    pe = output.read_bytes()
+    header = struct.unpack_from('<I', pe, 0x3c)[0]
+    optional = header + 24
+    section_table = optional + struct.unpack_from('<H', pe, header + 20)[0]
+    sections = {}
+    for index in range(struct.unpack_from('<H', pe, header + 6)[0]):
+        offset = section_table + index * 40
+        name = pe[offset:offset + 8].rstrip(b'\0')
+        size, rva, raw_size, raw = struct.unpack_from('<IIII', pe, offset + 8)
+        sections[name] = (rva, pe[raw:raw + min(size, raw_size)])
+
+    def file_offset(rva):
+        for index in range(struct.unpack_from('<H', pe, header + 6)[0]):
+            offset = section_table + index * 40
+            size, start, raw_size, raw = struct.unpack_from('<IIII', pe, offset + 8)
+            if start <= rva < start + min(size, raw_size):
+                return raw + rva - start
+        raise AssertionError(f'RVA {rva:#x} has no file data')
+
+    descriptor = file_offset(struct.unpack_from('<I', pe, optional + 112 + 8)[0])
+    load_library_iat = None
+    while any(pe[descriptor:descriptor + 20]):
+        lookup, _, _, _, iat = struct.unpack_from('<IIIII', pe, descriptor)
+        index = 0
+        while (name_rva := struct.unpack_from('<Q', pe, file_offset((lookup or iat) + index * 8))[0]):
+            if not name_rva & (1 << 63):
+                name_offset = file_offset(name_rva) + 2
+                name = pe[name_offset:pe.index(b'\0', name_offset)]
+                if name == b'LoadLibraryExW':
+                    load_library_iat = iat + index * 8
+            index += 1
+        descriptor += 20
+    assert load_library_iat is not None, 'LoadLibraryExW is not imported'
+
+    data_rva, data = sections[b'.startup']
+    code_rva, code = sections[b'.entry']
+    path_loads = []
+    for library in libraries:
+        path = ('libs\\' + library + '\0').encode('utf-16le')
+        path_rva = data_rva + data.index(path)
+        references = [offset for offset in range(len(code) - 6)
+                      if code[offset:offset + 3] == b'\x48\x8d\x35'
+                      and code_rva + offset + 7 + struct.unpack_from('<i', code, offset + 3)[0] == path_rva]
+        assert len(references) == 1, f'{library}: expected a loader path reference, found {len(references)}'
+        path_loads.append((references[0], library))
+    path_loads.sort()
+    for index, (start, library) in enumerate(path_loads):
+        end = path_loads[index + 1][0] if index + 1 < len(path_loads) else len(code)
+        calls = [offset for offset in range(start, end - 5)
+                 if code[offset:offset + 2] == b'\xff\x15'
+                 and code_rva + offset + 6 + struct.unpack_from('<i', code, offset + 2)[0] == load_library_iat]
+        assert calls, f'{library}: loader path does not reach a LoadLibraryExW call'
+        assert code[calls[0] - 11:calls[0]] == b'\x48\x89\xf1\x31\xd2\x41\xb8\x00\x11\x00\x00', library
+
+
 def dynamic(image, offset, phoff, tags):
     for index, tag in enumerate(tags + [(0, 0)]):
         struct.pack_into('<qQ', image, offset + index * 16, *tag)
     struct.pack_into('<QQ', image, phoff + 32, (len(tags) + 1) * 16, (len(tags) + 1) * 16)
 
 
-def provider(value, soname=None):
+def provider(value, soname=None, code=None):
     image = module_with_symbol(True)
-    code = b'\xb8' + struct.pack('<I', value) + b'\xc3'
-    image[0x400:0x406] = code
+    code = code or b'\xb8' + struct.pack('<I', value) + b'\xc3'
+    image[0x400:0x400 + len(code)] = code
     struct.pack_into('<Q', image, 0x898 + 16, len(code))
     if soname:
         strings = b'\0shared#A#B\0' + soname.encode() + b'\0'
@@ -38,14 +94,19 @@ def check_internal_guest_libc(convert, work, relinker):
     assert result.returncode == 0, result.stderr
     empty_provider = dummy.parent / 'app0' / 'prx' / 'c.prx.guest.prx'
     shared_provider = shared.parent / 'app0' / 'prx' / 'a.prx.guest.prx'
-    for name, native_owner, symbol, expected in (
-            ('guest-only', None, 'shared#A#B', 22),
-            ('internal-first', 'libSceLibcInternal.prx', 'shared#A#B', 11),
-            ('native-libc-first', 'libc.prx', 'shared#A#B', 11),
-            ('unresolved', None, 'absent#A#B', None)):
+    zero = b'\x31\xc0\xc3'
+    zero_xmm = b'\x66\x0f\xef\xc0\x31\xc0\xc3'
+    for name, native_owner, symbol, code, expected in (
+            ('guest-only', None, 'shared#A#B', None, 22),
+            ('internal-first', 'libSceLibcInternal.prx', 'shared#A#B', None, 11),
+            ('native-libc-first', 'libc.prx', 'shared#A#B', None, 11),
+            ('unresolved', None, 'absent#A#B', None, None),
+            ('guest-zero-return', None, 'shared#A#B', zero, None),
+            ('guest-zero-return-xmm', None, 'shared#A#B', zero_xmm, None),
+            ('internal-first-zero-return', 'libSceLibcInternal.prx', 'shared#A#B', zero, 11)):
         case = work / ('internal-guest-libc-' + name)
         (case / 'sce_module').mkdir(parents=True)
-        (case / 'sce_module' / 'libc.prx').write_bytes(provider(22))
+        (case / 'sce_module' / 'libc.prx').write_bytes(provider(22, code=code))
         source = case / 'input.elf'
         source.write_bytes(executable('libSceLibcInternal.prx', symbol, extra_dependencies=('libc.prx',)))
         output = case / 'output.exe'
@@ -58,7 +119,7 @@ def check_internal_guest_libc(convert, work, relinker):
         if os.name == 'nt':
             run = subprocess.run([str(output)], capture_output=True, text=True, timeout=30)
             if expected is None:
-                assert run.returncode != 0 and 'unresolved ELF import absent' in run.stderr, (run.returncode, run.stdout, run.stderr)
+                assert run.returncode != 0 and 'unresolved ELF import ' + symbol.split('#')[0] in run.stderr, (run.returncode, run.stdout, run.stderr)
             else:
                 assert run.returncode == expected, (run.returncode, run.stdout, run.stderr)
 
@@ -107,34 +168,51 @@ def executable(owner, symbol='shared#A#B', module_name=None, extra_dependencies=
     return image
 
 
-def shell_execute_exit_code(executable_path):
-    see_mask_nocloseprocess = 0x00000040
+def exit_code_without_standard_handles(executable_path):
+    sem_failcriticalerrors = 0x0001
+    sem_nogpfaulterrorbox = 0x0002
+    startf_usestdhandles = 0x00000100
     wait_object_0 = 0
     wait_timeout = 0x00000102
 
-    class ShellExecuteInfo(ctypes.Structure):
+    class StartupInfo(ctypes.Structure):
         _fields_ = [
-            ('cbSize', wintypes.DWORD),
-            ('fMask', wintypes.DWORD),
-            ('hwnd', wintypes.HWND),
-            ('lpVerb', wintypes.LPCWSTR),
-            ('lpFile', wintypes.LPCWSTR),
-            ('lpParameters', wintypes.LPCWSTR),
-            ('lpDirectory', wintypes.LPCWSTR),
-            ('nShow', ctypes.c_int),
-            ('hInstApp', wintypes.HANDLE),
-            ('lpIDList', wintypes.LPVOID),
-            ('lpClass', wintypes.LPCWSTR),
-            ('hkeyClass', wintypes.HANDLE),
-            ('dwHotKey', wintypes.DWORD),
-            ('hIconOrMonitor', wintypes.HANDLE),
-            ('hProcess', wintypes.HANDLE),
+            ('cb', wintypes.DWORD),
+            ('lpReserved', wintypes.LPWSTR),
+            ('lpDesktop', wintypes.LPWSTR),
+            ('lpTitle', wintypes.LPWSTR),
+            ('dwX', wintypes.DWORD),
+            ('dwY', wintypes.DWORD),
+            ('dwXSize', wintypes.DWORD),
+            ('dwYSize', wintypes.DWORD),
+            ('dwXCountChars', wintypes.DWORD),
+            ('dwYCountChars', wintypes.DWORD),
+            ('dwFillAttribute', wintypes.DWORD),
+            ('dwFlags', wintypes.DWORD),
+            ('wShowWindow', wintypes.WORD),
+            ('cbReserved2', wintypes.WORD),
+            ('lpReserved2', wintypes.LPVOID),
+            ('hStdInput', wintypes.HANDLE),
+            ('hStdOutput', wintypes.HANDLE),
+            ('hStdError', wintypes.HANDLE),
         ]
 
-    shell32 = ctypes.WinDLL('shell32', use_last_error=True)
+    class ProcessInformation(ctypes.Structure):
+        _fields_ = [
+            ('hProcess', wintypes.HANDLE),
+            ('hThread', wintypes.HANDLE),
+            ('dwProcessId', wintypes.DWORD),
+            ('dwThreadId', wintypes.DWORD),
+        ]
+
     kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
-    shell32.ShellExecuteExW.argtypes = [ctypes.POINTER(ShellExecuteInfo)]
-    shell32.ShellExecuteExW.restype = wintypes.BOOL
+    kernel32.GetErrorMode.restype = wintypes.UINT
+    kernel32.SetErrorMode.argtypes = [wintypes.UINT]
+    kernel32.SetErrorMode.restype = wintypes.UINT
+    kernel32.CreateProcessW.argtypes = [wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.LPVOID, wintypes.LPVOID, wintypes.BOOL,
+                                        wintypes.DWORD, wintypes.LPVOID, wintypes.LPCWSTR, ctypes.POINTER(StartupInfo),
+                                        ctypes.POINTER(ProcessInformation)]
+    kernel32.CreateProcessW.restype = wintypes.BOOL
     kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
     kernel32.WaitForSingleObject.restype = wintypes.DWORD
     kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
@@ -143,28 +221,30 @@ def shell_execute_exit_code(executable_path):
     kernel32.TerminateProcess.restype = wintypes.BOOL
     kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
     kernel32.CloseHandle.restype = wintypes.BOOL
-    info = ShellExecuteInfo()
-    info.cbSize = ctypes.sizeof(info)
-    info.fMask = see_mask_nocloseprocess
-    info.lpVerb = 'open'
-    info.lpFile = str(executable_path)
-    info.nShow = 1
-    if not shell32.ShellExecuteExW(ctypes.byref(info)):
-        raise OSError(ctypes.get_last_error(), 'ShellExecuteExW failed')
+    kernel32.SetErrorMode(kernel32.GetErrorMode() | sem_failcriticalerrors | sem_nogpfaulterrorbox)
+    info = StartupInfo()
+    info.cb = ctypes.sizeof(info)
+    info.dwFlags = startf_usestdhandles
+    process = ProcessInformation()
+    command = ctypes.create_unicode_buffer(f'"{executable_path}"')
+    if not kernel32.CreateProcessW(str(executable_path), command, None, None, False, 0, None, None,
+                                   ctypes.byref(info), ctypes.byref(process)):
+        raise OSError(ctypes.get_last_error(), 'CreateProcessW failed')
     try:
-        result = kernel32.WaitForSingleObject(info.hProcess, 30_000)
+        result = kernel32.WaitForSingleObject(process.hProcess, 30_000)
         if result == wait_timeout:
-            kernel32.TerminateProcess(info.hProcess, 0xffffffff)
-            kernel32.WaitForSingleObject(info.hProcess, 0xffffffff)
-            raise TimeoutError('ShellExecuteExW child did not exit')
+            kernel32.TerminateProcess(process.hProcess, 0xffffffff)
+            kernel32.WaitForSingleObject(process.hProcess, 0xffffffff)
+            raise TimeoutError('GUI child did not exit')
         if result != wait_object_0:
             raise OSError(f'WaitForSingleObject returned {result}')
         exit_code = wintypes.DWORD()
-        if not kernel32.GetExitCodeProcess(info.hProcess, ctypes.byref(exit_code)):
+        if not kernel32.GetExitCodeProcess(process.hProcess, ctypes.byref(exit_code)):
             raise OSError(ctypes.get_last_error(), 'GetExitCodeProcess failed')
         return exit_code.value
     finally:
-        kernel32.CloseHandle(info.hProcess)
+        kernel32.CloseHandle(process.hThread)
+        kernel32.CloseHandle(process.hProcess)
 
 
 def main():
@@ -201,6 +281,27 @@ def main():
             if os.name == 'nt':
                 run = subprocess.run([str(output)], capture_output=True, text=True, timeout=30)
                 assert run.returncode == (11 if owner == 'a.prx' else 22), (run.returncode, run.stdout, run.stderr)
+
+        result, output = convert('unicode-ü日', 'a.prx', guest_owner='b.prx')
+        assert result.returncode == 0, (result.stdout, result.stderr)
+        assert output.is_file() and (output.parent / 'app0' / 'prx' / 'a.prx.guest.prx').is_file()
+
+        result, native_output = convert('unscoped-native-provider', 'b.prx')
+        assert result.returncode == 0, result.stderr
+        case = work / 'unscoped-native-import'
+        (case / 'prx').mkdir(parents=True)
+        (case / 'libs').mkdir()
+        native_provider = native_output.parent / 'app0' / 'prx' / 'b.prx.guest.prx'
+        (case / 'libs' / 'available.prx').write_bytes(native_provider.read_bytes())
+        source = case / 'input.elf'
+        source.write_bytes(executable('available.prx', 'shared', extra_dependencies=('unused.prx',)))
+        output = case / 'output.exe'
+        result = subprocess.run([str(relinker), '--windows', str(source), str(output)], capture_output=True, text=True, timeout=30)
+        assert result.returncode == 0, result.stderr
+        check_native_load_paths(output, ('available.prx', 'unused.prx'))
+        if os.name == 'nt':
+            run = subprocess.run([str(output)], capture_output=True, text=True, timeout=30)
+            assert run.returncode == 22 and 'unused.prx' not in run.stderr, (run.returncode, run.stdout, run.stderr)
 
         check_internal_guest_libc(convert, work, relinker)
 
@@ -288,7 +389,7 @@ def main():
                     ('missing-dependency-gui', 'missing.prx', 'shared#A#B', 0xc0000135)]:
                 result, output = convert(name, owner, symbol, windows_gui=True)
                 assert result.returncode == 0, result.stderr
-                run_status = shell_execute_exit_code(output)
+                run_status = exit_code_without_standard_handles(output)
                 assert run_status == expected, (name, hex(run_status), hex(expected))
 
         result, output = convert('missing-symbol', 'a.prx', 'absent#A#B')
@@ -306,6 +407,21 @@ def main():
         if os.name == 'nt':
             run = subprocess.run([str(output)], capture_output=True, text=True, timeout=30)
             assert run.returncode != 0 and 'Failed to load module:' in run.stderr and 'missing.prx' in run.stderr, (run.returncode, run.stderr)
+            assert run.stderr.startswith('Failed to load module:'), run.stderr
+
+        for index, (symbol, module_name) in enumerate([('shared#A#B', None), ('shared', None), ('shared#A#B', 'libSceJson')]):
+            case = work / ('missing-unused-dependency-' + str(index))
+            modules = case / 'prx'
+            modules.mkdir(parents=True)
+            (modules / 'a.prx').write_bytes(provider(11))
+            source = case / 'input.elf'
+            source.write_bytes(executable('a.prx', symbol, module_name, extra_dependencies=('unused.prx',)))
+            output = case / 'output.exe'
+            result = subprocess.run([str(relinker), '--windows', str(source), str(output)], capture_output=True, text=True, timeout=30)
+            assert result.returncode == 0, (symbol, module_name, result.stdout, result.stderr)
+            if os.name == 'nt':
+                run = subprocess.run([str(output)], capture_output=True, text=True, timeout=30)
+                assert run.returncode == 11 and 'unused.prx' not in run.stderr, (symbol, module_name, run.returncode, run.stdout, run.stderr)
 
     print('Windows module-scoped import tests passed')
 

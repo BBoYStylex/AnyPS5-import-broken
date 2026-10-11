@@ -3,7 +3,6 @@
 #include <codegen/CodegenException.hpp>
 #include <codegen/x86/Amd64OnlySubstitutionTable.hpp>
 #include <codegen/x86/X64InstructionDecoder.hpp>
-#include <codegen/x86/X64InstructionRewriter.hpp>
 #include <codegen/x86/IAmd64OnlyInstructionMatcher.hpp>
 #include <algorithm>
 #include <memory>
@@ -27,6 +26,8 @@ auto _atFileOffset(const Domain::FileByteOffset base, const TOperation& operatio
 
 class Amd64OnlyConverter : public IAmd64OnlyConverter {
 public:
+    explicit Amd64OnlyConverter(const Amd64OnlyTarget target) : _matcher(MakeAmd64OnlyInstructionMatcher(target)) {}
+
     [[nodiscard]] ConvertResult Convert(
         std::vector<std::uint8_t> fileBytes,
         const std::vector<Domain::ProgramHeader>& codeSegments
@@ -39,8 +40,7 @@ private:
         Amd64OnlyMatch Substitution;
     };
 
-    X64InstructionRewriter _rewriter;
-    std::unique_ptr<IAmd64OnlyInstructionMatcher> _matcher = MakeAmd64OnlyInstructionMatcher();
+    std::unique_ptr<IAmd64OnlyInstructionMatcher> _matcher;
     std::unique_ptr<IInstructionScanner> _scanner = MakeInstructionScanner();
 
     void _convertSegment(
@@ -120,7 +120,7 @@ void Amd64OnlyConverter::_convertSegment(
         case Amd64OnlyLowering::InPlace: {
             if (substitution.ReplacementBytes.size() != match.Length)
                 throw CodegenException("Intel substitution changes the instruction length", fileOffset);
-            seg = _atFileOffset(ph.Offset, [&] { return _rewriter.Rewrite(seg, {match.Offset, substitution.ReplacementBytes}).Bytes; });
+            std::copy(substitution.ReplacementBytes.begin(), substitution.ReplacementBytes.end(), seg.begin() + static_cast<std::ptrdiff_t>(match.Offset));
             replacementLength = substitution.ReplacementBytes.size();
             ++result.ReplacedCount;
             break;
@@ -207,8 +207,8 @@ ConvertResult Amd64OnlyConverter::Convert(
 
 }
 
-std::unique_ptr<IAmd64OnlyConverter> MakeAmd64OnlyConverter() {
-    return std::make_unique<Amd64OnlyConverter>();
+std::unique_ptr<IAmd64OnlyConverter> MakeAmd64OnlyConverter(const Amd64OnlyTarget target) {
+    return std::make_unique<Amd64OnlyConverter>(target);
 }
 
 }
