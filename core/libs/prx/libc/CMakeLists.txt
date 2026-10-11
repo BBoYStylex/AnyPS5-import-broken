@@ -16,6 +16,7 @@ target_sources(libc PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src/Random.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/Time.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/FileAndHeap.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/GuestCopySign.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/StdioExtras.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/StandardStreams.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/GuestAllocations.cpp
@@ -217,6 +218,16 @@ if(BUILD_TESTING)
     set_tests_properties(guest_realpath PROPERTIES TIMEOUT 20)
     if(WIN32)
         set_tests_properties(guest_realpath PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+    endif()
+    add_test_executable(guest_libc_copy_sign_tests ${LIBS_INCLUDE_DIR}/tests/GuestLibcCopySign.cpp)
+    target_include_directories(guest_libc_copy_sign_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_libc_copy_sign_tests PRIVATE libc)
+    configure_windows_unwind(guest_libc_copy_sign_tests)
+    add_test(NAME guest_libc_copy_sign COMMAND guest_libc_copy_sign_tests)
+    set_tests_properties(guest_libc_copy_sign PROPERTIES TIMEOUT 10)
+    if(WIN32)
+        set_tests_properties(guest_libc_copy_sign PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
     endif()
     add_test_executable(guest_path_case_tests ${LIBS_INCLUDE_DIR}/tests/GuestPathCase.cpp)
