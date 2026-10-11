@@ -603,7 +603,7 @@ const HostImport* importAllocation(const Context& context, HostImports& state, s
     // registered memory of address-based shaders; past it they copy gigabytes per dispatch).
     static const std::uint64_t budget = [] {
         const char* value = std::getenv("APS5_HOST_IMPORT_MIB");
-        return (value ? std::strtoull(value, nullptr, 10) : 6144ull) << 20u;
+        return (value ? std::strtoull(value, nullptr, 10) : 16384ull) << 20u;
     }();
     const auto live = state.liveBytes;
     if (live + bytes > budget) {
@@ -1307,14 +1307,18 @@ std::shared_ptr<ImageMirror> acquireMirror(const Context& context, const std::sh
         }
         if (heapMirrorsBeside(*range) + mirror->bytes > heapMirrorBudget()) {
             sweepMirrors();
-            if (const auto held = heapMirrorsBeside(*range); held + mirror->bytes > heapMirrorBudget()) throw std::runtime_error(heapMirrorError(*range, held, "past the budget"));
+            if (const auto held = heapMirrorsBeside(*range); held + mirror->bytes > heapMirrorBudget()) {
+                std::fprintf(stderr, "[gpu] %s; falling back\n", heapMirrorError(*range, held, "past the budget").c_str());
+                std::lock_guard lock(state.mutex);
+                state.failed.insert(range->address);
+                return nullptr;
+            }
         }
     }
     try {
         mirror->buffer = std::make_shared<Buffer>(context, static_cast<std::size_t>(mirror->bytes), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
     } catch (const std::runtime_error& error) {
-        if (heap) throw std::runtime_error(heapMirrorError(*range, heapMirrorsBeside(*range), error.what()));
-        std::fprintf(stderr, "[gpu] image mirror of 0x%llx+0x%llx failed: %s; falling back to copies\n", static_cast<unsigned long long>(range->address), static_cast<unsigned long long>(range->bytes), error.what());
+        std::fprintf(stderr, "[gpu] %s mirror of 0x%llx+0x%llx failed: %s; falling back\n", heap ? "heap" : "image", static_cast<unsigned long long>(range->address), static_cast<unsigned long long>(range->bytes), error.what());
         std::lock_guard lock(state.mutex);
         state.failed.insert(range->address);
         return nullptr;
@@ -2131,12 +2135,14 @@ void GuestBufferMemory::AcquireRegistered() {
         regionsSorted = sortedLookup;
         static const std::uint64_t copyLimit = [] {
             const char* value = std::getenv("APS5_ADDRESS_COPY_MAX_MIB");
-            return (value ? std::strtoull(value, nullptr, 10) : 64ull) << 20u;
+            return (value ? std::strtoull(value, nullptr, 10) : 16384ull) << 20u;
         }();
         if (const auto overflow = AddressCopyOverflow(std::move(copies), copyLimit); !overflow.empty()) {
-            std::fprintf(stderr, "FATAL: %s\n", overflow.c_str());
+            std::fprintf(stderr, "WARN: %s\n", overflow.c_str());
             std::fflush(stderr);
-            std::abort();
+            if (std::getenv("APS5_STRICT_COPY_LIMIT")) {
+                std::abort();
+            }
         }
         lap(timing.importsUs, at);
         if (addressSpaceCacheEnabled()) {
