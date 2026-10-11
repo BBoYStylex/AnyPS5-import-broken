@@ -21,6 +21,11 @@ extern "C" int HostStandardError_nid_no_patch();
 template<typename TParse>
 auto ParseGuestInteger(const char* str, char** endptr, int base, TParse parse) {
     using TValue = decltype(parse(str, endptr, base));
+    if (base != 0 && (base < 2 || base > 36)) {
+        if (endptr != nullptr) *endptr = const_cast<char*>(str);
+        errno = EINVAL;
+        return TValue{};
+    }
     if (StopAtPrefixLetter_nid_no_patch(str, endptr, base)) return TValue{};
     char* end = nullptr;
     const TValue value = parse(str, &end, base);
