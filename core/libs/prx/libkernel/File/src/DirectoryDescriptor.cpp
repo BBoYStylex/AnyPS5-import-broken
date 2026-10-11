@@ -74,6 +74,10 @@ int ReadDirectoryDescriptor(int fd, char* buf, int nbytes) {
     std::size_t used = 0;
     while (state.cursor < state.entries.size()) {
         const auto& [name, type] = state.entries[state.cursor];
+        if (name.size() > 255) {
+            if (used == 0) return SCE_KERNEL_ERROR_ENAMETOOLONG;
+            break;
+        }
         const std::size_t record = (8 + name.size() + 1 + 3) & ~std::size_t{3};
         if (used + record > static_cast<std::size_t>(nbytes)) {
             if (used == 0) return SCE_KERNEL_ERROR_EINVAL;
