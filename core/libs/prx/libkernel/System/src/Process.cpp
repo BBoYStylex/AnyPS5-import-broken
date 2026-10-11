@@ -3,6 +3,8 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#include <shellapi.h>
+#include <tlhelp32.h>
 #else
 #include <sched.h>
 #include <unistd.h>
@@ -12,7 +14,9 @@
 #include "prx/libc/include/General.hpp"
 #include "prx/libc/include/ApplicationHeap.hpp"
 #include "prx/libc/include/Shutdown.hpp"
+#include "prx/libkernel/AppMetadata/include/AppMetadata.hpp"
 #include "prx/libkernel/DirectMemory/DirectMemory.hpp"
+#include "prx/libkernel/KernelErrors.hpp"
 #include "prx/libkernel/Pthread/include/Pthread.hpp"
 #include <array>
 #include <atomic>
@@ -34,24 +38,42 @@
 #include <sys/resource.h>
 #endif
 
+extern "C" int* APS5_VABI __error_nid_postfix();
+
 namespace {
 
 constexpr int sceInvalidArgument = static_cast<int>(0x80020016u);
+constexpr int errnoNoChild = 10;
+constexpr int errnoInvalidArgument = 22;
+constexpr unsigned freebsdWaitOptions = 0x8000003Fu;
 
 std::atomic<std::uint32_t> gpoBits{0};
 constexpr std::array<std::uint8_t, 16> openPsId{'A', 'n', 'y', 'P', 'S', '5', 'O', 'p', 'e', 'n', 'P', 's', 'I', 'd', 0, 1};
+
+#ifdef _WIN32
+std::string toUtf8(const wchar_t* value) {
+    const int size = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value, -1, nullptr, 0, nullptr, nullptr);
+    if (size <= 0)
+        throw std::system_error(GetLastError(), std::system_category(), "Converting a process argument to UTF-8");
+    std::string text(static_cast<std::size_t>(size), '\0');
+    if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value, -1, text.data(), size, nullptr, nullptr) != size)
+        throw std::system_error(GetLastError(), std::system_category(), "Converting a process argument to UTF-8");
+    text.pop_back();
+    return text;
+}
+#endif
 
 class ProcessArguments {
 public:
     ProcessArguments() {
 #ifdef _WIN32
-        std::array<char, 32768> path{};
-        const auto size = GetModuleFileNameA(nullptr, path.data(), static_cast<DWORD>(path.size()));
-        if (size == 0)
-            throw std::system_error(GetLastError(), std::system_category(), "Reading executable path");
-        if (size >= path.size())
-            throw std::runtime_error("Executable path exceeds the guest argument buffer");
-        arguments.emplace_back(path.data(), size);
+        int count = 0;
+        const std::unique_ptr<LPWSTR, void (*)(LPWSTR*)> values(CommandLineToArgvW(GetCommandLineW(), &count),
+            [](LPWSTR* parsed) { LocalFree(parsed); });
+        if (!values)
+            throw std::system_error(GetLastError(), std::system_category(), "Reading process arguments");
+        for (int index = 0; index < count; ++index)
+            arguments.push_back(toUtf8(values.get()[index]));
 #else
         std::ifstream stream("/proc/self/cmdline", std::ios::binary);
         if (!stream)
@@ -86,7 +108,7 @@ ProcessArguments& getProcessArguments() {
 }
 
 void validateSchedulingPolicy(int policy) {
-    if (policy != 1 && policy != 3)
+    if (policy < 1 || policy > 3)
         throw std::invalid_argument("Unsupported guest scheduling policy");
 }
 
@@ -152,6 +174,8 @@ extern "C" {
 
 // unknown data
 const char* __progname_nid_postfix = "eboot.bin";
+static char* emptyEnvironment[1];
+char** environ_nid_postfix = emptyEnvironment;
 
 int APS5_VABI getargc_nid_postfix(void) {
     return getProcessArguments().GetCount();
@@ -174,6 +198,47 @@ int APS5_VABI getpid_nid_postfix(void) {
     if (pid == 0 || static_cast<std::uint64_t>(pid) > static_cast<std::uint64_t>(std::numeric_limits<int>::max()))
         throw std::runtime_error("Process identifier is outside the guest range");
     return static_cast<int>(pid);
+}
+
+int APS5_VABI getppid_nid_postfix(void) {
+#ifdef _WIN32
+    const DWORD self = GetCurrentProcessId();
+    const HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snapshot == INVALID_HANDLE_VALUE)
+        throw std::system_error(static_cast<int>(GetLastError()), std::system_category(), "getppid: CreateToolhelp32Snapshot");
+    PROCESSENTRY32W entry{};
+    entry.dwSize = sizeof(entry);
+    bool found = false;
+    DWORD pid = 0;
+    for (BOOL more = Process32FirstW(snapshot, &entry); more && !found; more = Process32NextW(snapshot, &entry)) {
+        if (entry.th32ProcessID == self) {
+            pid = entry.th32ParentProcessID;
+            found = true;
+        }
+    }
+    CloseHandle(snapshot);
+    if (!found) throw std::runtime_error("getppid: the process is missing from the process snapshot");
+#else
+    const auto pid = ::getppid();
+#endif
+    if (static_cast<std::uint64_t>(pid) > static_cast<std::uint64_t>(std::numeric_limits<int>::max()))
+        throw std::runtime_error("Parent process identifier is outside the guest range");
+    return static_cast<int>(pid);
+}
+
+int APS5_VABI sceKernelGetAppInfo(int pid, void* info) {
+    if (pid != getpid_nid_postfix()) return SCE_KERNEL_ERROR_EPERM;
+    if (info == nullptr) return 0;
+    constexpr std::size_t TitleIdOffset = 0x10;
+    constexpr std::size_t TitleIdBytes = 10;
+    const auto titleId = GetAppTitleId_nid_postfix();
+    char field[TitleIdBytes] = {};
+    std::strncpy(field, titleId.value, sizeof(field) - 1);
+    auto* bytes = static_cast<std::uint8_t*>(info);
+    const std::uint32_t appId = 1;
+    std::memcpy(bytes, &appId, sizeof(appId));
+    std::memcpy(bytes + TitleIdOffset, field, TitleIdBytes);
+    return 0;
 }
 
 int APS5_VABI getuid_nid_postfix(void) {
@@ -201,12 +266,26 @@ void APS5_VABI exit_nid_postfix(int code) {
 }
 
 [[noreturn]] void APS5_VABI _exit_nid_postfix(int status) {
-    std::_Exit(status);
+    LibcTerminate_nid_no_patch(status);
 }
 
 int APS5_VABI system_nid_postfix(const char* command) {
     constexpr int shellNotExecuted = 127 << 8;
     return command == nullptr ? 1 : shellNotExecuted;
+}
+
+int APS5_VABI waitpid_nid_postfix(int pid, int* status, int options) {
+    (void)pid;
+    (void)status;
+    *__error_nid_postfix() = (static_cast<unsigned>(options) & ~freebsdWaitOptions) != 0 ? errnoInvalidArgument : errnoNoChild;
+    return -1;
+}
+
+int APS5_VABI execvp_nid_postfix(const char* file, char* const* arguments) {
+    (void)file;
+    (void)arguments;
+    NotImplemented_nid_no_patch("execvp: executable replacement");
+    return -1;
 }
 
 int APS5_VABI sceKernelGetCurrentCpu(void) {
@@ -263,6 +342,10 @@ int APS5_VABI sceKernelUuidCreate(std::uint32_t* uuid) {
 
 void APS5_VABI sceKernelSync(void) {
     SyncWrittenPaths_nid_no_patch();
+}
+
+void APS5_VABI sync_nid_postfix(void) {
+    sceKernelSync();
 }
 
 int APS5_VABI sched_get_priority_max_nid_postfix(int policy) {

@@ -113,6 +113,7 @@ int native_error() {
         case WSAEINTR: return 4;
         case WSAEINVAL: return NET_EINVAL;
         case WSAENOTSOCK: return NET_ENOTSOCK;
+        case WSAESHUTDOWN: return 32;
         default: return 5;
     }
 }
@@ -371,6 +372,11 @@ extern const std::uint32_t sce_net_in6addr_any[4] = {};
 
 int* APS5_VABI sceNetErrnoLoc(void) {
     return errno_slot();
+}
+
+int APS5_VABI sceNetShowNetstat(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
 }
 
 int PollSockets(KernelSocketPoll::Entry* entries, int count, int timeoutMilliseconds) {
@@ -906,13 +912,13 @@ int APS5_VABI sceNetEpollCreate(const char* name, int flags) {
 }
 
 int APS5_VABI sceNetGetMemoryPoolStats(int memid, NetMemoryPoolStats* stats) {
-    if (stats == nullptr) {
-        return fail(NET_EINVAL);
-    }
     std::lock_guard lk(g_mutex);
     const auto pool = g_pools.find(memid);
     if (pool == g_pools.end()) {
         return fail(NET_EBADF);
+    }
+    if (stats == nullptr) {
+        return fail(NET_EINVAL);
     }
     *stats = {pool->second, 0, 0};
     return 0;
@@ -1249,6 +1255,11 @@ int APS5_VABI sceNetResolverAbort(void) {
 }
 
 int APS5_VABI sceNetResolverStartNtoaMultipleRecords() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetShowIfconfig() {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }

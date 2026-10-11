@@ -173,6 +173,7 @@ struct ShaderPixelInputInfo {
     bool psExecuteOnNoop = false;
     ConservativeZExport psConservativeZExport = ConservativeZExport::AnyZ;
     bool psOrderedPixelShader = false;
+    bool psAlphaToCoverage = false;
     ShaderStageRuntime stage;
 
     bool HasPositionInput() const {
@@ -189,6 +190,10 @@ struct ShaderPixelInputInfo {
 
     [[nodiscard]] bool InputIsCustom(std::uint32_t input) const {
         return input < 32u && ((customInterpolationMask & (1u << input)) != 0u || InputIsPassthrough(input));
+    }
+
+    [[nodiscard]] bool InputIsFlat(std::uint32_t input) const {
+        return input < inputNum && input < 32u && (interpolatorSettings[input] & 0x400u) != 0u && !InputIsCustom(input);
     }
 
     [[nodiscard]] std::uint32_t InputSlot(std::uint32_t input) const {
