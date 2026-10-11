@@ -21,7 +21,9 @@ extern "C" int* APS5_VABI __error_nid_postfix();
 
 namespace {
 
+constexpr int GuestNoEntity = 2;
 constexpr int GuestNoMemory = 12;
+constexpr int GuestBadAddress = 14;
 constexpr int GuestInvalid = 22;
 constexpr int GuestTooManyFilesInSystem = 23;
 constexpr int GuestTooManyFiles = 24;
@@ -85,4 +87,12 @@ extern "C" int APS5_VABI shm_open_nid_postfix(const char* path, int flags, int) 
     const int error = errno;
     if (const int guest = GuestError(error)) return Fail(guest);
     throw std::runtime_error("shm_open: creating the host anonymous file failed, errno=" + std::to_string(error));
+}
+
+extern "C" int APS5_VABI shm_unlink_nid_postfix(const char* path) {
+    if (path == nullptr) return Fail(GuestBadAddress);
+    if (path == anonymousObject) return Fail(GuestInvalid);
+    if (*path == '\0') return Fail(GuestNoEntity);
+    NotImplemented_nid_no_patch("shm_unlink of a named object");
+    return 0;
 }

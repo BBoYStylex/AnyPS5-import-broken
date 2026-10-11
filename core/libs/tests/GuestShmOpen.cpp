@@ -6,6 +6,7 @@
 #include <stdexcept>
 extern "C" {
 int APS5_VABI shm_open_nid_postfix(const char*, int, int);
+int APS5_VABI shm_unlink_nid_postfix(const char*);
 int APS5_VABI ftruncate_nid_postfix(int, std::int64_t);
 std::int64_t APS5_VABI pread_nid_postfix(int, void*, std::size_t, std::int64_t);
 std::int64_t APS5_VABI pwrite_nid_disambig1_nid_postfix(int, const void*, std::size_t, std::int64_t);
@@ -54,4 +55,20 @@ int main() {
         threw = true;
     }
     Require(threw);
+    *__error_nid_postfix() = 0;
+    Require(shm_unlink_nid_postfix(nullptr) == -1);
+    Require(*__error_nid_postfix() == 14);
+    *__error_nid_postfix() = 0;
+    Require(shm_unlink_nid_postfix(anonymous) == -1);
+    Require(*__error_nid_postfix() == 22);
+    *__error_nid_postfix() = 0;
+    Require(shm_unlink_nid_postfix("") == -1);
+    Require(*__error_nid_postfix() == 2);
+    bool unlinkThrew = false;
+    try {
+        shm_unlink_nid_postfix("/anyps5-shm");
+    } catch (const std::runtime_error&) {
+        unlinkThrew = true;
+    }
+    Require(unlinkThrew);
 }
