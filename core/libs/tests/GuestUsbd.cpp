@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <atomic>
 #include <cstdlib>
 #include <cstring>
 #include <string>
@@ -91,6 +92,11 @@ void APS5_VABI MarkDone(HostTransfer* transfer) {
     *static_cast<int*>(transfer->userData) += 1;
 }
 
+void APS5_VABI MarkDoneThenSignal(HostTransfer* transfer) {
+    auto* notified = static_cast<std::atomic<bool>*>(transfer->userData);
+    notified->store(true, std::memory_order_release);
+}
+
 void Pump(const int& done) {
     const UsbdTimeval slice{0, 100000};
     for (int round = 0; round < 50 && done == 0; ++round) Require(sceUsbdHandleEventsTimeout(&slice) == 0, "event handling failed while a transfer was in flight");
@@ -142,6 +148,24 @@ void Device() {
         Require(sceUsbdReleaseInterface(handle, interfaceNumber) == 0, "releasing an interface failed");
     }
     Require(sceUsbdReleaseInterface(handle, 0) == static_cast<std::int32_t>(0x80240005), "releasing an unclaimed interface did not report not found");
+    const std::uint8_t* config0 = static_cast<const std::uint8_t*>(config);
+    const std::uint8_t* interfaceArray = *reinterpret_cast<const std::uint8_t* const*>(config0 + 16);
+    std::uint8_t interruptAddress = 0;
+    std::uint16_t interruptMax = 0;
+    for (std::uint8_t index = 0; index < interfaces && interruptAddress == 0; ++index) {
+        const std::uint8_t* alternate = *reinterpret_cast<const std::uint8_t* const*>(interfaceArray + index * 16);
+        const std::uint8_t* endpoints = *reinterpret_cast<const std::uint8_t* const*>(alternate + 16);
+        for (std::uint8_t endpoint = 0; endpoint < alternate[4]; ++endpoint) {
+            const std::uint8_t* item = endpoints + endpoint * 32;
+            if ((item[2] & 0x80) != 0 && (item[3] & 3) == 3) {
+                interruptAddress = item[2];
+                interruptMax = static_cast<std::uint16_t>(item[4] | item[5] << 8);
+            }
+        }
+    }
+    Require(interruptAddress != 0 && interruptMax != 0, "the device has no interrupt IN endpoint");
+    sceUsbdFreeConfigDescriptor(config);
+
     auto* transfer = static_cast<HostTransfer*>(sceUsbdAllocTransfer(0));
     std::uint8_t setup[8 + 18] = {0x80, 6, 0x00, 0x01, 0x00, 0x00, 18, 0};
     int done = 0;
@@ -157,6 +181,31 @@ void Device() {
     Pump(done);
     Require(done == 1 && transfer->status == 0 && transfer->actualLength == 18, "asynchronous control transfer did not complete");
     Require(std::memcmp(setup + 8, descriptor, 18) == 0, "asynchronous device descriptor differs from the cached one");
+    bool broken = false;
+    {
+        const UsbdTimeval slice{0, 200};
+        for (int round = 0; round < 300 && !broken; ++round) {
+            std::atomic<bool> notified{false};
+            std::uint8_t blink[64] = {};
+            sceUsbdFillInterruptTransfer(transfer, handle, interruptAddress, blink, interruptMax, reinterpret_cast<void*>(&MarkDoneThenSignal), &notified, 0);
+            const int submitResult = sceUsbdSubmitTransfer(transfer);
+            if (submitResult != 0) {
+                broken = true;
+                break;
+            }
+            std::thread canceller([&] {
+                const int outcome = sceUsbdCancelTransfer(transfer);
+                if (outcome != 0 && outcome != static_cast<std::int32_t>(0x80240005)) broken = true;
+            });
+            while (!notified.load(std::memory_order_acquire)) {
+                if (sceUsbdHandleEventsTimeout(&slice) != 0) broken = true;
+            }
+            canceller.join();
+            if (transfer->status != 0 && transfer->status != 2 && transfer->status != 3) broken = true;
+        }
+    }
+    Require(!broken, "the cancel race failed");
+
     Require(sceUsbdCancelTransfer(transfer) == static_cast<std::int32_t>(0x80240005), "cancelling a completed transfer did not report not found");
     sceUsbdFreeTransfer(transfer);
     sceUsbdClose(handle);
