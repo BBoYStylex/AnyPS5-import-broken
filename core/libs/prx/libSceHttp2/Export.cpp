@@ -293,23 +293,19 @@ int APS5_VABI sceHttp2SetResolveRetry(int id, int32_t retry) {
 }
 
 int APS5_VABI sceHttp2WebSocketCreateRequest() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return g_nextHandle.fetch_add(1, std::memory_order_relaxed);
 }
 
 int APS5_VABI sceHttp2WebSocketCloseAsync() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return ERROR_NETWORK;
 }
 
 int APS5_VABI sceHttp2WebSocketSendTextMessageAsync() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return ERROR_NETWORK;
 }
 
 int APS5_VABI sceHttp2WebSocketSendDataMessageAsync() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return ERROR_NETWORK;
 }
 
 }

@@ -23,8 +23,7 @@ int APS5_VABI sceNpAuthCreateAsyncRequest(const void* param) {
 }
 
 int APS5_VABI sceNpAuthCreateRequest(void) {
- NotImplemented_nid_no_patch(__func__);
- return 0;
+ return SCE_NP_ERROR_SIGNED_OUT;
 }
 
 int APS5_VABI sceNpAuthDeleteRequest(int req_id) {
@@ -43,8 +42,7 @@ int APS5_VABI sceNpAuthGetIdTokenV3(int req_id, const void* param, void* id_toke
  (void)req_id;
  (void)param;
  (void)id_token;
- NotImplemented_nid_no_patch(__func__);
- return 0;
+ return SCE_NP_ERROR_SIGNED_OUT;
 }
 
 int APS5_VABI sceNpAuthPollAsync(int req_id, int* result) {
@@ -55,8 +53,7 @@ int APS5_VABI sceNpAuthPollAsync(int req_id, int* result) {
 
 int APS5_VABI sceNpAuthWaitAsync(int req_id, int* result) {
  (void)req_id;
- (void)result;
- NotImplemented_nid_no_patch(__func__);
+ if (result) *result = SCE_NP_ERROR_SIGNED_OUT;
  return 0;
 }
 

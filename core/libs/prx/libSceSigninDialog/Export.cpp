@@ -22,19 +22,19 @@ std::atomic<int> g_status{COMMON_DIALOG_STATUS_NONE};
 extern "C" {
 
 int APS5_VABI sceSigninDialogClose(void) {
- NotImplemented_nid_no_patch(__func__);
+ int expected = COMMON_DIALOG_STATUS_RUNNING;
+ if (!g_status.compare_exchange_strong(expected, COMMON_DIALOG_STATUS_FINISHED)) return COMMON_DIALOG_ERROR_NOT_INITIALIZED;
  return 0;
 }
 
 int APS5_VABI sceSigninDialogGetResult(void* result) {
  (void)result;
- NotImplemented_nid_no_patch(__func__);
+ if (g_status.load() != COMMON_DIALOG_STATUS_FINISHED) return COMMON_DIALOG_ERROR_NOT_INITIALIZED;
  return 0;
 }
 
 int APS5_VABI sceSigninDialogGetStatus(void) {
- NotImplemented_nid_no_patch(__func__);
- return 0;
+ return g_status.load();
 }
 
 int APS5_VABI sceSigninDialogInitialize(void) {
