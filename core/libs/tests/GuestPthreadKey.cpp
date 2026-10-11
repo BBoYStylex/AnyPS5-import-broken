@@ -1,7 +1,11 @@
 #include "SceTypes.hpp"
+#include <algorithm>
 #include <atomic>
 #include <cstdlib>
+#include <initializer_list>
+#include <limits>
 #include <thread>
+#include <vector>
 
 extern "C" {
 int APS5_VABI scePthreadCreate(Pthread* thread, const PthreadAttr* attr, PthreadEntry entry, void* arg, const char* name);
@@ -14,6 +18,8 @@ int APS5_VABI scePthreadSetspecific(PthreadKey key, void* value);
 
 static constexpr int SCE_OK = 0;
 static constexpr int SCE_KERNEL_ERROR_EINVAL = static_cast<int>(0x80020016);
+static constexpr int SCE_KERNEL_ERROR_EAGAIN = static_cast<int>(0x80020023);
+static constexpr int MAX_KEYS = 512;
 
 static void Require(bool value) { if (!value) std::abort(); }
 
@@ -61,7 +67,32 @@ static void* APS5_VABI HoldAcrossReuse(void*) {
     return nullptr;
 }
 
+static void CheckKeyNumbering() {
+    for (const PthreadKey invalid : {0, -1, MAX_KEYS + 1, std::numeric_limits<PthreadKey>::min(), std::numeric_limits<PthreadKey>::max()}) {
+        Require(scePthreadSetspecific(invalid, &first) == SCE_KERNEL_ERROR_EINVAL);
+        Require(scePthreadGetspecific(invalid) == nullptr);
+        Require(scePthreadKeyDelete(invalid) == SCE_KERNEL_ERROR_EINVAL);
+    }
+    std::vector<PthreadKey> keys;
+    PthreadKey key = 0;
+    while (scePthreadKeyCreate(&key, nullptr) == SCE_OK) {
+        Require(key >= 1 && key <= MAX_KEYS);
+        Require(std::find(keys.begin(), keys.end(), key) == keys.end());
+        keys.push_back(key);
+    }
+    Require(scePthreadKeyCreate(&key, nullptr) == SCE_KERNEL_ERROR_EAGAIN);
+    Require(std::find(keys.begin(), keys.end(), MAX_KEYS) != keys.end());
+    Require(scePthreadSetspecific(MAX_KEYS, &second) == SCE_OK);
+    Require(scePthreadGetspecific(MAX_KEYS) == &second);
+    Require(scePthreadSetspecific(0, &third) == SCE_KERNEL_ERROR_EINVAL);
+    Require(scePthreadGetspecific(MAX_KEYS) == &second);
+    for (const PthreadKey created : keys) Require(scePthreadKeyDelete(created) == SCE_OK);
+    Require(scePthreadKeyCreate(&key, nullptr) == SCE_OK && key == 1);
+    Require(scePthreadKeyDelete(key) == SCE_OK);
+}
+
 int main() {
+    CheckKeyNumbering();
     PthreadKey key = -1;
     Require(scePthreadKeyCreate(&key, nullptr) == SCE_OK);
     Require(scePthreadGetspecific(key) == nullptr);
