@@ -3,6 +3,8 @@ import hashlib
 import io
 import json
 import os
+import platform
+import struct
 import subprocess
 import sys
 import time
@@ -131,13 +133,16 @@ def main():
     parser.add_argument('--runtime', type=Path)
     parser.add_argument('--image-runtime', type=Path)
     parser.add_argument('--compile-only', action='store_true')
+    parser.add_argument('--target', choices=('apple-arm64', 'linux-arm64'), default='apple-arm64')
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--original-delay', action='store_true')
     parser.add_argument('--run', action='store_true')
     args = parser.parse_args()
-    require(not (args.compile_only and args.run), 'cross compilation cannot execute a Mach-O program on Linux')
+    require(not (args.compile_only and args.run), 'compile-only mode cannot execute a program')
     require(args.compile_only or (args.runtime and args.image_runtime), 'native runtime archives are required for linking')
     folder = args.output.resolve()
+    if args.original_delay:
+        folder = folder / 'original'
     folder.mkdir(parents=True, exist_ok=True)
     for relative, digest in SOURCES.items():
         require(hashlib.sha256((args.sdk / relative).read_bytes()).hexdigest() == digest, f'example source changed: {relative}')
@@ -153,25 +158,35 @@ def main():
     source = folder / 'app.elf'
     contracts = contracts_for(source, [folder / 'crt.o', folder / 'main.o'])
     (folder / 'contracts.json').write_text(json.dumps(contracts, indent=2) + '\n')
-    ir, report = compile_image(Image(source, contracts))
+    ir, report = compile_image(Image(source, contracts, args.target))
     (folder / 'module.ll').write_text(ir)
-    report['native_object'] = build_native_object(ir, folder / 'module.o')
+    report['native_object'] = build_native_object(ir, folder / 'module.o', args.target)
     report['source_variant'] = 'original 30-second delay' if args.original_delay else 'CI source variant: sleep changed to 1000 microseconds'
     if args.compile_only:
         (folder / 'result.json').write_text(json.dumps(report, indent=2) + '\n')
         print(folder / 'module.o')
         return
-    run(['xcrun', 'clang++', '-arch', 'arm64', '-std=c++20', '-O2', 'module.o', args.runtime,
-         args.image_runtime, '-Wl,-dead_strip', '-o', 'hello-notify-arm64'], folder)
     binary = folder / 'hello-notify-arm64'
-    architecture = subprocess.check_output(['xcrun', 'lipo', '-archs', str(binary)], text=True).strip()
-    require(architecture == 'arm64', 'example executable is not ARM64-only')
+    if args.target == 'apple-arm64':
+        require(sys.platform == 'darwin' and platform.machine() == 'arm64', 'Apple execution requires a native Apple ARM64 host')
+        run(['xcrun', 'clang++', '-arch', 'arm64', '-std=c++20', '-O2', 'module.o', args.runtime,
+             args.image_runtime, '-Wl,-dead_strip', '-o', binary], folder)
+        architecture = subprocess.check_output(['xcrun', 'lipo', '-archs', str(binary)], text=True).strip()
+        require(architecture == 'arm64', 'example executable is not ARM64-only')
+    else:
+        require(sys.platform == 'linux' and platform.machine() == 'aarch64', 'Linux execution requires a native AArch64 host')
+        run(['clang++', '-std=c++20', '-O2', 'module.o', args.runtime, args.image_runtime,
+             '-Wl,--gc-sections,-z,relro,-z,now', '-o', binary], folder)
+        header = binary.read_bytes()[:64]
+        require(len(header) == 64 and header[:6] == b'\x7fELF\x02\x01' and struct.unpack_from('<H', header, 18)[0] == 183,
+                'example executable is not AArch64 ELF')
     if args.run:
         begin = time.monotonic()
         executed = subprocess.run([str(binary)], capture_output=True, text=True, timeout=40 if args.original_delay else 10)
         elapsed = time.monotonic() - begin
         require(executed.returncode == 0, f'native program failed: {executed.returncode}: {executed.stderr}')
-        require('architecture=arm64 translated=0' in executed.stderr, 'native execution was not confirmed')
+        marker = 'architecture=arm64 translated=0' if args.target == 'apple-arm64' else 'architecture=arm64 host=aarch64 format=ELF'
+        require(marker in executed.stderr, 'native execution was not confirmed')
         require('[notification] ps5link: hello from a real title (not a payload)!' in executed.stderr, 'notification missing')
         require('native teardown completed' in executed.stderr, 'registered teardown did not execute')
         if args.original_delay:

@@ -22,6 +22,7 @@ import immutable_data
 import stack_values
 from dynamic import parse_dynamic, DynamicError
 from calls import validate_indirect_calls, CallError
+from targets import TARGETS, target_spec
 
 
 class Rejected(ValueError):
@@ -68,7 +69,9 @@ def signature(contract):
 
 
 class Image:
-    def __init__(self, path, contracts):
+    def __init__(self, path, contracts, target='apple-arm64'):
+        self.target = target
+        self.target_spec = target_spec(target)
         self.contracts = contracts
         self.bytes = Path(path).read_bytes()
         require(contracts.get('schema') == 1, 'unsupported contract schema')
@@ -1134,7 +1137,7 @@ def compile_image(image):
         descriptor = native_image.describe(image) if image.contracts.get('native_runtime_registration') else None
     except ValueError as error:
         raise Rejected(str(error)) from error
-    lines = ['target triple = "arm64-apple-macosx13.0.0"', 'declare void @llvm.trap()', 'declare i8 @llvm.ctpop.i8(i8)']
+    lines = [f'target triple = "{image.target_spec["triple"]}"', 'declare void @llvm.trap()', 'declare i8 @llvm.ctpop.i8(i8)']
     names = {spec['name'] for spec in image.functions.values()}
     for contract in image.imports.values():
         result, parameters = signature(contract)
@@ -1171,7 +1174,7 @@ def compile_image(image):
             lines.append('  call void @NativeAotRegisterImage_nid_no_patch(ptr @__aps5_aot_image)')
         lines.extend(['  ret void', '}'])
     lines.extend(function.lower() for function in functions)
-    report = {'schema': 1, 'status': 'experimental_native_ir', 'input_sha256': hashlib.sha256(image.bytes).hexdigest(),
+    report = {'schema': 1, 'target': image.target, 'status': 'experimental_native_ir', 'input_sha256': hashlib.sha256(image.bytes).hexdigest(),
               'functions': [{'name': f.contract['name'], 'address': f.contract['address'], 'instructions': len(f.instructions),
                              'native_tail_calls': len(f.tail_calls),
                              'bounded_loops': f.loop_proofs,
@@ -1195,13 +1198,14 @@ def main():
     parser.add_argument('--contracts', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--object', type=Path)
+    parser.add_argument('--target', choices=TARGETS, default='apple-arm64')
     args = parser.parse_args()
     try:
-        image = Image(args.input, json.loads(args.contracts.read_text()))
+        image = Image(args.input, json.loads(args.contracts.read_text()), args.target)
         ir, report = compile_image(image)
         if args.object:
             from toolchain import build_native_object
-            report['native_object'] = build_native_object(ir, args.object)
+            report['native_object'] = build_native_object(ir, args.object, args.target)
     except (Rejected, KeyError, ValueError, subprocess.CalledProcessError) as error:
         parser.exit(2, f'Native AOT rejected: {error}\n')
     args.output.write_text(ir)

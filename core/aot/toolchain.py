@@ -7,12 +7,14 @@ import tempfile
 from pathlib import Path
 
 from optimize import merge_constant_stores
+from targets import target_spec
 
 
-def build_native_object(ir, destination):
+def build_native_object(ir, destination, target='apple-arm64'):
     destination = Path(destination)
-    compiler = [os.environ.get('ANYPS5_AOT_CLANG', 'clang'), '--target=arm64-apple-macosx13.0.0']
-    if platform.system() == 'Darwin' and 'ANYPS5_AOT_CLANG' not in os.environ:
+    spec = target_spec(target)
+    compiler = [os.environ.get('ANYPS5_AOT_CLANG', 'clang'), '--target=' + spec['triple']]
+    if target == 'apple-arm64' and platform.system() == 'Darwin' and 'ANYPS5_AOT_CLANG' not in os.environ:
         compiler = ['xcrun', 'clang', '-arch', 'arm64']
     with tempfile.TemporaryDirectory(prefix='anyps5-native-build-') as directory:
         folder = Path(directory)
@@ -29,9 +31,12 @@ def build_native_object(ir, destination):
         subprocess.run([*compiler, '-O3', '-c', str(merged), '-o', str(object_file)],
                        check=True, capture_output=True, text=True)
         raw = object_file.read_bytes()
-        if len(raw) < 32 or struct.unpack_from('<III', raw)[:2] != (0xfeedfacf, 0x100000c) or struct.unpack_from('<I', raw, 12)[0] != 1:
-            raise ValueError('compiler did not produce an ARM64 Mach-O object')
+        if target == 'apple-arm64':
+            if len(raw) < 32 or struct.unpack_from('<II', raw) != (0xfeedfacf, 0x100000c) or struct.unpack_from('<I', raw, 12)[0] != 1:
+                raise ValueError('compiler did not produce an ARM64 Mach-O object')
+        elif len(raw) < 64 or raw[:6] != b'\x7fELF\x02\x01' or struct.unpack_from('<HH', raw, 16) != (1, 183):
+            raise ValueError('compiler did not produce an AArch64 ELF object')
         destination.write_bytes(raw)
         destination.with_suffix('.optimized.ll').write_text(result)
-        return {'object_bytes': len(raw), 'constant_byte_runs_reconstructed': count, 'machine_state_allocas': 0,
+        return {'target': target, 'object_bytes': len(raw), 'constant_byte_runs_reconstructed': count, 'machine_state_allocas': 0,
                 'status': 'native_object_not_product_qualified'}

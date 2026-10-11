@@ -36,6 +36,8 @@ jobs:
             example: 'ON'
           - os: ubuntu-latest
             example: 'ON'
+          - os: ubuntu-24.04-arm
+            example: 'ON'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
@@ -47,5 +49,11 @@ jobs:
       - if: runner.os == 'macOS'
         run: /usr/bin/arch -x86_64 /usr/bin/true
       - run: cmake -S . -B build-aot -G Ninja -DCMAKE_BUILD_TYPE=Release -DANYPS5_RELINKER_ONLY=ON -DANYPS5_NATIVE_AOT=ON -DBUILD_TESTING=ON -DANYPS5_NATIVE_AOT_EXAMPLE=${{ matrix.example }}
-      - run: cmake --build build-aot --parallel 3
-      - run: ctest --test-dir build-aot --output-on-failure --parallel 2
+      - if: matrix.os != 'ubuntu-24.04-arm'
+        run: cmake --build build-aot --parallel 3
+      - if: matrix.os == 'ubuntu-24.04-arm'
+        run: cmake --build build-aot --target native_aot aot_ps5link anyps5_native_runtime native_aot_image_tests native_aot_runtime_tests native_aot_readonly_tests --parallel 3
+      - if: matrix.os != 'ubuntu-24.04-arm'
+        run: ctest --test-dir build-aot --output-on-failure --parallel 2
+      - if: matrix.os == 'ubuntu-24.04-arm'
+        run: ctest --test-dir build-aot --output-on-failure --parallel 2 -R '^native_aot_'

@@ -66,7 +66,7 @@ def declaration(image, spec):
         cursor = slot + 8
     raw(cursor, end)
     typ, value = '<{ ' + ', '.join(types) + ' }>', '<{ ' + ', '.join(values) + ' }>'
-    return f'@data_{begin:x} = constant {typ} {value}, section "__DATA_CONST,__aot_imports", align 16'
+    return f'@data_{begin:x} = constant {typ} {value}, section "{image.target_spec["readonly_section"]}", align 16'
 
 
 def declarations(image):

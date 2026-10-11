@@ -27,6 +27,25 @@ class PortableTests(unittest.TestCase):
         self.assertNotIn('alloca', optimized)
         self.assertEqual(report['input_sha256'], hashlib.sha256(raw).hexdigest())
 
+    def test_linux_validation_target_produces_arm64_elf(self):
+        raw, contracts = test_compiler.fixture(bytes.fromhex('4889f84801f0c3'), ['u64', 'u64'], result='u64')
+        source = self.directory / 'input.elf'
+        source.write_bytes(raw)
+        ir, report = compile_image(Image(source, contracts, 'linux-arm64'))
+        self.assertEqual(report['target'], 'linux-arm64')
+        output = self.directory / 'native.o'
+        result = build_native_object(ir, output, 'linux-arm64')
+        self.assertEqual(output.read_bytes()[:6], b'\x7fELF\x02\x01')
+        self.assertEqual(struct.unpack_from('<HH', output.read_bytes(), 16), (1, 183))
+        self.assertEqual(result['machine_state_allocas'], 0)
+
+    def test_unknown_native_target_rejects(self):
+        raw, contracts = test_compiler.fixture(bytes.fromhex('31c0c3'))
+        source = self.directory / 'input.elf'
+        source.write_bytes(raw)
+        with self.assertRaises(ValueError):
+            compile_image(Image(source, contracts, 'x86-runtime-fallback'))
+
     def test_changed_binary_rejects_before_codegen(self):
         raw, contracts = test_compiler.fixture(bytes.fromhex('31c0c3'))
         altered = bytearray(raw)

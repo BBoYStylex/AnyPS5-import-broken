@@ -8,6 +8,10 @@ if(CMAKE_OSX_ARCHITECTURES AND NOT CMAKE_OSX_ARCHITECTURES STREQUAL "arm64")
     message(FATAL_ERROR "The experimental native AOT tool requires an arm64 build")
 endif()
 
+set(aotNativeExecution OFF)
+if(APPLE OR CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$")
+    set(aotNativeExecution ON)
+endif()
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 if(NOT APPLE)
     set(aotClang clang CACHE STRING "Clang executable for Apple ARM64 cross-compilation")
@@ -34,15 +38,21 @@ add_custom_target(native_aot ALL DEPENDS capstone_shared)
 add_library(anyps5_native_image STATIC "${CMAKE_SOURCE_DIR}/core/libs/native/NativeAotImage.cpp")
 if(APPLE)
     target_sources(anyps5_native_image PRIVATE "${CMAKE_SOURCE_DIR}/core/libs/native/NativeAotReadonly.cpp")
+else()
+    target_sources(anyps5_native_image PRIVATE "${CMAKE_SOURCE_DIR}/core/libs/native/NativeAotReadonlyLinux.cpp")
 endif()
 target_include_directories(anyps5_native_image PUBLIC "${CMAKE_SOURCE_DIR}/core/libs")
 set_target_properties(anyps5_native_image PROPERTIES CXX_EXTENSIONS OFF)
 
 if(BUILD_TESTING)
+    add_test_executable(native_aot_readonly_tests "${CMAKE_SOURCE_DIR}/core/libs/tests/NativeAotReadonly.cpp")
+    target_link_libraries(native_aot_readonly_tests PRIVATE anyps5_native_image)
+    add_test(NAME native_aot_readonly COMMAND native_aot_readonly_tests)
+    set_tests_properties(native_aot_readonly PROPERTIES TIMEOUT 30)
     add_test_executable(native_aot_image_tests "${CMAKE_SOURCE_DIR}/core/libs/tests/NativeAotImage.cpp")
-        target_link_libraries(native_aot_image_tests PRIVATE anyps5_native_image)
-        add_test(NAME native_aot_image COMMAND native_aot_image_tests)
-        set_tests_properties(native_aot_image PROPERTIES TIMEOUT 30)
+    target_link_libraries(native_aot_image_tests PRIVATE anyps5_native_image)
+    add_test(NAME native_aot_image COMMAND native_aot_image_tests)
+    set_tests_properties(native_aot_image PROPERTIES TIMEOUT 30)
     if(APPLE)
         file(GLOB testSources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_*.py")
     else()
@@ -78,18 +88,18 @@ if(ANYPS5_NATIVE_AOT_EXAMPLE)
         ${ps5linkSource}/catalog.c ${ps5linkSource}/catalog_extra.c
         ${ps5linkSource}/catalog_lookup.c ${ps5linkSource}/nid.c ${ps5linkSource}/sha1.c)
     add_library(anyps5_native_runtime STATIC
-            ../libs/prx/libc/src/LocaleSupport.cpp
-            ../libs/prx/libc/src/ApplicationHeap.cpp
-            ../libs/prx/libc/src/GuestHeap.cpp
-            ../libs/prx/libc/src/GuestArena.cpp
-            ../libs/prx/libc/src/GuestAllocations.cpp
-            ../libs/prx/libkernel/Time/TimedWait.cpp
-            ../libs/prx/libkernel/System/src/Notification.cpp
-            ../libs/native/NativeAotTime.cpp)
-        target_include_directories(anyps5_native_runtime PUBLIC "${CMAKE_SOURCE_DIR}/core/libs")
-        target_compile_options(anyps5_native_runtime PRIVATE -ffunction-sections -fdata-sections)
+        ../libs/prx/libc/src/LocaleSupport.cpp
+        ../libs/prx/libc/src/ApplicationHeap.cpp
+        ../libs/prx/libc/src/GuestHeap.cpp
+        ../libs/prx/libc/src/GuestArena.cpp
+        ../libs/prx/libc/src/GuestAllocations.cpp
+        ../libs/prx/libkernel/Time/TimedWait.cpp
+        ../libs/prx/libkernel/System/src/Notification.cpp
+        ../libs/native/NativeAotTime.cpp)
+    target_include_directories(anyps5_native_runtime PUBLIC "${CMAKE_SOURCE_DIR}/core/libs")
+    target_compile_options(anyps5_native_runtime PRIVATE -ffunction-sections -fdata-sections)
     target_link_libraries(anyps5_native_runtime PUBLIC anyps5_native_image)
-    if(APPLE)
+    if(aotNativeExecution)
         target_sources(anyps5_native_runtime PRIVATE ../libs/native/NativeAotMain.cpp)
     endif()
     if(BUILD_TESTING)
@@ -110,11 +120,18 @@ if(ANYPS5_NATIVE_AOT_EXAMPLE)
         --sdk "${CMAKE_SOURCE_DIR}/3rdparty/ps5link-sdk"
         --linker $<TARGET_FILE:aot_ps5link>
         --output "${CMAKE_CURRENT_BINARY_DIR}/hello-notify")
-    if(APPLE)
+    if(aotNativeExecution)
         list(APPEND aotExampleCommand --runtime $<TARGET_FILE:anyps5_native_runtime>
             --image-runtime $<TARGET_FILE:anyps5_native_image>)
+        if(NOT APPLE)
+            list(APPEND aotExampleCommand --target linux-arm64)
+        endif()
         add_custom_target(native_aot_hello_notify
             COMMAND ${aotExampleCommand} --run
+            DEPENDS aot_ps5link anyps5_native_runtime capstone_shared
+            USES_TERMINAL)
+        add_custom_target(native_aot_hello_notify_original
+            COMMAND ${aotExampleCommand} --original-delay --run
             DEPENDS aot_ps5link anyps5_native_runtime capstone_shared
             USES_TERMINAL)
         if(BUILD_TESTING)
