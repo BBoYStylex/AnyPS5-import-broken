@@ -102,6 +102,25 @@ long double APS5_VABI ldexpl_nid_postfix(long double, int);
 long double APS5_VABI truncl_nid_postfix(long double);
 double APS5_VABI logb_nid_postfix(double);
 double APS5_VABI remainder_nid_postfix(double, double);
+double APS5_VABI sin_nid_postfix(double);
+double APS5_VABI cos_nid_postfix(double);
+double APS5_VABI tan_nid_postfix(double);
+double APS5_VABI exp_nid_postfix(double);
+double APS5_VABI log_nid_postfix(double);
+double APS5_VABI log2_nid_postfix(double);
+double APS5_VABI log10_nid_postfix(double);
+double APS5_VABI pow_nid_postfix(double, double);
+double APS5_VABI atan2_nid_postfix(double, double);
+void APS5_VABI sincos_nid_postfix(double, double*, double*);
+float APS5_VABI sinf_nid_postfix(float);
+float APS5_VABI cosf_nid_postfix(float);
+float APS5_VABI expf_nid_postfix(float);
+float APS5_VABI exp2f_nid_postfix(float);
+float APS5_VABI logf_nid_postfix(float);
+float APS5_VABI log2f_nid_postfix(float);
+float APS5_VABI ldexpf_nid_postfix(float, int);
+float APS5_VABI remainderf_nid_postfix(float, float);
+void APS5_VABI sincosf_nid_postfix(float, float*, float*);
 }
 static void Require(bool value) { if (!value) std::abort(); }
 
@@ -401,10 +420,64 @@ static void CheckHyperbolic() {
     Require(Near(acosh_nid_postfix(1e300), 691.4686750787736, 1e-15));
 }
 
-static void CheckAcoshfErrno() {
-    errno = 0;
-    (void)acoshf_nid_postfix(-1.0f);
-    Require(errno == 0);
+template<typename Fn, typename... Args>
+static void CheckErrnoPreserved(Fn fn, std::uint64_t expected, Args... args) {
+    errno = EINTR;
+    const auto result = fn(args...);
+    Require(errno == EINTR);
+    if constexpr (sizeof(result) == sizeof(std::uint32_t)) Require(std::bit_cast<std::uint32_t>(result) == expected);
+    else Require(std::bit_cast<std::uint64_t>(result) == expected);
+}
+
+static void CheckLibmErrnoPreserved() {
+    CheckErrnoPreserved(sin_nid_postfix, 0xfff8000000000000ull, INFINITY); CheckErrnoPreserved(sin_nid_postfix, 0x0000000000000000ull, 0.0);
+    CheckErrnoPreserved(cos_nid_postfix, 0xfff8000000000000ull, INFINITY); CheckErrnoPreserved(cos_nid_postfix, 0x3ff0000000000000ull, 0.0);
+    CheckErrnoPreserved(tan_nid_postfix, 0xfff8000000000000ull, INFINITY); CheckErrnoPreserved(tan_nid_postfix, 0x0000000000000000ull, 0.0);
+    CheckErrnoPreserved(sinh_nid_postfix, 0x7ff0000000000000ull, 1024.0); CheckErrnoPreserved(sinh_nid_postfix, 0x0000000000000000ull, 0.0);
+    CheckErrnoPreserved(cosh_nid_postfix, 0x7ff0000000000000ull, 1024.0); CheckErrnoPreserved(cosh_nid_postfix, 0x3ff0000000000000ull, 0.0);
+    CheckErrnoPreserved(asinh_nid_postfix, 0x0000000000000001ull, 0x1p-1074); CheckErrnoPreserved(asinh_nid_postfix, 0x0000000000000000ull, 0.0);
+    CheckErrnoPreserved(acosh_nid_postfix, 0xfff8000000000000ull, -1.0); CheckErrnoPreserved(acosh_nid_postfix, 0x0000000000000000ull, 1.0);
+    CheckErrnoPreserved(atanh_nid_postfix, 0x7ff0000000000000ull, 1.0); CheckErrnoPreserved(atanh_nid_postfix, 0x0000000000000000ull, 0.0);
+    CheckErrnoPreserved(exp_nid_postfix, 0x7ff0000000000000ull, 1024.0); CheckErrnoPreserved(exp_nid_postfix, 0x3ff0000000000000ull, 0.0);
+    CheckErrnoPreserved(expm1_nid_postfix, 0x7ff0000000000000ull, 1024.0); CheckErrnoPreserved(expm1_nid_postfix, 0x0000000000000000ull, 0.0);
+    CheckErrnoPreserved(log_nid_postfix, 0xfff8000000000000ull, -1.0); CheckErrnoPreserved(log_nid_postfix, 0x0000000000000000ull, 1.0);
+    CheckErrnoPreserved(log2_nid_postfix, 0xfff8000000000000ull, -1.0); CheckErrnoPreserved(log2_nid_postfix, 0x4008000000000000ull, 8.0);
+    CheckErrnoPreserved(log10_nid_postfix, 0xfff0000000000000ull, 0.0); CheckErrnoPreserved(log10_nid_postfix, 0x0000000000000000ull, 1.0);
+    CheckErrnoPreserved(log1p_nid_postfix, 0xfff0000000000000ull, -1.0); CheckErrnoPreserved(log1p_nid_postfix, 0x0000000000000000ull, 0.0);
+    CheckErrnoPreserved(sqrt_nid_postfix, 0xfff8000000000000ull, -1.0); CheckErrnoPreserved(sqrt_nid_postfix, 0x4000000000000000ull, 4.0);
+    CheckErrnoPreserved(pow_nid_postfix, 0xfff8000000000000ull, -1.0, 0.5); CheckErrnoPreserved(pow_nid_postfix, 0x4090000000000000ull, 2.0, 10.0);
+    CheckErrnoPreserved(atan2_nid_postfix, 0x0000000000000000ull, 0x1p-1022, 0x1p54); CheckErrnoPreserved(atan2_nid_postfix, 0x0000000000000000ull, 0.0, 1.0);
+    CheckErrnoPreserved(hypot_nid_postfix, 0x7ff0000000000000ull, std::numeric_limits<double>::max(), std::numeric_limits<double>::max()); CheckErrnoPreserved(hypot_nid_postfix, 0x4014000000000000ull, 3.0, 4.0);
+    CheckErrnoPreserved(ldexp_nid_postfix, 0x7ff0000000000000ull, 1.0, 1024); CheckErrnoPreserved(ldexp_nid_postfix, 0x4030000000000000ull, 1.0, 4);
+    CheckErrnoPreserved(scalbn_nid_postfix, 0x7ff0000000000000ull, 1.0, 1024); CheckErrnoPreserved(scalbn_nid_postfix, 0x4030000000000000ull, 1.0, 4);
+    CheckErrnoPreserved(sinf_nid_postfix, 0xffc00000u, INFINITY); CheckErrnoPreserved(sinf_nid_postfix, 0x00000000u, 0.0f);
+    CheckErrnoPreserved(cosf_nid_postfix, 0xffc00000u, INFINITY); CheckErrnoPreserved(cosf_nid_postfix, 0x3f800000u, 0.0f);
+    CheckErrnoPreserved(tanf_nid_postfix, 0xffc00000u, INFINITY); CheckErrnoPreserved(tanf_nid_postfix, 0x00000000u, 0.0f);
+    CheckErrnoPreserved(coshf_nid_postfix, 0x7f800000u, 128.0f); CheckErrnoPreserved(coshf_nid_postfix, 0x3f800000u, 0.0f);
+    CheckErrnoPreserved(expf_nid_postfix, 0x7f800000u, 128.0f); CheckErrnoPreserved(expf_nid_postfix, 0x3f800000u, 0.0f);
+    CheckErrnoPreserved(exp2f_nid_postfix, 0x7f800000u, 128.0f); CheckErrnoPreserved(exp2f_nid_postfix, 0x3f800000u, 0.0f);
+    CheckErrnoPreserved(logf_nid_postfix, 0xffc00000u, -1.0f); CheckErrnoPreserved(logf_nid_postfix, 0x00000000u, 1.0f);
+    CheckErrnoPreserved(log2f_nid_postfix, 0xffc00000u, -1.0f); CheckErrnoPreserved(log2f_nid_postfix, 0x40400000u, 8.0f);
+    CheckErrnoPreserved(log10f_nid_postfix, 0xffc00000u, -1.0f); CheckErrnoPreserved(log10f_nid_postfix, 0x3f800000u, 10.0f);
+    CheckErrnoPreserved(log1pf_nid_postfix, 0xff800000u, -1.0f); CheckErrnoPreserved(log1pf_nid_postfix, 0x00000000u, 0.0f);
+    CheckErrnoPreserved(sqrtf_nid_postfix, 0xffc00000u, -1.0f); CheckErrnoPreserved(sqrtf_nid_postfix, 0x40000000u, 4.0f);
+    CheckErrnoPreserved(acoshf_nid_postfix, 0xffc00000u, -1.0f); CheckErrnoPreserved(acoshf_nid_postfix, 0x00000000u, 1.0f);
+    CheckErrnoPreserved(atan2f_nid_postfix, 0x00000000u, 0x1p-126f, 0x1p25f); CheckErrnoPreserved(atan2f_nid_postfix, 0x00000000u, 0.0f, 1.0f);
+    CheckErrnoPreserved(fmodf_nid_postfix, 0xffc00000u, 1.0f, 0.0f); CheckErrnoPreserved(fmodf_nid_postfix, 0x40000000u, 5.0f, 3.0f);
+    CheckErrnoPreserved(scalbnf_nid_postfix, 0x00000000u, 1.0f, -200); CheckErrnoPreserved(scalbnf_nid_postfix, 0x41800000u, 1.0f, 4);
+    CheckErrnoPreserved(ldexpf_nid_postfix, 0x00000000u, 1.0f, -200); CheckErrnoPreserved(ldexpf_nid_postfix, 0x41800000u, 1.0f, 4);
+    CheckErrnoPreserved(remainderf_nid_postfix, 0xffc00000u, 1.0f, 0.0f); CheckErrnoPreserved(remainderf_nid_postfix, 0xbf800000u, 5.0f, 3.0f);
+    double sine = 0, cosine = 0;
+    errno = EINTR;
+    sincos_nid_postfix(INFINITY, &sine, &cosine);
+    Require(errno == EINTR && std::bit_cast<std::uint64_t>(sine) == 0xfff8000000000000ull && std::bit_cast<std::uint64_t>(cosine) == 0xfff8000000000000ull);
+    sincos_nid_postfix(0.0, &sine, &cosine);
+    Require(errno == EINTR && std::bit_cast<std::uint64_t>(sine) == 0 && std::bit_cast<std::uint64_t>(cosine) == 0x3ff0000000000000ull);
+    float sineF = 0, cosineF = 0;
+    sincosf_nid_postfix(INFINITY, &sineF, &cosineF);
+    Require(errno == EINTR && std::bit_cast<std::uint32_t>(sineF) == 0xffc00000u && std::bit_cast<std::uint32_t>(cosineF) == 0xffc00000u);
+    sincosf_nid_postfix(0.0f, &sineF, &cosineF);
+    Require(errno == EINTR && std::bit_cast<std::uint32_t>(sineF) == 0 && std::bit_cast<std::uint32_t>(cosineF) == 0x3f800000u);
     std::feclearexcept(FE_ALL_EXCEPT);
     (void)acoshf_nid_postfix(0.5f);
     Require(std::fetestexcept(FE_INVALID) != 0);
@@ -613,7 +686,6 @@ int main() {
     const auto minimum = div_nid_postfix(std::numeric_limits<int>::min(), 10);
     Require(minimum.quot == -214748364 && minimum.rem == -8);
     Require(abs_nid_postfix(0) == 0);
-    CheckAcoshfErrno();
     Require(abs_nid_postfix(42) == 42);
     Require(abs_nid_postfix(-42) == 42);
     Require(abs_nid_postfix(std::numeric_limits<int>::max()) == std::numeric_limits<int>::max());
@@ -636,4 +708,5 @@ int main() {
     CheckHyperbolic();
     CheckHypotSpecialValue();
     CheckFmodErrno();
+    CheckLibmErrnoPreserved();
 }
