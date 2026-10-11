@@ -23,6 +23,9 @@ def strip_nid_token(raw):
     return s.split()[0]
 
 
+NID_RE = re.compile("[" + re.escape(CHARSET) + "]{11}")
+
+
 def parse_nids(path):
     nids = []
     seen = set()
@@ -31,6 +34,9 @@ def parse_nids(path):
             nid = strip_nid_token(line)
             if not nid:
                 continue
+            if not NID_RE.fullmatch(nid):
+                print(f"stubgen: invalid NID {nid!r} in {path}", file=sys.stderr)
+                raise SystemExit(2)
             if nid in seen:
                 continue
             seen.add(nid)
