@@ -82,6 +82,9 @@ static void* APS5_VABI Worker(void* arg) {
     static_cast<volatile unsigned char*>(start)[0] = 3;
     const auto outside = reinterpret_cast<std::uintptr_t>(start) & ~(Page - 1);
     if (outside >= Page) Require(mprotect_nid_postfix(reinterpret_cast<void*>(outside - Page), 2 * Page, 3) == -1);
+    if (outside >= 2 * Page) Require(mprotect_nid_postfix(reinterpret_cast<void*>(outside - 2 * Page), Page, 3) == -1);
+    const auto upperOutside = reinterpret_cast<std::uintptr_t>(end) & ~(Page - 1);
+    Require(mprotect_nid_postfix(reinterpret_cast<void*>(upperOutside - Page), 2 * Page, 3) == -1);
     passed.store(true);
     return nullptr;
 }

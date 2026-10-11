@@ -182,6 +182,28 @@ bool GuestThreadStack(std::uintptr_t address, std::uintptr_t* start, std::uintpt
     return false;
 }
 
+#ifdef _WIN32
+bool IsGuestThreadStackAllocation(const void* allocationBase) noexcept {
+    if (!allocationBase) return false;
+    std::uintptr_t low = 0;
+    std::uintptr_t high = 0;
+    if (CurrentStack(&low, &high)) {
+        MEMORY_BASIC_INFORMATION info{};
+        if (VirtualQuery(reinterpret_cast<const void*>(low), &info, sizeof(info)) == sizeof(info) && info.AllocationBase == allocationBase) {
+            return true;
+        }
+    }
+    std::lock_guard lock(stackLock);
+    for (const auto& [thread, range] : liveStacks) {
+        MEMORY_BASIC_INFORMATION info{};
+        if (VirtualQuery(reinterpret_cast<const void*>(range.first), &info, sizeof(info)) == sizeof(info) && info.AllocationBase == allocationBase) {
+            return true;
+        }
+    }
+    return false;
+}
+#endif
+
 struct CpuClockRegistry {
     std::mutex lock;
     std::map<int, PthreadPrivate*> threads;

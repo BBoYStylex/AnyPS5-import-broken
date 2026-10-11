@@ -900,7 +900,7 @@ int DoMprotect(const void* addr, size_t len, int prot) {
     const auto nativeProtection = LinuxProtFromSce(prot);
     std::uintptr_t stackStart = 0;
     std::uintptr_t stackEnd = 0;
-    if ((prot & GuestProtGpuReadWrite) == 0 && GuestThreadStack(address, &stackStart, &stackEnd) && address >= stackStart && address + len <= stackEnd) {
+    if (GuestThreadStack(address, &stackStart, &stackEnd) && address >= stackStart && address + len <= stackEnd) {
         constexpr std::uintptr_t hostPageMask = 0xfff;
         const auto inside = std::max(first, (stackStart + hostPageMask) & ~hostPageMask);
         const auto insideEnd = std::min(end, stackEnd & ~hostPageMask);
@@ -921,7 +921,7 @@ int DoMprotect(const void* addr, size_t len, int prot) {
         else if (IsGuestModuleImage(memory.AllocationBase)) mutation.RegisterImage(memory.AllocationBase);
         else throw std::invalid_argument("Memory protection of a foreign image is not supported");
     }
-    if (memory.Type == MEM_PRIVATE && memory.State == MEM_COMMIT && memory.RegionSize >= bytes && !mutation.Overlaps(pointer, bytes)) {
+    if (memory.Type == MEM_PRIVATE && memory.State == MEM_COMMIT && memory.RegionSize >= bytes && !mutation.Overlaps(pointer, bytes) && !IsGuestThreadStackAllocation(memory.AllocationBase)) {
         if (mprotect(const_cast<void*>(pointer), bytes, nativeProtection) != 0) throw std::system_error(errno, std::generic_category(), "mprotect failed");
         return 0;
     }
