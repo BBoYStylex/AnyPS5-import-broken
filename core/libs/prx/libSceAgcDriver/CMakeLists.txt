@@ -406,6 +406,14 @@ target_link_libraries(agc_spirv_module_tests PRIVATE shader_recompiler_agc_drive
 set_target_properties(agc_spirv_module_tests PROPERTIES CXX_EXTENSIONS OFF)
 configure_windows_unwind(agc_spirv_module_tests)
 
+add_test_executable(agc_spirv_flat_store_tests EXCLUDE_FROM_ALL tests/SpirvFlatStore.cpp)
+target_link_libraries(agc_spirv_flat_store_tests PRIVATE shader_recompiler_agc_driver libc)
+set_target_properties(agc_spirv_flat_store_tests PROPERTIES CXX_EXTENSIONS OFF)
+configure_windows_unwind(agc_spirv_flat_store_tests)
+if(ANYPS5_ENABLE_SPIRV_TOOLS)
+    target_link_libraries(agc_spirv_flat_store_tests PRIVATE SPIRV-Tools-static)
+endif()
+
 add_test_executable(agc_spirv_narrow_constant_store_tests EXCLUDE_FROM_ALL tests/SpirvNarrowConstantStore.cpp)
 target_link_libraries(agc_spirv_narrow_constant_store_tests PRIVATE shader_recompiler_agc_driver libc)
 set_target_properties(agc_spirv_narrow_constant_store_tests PROPERTIES CXX_EXTENSIONS OFF)
@@ -1005,7 +1013,7 @@ if(BUILD_TESTING)
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
     endif()
 
-    foreach(agcTest IN ITEMS agc_spirv_narrow_constant_store_tests agc_spirv_optimizer_tests agc_driver_constant_store_tests)
+    foreach(agcTest IN ITEMS agc_spirv_flat_store_tests agc_spirv_narrow_constant_store_tests agc_spirv_optimizer_tests agc_driver_constant_store_tests)
         if(NOT TARGET ${agcTest})
             continue()
         endif()
