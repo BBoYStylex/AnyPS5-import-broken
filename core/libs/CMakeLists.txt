@@ -340,7 +340,6 @@ if(BUILD_TESTING)
         set_tests_properties(guest_posix_random PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libScePosixForWebKit>")
     endif()
-
     add_test_executable(MemoryPoolTest
         tests/MemoryPoolTest.cpp
         prx/libkernel/DirectMemory/MemoryPool.cpp
