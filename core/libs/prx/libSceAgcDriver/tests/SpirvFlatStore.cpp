@@ -23,7 +23,6 @@ namespace {
 using namespace ShaderRecompiler;
 
 SpirvTarget FlatStoreTarget() {
-    // Fixed capability profile; no Vulkan device is created.
     static constexpr std::array<std::uint32_t, 3> capabilities{
         spv::CapabilityInt64,
         spv::CapabilityPhysicalStorageBufferAddresses,
