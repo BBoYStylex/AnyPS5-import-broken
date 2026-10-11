@@ -383,6 +383,9 @@ int APS5_VABI chmod_nid_postfix(const char* path, int mode) {
         APS5_INVALID_ARG_EX;
     }
     auto native = ResolvePath_nid_no_patch(path);
+#ifdef _WIN32
+    File::RememberChmod(native, static_cast<std::uint16_t>(mode & 01777));
+#endif
     if (NativeChmod(native, mode) != 0) {
         throw std::runtime_error(std::string(__func__) + ": chmod failed for " + native.string() + ", errno=" + std::to_string(errno));
     }

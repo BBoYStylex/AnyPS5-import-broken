@@ -5,6 +5,10 @@
 #include <algorithm>
 #include <stdexcept>
 #include <string>
+#include <map>
+#include <mutex>
+#include <fstream>
+#include <iomanip>
 
 #ifdef _WIN32
 #include "prx/libkernel/File/include/WindowsFileTime.hpp"
@@ -17,6 +21,53 @@ struct NativeStat : __stat64 {
     bool hasTimes = false;
     bool hasIdentity = false;
 };
+
+namespace File {
+std::mutex& ChmodMutex() {
+    static std::mutex mutex;
+    return mutex;
+}
+std::filesystem::path ChmodCachePath();
+std::map<std::wstring, std::uint16_t> LoadChmodCache();
+std::map<std::wstring, std::uint16_t>& ChmodModes() {
+    static std::map<std::wstring, std::uint16_t> modes = LoadChmodCache();
+    return modes;
+}
+std::wstring ChmodKey(const std::filesystem::path& p) {
+    std::error_code ec;
+    auto key = std::filesystem::absolute(p, ec).lexically_normal().wstring();
+    std::transform(key.begin(), key.end(), key.begin(), [](wchar_t c) { return static_cast<wchar_t>(::towlower(c)); });
+    return key;
+}
+std::filesystem::path ChmodCachePath() {
+    wchar_t executable[MAX_PATH]{};
+    GetModuleFileNameW(nullptr, executable, MAX_PATH);
+    return std::filesystem::path(executable).parent_path() / L"anyps5-chmod-cache.tsv";
+}
+std::map<std::wstring, std::uint16_t> LoadChmodCache() {
+    std::map<std::wstring, std::uint16_t> modes;
+    std::error_code ec;
+    if (!std::filesystem::exists(ChmodCachePath(), ec)) return modes;
+    std::wifstream input(ChmodCachePath());
+    std::wstring line;
+    while (std::getline(input, line)) {
+        const auto separator = line.rfind(L'\t');
+        if (separator == std::wstring::npos || separator + 1 >= line.size()) continue;
+        try {
+            modes[line.substr(0, separator)] = static_cast<std::uint16_t>(std::stoul(line.substr(separator + 1), nullptr, 8));
+        } catch (const std::exception&) {
+        }
+    }
+    return modes;
+}
+void SaveChmodCacheImpl() {
+    std::wofstream output(ChmodCachePath(), std::ios::trunc);
+    if (!output) return;
+    for (const auto& [path, mode] : ChmodModes())
+        output << path << L'\t' << std::oct << mode << L'\n';
+}
+}
+
 static int ReadHandleInfo(HANDLE handle, NativeStat* st) {
     if (GetFileType(handle) != FILE_TYPE_DISK) return 0;
     if (!GetFileInformationByHandleEx(handle, FileBasicInfo, &st->times, sizeof(st->times)))
@@ -36,12 +87,47 @@ static int DoStat(const std::filesystem::path& p, NativeStat* st) {
     if (handle == INVALID_HANDLE_VALUE) return File::WindowsFileTime::Failure(GetLastError());
     const int result = ReadHandleInfo(handle, st);
     CloseHandle(handle);
+    if (const std::uint16_t remembered = File::RememberedChmod(p))
+        st->st_mode = (st->st_mode & ~01777) | (remembered & 01777);
     return result;
 }
+static bool PathFromHandle(HANDLE handle, std::filesystem::path& result) {
+    char buffer[1024]{};
+    if (!GetFileInformationByHandleEx(handle, FileNameInfo, buffer, sizeof(buffer))) return false;
+    const auto* nameInfo = reinterpret_cast<FILE_NAME_INFO*>(buffer);
+    std::wstring name(nameInfo->FileName, nameInfo->FileNameLength / sizeof(wchar_t));
+    if (name.rfind(L"\\Device\\", 0) != 0) {
+        result = std::filesystem::path(name);
+        return true;
+    }
+    const auto separator = name.find(L'\\', 8);  // after \Device\
+    if (separator == std::wstring::npos) return false;
+    const std::wstring device = name.substr(0, separator);
+    const std::wstring rest = name.substr(separator);
+    wchar_t drives[512]{};
+    if (!QueryDosDeviceW(nullptr, drives, 512)) return false;
+    for (const wchar_t* drive = drives; *drive; drive += std::wcslen(drive) + 1) {
+        wchar_t target[512]{};
+        if (QueryDosDeviceW(drive, target, 512) && device == target) {
+            result = std::filesystem::path(drive) / rest;
+            return true;
+        }
+    }
+    return false;
+}
+
 static int DoFstat(int fd, NativeStat* st) {
     if (const auto directory = File::DirectoryDescriptorPath(fd)) return DoStat(*directory, st);
     if (_fstat64(fd, st) != 0) return -1;
-    return ReadHandleInfo(reinterpret_cast<HANDLE>(::_get_osfhandle(fd)), st);
+    const int result = ReadHandleInfo(reinterpret_cast<HANDLE>(::_get_osfhandle(fd)), st);
+    if (result == 0) {
+        std::filesystem::path path;
+        if (PathFromHandle(reinterpret_cast<HANDLE>(::_get_osfhandle(fd)), path)) {
+            if (const std::uint16_t remembered = File::RememberedChmod(path))
+                st->st_mode = (st->st_mode & ~01777) | (remembered & 01777);
+        }
+    }
+    return result;
 }
 static int DoLstat(const std::filesystem::path& p, NativeStat* st) {
     const auto attributes = GetFileAttributesW(p.c_str());
@@ -78,6 +164,7 @@ static void CopyNativeStat(const NativeStat& st, FileStat* sb) {
     sb->st_blocks = (sb->st_size + 511LL) / 512LL;
     sb->st_atim.tv_sec = static_cast<std::int64_t>(st.st_atime);
     sb->st_atim.tv_nsec = 0;
+
     sb->st_mtim.tv_sec = static_cast<std::int64_t>(st.st_mtime);
     sb->st_mtim.tv_nsec = 0;
     sb->st_ctim.tv_sec = static_cast<std::int64_t>(st.st_ctime);
@@ -154,4 +241,31 @@ bool FillLinkStat(const std::filesystem::path& nativePath, FileStat* sb) {
     return true;
 }
 
+#ifdef _WIN32
+void RememberChmod(const std::filesystem::path& nativePath, std::uint16_t mode) {
+    std::size_t pending = 0;
+    {
+        const std::lock_guard lock{ChmodMutex()};
+        ChmodModes()[ChmodKey(nativePath)] = static_cast<std::uint16_t>(mode & 01777);
+        static std::size_t updates = 0;
+        pending = ++updates;
+    }
+    if (pending % 256 == 0) SaveChmodCacheImpl();
+}
+std::uint16_t RememberedChmod(const std::filesystem::path& nativePath) {
+    const std::lock_guard lock{ChmodMutex()};
+    const auto it = ChmodModes().find(ChmodKey(nativePath));
+    return it == ChmodModes().end() ? 0 : it->second;
+}
+#else
+void RememberChmod(const std::filesystem::path&, std::uint16_t) {}
+std::uint16_t RememberedChmod(const std::filesystem::path&) { return 0; }
+#endif
+
+}
+
+extern "C" void SaveChmodCache_nid_no_patch(void) {
+#ifdef _WIN32
+    File::SaveChmodCacheImpl();
+#endif
 }
