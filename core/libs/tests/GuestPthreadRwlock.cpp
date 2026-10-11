@@ -23,12 +23,15 @@ int APS5_VABI pthread_rwlock_timedrdlock_nid_postfix(PthreadRwlock* rwlock, cons
 int APS5_VABI pthread_rwlock_timedwrlock_nid_postfix(PthreadRwlock* rwlock, const KernelTimespec* abstime);
 int APS5_VABI scePthreadRwlockInit(PthreadRwlock* rwlock, const PthreadRwlockattr* attr, const char* name);
 int APS5_VABI scePthreadRwlockDestroy(PthreadRwlock* rwlock);
+int APS5_VABI scePthreadRwlockUnlock(PthreadRwlock* rwlock);
 }
 
 using TimedLock = int (APS5_VABI *)(PthreadRwlock*, const KernelTimespec*);
 
 static constexpr int SCE_OK = 0;
 static constexpr int SCE_KERNEL_ERROR_EBUSY = 0x80020010;
+static constexpr int SCE_KERNEL_ERROR_EPERM = 0x80020001;
+static constexpr int GUEST_EPERM = 1;
 static constexpr int GUEST_EDEADLK = 11;
 static constexpr int GUEST_EBUSY = 16;
 static constexpr int GUEST_EINVAL = 22;
@@ -190,6 +193,44 @@ static void CheckFailedLockAttempts() {
     Require(rwlock == nullptr);
 }
 
+static void CheckUnlockWithoutOwnership() {
+    PthreadRwlock rwlock = nullptr;
+    Require(pthread_rwlock_unlock_nid_postfix(&rwlock) == GUEST_EPERM);
+    Require(rwlock != nullptr);
+    Require(scePthreadRwlockUnlock(&rwlock) == SCE_KERNEL_ERROR_EPERM);
+    Require(pthread_rwlock_trywrlock_nid_postfix(&rwlock) == 0);
+    Require(pthread_rwlock_unlock_nid_postfix(&rwlock) == 0);
+    Require(pthread_rwlock_unlock_nid_postfix(&rwlock) == GUEST_EPERM);
+    Require(pthread_rwlock_rdlock_nid_postfix(&rwlock) == 0);
+    Require(pthread_rwlock_tryrdlock_nid_postfix(&rwlock) == 0);
+    Require(pthread_rwlock_unlock_nid_postfix(&rwlock) == 0);
+    Require(pthread_rwlock_unlock_nid_postfix(&rwlock) == 0);
+    Require(pthread_rwlock_unlock_nid_postfix(&rwlock) == GUEST_EPERM);
+    Require(pthread_rwlock_trywrlock_nid_postfix(&rwlock) == 0);
+    Require(pthread_rwlock_unlock_nid_postfix(&rwlock) == 0);
+
+    Holder writer{&rwlock, true};
+    Start(writer);
+    Require(pthread_rwlock_unlock_nid_postfix(&rwlock) == GUEST_EPERM);
+    Require(scePthreadRwlockUnlock(&rwlock) == SCE_KERNEL_ERROR_EPERM);
+    Require(pthread_rwlock_tryrdlock_nid_postfix(&rwlock) == GUEST_EBUSY);
+    ExpectTimeout(pthread_rwlock_timedrdlock_nid_postfix, &rwlock);
+    writer.release.store(true);
+    Require(scePthreadJoin(writer.thread, nullptr) == SCE_OK);
+    Require(pthread_rwlock_unlock_nid_postfix(&rwlock) == GUEST_EPERM);
+
+    Holder reader{&rwlock, false};
+    Start(reader);
+    Require(pthread_rwlock_trywrlock_nid_postfix(&rwlock) == GUEST_EBUSY);
+    const KernelTimespec deadline = After(5000);
+    reader.release.store(true);
+    Require(pthread_rwlock_timedwrlock_nid_postfix(&rwlock, &deadline) == 0);
+    Require(scePthreadJoin(reader.thread, nullptr) == SCE_OK);
+    Require(pthread_rwlock_unlock_nid_postfix(&rwlock) == 0);
+    Require(pthread_rwlock_unlock_nid_postfix(&rwlock) == GUEST_EPERM);
+    Require(pthread_rwlock_destroy_nid_postfix(&rwlock) == 0);
+}
+
 int main() {
     CheckConcurrentFirstWrlockExcludes();
     const KernelTimespec invalid{0, NANOS_PER_SECOND};
@@ -313,4 +354,5 @@ int main() {
 
     CheckWriterHandoff();
     CheckFailedLockAttempts();
+    CheckUnlockWithoutOwnership();
 }
