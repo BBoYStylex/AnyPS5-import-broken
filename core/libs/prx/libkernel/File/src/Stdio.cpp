@@ -573,6 +573,10 @@ int64_t APS5_VABI lseek_nid_postfix(int d, int64_t offset, int whence) {
     return PosixResult(sceKernelLseek(d, offset, whence));
 }
 
+int64_t APS5_VABI _lseek_nid_postfix(int d, int64_t offset, int whence) {
+    return lseek_nid_postfix(d, offset, whence);
+}
+
 int APS5_VABI mkdir_nid_postfix(const char* path, uint16_t mode) {
     if (const int error = PathError(path)) return PosixFailure(error);
     auto native = ResolvePath_nid_no_patch(path);
