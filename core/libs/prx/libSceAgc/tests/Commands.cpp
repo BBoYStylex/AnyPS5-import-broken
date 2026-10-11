@@ -207,8 +207,8 @@ void testMarkers() {
 
 void testOcclusionQuerySizes() {
     check(sceAgcDcbBeginOcclusionQueryGetSize(0) == 16, "occlusion query begin size mismatch");
-    check(sceAgcDcbBeginOcclusionQueryGetSize(1) == 288, "type 1 occlusion query begin size mismatch");
     check(sceAgcDcbEndOcclusionQueryGetSize() == 16, "occlusion query end size mismatch");
+    expectFailure([] { sceAgcDcbBeginOcclusionQueryGetSize(1); });
     expectFailure([] { sceAgcDcbBeginOcclusionQueryGetSize(2); });
     expectFailure([] { sceAgcDcbBeginOcclusionQueryGetSize(0xff); });
 }

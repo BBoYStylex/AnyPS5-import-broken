@@ -22,8 +22,8 @@ std::uint32_t* APS5_VABI sceAgcDcbGetLodStats(CommandBuffer* buf, std::uint8_t c
 }
 
 std::uint32_t APS5_VABI sceAgcDcbBeginOcclusionQueryGetSize(std::uint8_t type) {
-    Agc::Command::Require(type <= 1, __func__, "unknown occlusion query type");
-    return type == 0 ? 16 : 288;
+    Agc::Command::Require(type == 0, __func__, "only occlusion query type 0 has a confirmed size");
+    return 16;
 }
 
 std::uint32_t APS5_VABI sceAgcDcbEndOcclusionQueryGetSize() {
