@@ -243,6 +243,8 @@ Module Inspect(const CompiledShader& compiled, const State& state, const VkPhysi
                     capability == spv::CapabilityFloat16 ||
                     capability == spv::CapabilityRoundingModeRTE ||
                     capability == spv::CapabilityDenormPreserve ||
+                    capability == spv::CapabilityDotProduct ||
+                    capability == spv::CapabilityDotProductInput4x8BitPacked ||
                     capability == spv::CapabilityFloat64 ||
                     capability == spv::CapabilityStorageBuffer8BitAccess ||
                     capability == spv::CapabilityPhysicalStorageBufferAddresses ||

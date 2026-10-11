@@ -894,6 +894,24 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window) : state(std::make_u
     atomicInt64Features.shaderBufferInt64Atomics = VK_TRUE;
     if (bufferInt64Atomics) deviceExtensions.push_back(VK_KHR_SHADER_ATOMIC_INT64_EXTENSION_NAME);
     state->bufferInt64Atomics = bufferInt64Atomics;
+    VkPhysicalDeviceShaderIntegerDotProductFeaturesKHR integerDotFeatures{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_DOT_PRODUCT_FEATURES_KHR};
+    VkPhysicalDeviceShaderIntegerDotProductPropertiesKHR integerDotProperties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_DOT_PRODUCT_PROPERTIES_KHR};
+    if (hasExtension(VK_KHR_SHADER_INTEGER_DOT_PRODUCT_EXTENSION_NAME)) {
+        VkPhysicalDeviceFeatures2 features{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &integerDotFeatures};
+        state->InstanceFunction<PFN_vkGetPhysicalDeviceFeatures2>("vkGetPhysicalDeviceFeatures2")(selected, &features);
+        VkPhysicalDeviceProperties2 properties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &integerDotProperties};
+        state->InstanceFunction<PFN_vkGetPhysicalDeviceProperties2>("vkGetPhysicalDeviceProperties2")(selected, &properties);
+    }
+    const bool integerDot4x8 = integerDotFeatures.shaderIntegerDotProduct == VK_TRUE &&
+        integerDotProperties.integerDotProduct4x8BitPackedSignedAccelerated == VK_TRUE && integerDotProperties.integerDotProduct4x8BitPackedUnsignedAccelerated == VK_TRUE;
+    integerDotFeatures = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_DOT_PRODUCT_FEATURES_KHR};
+    integerDotFeatures.shaderIntegerDotProduct = VK_TRUE;
+    if (integerDot4x8) {
+        deviceExtensions.push_back(VK_KHR_SHADER_INTEGER_DOT_PRODUCT_EXTENSION_NAME);
+        state->capabilities.push_back(spv::CapabilityDotProduct);
+        state->capabilities.push_back(spv::CapabilityDotProductInput4x8BitPacked);
+        state->spirvExtensions.push_back("SPV_KHR_integer_dot_product");
+    }
     VkPhysicalDeviceShaderImageAtomicInt64FeaturesEXT imageAtomicInt64Features{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_IMAGE_ATOMIC_INT64_FEATURES_EXT};
     if (hasExtension(VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME)) {
         VkPhysicalDeviceFeatures2 features{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &imageAtomicInt64Features};
@@ -1224,6 +1242,10 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window) : state(std::make_u
     if (imageInt64Atomics) {
         imageAtomicInt64Features.pNext = byteFeatures.pNext;
         byteFeatures.pNext = &imageAtomicInt64Features;
+    }
+    if (integerDot4x8) {
+        integerDotFeatures.pNext = byteFeatures.pNext;
+        byteFeatures.pNext = &integerDotFeatures;
     }
     VkPhysicalDeviceImageRobustnessFeaturesEXT imageRobustnessFeatures{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_ROBUSTNESS_FEATURES_EXT, nullptr, VK_TRUE};
     if (imageRobustness) {

@@ -846,6 +846,11 @@ bool TranslationContext::integerDot(const RdnaInstruction& inst, std::uint32_t e
             const IrU32 rhs = readU16LaneAsU32(sourceAt(inst, 1u), highLane, sign);
             result = IrU32(ir.IAdd(result.Value(), ir.IMul(lhs.Value(), rhs.Value())));
         }
+    } else if (elementBits == 8u && integerDot4x8) {
+        const IrU32 lhs = readU32(sourceAt(inst, 0u));
+        const IrU32 rhs = readU32(sourceAt(inst, 1u));
+        const IrU32 dot(ir.Emit(sign ? IrOpcode::SDot4x8 : IrOpcode::UDot4x8, IrType::U32, {&lhs.Value(), &rhs.Value()}));
+        result = IrU32(ir.IAdd(result.Value(), dot.Value()));
     } else {
         const IrOpcode extractOpcode = sign ? IrOpcode::BitFieldSExtract : IrOpcode::BitFieldUExtract;
         const IrU32 lhsSource = readU32(sourceAt(inst, 0u));

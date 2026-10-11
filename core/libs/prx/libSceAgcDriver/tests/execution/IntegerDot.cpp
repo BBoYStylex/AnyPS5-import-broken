@@ -2,11 +2,13 @@
 #include "prx/libSceAgcDriver/Graphics/include/Draw.hpp"
 #include "Recompiler.hpp"
 #include "VulkanTestDevice.hpp"
+#include <spirv/unified1/spirv.hpp>
 #include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstdio>
 #include <iostream>
+#include <iterator>
 #include <span>
 #include <string>
 #include <vector>
@@ -40,13 +42,13 @@ constexpr std::array<std::array<std::uint32_t, 3>, 12> Edges{{
     {0u, 0xffffffffu, 0xdeadbeefu}, {0x01020304u, 0xfffefdfcu, 0u}, {0x0001ffffu, 0xffff0001u, 0x00010000u},
 }};
 
-void FillInput() {
-    std::uint64_t state = 0x9e3779b97f4a7c15ull;
+void FillInput(std::uint32_t batch) {
+    std::uint64_t state = 0x9e3779b97f4a7c15ull + batch;
     for (std::uint32_t tid = 0; tid < Threads; ++tid) {
         auto* words = &Input[tid * Inputs];
         for (std::uint32_t j = 0; j < 3u; ++j) {
             state = state * 6364136223846793005ull + 1442695040888963407ull;
-            words[j] = tid < Edges.size() ? Edges[tid][j] : static_cast<std::uint32_t>(state >> 32u);
+            words[j] = batch == 0u && tid < Edges.size() ? Edges[tid][j] : static_cast<std::uint32_t>(state >> 32u);
         }
     }
 }
@@ -62,7 +64,7 @@ std::string Hex(std::uint32_t value) {
     return text;
 }
 
-auto Compile(AgcDriver::VulkanDevice& device, std::span<const std::uint32_t> code) {
+auto Compile(std::span<const std::uint32_t> code, const ShaderRecompiler::SpirvTarget& target) {
     std::vector<std::uint32_t> userData(8, 0u);
     const auto input = BufferDescriptor(Input.data(), static_cast<std::uint32_t>(Input.size()));
     const auto output = BufferDescriptor(Output.data(), static_cast<std::uint32_t>(Output.size()));
@@ -73,17 +75,29 @@ auto Compile(AgcDriver::VulkanDevice& device, std::span<const std::uint32_t> cod
     ShaderRecompiler::RecompileRequest request{
         {ShaderStage::Compute, reinterpret_cast<std::uintptr_t>(code.data()), code, 0, {}},
         {32, 0, userData, compute, std::nullopt, std::nullopt, memory},
-        device.Target(),
+        target,
         {0, 0, 0, 128}
     };
     request.useCache = false;
     return ShaderRecompiler::Recompile(request);
 }
 
-void Run(AgcDriver::VulkanDevice& device) {
+bool UsesPackedDot(std::span<const std::uint32_t> words) {
+    for (std::size_t cursor = 5; cursor < words.size();) {
+        const auto count = words[cursor] >> 16u;
+        Require(count != 0 && cursor + count <= words.size(), "integer dot: malformed SPIR-V");
+        const auto opcode = words[cursor] & 0xffffu;
+        if (opcode == spv::OpSDot || opcode == spv::OpUDot) return true;
+        cursor += count;
+    }
+    return false;
+}
+
+void Run(AgcDriver::VulkanDevice& device, const ShaderRecompiler::SpirvTarget& target, bool packed) {
     Output.fill(0xdeadbeefu);
     const std::span<const std::uint32_t> code(DotCode);
-    const auto result = Compile(device, code);
+    const auto result = Compile(code, target);
+    Require(UsesPackedDot(result.spirv.Words()) == packed, packed ? "integer dot: the packed 4x8-bit dot product was not used" : "integer dot: a packed dot product was used without the capability");
     device.Dispatch(result, 1, 1, 1, {}, reinterpret_cast<std::uintptr_t>(code.data()));
     device.WaitIdle();
 }
@@ -92,7 +106,7 @@ void CheckRefused(AgcDriver::VulkanDevice& device, std::uint32_t word0, std::uin
     alignas(256) const std::array<std::uint32_t, 3> code{word0, word1, 0xbf810000u};
     std::string refusal;
     try {
-        static_cast<void>(Compile(device, code));
+        static_cast<void>(Compile(code, device.Target()));
     } catch (const std::exception& error) {
         refusal = error.what();
     }
@@ -133,7 +147,7 @@ std::uint32_t Dot(std::uint32_t lhs, std::uint32_t rhs, std::uint32_t bits, bool
     return sum;
 }
 
-void Check() {
+void Check(const char* path) {
     constexpr std::array<const char*, 10> names{
         "v_dot2_i32_i16", "v_dot2_u32_u16", "v_dot4_i32_i8", "v_dot4_u32_u8", "v_dot8_i32_i4", "v_dot8_u32_u4", "v_dot4c_i32_i8",
         "v_dot2_i32_i16 with swapped halves", "v_dot4_u32_u8 with a literal", "v_dot8_i32_i4 with an inline constant",
@@ -157,7 +171,7 @@ void Check() {
         };
         for (std::uint32_t j = 0; j < expected.size(); ++j) {
             const std::uint32_t actual = Output[tid * Results + j];
-            Require(actual == expected[j], std::string(names[j]) + ": thread " + std::to_string(tid) + " (" + Hex(a) + ", " + Hex(b) + ", " + Hex(c) + ") is " + Hex(actual) + ", expected " + Hex(expected[j]));
+            Require(actual == expected[j], std::string(names[j]) + " (" + path + "): thread " + std::to_string(tid) + " (" + Hex(a) + ", " + Hex(b) + ", " + Hex(c) + ") is " + Hex(actual) + ", expected " + Hex(expected[j]));
         }
     }
 }
@@ -168,11 +182,23 @@ int main() {
     try {
         const auto device = OpenVulkanTestDevice();
         if (!device) return VulkanTestSkipped;
-        FillInput();
-        Run(*device);
-        Check();
+        const auto target = device->Target();
+        const bool packed = std::ranges::find(target.supportedCapabilities, static_cast<std::uint32_t>(spv::CapabilityDotProductInput4x8BitPacked)) != target.supportedCapabilities.end();
+        std::vector<std::uint32_t> withoutPacked;
+        std::ranges::copy_if(target.supportedCapabilities, std::back_inserter(withoutPacked), [](std::uint32_t capability) { return capability != spv::CapabilityDotProduct && capability != spv::CapabilityDotProductInput4x8BitPacked; });
+        auto generic = target;
+        generic.supportedCapabilities = withoutPacked;
+        for (std::uint32_t batch = 0; batch < 16u; ++batch) {
+            FillInput(batch);
+            Run(*device, target, packed);
+            Check(packed ? "packed dot product" : "generic");
+            if (packed) {
+                Run(*device, generic, false);
+                Check("generic");
+            }
+        }
         CheckModifiersRefused(*device);
-        std::puts("integer dot tests passed");
+        std::printf("integer dot tests passed (%s)\n", packed ? "packed dot product and generic" : "generic");
         return 0;
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

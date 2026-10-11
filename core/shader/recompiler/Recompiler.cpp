@@ -1,5 +1,6 @@
 #include "Recompiler.hpp"
 #include <algorithm>
+#include <spirv/unified1/spirv.hpp>
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
@@ -174,6 +175,7 @@ IrProgram PrepareResourceProgram(const RecompileRequest& request, ShaderPreparat
     translateOptions.sharedMemoryBytes = DeviceMemoryLdsBytes(request);
     translateOptions.fragmentShaderBarycentricEnabled = request.target.fragmentShaderBarycentricEnabled;
     translateOptions.floatMode = request.context.floatMode;
+    translateOptions.integerDot4x8 = std::ranges::find(request.target.supportedCapabilities, static_cast<std::uint32_t>(spv::CapabilityDotProductInput4x8BitPacked)) != request.target.supportedCapabilities.end();
     translateOptions.inputInfo = inputInfo;
 
     constexpr InstructionTranslator translator;
