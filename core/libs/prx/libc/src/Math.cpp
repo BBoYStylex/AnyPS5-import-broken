@@ -122,7 +122,12 @@ float APS5_VABI coshf_nid_postfix(float x) { return std::cosh(x); }
 double APS5_VABI asinh_nid_postfix(double x) { return std::asinh(x); }
 float APS5_VABI asinhf_nid_postfix(float x) { return std::asinh(x); }
 double APS5_VABI acosh_nid_postfix(double x) { return std::acosh(x); }
-float APS5_VABI acoshf_nid_postfix(float x) { return std::acosh(x); }
+float APS5_VABI acoshf_nid_postfix(float x) {
+    const int saved_errno = errno;
+    const float result = std::acosh(x);
+    errno = saved_errno;
+    return result;
+}
 double APS5_VABI atanh_nid_postfix(double x) { return std::atanh(x); }
 
 void APS5_VABI sincos_nid_postfix(double x, double* sinp, double* cosp) {

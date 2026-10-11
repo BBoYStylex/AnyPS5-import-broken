@@ -401,6 +401,15 @@ static void CheckHyperbolic() {
     Require(Near(acosh_nid_postfix(1e300), 691.4686750787736, 1e-15));
 }
 
+static void CheckAcoshfErrno() {
+    errno = 0;
+    (void)acoshf_nid_postfix(-1.0f);
+    Require(errno == 0);
+    std::feclearexcept(FE_ALL_EXCEPT);
+    (void)acoshf_nid_postfix(0.5f);
+    Require(std::fetestexcept(FE_INVALID) != 0);
+}
+
 static void CheckFloatClassification() {
     Require(_FInf_nid_postfix.bits[0] == 0x7f800000u && _FNan_nid_postfix.bits[0] == 0x7fc00000u);
     for (int word = 1; word < 4; ++word) Require(_FInf_nid_postfix.bits[word] == 0 && _FNan_nid_postfix.bits[word] == 0);
@@ -604,6 +613,7 @@ int main() {
     const auto minimum = div_nid_postfix(std::numeric_limits<int>::min(), 10);
     Require(minimum.quot == -214748364 && minimum.rem == -8);
     Require(abs_nid_postfix(0) == 0);
+    CheckAcoshfErrno();
     Require(abs_nid_postfix(42) == 42);
     Require(abs_nid_postfix(-42) == 42);
     Require(abs_nid_postfix(std::numeric_limits<int>::max()) == std::numeric_limits<int>::max());
