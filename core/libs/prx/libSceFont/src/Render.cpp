@@ -125,6 +125,51 @@ int RenderDirectional(FontHandle fontHandle, std::uint32_t code, FontRenderSurfa
 
 extern "C" {
 
+int APS5_VABI sceFontGlyphRenderImage(FontGlyph glyph, FontRenderSurface* surface, float x, float y, FontGlyphMetrics* metrics, FontRenderOutput* result) {
+    const auto* generated = TryGetGeneratedGlyph(glyph);
+    if (!generated || !generated->owner) {
+        ClearRenderOutputs(metrics, result);
+        return SCE_FONT_ERROR_INVALID_GLYPH;
+    }
+    return RenderCharGlyphImageCore(generated->owner, generated->codepoint, surface, x, y, metrics, result);
+}
+
+int APS5_VABI sceFontGlyphRenderImageHorizontal(FontGlyph glyph, FontRenderSurface* surface, float x, float y, FontGlyphMetrics* metrics, FontRenderOutput* result) {
+    const auto* generated = TryGetGeneratedGlyph(glyph);
+    if (!generated || !generated->owner) {
+        ClearRenderOutputs(metrics, result);
+        return SCE_FONT_ERROR_INVALID_GLYPH;
+    }
+    return RenderDirectional(generated->owner, generated->codepoint, surface, x, y, metrics, result, 1);
+}
+
+int APS5_VABI sceFontGlyphRenderImageVertical(FontGlyph glyph, FontRenderSurface* surface, float x, float y, FontGlyphMetrics* metrics, FontRenderOutput* result) {
+    const auto* generated = TryGetGeneratedGlyph(glyph);
+    if (!generated || !generated->owner) {
+        ClearRenderOutputs(metrics, result);
+        return SCE_FONT_ERROR_INVALID_GLYPH;
+    }
+    return RenderDirectional(generated->owner, generated->codepoint, surface, x, y, metrics, result, 2);
+}
+
+int APS5_VABI sceFontGlyphGetAttribute(FontGlyph glyph, std::uint32_t, std::uint64_t* value) {
+    if (!glyph || glyph->magic != GLYPH_MAGIC) return SCE_FONT_ERROR_INVALID_GLYPH;
+    if (!value) return SCE_FONT_ERROR_INVALID_PARAMETER;
+    *value = 0;
+    return SCE_FONT_OK;
+}
+
+int APS5_VABI sceFontGetGlyphExpandBufferState(FontHandle fontHandle, std::uint32_t* outState) {
+    if (!outState) return SCE_FONT_ERROR_INVALID_PARAMETER;
+    *outState = 0;
+    const auto* font = GetNativeFont(fontHandle);
+    if (!font || font->magic != HANDLE_MAGIC) return SCE_FONT_ERROR_INVALID_FONT_HANDLE;
+    const auto* renderer = static_cast<const RendererNative*>(font->renderer);
+    if (renderer && renderer->magic == RENDERER_MAGIC)
+        *outState = static_cast<std::uint32_t>(renderer->workspace_size);
+    return SCE_FONT_OK;
+}
+
 int APS5_VABI sceFontGetCharGlyphMetrics(FontHandle fontHandle, std::uint32_t code, FontGlyphMetrics* metrics) {
     return GetCharGlyphMetrics(fontHandle, code, metrics, false);
 }

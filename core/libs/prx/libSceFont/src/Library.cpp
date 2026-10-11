@@ -5,6 +5,8 @@
 #include <atomic>
 #include <cstring>
 #include <limits>
+#include <mutex>
+#include <unordered_map>
 
 #include "prx/libSceFont/include/FontInternal.hpp"
 
@@ -403,6 +405,63 @@ int APS5_VABI sceFontSetFontsOpenMode(FontLibrary library, std::uint32_t openMod
     if (!lib || lib->magic != LIBRARY_MAGIC) return SCE_FONT_ERROR_INVALID_LIBRARY;
     if (openMode > 2) return SCE_FONT_ERROR_INVALID_PARAMETER;
     return SCE_FONT_OK;
+}
+
+int APS5_VABI sceFontControl(FontLibrary library, std::uint32_t, std::uint32_t, void*) {
+    const auto* lib = static_cast<const FontLibNative*>(library);
+    if (!lib || lib->magic != LIBRARY_MAGIC) return SCE_FONT_ERROR_INVALID_LIBRARY;
+    return SCE_FONT_OK;
+}
+
+namespace {
+std::mutex g_attrMutex;
+std::unordered_map<FontLibrary, std::unordered_map<std::uint32_t, std::uint64_t>> g_libAttrs;
+}
+
+int APS5_VABI sceFontDefineAttribute(FontLibrary library, std::uint32_t attribute, std::uint64_t value) {
+    const auto* lib = static_cast<const FontLibNative*>(library);
+    if (!lib || lib->magic != LIBRARY_MAGIC) return SCE_FONT_ERROR_INVALID_LIBRARY;
+    std::lock_guard lock(g_attrMutex);
+    g_libAttrs[library][attribute] = value;
+    return SCE_FONT_OK;
+}
+
+int APS5_VABI sceFontGetAttribute(FontLibrary library, std::uint32_t attribute, std::uint64_t* value) {
+    if (!value) return SCE_FONT_ERROR_INVALID_PARAMETER;
+    const auto* lib = static_cast<const FontLibNative*>(library);
+    if (!lib || lib->magic != LIBRARY_MAGIC) return SCE_FONT_ERROR_INVALID_LIBRARY;
+    std::lock_guard lock(g_attrMutex);
+    const auto it = g_libAttrs.find(library);
+    if (it != g_libAttrs.end()) {
+        const auto jt = it->second.find(attribute);
+        if (jt != it->second.end()) { *value = jt->second; return SCE_FONT_OK; }
+    }
+    *value = 0;
+    return SCE_FONT_OK;
+}
+
+int APS5_VABI sceFontSupportGlyphs(FontLibrary library) {
+    const auto* lib = static_cast<const FontLibNative*>(library);
+    if (!lib || lib->magic != LIBRARY_MAGIC) return SCE_FONT_ERROR_INVALID_LIBRARY;
+    return SCE_FONT_ERROR_NO_SUPPORT_FUNCTION;
+}
+
+int APS5_VABI sceFontGetFontMetrics(FontHandle fontHandle, void*) {
+    const auto* font = GetNativeFont(fontHandle);
+    if (!font || font->magic != HANDLE_MAGIC) return SCE_FONT_ERROR_INVALID_FONT_HANDLE;
+    return SCE_FONT_ERROR_NO_SUPPORT_FUNCTION;
+}
+
+int APS5_VABI sceFontGetFontStyleInformation(FontHandle fontHandle, void*) {
+    const auto* font = GetNativeFont(fontHandle);
+    if (!font || font->magic != HANDLE_MAGIC) return SCE_FONT_ERROR_INVALID_FONT_HANDLE;
+    return SCE_FONT_ERROR_NO_SUPPORT_FUNCTION;
+}
+
+int APS5_VABI sceFontGetFontGlyphsOutlineProfile(FontHandle fontHandle, void*) {
+    const auto* font = GetNativeFont(fontHandle);
+    if (!font || font->magic != HANDLE_MAGIC) return SCE_FONT_ERROR_INVALID_FONT_HANDLE;
+    return SCE_FONT_ERROR_NO_SUPPORT_FUNCTION;
 }
 
 }

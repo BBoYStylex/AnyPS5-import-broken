@@ -56,6 +56,18 @@ FontTextCharacter* APS5_VABI sceFontWritingRefersRenderStepCharacter(FontWriting
 const void* APS5_VABI sceFontSelectLibraryFt(int);
 const void* APS5_VABI sceFontSelectRendererFt(int);
 int APS5_VABI sceFontCharacterGetSyllableStringState(const FontTextCharacter*, int*);
+int APS5_VABI sceFontControl(FontLibrary, std::uint32_t, std::uint32_t, void*);
+int APS5_VABI sceFontDefineAttribute(FontLibrary, std::uint32_t, std::uint64_t);
+int APS5_VABI sceFontGetAttribute(FontLibrary, std::uint32_t, std::uint64_t*);
+int APS5_VABI sceFontSupportGlyphs(FontLibrary);
+int APS5_VABI sceFontGetFontMetrics(FontHandle, void*);
+int APS5_VABI sceFontGetFontStyleInformation(FontHandle, void*);
+int APS5_VABI sceFontGetFontGlyphsOutlineProfile(FontHandle, void*);
+int APS5_VABI sceFontGlyphGetAttribute(FontGlyph, std::uint32_t, std::uint64_t*);
+int APS5_VABI sceFontGetGlyphExpandBufferState(FontHandle, std::uint32_t*);
+int APS5_VABI sceFontCreateWords(const FontMemory*, const void*, void**);
+int APS5_VABI sceFontDestroyWords(void**);
+int APS5_VABI sceFontWordsFindWordCharacters(void*, const FontTextCharacter*, const FontTextCharacter**, const FontTextCharacter**);
 }
 
 static void Check(bool value, int line) {
@@ -313,7 +325,18 @@ int main() {
     Require(sceFontGlyphDefineAttribute(nullptr, 0x11, 0) == SCE_FONT_ERROR_INVALID_GLYPH);
     FontGlyphOpaque notAGlyph{};
     Require(sceFontGlyphDefineAttribute(&notAGlyph, 0x11, 0) == SCE_FONT_ERROR_INVALID_GLYPH);
+    std::uint64_t glyphAttr = 1;
+    Require(sceFontGlyphGetAttribute(glyph, 0x11, &glyphAttr) == SCE_FONT_OK && glyphAttr == 0);
+    Require(sceFontGlyphGetAttribute(nullptr, 0x11, &glyphAttr) == SCE_FONT_ERROR_INVALID_GLYPH);
+    Require(sceFontGlyphGetAttribute(glyph, 0x11, nullptr) == SCE_FONT_ERROR_INVALID_PARAMETER);
     Require(sceFontDeleteGlyph(&memory, &glyph) == SCE_FONT_OK && glyph == nullptr);
+    std::uint32_t bufferState = 0;
+    Require(sceFontGetGlyphExpandBufferState(font, &bufferState) == SCE_FONT_OK);
+    Require(sceFontGetGlyphExpandBufferState(font, nullptr) == SCE_FONT_ERROR_INVALID_PARAMETER);
+    Require(sceFontGetGlyphExpandBufferState(nullptr, &bufferState) == SCE_FONT_ERROR_INVALID_FONT_HANDLE);
+    Require(sceFontGetFontMetrics(font, nullptr) == SCE_FONT_ERROR_NO_SUPPORT_FUNCTION);
+    Require(sceFontGetFontStyleInformation(font, nullptr) == SCE_FONT_ERROR_NO_SUPPORT_FUNCTION);
+    Require(sceFontGetFontGlyphsOutlineProfile(font, nullptr) == SCE_FONT_ERROR_NO_SUPPORT_FUNCTION);
     FontKerning kerning{1.0f, 1.0f, 1.0f, 1.0f};
     Require(sceFontGetKerning(font, 'A', 'V', &kerning) == SCE_FONT_OK && KerningIs(kerning, -20.0f));
     kerning = {1.0f, 1.0f, 1.0f, 1.0f};
@@ -367,6 +390,22 @@ int main() {
 
     Require(sceFontDestroyRenderer(&renderer) == SCE_FONT_OK && renderer == nullptr);
     Require(sceFontDestroyRenderer(&renderer) == SCE_FONT_ERROR_INVALID_RENDERER);
+
+    Require(sceFontControl(library, 0, 0, nullptr) == SCE_FONT_OK);
+    Require(sceFontControl(nullptr, 0, 0, nullptr) == SCE_FONT_ERROR_INVALID_LIBRARY);
+    std::uint64_t libAttr = 0;
+    Require(sceFontDefineAttribute(library, 0x42, 1234) == SCE_FONT_OK);
+    Require(sceFontGetAttribute(library, 0x42, &libAttr) == SCE_FONT_OK && libAttr == 1234);
+    Require(sceFontGetAttribute(library, 0x99, &libAttr) == SCE_FONT_OK && libAttr == 0);
+    Require(sceFontGetAttribute(library, 0x42, nullptr) == SCE_FONT_ERROR_INVALID_PARAMETER);
+    Require(sceFontGetAttribute(nullptr, 0x42, &libAttr) == SCE_FONT_ERROR_INVALID_LIBRARY);
+    Require(sceFontSupportGlyphs(library) == SCE_FONT_ERROR_NO_SUPPORT_FUNCTION);
+    Require(sceFontSupportGlyphs(nullptr) == SCE_FONT_ERROR_INVALID_LIBRARY);
+    void* words = nullptr;
+    Require(sceFontCreateWords(&memory, nullptr, &words) == SCE_FONT_ERROR_NO_SUPPORT_FUNCTION && words == nullptr);
+    Require(sceFontDestroyWords(&words) == SCE_FONT_OK && words == nullptr);
+    Require(sceFontDestroyWords(nullptr) == SCE_FONT_ERROR_INVALID_PARAMETER);
+    Require(sceFontWordsFindWordCharacters(nullptr, nullptr, nullptr, nullptr) == SCE_FONT_ERROR_NO_SUPPORT_FUNCTION);
 
     Require(sceFontDestroyLibrary(&library) == SCE_FONT_OK && library == nullptr);
     Require(sceFontDestroyLibrary(&library) == SCE_FONT_ERROR_INVALID_LIBRARY);

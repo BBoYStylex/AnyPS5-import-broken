@@ -641,6 +641,21 @@ int APS5_VABI sceFontWritingSetMaskInvisible(FontWriting* fontWriting, std::int3
     return SCE_FONT_ERROR_INVALID_PARAMETER;
 }
 
+int APS5_VABI sceFontCreateWords(const FontMemory*, const void*, void** pWords) {
+    if (pWords) *pWords = nullptr;
+    return SCE_FONT_ERROR_NO_SUPPORT_FUNCTION;
+}
+
+int APS5_VABI sceFontDestroyWords(void** pWords) {
+    if (!pWords) return SCE_FONT_ERROR_INVALID_PARAMETER;
+    *pWords = nullptr;
+    return SCE_FONT_OK;
+}
+
+int APS5_VABI sceFontWordsFindWordCharacters(void*, const FontTextCharacter*, const FontTextCharacter**, const FontTextCharacter**) {
+    return SCE_FONT_ERROR_NO_SUPPORT_FUNCTION;
+}
+
 }
 
 #pragma GCC visibility pop
