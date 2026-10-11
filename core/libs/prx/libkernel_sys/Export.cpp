@@ -5,6 +5,7 @@
 #include <cstring>
 #include <filesystem>
 #include <limits>
+#include <stdexcept>
 #include <string>
 #include <system_error>
 #include "SceTypes.hpp"
@@ -17,6 +18,8 @@ constexpr int GuestEnoent = 2;
 constexpr int GuestEperm = 1;
 constexpr int GuestEio = 5;
 constexpr int GuestEfault = 14;
+constexpr int GuestEexist = 17;
+constexpr int GuestExdev = 18;
 constexpr int GuestEinval = 22;
 
 std::atomic<std::uint16_t> creationMask{022};
@@ -63,6 +66,25 @@ std::int64_t APS5_VABI readlink_nid_postfix(const char* path, char* buffer, std:
     if (count != 0 && buffer == nullptr) return Fail(GuestEfault);
     if (count != 0) std::memcpy(buffer, target.data(), count);
     return static_cast<std::int64_t>(count);
+}
+
+int APS5_VABI link_nid_postfix(const char* existing, const char* created) {
+    if (existing == nullptr || created == nullptr) return static_cast<int>(Fail(GuestEfault));
+    if (*existing == '\0' || *created == '\0') return static_cast<int>(Fail(GuestEnoent));
+    const auto source = ResolvePath_nid_no_patch(existing);
+    const auto destination = ResolvePath_nid_no_patch(created);
+    std::error_code error;
+    const auto status = std::filesystem::symlink_status(source, error);
+    if (!std::filesystem::exists(status)) return static_cast<int>(Fail(GuestEnoent));
+    if (std::filesystem::is_symlink(status)) throw std::runtime_error("link: a symbolic link as the existing path is not supported");
+    if (std::filesystem::is_directory(status)) return static_cast<int>(Fail(GuestEperm));
+    if (std::filesystem::exists(std::filesystem::symlink_status(destination, error))) return static_cast<int>(Fail(GuestEexist));
+    if (!std::filesystem::is_directory(destination.parent_path(), error)) return static_cast<int>(Fail(GuestEnoent));
+    std::filesystem::create_hard_link(source, destination, error);
+    if (error == std::errc::cross_device_link) return static_cast<int>(Fail(GuestExdev));
+    if (error) throw std::system_error(error, "link");
+    RecordWrittenPath_nid_no_patch(destination);
+    return 0;
 }
 
 }

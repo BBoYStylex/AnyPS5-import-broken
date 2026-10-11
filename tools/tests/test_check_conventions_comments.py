@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from check_conventions import STUB_BODY, function_body
+from check_conventions import STUB_BODY, Check, function_body
 
 
 class FunctionBodyTests(unittest.TestCase):
@@ -207,6 +207,23 @@ class SilentStubSectionTests(unittest.TestCase):
 
     def test_subsection_in_silent_stubs_keeps_exemption(self):
         self.require_accepted(f"# Project technical debt\n\n### Silent stubs\n\n#### Dialogs\n\n{self.entry}")
+
+
+class PullRequestTemplateTests(unittest.TestCase):
+    def findings(self, line):
+        check = Check.__new__(Check)
+        check.findings = []
+        body = f"### What\nx\n### Tested\nLinux\n### Checklist\n{line}\n- [x] Depends on: none\n- [x] AI-assisted: no\n"
+        check.pull_request("fix: x", body)
+        return check.findings
+
+    def test_unchecked_items_with_any_bullet_are_reported(self):
+        for bullet in ("-", "*", "+"):
+            with self.subTest(bullet=bullet):
+                self.assertEqual(self.findings(f"{bullet} [ ] all"), [("pr-template", "", 0, "unchecked: all")])
+
+    def test_checked_item_is_accepted(self):
+        self.assertEqual(self.findings("- [x] all"), [])
 
 
 if __name__ == "__main__":

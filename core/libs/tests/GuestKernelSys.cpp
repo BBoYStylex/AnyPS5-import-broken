@@ -12,6 +12,7 @@
 extern "C" {
 std::int64_t APS5_VABI readlink_nid_postfix(const char*, char*, std::size_t);
 int APS5_VABI setsid_nid_postfix(void);
+int APS5_VABI link_nid_postfix(const char*, const char*);
 std::uint16_t APS5_VABI umask_nid_postfix(std::uint16_t);
 int* APS5_VABI __error_nid_postfix();
 }
@@ -59,6 +60,20 @@ int main() {
     } else {
         std::fprintf(stderr, "symbolic links unavailable: the link cases not tested\n");
     }
+    const auto original = (root / "original.bin").string();
+    const auto linked = (root / "linked.bin").string();
+    std::ofstream(original) << "abc";
+    Require(link_nid_postfix(original.c_str(), linked.c_str()) == 0);
+    Require(std::filesystem::hard_link_count(original) == 2 && std::filesystem::file_size(linked) == 3);
+    std::ofstream(linked, std::ios::trunc).close();
+    Require(std::filesystem::file_size(original) == 0);
+    Require(link_nid_postfix(original.c_str(), linked.c_str()) == -1 && Error() == 17);
+    Require(link_nid_postfix((root / "missing").string().c_str(), (root / "other").string().c_str()) == -1 && Error() == 2);
+    Require(link_nid_postfix(original.c_str(), (root / "missing" / "linked.bin").string().c_str()) == -1 && Error() == 2);
+    Require(link_nid_postfix(root.string().c_str(), (root / "directory").string().c_str()) == -1 && Error() == 1);
+    Require(link_nid_postfix(nullptr, linked.c_str()) == -1 && Error() == 14);
+    Require(link_nid_postfix(original.c_str(), "") == -1 && Error() == 2);
+    Require(std::filesystem::remove(linked) && std::filesystem::hard_link_count(original) == 1);
     std::filesystem::remove_all(root);
     return 0;
 }

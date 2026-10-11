@@ -9,6 +9,7 @@
 #include <stdexcept>
 
 #include "prx/libc/include/General.hpp"
+#include "prx/libc/include/SonyCrt.hpp"
 
 namespace {
 
@@ -65,6 +66,7 @@ double APS5_VABI acos_nid_postfix(double x) { return std::acos(x); }
 double APS5_VABI sqrt_nid_postfix(double x) { return std::sqrt(x); }
 float APS5_VABI sqrtf_nid_postfix(float x) { return std::sqrt(x); }
 double APS5_VABI fabs_nid_postfix(double x) { return std::fabs(x); }
+int APS5_VABI abs_nid_postfix(int x) { return x < 0 ? static_cast<int>(0u - static_cast<unsigned>(x)) : x; }
 double APS5_VABI trunc_nid_postfix(double x) { return std::trunc(x); }
 double APS5_VABI fma_nid_postfix(double x, double y, double z) { return std::fma(x, y, z); }
 long double APS5_VABI acosl_nid_postfix(long double x) { return std::acos(x); }
@@ -197,6 +199,18 @@ int APS5_VABI rand_r_nid_postfix(unsigned int* state) {
 void APS5_VABI srand_nid_postfix(unsigned int seed) {
     std::lock_guard lock(g_randLock);
     g_randState = seed;
+}
+
+int APS5_VABI __fpclassifyd_nid_postfix(double value) {
+    return SonyFpclassifyd(value);
+}
+
+double APS5_VABI _Sinh_nid_postfix(double x, double y) {
+    return SonySinh(x, y);
+}
+
+int APS5_VABI _Fltrounds_nid_postfix(void) {
+    return SonyFltrounds();
 }
 
 }

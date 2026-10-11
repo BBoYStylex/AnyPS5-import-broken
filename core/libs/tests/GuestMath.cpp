@@ -27,6 +27,7 @@ int* APS5_VABI __error_nid_postfix();
 double APS5_VABI sqrt_nid_postfix(double);
 float APS5_VABI sqrtf_nid_postfix(float);
 double APS5_VABI fabs_nid_postfix(double);
+int APS5_VABI abs_nid_postfix(int);
 double APS5_VABI trunc_nid_postfix(double);
 double APS5_VABI fma_nid_postfix(double, double, double);
 long double APS5_VABI acosl_nid_postfix(long double);
@@ -478,5 +479,10 @@ int main() {
     Require(negativeDenominator.quot == -3 && negativeDenominator.rem == 1);
     const auto minimum = div_nid_postfix(std::numeric_limits<int>::min(), 10);
     Require(minimum.quot == -214748364 && minimum.rem == -8);
+    Require(abs_nid_postfix(0) == 0);
+    Require(abs_nid_postfix(42) == 42);
+    Require(abs_nid_postfix(-42) == 42);
+    Require(abs_nid_postfix(std::numeric_limits<int>::max()) == std::numeric_limits<int>::max());
+    Require(abs_nid_postfix(std::numeric_limits<int>::min()) == std::numeric_limits<int>::min());
     CheckHyperbolic();
 }
