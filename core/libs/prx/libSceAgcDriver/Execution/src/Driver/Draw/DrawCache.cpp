@@ -56,6 +56,20 @@ void Driver::accountDrawVariant(const DispatchVariant& variant, bool added) {
     }
 }
 
+bool Driver::admitDrawEntry(std::uint64_t key) {
+    static const bool everyKey = std::getenv("APS5_DRAW_CACHE_ADMIT_ALL") != nullptr;
+    if (everyKey) return true;
+    constexpr std::size_t SightingSlots = 16384;
+    std::lock_guard cacheLock(drawCacheMutex);
+    if (drawCache.contains(key)) return true;
+    if (drawKeySightings.empty()) drawKeySightings.assign(SightingSlots, 0);
+    auto& slot = drawKeySightings[static_cast<std::size_t>((key ^ (key >> 29u)) % SightingSlots)];
+    if (slot == key) return true;
+    slot = key;
+    ++drawEntryCounters.firstSightings;
+    return false;
+}
+
 void Driver::insertDrawEntry(std::uint64_t key, std::vector<std::shared_ptr<DispatchVariant>>& fresh, std::shared_ptr<const DrawDecode> decode) {
     std::lock_guard cacheLock(drawCacheMutex);
     auto& counters = drawEntryCounters;
