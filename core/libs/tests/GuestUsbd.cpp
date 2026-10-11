@@ -49,6 +49,16 @@ void APS5_VABI sceUsbdFillInterruptTransfer(void* transfer, void* deviceHandle, 
 std::int32_t APS5_VABI sceUsbdCancelTransfer(void* transfer);
 std::int32_t APS5_VABI sceUsbdEventHandlingOk();
 void APS5_VABI sceUsbdFreeConfigDescriptor(void* config);
+void APS5_VABI sceUsbdFillBulkTransfer(void* transfer, void* deviceHandle, std::uint8_t endpoint, std::uint8_t* buffer, std::int32_t length, void* callback, void* userData, std::uint32_t timeout);
+void APS5_VABI sceUsbdFillIsoTransfer(void* transfer, void* deviceHandle, std::uint8_t endpoint, std::uint8_t* buffer, std::int32_t length, std::int32_t numIsoPackets, void* callback, void* userData, std::uint32_t timeout);
+void APS5_VABI sceUsbdFillControlSetup(std::uint8_t* buffer, std::uint8_t requestType, std::uint8_t request, std::uint16_t value, std::uint16_t index, std::uint16_t length);
+void APS5_VABI sceUsbdFillControlTransfer(void* transfer, void* deviceHandle, std::uint8_t* buffer, void* callback, void* userData, std::uint32_t timeout);
+std::uint8_t* APS5_VABI sceUsbdControlTransferGetData(void* transfer);
+std::uint8_t* APS5_VABI sceUsbdControlTransferGetSetup(void* transfer);
+void APS5_VABI sceUsbdSetIsoPacketLengths(void* transfer, std::uint32_t length);
+std::uint8_t* APS5_VABI sceUsbdGetIsoPacketBuffer(void* transfer, std::uint32_t packet);
+std::int32_t APS5_VABI sceUsbdBulkTransfer(void* deviceHandle, std::uint8_t endpoint, std::uint8_t* data, std::int32_t length, std::int32_t* transferred, std::uint32_t timeout);
+std::int32_t APS5_VABI sceUsbdInterruptTransfer(void* deviceHandle, std::uint8_t endpoint, std::uint8_t* data, std::int32_t length, std::int32_t* transferred, std::uint32_t timeout);
 }
 
 namespace {
@@ -96,6 +106,56 @@ void Pump(const int& done) {
     for (int round = 0; round < 50 && done == 0; ++round) Require(sceUsbdHandleEventsTimeout(&slice) == 0, "event handling failed while a transfer was in flight");
 }
 
+void Helpers() {
+    int foreign = 0;
+    auto* transfer = static_cast<std::uint8_t*>(sceUsbdAllocTransfer(3));
+    std::uint8_t buffer[64] = {};
+    int user = 0;
+    sceUsbdFillBulkTransfer(transfer, &foreign, 0x82, buffer, 64, nullptr, &user, 300);
+    Require(transfer[9] == 0x82 && transfer[10] == 2 && *reinterpret_cast<std::uint32_t*>(transfer + 12) == 300 && *reinterpret_cast<std::int32_t*>(transfer + 20) == 64, "bulk transfer not filled");
+    sceUsbdFillIsoTransfer(transfer, &foreign, 0x83, buffer, 60, 3, nullptr, &user, 400);
+    Require(transfer[9] == 0x83 && transfer[10] == 1 && *reinterpret_cast<std::int32_t*>(transfer + 56) == 3, "iso transfer not filled");
+    sceUsbdSetIsoPacketLengths(transfer, 20);
+    for (int packet = 0; packet < 3; ++packet) Require(*reinterpret_cast<std::uint32_t*>(transfer + 60 + packet * 12) == 20, "iso packet length not set");
+    *reinterpret_cast<std::uint32_t*>(transfer + 60 + 12) = 7;
+    Require(sceUsbdGetIsoPacketBuffer(transfer, 0) == buffer && sceUsbdGetIsoPacketBuffer(transfer, 1) == buffer + 20 && sceUsbdGetIsoPacketBuffer(transfer, 2) == buffer + 27, "iso packet buffers not at the summed packet lengths");
+    Require(sceUsbdGetIsoPacketBuffer(transfer, 3) == nullptr, "iso packet past the count returned a buffer");
+    std::uint8_t setup[8 + 18] = {};
+    sceUsbdFillControlSetup(setup, 0x80, 6, 0x0100, 0x0409, 18);
+    const std::uint8_t expected[8] = {0x80, 6, 0x00, 0x01, 0x09, 0x04, 18, 0};
+    Require(std::memcmp(setup, expected, 8) == 0, "control setup not little-endian");
+    sceUsbdFillControlTransfer(transfer, &foreign, setup, nullptr, &user, 500);
+    Require(transfer[9] == 0 && transfer[10] == 0 && *reinterpret_cast<std::int32_t*>(transfer + 20) == 26, "control transfer length is not the setup plus wLength");
+    Require(sceUsbdControlTransferGetSetup(transfer) == setup && sceUsbdControlTransferGetData(transfer) == setup + 8, "control setup or data pointer wrong");
+    sceUsbdFillControlTransfer(transfer, &foreign, nullptr, nullptr, &user, 500);
+    Require(*reinterpret_cast<std::int32_t*>(transfer + 20) == 0 && sceUsbdControlTransferGetData(transfer) == nullptr, "control transfer without a buffer has data");
+    sceUsbdFreeTransfer(transfer);
+    std::int32_t transferred = -1;
+    Require(sceUsbdBulkTransfer(nullptr, 0x81, buffer, 8, &transferred, 100) == invalidArgument, "null handle bulk transfer accepted");
+    Require(sceUsbdInterruptTransfer(&foreign, 0x81, nullptr, 8, &transferred, 100) == invalidArgument, "interrupt transfer without data accepted");
+    Require(Throws([&] { sceUsbdInterruptTransfer(&foreign, 0x81, buffer, 8, &transferred, 100); }), "interrupt transfer on a handle that was never opened did not throw");
+}
+
+struct Endpoint {
+    std::uint8_t interfaceNumber;
+    std::uint8_t address;
+    std::uint16_t maxPacket;
+};
+
+Endpoint FindInterruptIn(const std::uint8_t* config) {
+    const std::uint8_t interfaces = config[4];
+    const auto* interfaceArray = *reinterpret_cast<const std::uint8_t* const*>(config + 16);
+    for (std::uint8_t index = 0; index < interfaces; ++index) {
+        const auto* alternate = *reinterpret_cast<const std::uint8_t* const*>(interfaceArray + index * 16);
+        const auto* endpoints = *reinterpret_cast<const std::uint8_t* const*>(alternate + 16);
+        for (std::uint8_t endpoint = 0; endpoint < alternate[4]; ++endpoint) {
+            const auto* descriptor = endpoints + endpoint * 32;
+            if ((descriptor[2] & 0x80) != 0 && (descriptor[3] & 3) == 3) return {alternate[2], descriptor[2], static_cast<std::uint16_t>(descriptor[4] | descriptor[5] << 8)};
+        }
+    }
+    return {0, 0, 0};
+}
+
 void Device() {
     const char* wanted = std::getenv("APS5_USBD_DEVICE");
     Require(wanted != nullptr, "APS5_USBD_DEVICE is not set to vendor:product in hex");
@@ -119,6 +179,8 @@ void Device() {
     const auto* raw = static_cast<const std::uint8_t*>(config);
     Require(raw[1] == 2 && raw[4] > 0, "active config descriptor is not a configuration with interfaces");
     const std::uint8_t interfaces = raw[4];
+    const Endpoint interruptIn = FindInterruptIn(raw);
+    Require(interruptIn.address != 0 && interruptIn.maxPacket != 0, "the device has no interrupt IN endpoint");
     sceUsbdFreeConfigDescriptor(config);
     Require(Throws([&] { sceUsbdFreeConfigDescriptor(config); }), "a config descriptor was freed twice");
     Require(sceUsbdGetConfigDescriptor(device, 0, &config) == 0, "config descriptor 0 failed");
@@ -143,21 +205,29 @@ void Device() {
     }
     Require(sceUsbdReleaseInterface(handle, 0) == static_cast<std::int32_t>(0x80240005), "releasing an unclaimed interface did not report not found");
     auto* transfer = static_cast<HostTransfer*>(sceUsbdAllocTransfer(0));
-    std::uint8_t setup[8 + 18] = {0x80, 6, 0x00, 0x01, 0x00, 0x00, 18, 0};
+    std::uint8_t setup[8 + 18] = {};
     int done = 0;
-    transfer->deviceHandle = handle;
-    transfer->type = 0;
-    transfer->timeout = 1000;
-    transfer->buffer = setup;
-    transfer->length = sizeof(setup);
-    transfer->callback = MarkDone;
-    transfer->userData = &done;
+    sceUsbdFillControlSetup(setup, 0x80, 6, 0x0100, 0, 18);
+    sceUsbdFillControlTransfer(transfer, handle, setup, reinterpret_cast<void*>(&MarkDone), &done, 1000);
     Require(sceUsbdSubmitTransfer(transfer) == 0, "submitting an asynchronous control transfer failed");
     Require(Throws([&] { sceUsbdFreeTransfer(transfer); }), "an in-flight transfer was freed");
     Pump(done);
     Require(done == 1 && transfer->status == 0 && transfer->actualLength == 18, "asynchronous control transfer did not complete");
-    Require(std::memcmp(setup + 8, descriptor, 18) == 0, "asynchronous device descriptor differs from the cached one");
+    Require(std::memcmp(sceUsbdControlTransferGetData(transfer), descriptor, 18) == 0, "asynchronous device descriptor differs from the cached one");
     Require(sceUsbdCancelTransfer(transfer) == static_cast<std::int32_t>(0x80240005), "cancelling a completed transfer did not report not found");
+    Require(sceUsbdClaimInterface(handle, interruptIn.interfaceNumber) == 0, "claiming the interrupt interface failed");
+    std::uint8_t report[1024] = {};
+    std::int32_t transferred = -1;
+    Require(sceUsbdInterruptTransfer(handle, interruptIn.address, report, interruptIn.maxPacket, &transferred, 1000) == 0, "synchronous interrupt read failed");
+    Require(transferred > 0 && transferred <= interruptIn.maxPacket, "synchronous interrupt read returned no data");
+    std::printf("interrupt endpoint 0x%02x read %d bytes\n", interruptIn.address, transferred);
+    done = 0;
+    std::memset(report, 0, sizeof(report));
+    sceUsbdFillInterruptTransfer(transfer, handle, interruptIn.address, report, interruptIn.maxPacket, reinterpret_cast<void*>(&MarkDone), &done, 1000);
+    Require(sceUsbdSubmitTransfer(transfer) == 0, "submitting an asynchronous interrupt read failed");
+    Pump(done);
+    Require(done == 1 && transfer->status == 0 && transfer->actualLength > 0 && transfer->actualLength <= interruptIn.maxPacket, "asynchronous interrupt read did not complete with data");
+    Require(sceUsbdReleaseInterface(handle, interruptIn.interfaceNumber) == 0, "releasing the interrupt interface failed");
     sceUsbdFreeTransfer(transfer);
     sceUsbdClose(handle);
     Require(Throws([&] { sceUsbdClose(handle); }), "a handle was closed twice");
@@ -238,6 +308,7 @@ int main(int argc, char** argv) {
     sceUsbdFreeTransfer(nullptr);
     Require(sceUsbdEventHandlingOk() == 1, "event handling not allowed");
     sceUsbdFreeConfigDescriptor(nullptr);
+    Helpers();
     if (argc == 2 && std::strcmp(argv[1], "device") == 0) Device();
     sceUsbdExit();
     std::puts("USBD tests passed");
