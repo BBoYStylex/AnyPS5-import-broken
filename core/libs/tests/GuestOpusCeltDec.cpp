@@ -1,9 +1,8 @@
 #include "prx/libc/include/general/VabiMacros.hpp"
+#include <array>
 #include <cstdint>
-#include <cstdio>
-#include <functional>
+#include <cstdlib>
 #include <stdexcept>
-#include <string>
 
 extern "C" {
 int APS5_VABI sceOpusCeltDecInitialize(std::uint32_t*);
@@ -14,31 +13,37 @@ int APS5_VABI sceOpusCeltDecDecode(void*, const std::uint8_t*, int, std::int16_t
 int APS5_VABI sceOpusCeltDecDestroy(void*);
 }
 
-static int failures = 0;
+namespace {
 
-static void RequireNotImplemented(const char* name, const std::function<void()>& call) {
-    try {
-        call();
-    } catch (const std::runtime_error& error) {
-        if (std::string(error.what()) == std::string(name) + " not implemented") return;
-        std::fprintf(stderr, "%s threw: %s\n", name, error.what());
-        ++failures;
-        return;
-    }
-    std::fprintf(stderr, "%s returned instead of reporting that it is not implemented\n", name);
-    ++failures;
+void Require(bool value) { if (!value) std::abort(); }
+
+template <typename TFunction>
+void RequireThrows(TFunction function) {
+    try { function(); } catch (const std::runtime_error&) { return; }
+    std::abort();
 }
+
+} // namespace
 
 int main() {
     std::uint32_t context = 0;
-    std::uint8_t state[64] = {};
-    std::int16_t pcm[16] = {};
-    const std::uint8_t packet[] = {0xFC, 0x00};
-    RequireNotImplemented("sceOpusCeltDecInitialize", [&] { sceOpusCeltDecInitialize(&context); });
-    RequireNotImplemented("sceOpusCeltDecTerminate", [&] { sceOpusCeltDecTerminate(&context); });
-    RequireNotImplemented("sceOpusCeltDecGetSize", [] { sceOpusCeltDecGetSize(2); });
-    RequireNotImplemented("sceOpusCeltDecCreateEx", [&] { sceOpusCeltDecCreateEx(&context, state, 48000, 2); });
-    RequireNotImplemented("sceOpusCeltDecDecode", [&] { sceOpusCeltDecDecode(state, packet, sizeof(packet), pcm, sizeof(pcm)); });
-    RequireNotImplemented("sceOpusCeltDecDestroy", [&] { sceOpusCeltDecDestroy(state); });
-    return failures == 0 ? 0 : 1;
+    Require(sceOpusCeltDecInitialize(&context) == 0);
+    RequireThrows([&] { sceOpusCeltDecInitialize(&context); });
+    Require(sceOpusCeltDecGetSize(1) == 640 && sceOpusCeltDecGetSize(2) == 640);
+    RequireThrows([] { sceOpusCeltDecGetSize(3); });
+    std::array<std::uint8_t, 640> state{};
+    Require(sceOpusCeltDecCreateEx(&context, state.data(), 48000, 1) == 0);
+    RequireThrows([&] { sceOpusCeltDecTerminate(&context); });
+    RequireThrows([&] { sceOpusCeltDecCreateEx(&context, state.data(), 48000, 1); });
+    std::array<std::int16_t, 960> pcm{};
+    const std::uint8_t celtSilence[] = {0xf8, 0xff, 0xfe};
+    const std::uint8_t nonCelt[] = {0x00, 0x00};
+    RequireThrows([&] { sceOpusCeltDecDecode(state.data(), nonCelt, sizeof(nonCelt), pcm.data(), sizeof(pcm)); });
+    RequireThrows([&] { sceOpusCeltDecDecode(state.data(), celtSilence, sizeof(celtSilence), pcm.data(), sizeof(pcm) - 1); });
+    Require(sceOpusCeltDecDecode(state.data(), celtSilence, sizeof(celtSilence), pcm.data(), sizeof(pcm)) == 1920);
+    Require(sceOpusCeltDecDestroy(state.data()) == 0);
+    RequireThrows([&] { sceOpusCeltDecDestroy(state.data()); });
+    Require(sceOpusCeltDecTerminate(&context) == 0);
+    RequireThrows([&] { sceOpusCeltDecTerminate(&context); });
+    return 0;
 }
