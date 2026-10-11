@@ -15,6 +15,7 @@ int APS5_VABI scePadSetVibrationTriggerEffectWeakWhileEmbeddedMicInUse(bool);
 int APS5_VABI scePadSetVibrationMode(int, int);
 int APS5_VABI scePadInit_nid_postfix(void);
 int APS5_VABI scePadRead_nid_postfix(int, PadData*, int);
+int APS5_VABI scePadReadExt(int, PadData*, int);
 int APS5_VABI scePadReadState(int, PadData*);
 int APS5_VABI scePadSetTiltCorrectionState(int, bool);
 int APS5_VABI scePadResetOrientation(int);
@@ -71,6 +72,14 @@ static void CheckReadStateHandle(int handle) {
     Require(scePadReadState(handle, &data) == PAD_OK);
 }
 
+static void CheckReadExtHandle(int handle) {
+    PadData data{};
+    Require(scePadReadExt(0, &data, 1) == PAD_ERROR_INVALID_HANDLE);
+    Require(scePadReadExt(handle + 1, &data, 1) == PAD_ERROR_INVALID_HANDLE);
+    Require(scePadReadExt(handle, &data, 1) == 1);
+    Require(data.connected);
+}
+
 static void CheckRemoteController(int handle) {
     bool remote = true;
     Require(scePadIsRemoteController(handle + 1, &remote) == PAD_ERROR_INVALID_HANDLE);
@@ -100,6 +109,7 @@ int main() {
     CheckTiltCorrection(handle);
     CheckTouchContact();
     CheckReadStateHandle(handle);
+    CheckReadExtHandle(handle);
     CheckRemoteController(handle);
     Require(scePadSetVibrationMode(handle, 1) == 0);
     Require(scePadSetVibrationMode(handle, 2) == 0);
