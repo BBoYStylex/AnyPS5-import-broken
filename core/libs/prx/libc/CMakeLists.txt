@@ -4,6 +4,7 @@ target_sources(libc PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src/CreationMask.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/specifics/gcc/StackGuard.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/specifics/windows/CrashReport.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/GuestWideIntmax.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/specifics/linux/DlIteratePhdr.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/specifics/macos/GuestImages.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/Strings.cpp
@@ -103,6 +104,16 @@ if(BUILD_TESTING)
     add_test(NAME file_position COMMAND file_position_tests)
     if(WIN32)
         set_tests_properties(file_position PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+    endif()
+    add_test_executable(guest_libc_wide_intmax_tests ${LIBS_INCLUDE_DIR}/tests/GuestLibcWideIntmax.cpp)
+    target_include_directories(guest_libc_wide_intmax_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_libc_wide_intmax_tests PRIVATE libc)
+    configure_windows_unwind(guest_libc_wide_intmax_tests)
+    add_test(NAME guest_libc_wide_intmax COMMAND guest_libc_wide_intmax_tests)
+    set_tests_properties(guest_libc_wide_intmax PROPERTIES TIMEOUT 10)
+    if(WIN32)
+        set_tests_properties(guest_libc_wide_intmax PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
     endif()
     add_test_executable(guest_wide_formatting_tests ${LIBS_INCLUDE_DIR}/tests/GuestWideFormatting.cpp)
