@@ -328,6 +328,14 @@ extern "C" int SetWorkingDirectory_nid_no_patch(const char* resolved) {
     }
 }
 
+extern "C" bool FinalPathComponentIsDot_nid_no_patch(const char* path) {
+    std::string_view text(path);
+    while (!text.empty() && (text.back() == '/' || text.back() == '\\')) text.remove_suffix(1);
+    const auto separator = text.find_last_of("/\\");
+    const auto component = text.substr(separator == std::string_view::npos ? 0 : separator + 1);
+    return component == ".";
+}
+
 extern "C" int APS5_VABI chdir_nid_postfix(const char* path) {
     if (!path) { errno = 14; return -1; }
     if (!*path) { errno = 2; return -1; }

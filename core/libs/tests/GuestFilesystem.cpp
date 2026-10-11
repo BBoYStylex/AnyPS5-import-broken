@@ -460,6 +460,25 @@ int main() {
     Require(rmdir_nid_postfix((missingName + "/").c_str()) == -1 && *__error_nid_postfix() == 2);
     Require(sceKernelRmdir((presentName + "/").c_str()) == static_cast<int>(0x80020014u));
     Require(sceKernelRmdir((missingName + "/").c_str()) == static_cast<int>(0x80020002u));
+    const auto dotDirectory = root / "dot-directory";
+    Require(std::filesystem::create_directory(dotDirectory));
+    const auto dotDirectoryName = dotDirectory.string() + "/.";
+    const auto dotDirectoryTrailingName = dotDirectoryName + "/";
+    Require(rmdir_nid_postfix(dotDirectoryName.c_str()) == -1 && *__error_nid_postfix() == 22);
+    Require(sceKernelRmdir(dotDirectoryName.c_str()) == static_cast<int>(0x80020016u));
+    Require(remove_nid_postfix(dotDirectoryName.c_str()) == -1 && *__error_nid_postfix() == 22);
+    Require(rmdir_nid_postfix(dotDirectoryTrailingName.c_str()) == -1 && *__error_nid_postfix() == 22);
+    Require(sceKernelRmdir(dotDirectoryTrailingName.c_str()) == static_cast<int>(0x80020016u));
+    Require(remove_nid_postfix(dotDirectoryTrailingName.c_str()) == -1 && *__error_nid_postfix() == 22);
+    Require(std::filesystem::is_directory(dotDirectory));
+    const auto dotFileName = presentName + "/.";
+    Require(rmdir_nid_postfix(dotFileName.c_str()) == -1 && *__error_nid_postfix() == 20);
+    Require(sceKernelRmdir(dotFileName.c_str()) == static_cast<int>(0x80020014u));
+    Require(remove_nid_postfix(dotFileName.c_str()) == -1 && *__error_nid_postfix() == 20);
+    const auto dotMissingName = missingName + "/.";
+    Require(rmdir_nid_postfix(dotMissingName.c_str()) == -1 && *__error_nid_postfix() == 2);
+    Require(sceKernelRmdir(dotMissingName.c_str()) == static_cast<int>(0x80020002u));
+    Require(remove_nid_postfix(dotMissingName.c_str()) == -1 && *__error_nid_postfix() == 2);
     const auto missingParentLeaf = rootName + "/missing/leaf";
     Require(sceKernelMkdir(missingParentLeaf.c_str(), 0700) == static_cast<int>(0x80020002u));
     const auto invalidNameUnderFile = presentName + "/a:b/x";
@@ -500,6 +519,7 @@ int main() {
     const auto empty = root / "empty";
     Require(std::filesystem::create_directory(empty));
     Require(rmdir_nid_postfix(empty.string().c_str()) == 0 && !std::filesystem::exists(empty));
+    Require(rmdir_nid_postfix(dotDirectory.string().c_str()) == 0 && !std::filesystem::exists(dotDirectory));
     Require(remove_nid_postfix(root.string().c_str()) == 0);
     Require(!std::filesystem::exists(root));
 }
