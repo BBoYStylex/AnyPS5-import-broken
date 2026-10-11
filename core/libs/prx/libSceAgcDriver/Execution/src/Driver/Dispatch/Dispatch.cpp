@@ -150,10 +150,10 @@ void Driver::dispatch(QueueState& queue, std::span<const std::uint32_t> packet, 
             mix(found == queue.shader.end() ? (1ull << 32u) : found->second);
         }
     } else {
-        for (const auto& [offset, value] : queue.shader) {
+        queue.shader.ForEach([&](std::uint32_t offset, std::uint32_t value) {
             mix(offset);
             mix(value);
-        }
+        });
     }
     std::shared_ptr<const ShaderRecompiler::RecompileResult> compiledResult;
 
@@ -189,14 +189,14 @@ void Driver::dispatch(QueueState& queue, std::span<const std::uint32_t> packet, 
                     what += text;
                 }
             }
-            for (const auto& [offset, value] : queue.shader) {
+            queue.shader.ForEach([&](std::uint32_t offset, std::uint32_t value) {
                 const auto old = previous.shader.find(offset);
                 if (old == previous.shader.end() || old->second != value) {
                     char text[48];
                     std::snprintf(text, sizeof(text), " sh[%x] %08x->%08x", offset, old == previous.shader.end() ? 0u : old->second, value);
                     what += text;
                 }
-            }
+            });
             ++reports;
             std::fprintf(stderr, "[dispatch-cache] 0x%llx key changed:%s\n", static_cast<unsigned long long>(address), what.c_str());
         }
