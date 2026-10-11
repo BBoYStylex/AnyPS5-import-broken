@@ -12,4 +12,13 @@ if(BUILD_TESTING)
         set_tests_properties(guest_hmd2 PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceHmd2>")
     endif()
+    add_test_executable(guest_ppsa07411_exports_tests ${LIBS_INCLUDE_DIR}/tests/GuestPPSA07411Exports.cpp)
+    target_include_directories(guest_ppsa07411_exports_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_ppsa07411_exports_tests PRIVATE libSceHmd2 libSceVrTracker2 libScePad libSceSsl libSceJson2 libSceSharePlay libSceNpSessionSignaling libSceConvertKeycode libc)
+    configure_windows_unwind(guest_ppsa07411_exports_tests)
+    add_test(NAME guest_ppsa07411_exports COMMAND guest_ppsa07411_exports_tests)
+    if(WIN32)
+        set_tests_properties(guest_ppsa07411_exports PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceHmd2>")
+    endif()
 endif()

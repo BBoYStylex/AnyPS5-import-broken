@@ -96,4 +96,59 @@ int APS5_VABI sceHmd2SetVibration() {
     return 0;
 }
 
+int APS5_VABI sceHmd2Terminate() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceHmd2GetDeviceInformationByHandle() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceHmd2ReprojectionTerminate() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceHmd2ReprojectionSetTiming() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceHmd2ReprojectionEnableMirroring() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceHmd2ReprojectionDisableMirroring() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceHmd2ReprojectionGetMirroringWorkMemorySizeAlign() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceHmd2ReprojectionGetMirroringDisplayBufferSizeAlign() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceHmd2GetFieldOfView() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceHmd2GazeGetResult() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceHmd2ReprojectionSetParam() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
 }
