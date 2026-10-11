@@ -22,6 +22,7 @@ target_sources(libc PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src/GuestArena.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/GuestStacks.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/GuestWriteWatch.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/GuestNearbyintDouble.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/Interfaces.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/GuestHeap.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/HeapDiagnostics.cpp
@@ -272,6 +273,16 @@ if(BUILD_TESTING)
     add_test(NAME guest_daemon COMMAND guest_daemon_tests)
     if(WIN32)
         set_tests_properties(guest_daemon PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+    endif()
+    add_test_executable(guest_libc_nearbyint_double_tests ${LIBS_INCLUDE_DIR}/tests/GuestLibcNearbyintDouble.cpp)
+    target_include_directories(guest_libc_nearbyint_double_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_libc_nearbyint_double_tests PRIVATE libc)
+    configure_windows_unwind(guest_libc_nearbyint_double_tests)
+    add_test(NAME guest_libc_nearbyint_double COMMAND guest_libc_nearbyint_double_tests)
+    set_tests_properties(guest_libc_nearbyint_double PROPERTIES TIMEOUT 10)
+    if(WIN32)
+        set_tests_properties(guest_libc_nearbyint_double PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
     endif()
     add_test_executable(guest_lifecycle_tests ${LIBS_INCLUDE_DIR}/tests/GuestLifecycle.cpp)
