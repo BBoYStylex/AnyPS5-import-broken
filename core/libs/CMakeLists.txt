@@ -290,4 +290,13 @@ if(BUILD_TESTING)
         set_tests_properties(guest_posix_random PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libScePosixForWebKit>")
     endif()
+    add_test_executable(audioout2_port_state_tests tests/AudioOut2PortState.cpp)
+    target_include_directories(audioout2_port_state_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(audioout2_port_state_tests PRIVATE libSceAudioOut)
+    configure_windows_unwind(audioout2_port_state_tests)
+    add_test(NAME audioout2_port_state COMMAND audioout2_port_state_tests)
+    if(WIN32)
+        set_tests_properties(audioout2_port_state PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceAudioOut>")
+    endif()
 endif()

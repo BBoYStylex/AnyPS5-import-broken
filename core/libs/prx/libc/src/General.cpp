@@ -29,6 +29,8 @@
 #include "prx/libc/include/General.hpp"
 #include "prx/libc/include/ApplicationHeap.hpp"
 
+extern "C" char* APS5_VABI getenv_nid_postfix(const char* name);
+
 namespace {
 // Guest prefixes (without leading slashes) mapped to host directories, e.g. save-data mount points:
 // the PS5 hands the title a short mount point ("/savedata0") whose files live under _sd/<dir name>.
@@ -115,8 +117,32 @@ struct WorkingDirectory {
     std::filesystem::path current = root;
 };
 WorkingDirectory& Directories() { static WorkingDirectory state; return state; }
+std::string ExpandEnvironmentVariables(const std::string& text) {
+    std::string result;
+    result.reserve(text.size());
+    std::size_t pos = 0;
+    while (pos < text.size()) {
+        if (text[pos] == '%') {
+            const std::size_t start = pos + 1;
+            std::size_t end = start;
+            while (end < text.size() && text[end] != '%' && text[end] != '/' && text[end] != '\\') ++end;
+            if (end < text.size() && text[end] == '%') {
+                const std::string varName = text.substr(start, end - start);
+                const char* value = getenv_nid_postfix(varName.c_str());
+                if (value) {
+                    result += value;
+                    pos = end + 1;
+                    continue;
+                }
+            }
+        }
+        result += text[pos++];
+    }
+    return result;
+}
+
 std::filesystem::path Resolve(WorkingDirectory& state, const char* path) {
-    std::string text(path);
+    std::string text = ExpandEnvironmentVariables(std::string(path));
     for (auto& character : text) if (character == '\\') character = '/';
     std::filesystem::path input(text);
 #ifdef _WIN32

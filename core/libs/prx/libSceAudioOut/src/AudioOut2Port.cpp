@@ -222,11 +222,14 @@ int APS5_VABI sceAudioOut2PortDestroy(AudioOut2PortHandle port) {
 }
 
 int APS5_VABI sceAudioOut2PortGetState(AudioOut2PortHandle port, AudioOut2PortState* state) {
-    std::lock_guard lock(g_portsLock);
-    if (!FromHandle(port)) return SCE_AUDIO_OUT2_ERROR_INVALID_HANDLE;
     if (!state) return SCE_AUDIO_OUT2_ERROR_INVALID_ARGUMENT;
+    std::lock_guard lock(g_portsLock);
+    auto* entry = FromHandle(port);
+    if (!entry) {
+        return SCE_AUDIO_OUT2_ERROR_INVALID_HANDLE;
+    }
     state->output = OUTPUT_MAIN;
-    state->num_channels = AUDIO_OUT2_OUTPUT_CHANNELS;
+    state->num_channels = entry->channels;
     state->volume = VOLUME_MAX;
     state->reroute_counter = 0;
     state->flags = 0;
