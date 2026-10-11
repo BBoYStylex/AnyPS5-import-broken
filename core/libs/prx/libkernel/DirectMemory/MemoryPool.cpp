@@ -1,4 +1,3 @@
-
 #include "prx/libkernel/DirectMemory/MemoryPool.hpp"
 #include "prx/libkernel/DirectMemory/DirectMemory.hpp"
 #include <algorithm>
@@ -8,8 +7,8 @@
 #include <map>
 #include <mutex>
 #include <new>
+#include <stdexcept>
 #include <utility>
-
 
 #ifndef SCE_KERNEL_ERROR_EINVAL
 #define SCE_KERNEL_ERROR_EINVAL static_cast<int>(0x80020016u)
@@ -36,7 +35,6 @@ constexpr size_t kNumPages = static_cast<size_t>(kPoolBytes / kPage);
 static_assert(kPage != 0 && (kPage & (kPage - 1)) == 0, "PS5_PAGE_SIZE must be a power of two");
 static_assert(kPoolBytes % kPage == 0, "DIRECT_MEMORY_SIZE must be a multiple of PS5_PAGE_SIZE");
 
-
 bool AlignUp(uint64_t v, uint64_t a, uint64_t& out) {
     const uint64_t m = a - 1;
     if (v > UINT64_MAX - m) return false;
@@ -44,14 +42,12 @@ bool AlignUp(uint64_t v, uint64_t a, uint64_t& out) {
     return true;
 }
 
-
 bool NormalizeAlignment(size_t alignment, uint64_t& out) {
     const uint64_t a = (alignment == 0) ? kPage : static_cast<uint64_t>(alignment);
     if ((a & (a - 1)) != 0) return false;
     out = std::max<uint64_t>(a, kPage);
     return true;
 }
-
 
 bool NormalizeLength(size_t len, uint64_t& out) {
     if (len == 0) return false;
@@ -68,7 +64,6 @@ bool NormalizeSearchRange(int64_t searchStart, int64_t searchEnd, uint64_t& star
     end = (searchEnd < 0) ? kPoolBytes : std::min<uint64_t>(static_cast<uint64_t>(searchEnd), kPoolBytes);
     return start < end;
 }
-
 
 bool NormalizeRegion(uint64_t start, size_t len, uint64_t& alignedLen) {
     if (start >= kPoolBytes || (start & (kPage - 1)) != 0) return false;
@@ -99,26 +94,18 @@ struct PhysicalMemoryPool {
         while (cur <= end && alignedLen <= end - cur) {
             size_t lastUsed;
             if (!_lastUsedPage(static_cast<size_t>(cur / kPage), pageCount, lastUsed)) {
-                const int rc = _commit(cur, alignedLen, memoryType);
-                if (rc == 0) *physOut = static_cast<int64_t>(cur);
-                return rc;
+                _commit(cur, alignedLen, memoryType);
+                *physOut = static_cast<int64_t>(cur);
+                return 0;
             }
-
             if (!AlignUp((static_cast<uint64_t>(lastUsed) + 1) * kPage, align, cur)) break;
         }
         return SCE_KERNEL_ERROR_EAGAIN;
     }
 
+    bool Free(uint64_t start, size_t len) { return _release(start, len, false); }
 
-    bool Free(uint64_t start, size_t len) { return _release(start, len, /*requireAllocated=*/false); }
-
-    bool CheckedFree(uint64_t start, size_t len) {
-        try {
-            return _release(start, len, /*requireAllocated=*/true);
-        } catch (...) {
-            return false;
-        }
-    }
+    bool CheckedFree(uint64_t start, size_t len) { return _release(start, len, true); }
 
     bool Find(uint64_t offset, bool findNext, int64_t* start, int64_t* end, int* memoryType) {
         if (!start || !end || !memoryType || offset >= kPoolBytes) return false;
@@ -240,21 +227,18 @@ private:
         for (size_t i = 0; i < count; ++i) _used[first + i] = used;
     }
 
-    int _commit(uint64_t start, uint64_t len, int type) {
-        const uint64_t end = start + len;
-
-        std::pair<BlockMap::iterator, bool> ins = _blocks.emplace(start, Block{end, type});
-        if (!ins.second) return SCE_KERNEL_ERROR_EFAULT;
+    void _commit(uint64_t start, uint64_t len, int type) {
+        std::pair<BlockMap::iterator, bool> ins = _blocks.emplace(start, Block{start + len, type});
+        if (!ins.second) throw std::logic_error("DirectMemory pool: block map and page flags disagree");
 
         try {
             CreateDirectMemoryBacking(static_cast<int64_t>(start), static_cast<size_t>(len), type);
         } catch (...) {
             _blocks.erase(ins.first);
-            return SCE_KERNEL_ERROR_ENOMEM;
+            throw;
         }
 
         _mark(static_cast<size_t>(start / kPage), static_cast<size_t>(len / kPage), true);
-        return 0;
     }
 
     bool _release(uint64_t start, size_t len, bool requireAllocated) {
@@ -266,7 +250,6 @@ private:
 
         std::lock_guard<std::mutex> lock(_mutex);
         if (requireAllocated ? !_allUsed(first, count) : !_anyUsed(first, count)) return false;
-
 
         const bool splitStart = _splitAt(start);
         bool splitEnd = false;
@@ -283,7 +266,6 @@ private:
         _mark(first, count, false);
         return true;
     }
-
 
     bool _splitAt(uint64_t at) {
         BlockMap::iterator it = _blocks.upper_bound(at);
@@ -310,61 +292,42 @@ private:
 };
 
 }
+
 int DirectMemoryAlloc(int64_t searchStart, int64_t searchEnd, size_t len, size_t alignment, int memoryType, int64_t* physOut) {
     if (!physOut) return SCE_KERNEL_ERROR_EFAULT;
     try {
         return PhysicalMemoryPool::Instance().Alloc(searchStart, searchEnd, len, alignment, memoryType, physOut);
     } catch (const std::bad_alloc&) {
         return SCE_KERNEL_ERROR_ENOMEM;
-    } catch (...) {
-        return SCE_KERNEL_ERROR_EFAULT;
     }
 }
 
 void DirectMemoryFree(int64_t start, size_t len) {
     if (start < 0 || len == 0) return;
-    // Exceptions intentionally propagate to surface physical backing cleanup failures.
     (void)PhysicalMemoryPool::Instance().Free(static_cast<uint64_t>(start), len);
 }
 
 bool DirectMemoryCheckedFree(int64_t start, size_t len) {
     if (start < 0 || len == 0) return false;
-    try {
-        return PhysicalMemoryPool::Instance().CheckedFree(static_cast<uint64_t>(start), len);
-    } catch (...) {
-        return false;
-    }
+    return PhysicalMemoryPool::Instance().CheckedFree(static_cast<uint64_t>(start), len);
 }
 
 bool DirectMemoryFind(int64_t offset, bool findNext, int64_t* start, int64_t* end, int* memoryType) {
     if (offset < 0 || !start || !end || !memoryType) return false;
-    try {
-        return PhysicalMemoryPool::Instance().Find(static_cast<uint64_t>(offset), findNext, start, end, memoryType);
-    } catch (...) {
-        return false;
-    }
+    return PhysicalMemoryPool::Instance().Find(static_cast<uint64_t>(offset), findNext, start, end, memoryType);
 }
 
 void DirectMemoryRetype(int64_t start, size_t len, int memoryType) {
     if (start < 0 || len == 0) return;
-    // Exceptions intentionally propagate to surface map node allocation failures.
     (void)PhysicalMemoryPool::Instance().Retype(static_cast<uint64_t>(start), len, memoryType);
 }
 
 bool DirectMemoryLargestFree(int64_t searchStart, int64_t searchEnd, size_t alignment, int64_t* startOut, size_t* sizeOut) {
     if (!startOut || !sizeOut) return false;
-    try {
-        return PhysicalMemoryPool::Instance().LargestFree(searchStart, searchEnd, alignment, startOut, sizeOut);
-    } catch (...) {
-        return false;
-    }
+    return PhysicalMemoryPool::Instance().LargestFree(searchStart, searchEnd, alignment, startOut, sizeOut);
 }
 
 size_t DirectMemoryFreeRun(uint64_t offset, uint64_t limit) {
     if (offset >= kPoolBytes) return 0;
-    try {
-        return PhysicalMemoryPool::Instance().FreeRun(offset, limit);
-    } catch (...) {
-        return 0;
-    }
+    return PhysicalMemoryPool::Instance().FreeRun(offset, limit);
 }
