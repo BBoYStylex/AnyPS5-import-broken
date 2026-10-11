@@ -33,6 +33,7 @@ int APS5_VABI sceHttpSetRedirectCallback(int, HttpRedirectCallback, void*);
 int APS5_VABI sceHttpSetCookieRecvCallback(int, HttpCookieRecvCallback, void*);
 int APS5_VABI sceHttpSetAuthInfoCallback(int, HttpAuthInfoCallback, void*);
 int APS5_VABI sceHttpParseStatusLine(const char*, std::size_t, std::int32_t*, std::int32_t*, std::int32_t*, const char**, std::size_t*);
+int APS5_VABI sceHttpSetCookieEnabled(int, int);
 }
 
 static void Require(bool value) { if (!value) std::abort(); }
@@ -218,6 +219,10 @@ int main() {
     Require(sceHttpSetInflateGZIPEnabled(1, 1) == 0);
     Require(sceHttpSetInflateGZIPEnabled(1, 2) == invalidValue);
     Require(sceHttpSetInflateGZIPEnabled(1, -1) == invalidValue);
+    Require(sceHttpSetCookieEnabled(1, 0) == 0);
+    Require(sceHttpSetCookieEnabled(1, 1) == 0);
+    Require(sceHttpSetCookieEnabled(1, 2) == invalidValue);
+    Require(sceHttpSetCookieEnabled(1, -1) == invalidValue);
     Require(sceHttpsEnableOption(1, 0) == 0);
     Require(sceHttpsLoadCert(1, 0, nullptr, nullptr, nullptr) == 0);
     Require(sceHttpsUnloadCert(1) == 0);
