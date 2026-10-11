@@ -1,10 +1,12 @@
 #include "SceTypes.hpp"
 #include "prx/libc/include/general/VabiMacros.hpp"
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <initializer_list>
+#include <thread>
 
 extern "C" {
 int APS5_VABI sem_init_nid_postfix(void*, int, unsigned int);
@@ -12,6 +14,7 @@ int APS5_VABI sem_destroy_nid_postfix(void*);
 int APS5_VABI sem_post_nid_postfix(void*);
 int APS5_VABI sem_trywait_nid_postfix(void*);
 int APS5_VABI sem_getvalue_nid_postfix(void*, int*);
+int APS5_VABI sem_timedwait_nid_postfix(void*, const KernelTimespec*);
 int* APS5_VABI __error_nid_postfix();
 }
 
@@ -58,4 +61,26 @@ int main(int argc, char** argv) {
     Require(sem_trywait_nid_postfix(&sem) == 0, "normal wait must succeed");
     Require(sem_getvalue_nid_postfix(&sem, &value) == 0 && value == 0, "normal wait must decrement");
     Require(sem_destroy_nid_postfix(&sem) == 0, "normal destroy must succeed");
+
+    const KernelTimespec invalid[] = {{0, 1000000000}, {0, -1}};
+    Require(sem_init_nid_postfix(&sem, 0, 3) == 0, "timed semaphore must initialize");
+    Require(sem_timedwait_nid_postfix(&sem, nullptr) == 0, "available semaphore must be taken without a timeout");
+    for (const KernelTimespec& timeout : invalid)
+        Require(sem_timedwait_nid_postfix(&sem, &timeout) == 0, "available semaphore must be taken before the timeout is checked");
+    Require(sem_getvalue_nid_postfix(&sem, &value) == 0 && value == 0, "timed waits must decrement");
+    for (const KernelTimespec& timeout : invalid) {
+        *__error_nid_postfix() = 0;
+        Require(sem_timedwait_nid_postfix(&sem, &timeout) == -1 && *__error_nid_postfix() == 22, "blocking wait must reject an invalid timeout");
+    }
+    const KernelTimespec past{0, 0};
+    *__error_nid_postfix() = 0;
+    Require(sem_timedwait_nid_postfix(&sem, &past) == -1 && *__error_nid_postfix() == 60, "blocking wait must time out at a past deadline");
+    std::thread poster([&sem] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        Require(sem_post_nid_postfix(&sem) == 0, "post to a waiter must succeed");
+    });
+    Require(sem_timedwait_nid_postfix(&sem, nullptr) == 0, "a null timeout must wait without a limit");
+    poster.join();
+    Require(sem_getvalue_nid_postfix(&sem, &value) == 0 && value == 0, "unlimited wait must take the posted count");
+    Require(sem_destroy_nid_postfix(&sem) == 0, "timed destroy must succeed");
 }

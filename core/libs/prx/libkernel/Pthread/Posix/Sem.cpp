@@ -47,6 +47,13 @@ static int WaitFor(PosixSemaphore* semaphore, const KernelUseconds* usec) {
     return 0;
 }
 
+static bool TryTake(PosixSemaphore* semaphore) {
+    std::lock_guard lock(semaphore->lock);
+    if (semaphore->count == 0) return false;
+    --semaphore->count;
+    return true;
+}
+
 extern "C" {
 
 int APS5_VABI sem_init_nid_postfix(void* sem, int pshared, unsigned int value) {
@@ -75,15 +82,15 @@ int APS5_VABI sem_wait_nid_postfix(void* sem) {
 int APS5_VABI sem_trywait_nid_postfix(void* sem) {
     auto* semaphore = Get(sem);
     if (!semaphore) return Fail(PosixThread::GUEST_EINVAL);
-    std::lock_guard lock(semaphore->lock);
-    if (semaphore->count == 0) return Fail(GUEST_EAGAIN);
-    --semaphore->count;
-    return 0;
+    return TryTake(semaphore) ? 0 : Fail(GUEST_EAGAIN);
 }
 
 int APS5_VABI sem_timedwait_nid_postfix(void* sem, const KernelTimespec* abstime) {
     auto* semaphore = Get(sem);
     if (!semaphore) return Fail(PosixThread::GUEST_EINVAL);
+    ThreadCancel::Check();
+    if (TryTake(semaphore)) return 0;
+    if (!abstime) return WaitFor(semaphore, nullptr);
     KernelUseconds usec = 0;
     if (!PosixThread::RelativeMicroseconds(GUEST_REALTIME_CLOCK, abstime, &usec)) return Fail(PosixThread::GUEST_EINVAL);
     return WaitFor(semaphore, &usec);
