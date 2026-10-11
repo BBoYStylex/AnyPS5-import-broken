@@ -1,5 +1,7 @@
 #include "prx/libc/include/general/VabiMacros.hpp"
+#include "SceTypes.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstdlib>
@@ -18,6 +20,9 @@ int APS5_VABI sceSystemGestureUpdateTouchRecognizerRectangle(std::int32_t, void*
 int APS5_VABI sceSystemGestureResetPrimitiveTouchRecognizer(std::int32_t);
 int APS5_VABI sceSystemGestureUpdateAllTouchRecognizer(std::int32_t);
 int APS5_VABI sceSystemGestureUpdatePrimitiveTouchRecognizer(std::int32_t, const void*);
+int APS5_VABI sceSystemGestureGetPrimitiveTouchEventByPrimitiveID(std::int32_t, std::uint16_t, void*);
+int APS5_VABI sceSystemGestureGetTouchEventByEventID(std::int32_t, const void*, std::uint32_t, void*);
+int APS5_VABI sceSystemGestureGetTouchRecognizerInformation(std::int32_t, const void*, void*);
 }
 
 static void Require(bool value) { if (!value) std::abort(); }
@@ -76,5 +81,26 @@ int main() {
     Require(sceSystemGestureResetPrimitiveTouchRecognizer(handle + 1) == invalidHandle);
     Require(sceSystemGestureUpdateAllTouchRecognizer(handle + 1) == invalidHandle);
     Require(sceSystemGestureUpdatePrimitiveTouchRecognizer(handle + 1, nullptr) == invalidHandle);
+
+    Require(sceSystemGestureGetPrimitiveTouchEventByPrimitiveID(handle, 1, buffer.data()) == indexOutOfArray);
+    Require(sceSystemGestureGetPrimitiveTouchEventByPrimitiveID(handle, 1, nullptr) == indexOutOfArray);
+    Require(sceSystemGestureGetPrimitiveTouchEventByPrimitiveID(handle + 1, 1, buffer.data()) == invalidHandle);
+    Require(buffer == original);
+
+    Require(sceSystemGestureGetTouchEventByEventID(handle, &recognizer, 0, buffer.data()) == indexOutOfArray);
+    Require(sceSystemGestureGetTouchEventByEventID(handle, nullptr, 0, buffer.data()) == indexOutOfArray);
+    Require(sceSystemGestureGetTouchEventByEventID(handle + 1, &recognizer, 0, buffer.data()) == invalidHandle);
+    Require(buffer == original);
+
+    std::array<unsigned char, sizeof(SystemGestureTouchRecognizerInformation)> info;
+    info.fill(0x5a);
+    Require(sceSystemGestureGetTouchRecognizerInformation(handle, &recognizer, info.data()) == 0);
+    std::array<unsigned char, sizeof(SystemGestureTouchRecognizerInformation)> zeroed;
+    zeroed.fill(0);
+    Require(std::equal(zeroed.begin(), zeroed.end(), info.begin()));
+    Require(sceSystemGestureGetTouchRecognizerInformation(handle, &recognizer, nullptr) == invalidArgument);
+    Require(sceSystemGestureGetTouchRecognizerInformation(handle + 1, &recognizer, info.data()) == invalidHandle);
+    info.fill(0x5a);
+    Require(info != zeroed);
     return 0;
 }
