@@ -15,7 +15,9 @@ bool parseVersionNumber(const char* line, size_t lineLen, size_t& index, int32_t
     if (index >= lineLen || !isAsciiDigit(line[index])) return false;
     uint32_t number = 0;
     while (index < lineLen && isAsciiDigit(line[index])) {
-        number = number * 10 + static_cast<uint32_t>(line[index] - '0');
+        const auto digit = static_cast<uint32_t>(line[index] - '0');
+        if (number > (static_cast<uint32_t>(INT32_MAX) - digit) / 10) return false;
+        number = number * 10 + digit;
         ++index;
     }
     *value = static_cast<int32_t>(number);
@@ -49,6 +51,10 @@ int APS5_VABI sceHttpParseStatusLine(const char* statusLine, size_t lineLen, int
     }
     *responseCode = (statusLine[index] - '0') * 100 + (statusLine[index + 1] - '0') * 10 + (statusLine[index + 2] - '0');
     index += 3;
+
+    if (index < lineLen && statusLine[index] != ' ' && statusLine[index] != '\r' && statusLine[index] != '\n') {
+        return ERROR_PARSE_HTTP_INVALID_RESPONSE;
+    }
 
     const char* phrase = statusLine + index;
     const void* lineFeed = std::memchr(phrase, '\n', lineLen - index);
