@@ -132,6 +132,22 @@ The game runs on the first Vulkan 1.1 device with graphics and compute queues an
 
 GPU results in storage images and render targets stay on the GPU until something reads their memory. A title that frees such an image after waiting for its GPU work and reuses the memory can have its new data overwritten when the results are stored later ([TechnicalDebt](../dev/TechnicalDebt.md)). `APS5_STORE_AT_FLIP=1` stores every pending result when a display buffer is flipped, at the cost of one write-back per pending image and frame. Any other value stops the title at its first flip.
 
+## Shader corpus comparisons
+
+`agc_shader_replay` compiles the `.req` captures written when a title runs with `APS5_DUMP_SHADERS=1`. Build the existing replay executable in two separate checkouts to compare a compiler change without launching the title or using a GPU:
+
+```sh
+python3 tools/shader_corpus.py captures/ --baseline /old/build/agc_shader_replay --replay /new/build/agc_shader_replay --json comparison.json
+```
+
+The runner recursively discovers `.req` files, groups identical content by SHA-256, and preserves the original paths in the report. Each distinct request runs in its own temporary working directory with `--spv`; artifacts cannot overwrite the capture directory or another request's output. It records executable hashes, exit statuses, bounded stdout/stderr tails, SPIR-V hashes and word counts, and wall times. Successful replay requires a bounded SPIR-V file with a valid header; full SPIR-V validation remains the replay build's responsibility (`ANYPS5_ENABLE_SPIRV_TOOLS=ON`). Captures are copied and hashed before each run, and changes to the executable during a run invalidate the report.
+
+Three measured runs per build are used by default, alternating their order. A slowdown requires both more than 25% additional median time and at least 25 ms extra; configure these with `--slowdown-percent` and `--minimum-ms`. Times include process startup and resource analysis. Use the default `--jobs 1` for performance comparisons; `--jobs 4` processes independent requests concurrently but adds CPU and memory contention. `--repeats` accepts 1–9 and `--timeout` bounds each replay process (30 s by default).
+
+New compilation failures, resolved failures, persistent failures and changed output are reported separately. Exit `1` means a new failure or measured slowdown when comparing builds; without `--baseline`, any failed request returns `1`. Existing failures in both builds do not fail a comparison. Output differences are informational because valid compiler changes alter SPIR-V; `--fail-on-output-change` also gates changed or unstable output. Exit `2` means invalid input or a report could not be written. The JSON is replaced atomically after the run completes. Replay does not execute shader code or establish rendering correctness, title compatibility or frame-rate gains.
+
+Pass a replay option to either build with `--replay-arg=--maintenance8` or `--baseline-arg=--maintenance8`. Keep build options and host load comparable when measuring performance. The process timeout kills the replay process and its process group on POSIX; on Windows it kills the replay process, so replay commands must not spawn child processes.
+
 ## Exit codes
 
 `0`: conversion succeeded. `1`: invalid arguments. `2`: conversion failed; the error is printed to stderr. With `--autorun`, successful conversion returns the launched application's exit code.
