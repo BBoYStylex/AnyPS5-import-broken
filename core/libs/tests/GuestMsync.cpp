@@ -77,6 +77,16 @@ int main() {
     Require(Fails(mapped + Page, 0, Sync, NoMemory));
     Require(Fails(mapped, Page, Invalidate, NoMemory));
 
+    char* holed = Map(3);
+    Require(munmap_nid_postfix(holed + Page, Page) == 0);
+    Require(Succeeds(holed, Page, Sync));
+    Require(Succeeds(holed + 2 * Page, Page, Sync));
+    Require(Fails(holed + Page, Page, Sync, NoMemory));
+    Require(Fails(holed + Page, 0, Sync, NoMemory));
+    Require(Fails(holed, 3 * Page, Async, NoMemory));
+    Require(munmap_nid_postfix(holed, Page) == 0);
+    Require(munmap_nid_postfix(holed + 2 * Page, Page) == 0);
+
     void* reserved = nullptr;
     Require(sceKernelReserveVirtualRange(&reserved, 2 * Page, 0, 0) == 0);
     Require(Succeeds(reserved, 2 * Page, Sync));
