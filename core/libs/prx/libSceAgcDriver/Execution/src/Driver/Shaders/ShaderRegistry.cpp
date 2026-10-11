@@ -504,7 +504,7 @@ void BuildRegisteredAbiKey(const QueueState& state, const VulkanDevice& device, 
     key.insert(key.end(), {device.Serial(), ShaderRecompiler::DebugProbeActive(), ShaderRecompiler::RayTracingStrict(), ShaderRecompiler::RayTracingMiss()});
     for (const auto* registers : {&state.shader, &state.context, &state.userConfig}) {
         key.push_back(registers->size());
-        for (const auto& [offset, value] : *registers) key.push_back((static_cast<std::uint64_t>(offset) << 32u) | value);
+        registers->ForEach([&](std::uint32_t offset, std::uint32_t value) { key.push_back((static_cast<std::uint64_t>(offset) << 32u) | value); });
     }
 }
 
@@ -833,9 +833,9 @@ void Driver::ResolveGraphicsStagesAbi(std::span<const Shader* const> stages, std
             const auto& snapshot = *selected;
             require(snapshot.registeredState != nullptr, "registered shader state is missing");
             const auto registered = DecodeRegisteredState(snapshot, {});
-            for (const auto& [offset, value] : registered.shader) state.shader.insert_or_assign(offset, value);
-            for (const auto& [offset, value] : registered.context) state.context.insert_or_assign(offset, value);
-            for (const auto& [offset, value] : registered.userConfig) state.userConfig.insert_or_assign(offset, value);
+            registered.shader.ForEach([&](std::uint32_t offset, std::uint32_t value) { state.shader.insert_or_assign(offset, value); });
+            registered.context.ForEach([&](std::uint32_t offset, std::uint32_t value) { state.context.insert_or_assign(offset, value); });
+            registered.userConfig.ForEach([&](std::uint32_t offset, std::uint32_t value) { state.userConfig.insert_or_assign(offset, value); });
         }
     }
     for (const auto reg : context) state.context.insert_or_assign(reg.offset, reg.value);
