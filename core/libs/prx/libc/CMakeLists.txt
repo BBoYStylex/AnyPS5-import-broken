@@ -20,6 +20,7 @@ target_sources(libc PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src/StandardStreams.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/GuestAllocations.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/GuestArena.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/GuestNexttowardDouble.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/GuestStacks.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/GuestWriteWatch.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/Interfaces.cpp
@@ -254,6 +255,16 @@ if(BUILD_TESTING)
     set_tests_properties(guest_hostname PROPERTIES TIMEOUT 20)
     if(WIN32)
         set_tests_properties(guest_hostname PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+    endif()
+    add_test_executable(guest_libc_nexttoward_double_tests ${LIBS_INCLUDE_DIR}/tests/GuestLibcNexttowardDouble.cpp)
+    target_include_directories(guest_libc_nexttoward_double_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_libc_nexttoward_double_tests PRIVATE libc)
+    configure_windows_unwind(guest_libc_nexttoward_double_tests)
+    add_test(NAME guest_libc_nexttoward_double COMMAND guest_libc_nexttoward_double_tests)
+    set_tests_properties(guest_libc_nexttoward_double PROPERTIES TIMEOUT 10)
+    if(WIN32)
+        set_tests_properties(guest_libc_nexttoward_double PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
     endif()
     add_test_executable(guest_memrchr_tests ${LIBS_INCLUDE_DIR}/tests/GuestMemrchr.cpp)
