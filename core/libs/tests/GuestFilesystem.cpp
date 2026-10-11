@@ -440,6 +440,7 @@ int main() {
     Require(sceKernelOpen(missingName.c_str(), 0x20000, 0) == static_cast<int>(0x80020002u));
     Require(open_nid_postfix("", 0, 0) == -1 && *__error_nid_postfix() == 2);
     Require(_open_nid_postfix("", 0) == -1 && *__error_nid_postfix() == 2);
+    Require(sceKernelOpen("", 0, 0) == static_cast<int>(0x80020002u));
     Require(open_nid_postfix(nullptr, 0, 0) == -1 && *__error_nid_postfix() == 14);
     Require(_open_nid_postfix(nullptr, 0) == -1 && *__error_nid_postfix() == 14);
     Require(rmdir_nid_postfix(rootName.c_str()) == -1 && *__error_nid_postfix() == 66);
