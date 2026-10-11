@@ -230,6 +230,12 @@ struct ModuleSegmentInfo {
     std::int32_t prot;
 };
 
+struct InternalSegmentInfo {
+    std::uint64_t address;
+    std::uint64_t size;
+};
+static_assert(sizeof(InternalSegmentInfo) == 0x10);
+
 struct ModuleInfo {
     std::uint64_t st_size;
     char name[256];

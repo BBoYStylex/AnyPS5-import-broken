@@ -428,6 +428,24 @@ int APS5_VABI sceKernelGetModuleInfo2(KernelModule handle, ModuleInfo* info) {
     return FillModuleInfo(handle, info, true);
 }
 
+std::int32_t APS5_VABI sceKernelInternalMemoryGetModuleSegmentInfo_nid_postfix(InternalSegmentInfo* result) {
+    if (!result) throw std::invalid_argument("sceKernelInternalMemoryGetModuleSegmentInfo: result is null");
+    const auto images = GuestImages();
+    if (images.empty()) throw std::runtime_error("sceKernelInternalMemoryGetModuleSegmentInfo: the main program is not loaded");
+    ModuleInfo info{};
+#ifdef _WIN32
+    const bool found = Fill(images.front().address, info);
+#else
+    ImageSearch<ModuleInfo> search{images.front().address, &info, false};
+    dl_iterate_phdr(FindImage<ModuleInfo>, &search);
+    const bool found = search.found;
+#endif
+    if (!found || info.segment_count == 0)
+        throw std::runtime_error("sceKernelInternalMemoryGetModuleSegmentInfo: the main program has no segments");
+    *result = {info.segments[0].address, info.segments[0].size};
+    return 0;
+}
+
 std::uint64_t GuestImageSegmentBytes_nid_no_patch() {
     return GuestSegmentBytes();
 }
