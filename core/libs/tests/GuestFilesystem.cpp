@@ -45,8 +45,10 @@ int APS5_VABI mkdir_nid_postfix(const char*, unsigned short);
 int APS5_VABI sceKernelOpen(const char*, int, unsigned short);
 int APS5_VABI sceKernelClose(int);
 int APS5_VABI sceKernelStat(const char*, FileStat*);
+int APS5_VABI sceKernelCheckReachability(const char*);
 int APS5_VABI sceKernelFstat(int, FileStat*);
 int APS5_VABI sceKernelUnlink(const char*);
+int APS5_VABI sceKernelRename(const char*, const char*);
 int APS5_VABI sceKernelRmdir(const char*);
 int APS5_VABI sceKernelMkdir(const char*, unsigned short);
 int* APS5_VABI __error_nid_postfix();
@@ -77,6 +79,7 @@ static void Check(bool value, int line) {
 int main() {
     Require(chmod_nid_postfix(nullptr, 0600) == -1 && *__error_nid_postfix() == 14);
     Require(sceKernelChmod_nid_postfix(nullptr, 0600) == static_cast<int>(0x8002000eu));
+    Require(chmod_nid_postfix("", 0600) == -1 && *__error_nid_postfix() == 2);
     Require(chmod_nid_postfix("anyps5_missing_chmod_path", 0600) == -1 && *__error_nid_postfix() == 2);
     Require(sceKernelChmod_nid_postfix("anyps5_missing_chmod_path", 0600) == static_cast<int>(0x80020002u));
     Require(sceKernelDebugOutText(-1, "text") == static_cast<int>(0x80020016u));
@@ -267,6 +270,21 @@ int main() {
     const auto rootName = root.string();
     { std::ofstream stream(present); stream << "posix"; }
     FileStat status{};
+    Require(sceKernelStat("", &status) == static_cast<int>(0x80020002u));
+    Require(sceKernelCheckReachability("") == static_cast<int>(0x80020002u));
+    Require(sceKernelRename("", presentName.c_str()) == static_cast<int>(0x80020002u));
+    Require(sceKernelRename(presentName.c_str(), "") == static_cast<int>(0x80020002u));
+    Require(sceKernelRmdir("") == static_cast<int>(0x80020002u));
+    Require(sceKernelMkdir("", 0700) == static_cast<int>(0x80020002u));
+    const auto cwdPermissions = std::filesystem::status(".").permissions();
+    Require(sceKernelChmod_nid_postfix("", static_cast<unsigned short>(cwdPermissions) & 07777) == static_cast<int>(0x80020002u));
+    Require(sceKernelTruncate_nid_postfix("", 0) == static_cast<int>(0x80020002u));
+    const auto cwdWriteTime = std::filesystem::last_write_time(".");
+    const int emptyUtimes = sceKernelUtimes_nid_postfix("", nullptr);
+    std::error_code restoreTimeError;
+    std::filesystem::last_write_time(".", cwdWriteTime, restoreTimeError);
+    Require(!restoreTimeError);
+    Require(emptyUtimes == static_cast<int>(0x80020002u));
     Require(stat_nid_postfix(presentName.c_str(), &status) == 0 && status.st_size == 5);
     Require(stat_nid_postfix(missingName.c_str(), &status) == -1 && *__error_nid_postfix() == 2);
     Require(sceKernelStat(missingName.c_str(), &status) == static_cast<int>(0x80020002u));
@@ -497,6 +515,7 @@ int main() {
     Require(rmdir_nid_postfix(nullptr) == -1 && *__error_nid_postfix() == 14);
     Require(unlink_nid_postfix(missingName.c_str()) == -1 && *__error_nid_postfix() == 2);
     Require(sceKernelUnlink(missingName.c_str()) == static_cast<int>(0x80020002u));
+    Require(sceKernelUnlink("") == static_cast<int>(0x80020002u));
     Require(unlink_nid_postfix("") == -1 && *__error_nid_postfix() == 2);
     Require(unlink_nid_postfix(nullptr) == -1 && *__error_nid_postfix() == 14);
     Require(unlink_nid_postfix(rootName.c_str()) == -1 && *__error_nid_postfix() == 1 && std::filesystem::is_directory(root));
