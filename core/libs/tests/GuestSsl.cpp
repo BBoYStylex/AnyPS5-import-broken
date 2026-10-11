@@ -12,6 +12,12 @@ int APS5_VABI sceSslFreeCaCerts(int, void*);
 int APS5_VABI sceSslGetCaList(int, void*);
 int APS5_VABI sceSslFreeCaList(int, void*);
 int APS5_VABI sceSslUnloadCert(int);
+int APS5_VABI sceSslFreeSslCertName(void);
+int APS5_VABI sceSslGetIssuerName(void);
+int APS5_VABI sceSslGetNameEntryCount(void);
+int APS5_VABI sceSslGetNameEntryInfo(void);
+int APS5_VABI sceSslGetPem(void);
+int APS5_VABI sceSslGetSubjectName(void);
 }
 
 struct SslMemoryPoolStats {
@@ -95,4 +101,10 @@ int main() {
     Require(Throws([&] { sceSslGetCaList(context, &list); }));
     Require(Throws([&] { sceSslFreeCaList(context, &list); }));
     Require(Throws([&] { sceSslUnloadCert(context); }));
+    Require(sceSslFreeSslCertName() == 0);
+    Require(sceSslGetIssuerName() == 0);
+    Require(sceSslGetNameEntryCount() == 0);
+    Require(sceSslGetNameEntryInfo() == notFound);
+    Require(sceSslGetPem() == notFound);
+    Require(sceSslGetSubjectName() == 0);
 }

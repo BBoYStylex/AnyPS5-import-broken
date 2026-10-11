@@ -47,6 +47,7 @@ Throughout the project, every function at every stage either **does exactly what
 - [sceFontGlyphDefineAttribute](../../core/libs/prx/libSceFont/src/Render.cpp) (libSceFont) checks the glyph and ignores the attribute and its value, whose meaning is unknown. PPSA01325 sets attribute 0x11 to 0 on a glyph from `sceFontGenerateCharGlyph` that it deletes unused, and draws the character with `sceFontRenderCharGlyphImageHorizontal`
 - [sceAudioInInit](../../core/libs/prx/libSceAudioIn/Export.cpp) (libSceAudioIn) - returns 0 without library-wide setup, as `sceAudioOutInit` does; each `sceAudioInOpen` opens its own SDL capture device
 - [sceRazorCpuPushMarker](../../core/libs/prx/libSceRazorCpu/Export.cpp) (libSceRazorCpu) - signature (label, color, flags) from [SharpProspero](https://github.com/SvenGDK/SharpProspero), the same as sceRazorCpuPushMarkerStatic's except that the label is copied; it does nothing without a capture and returns 0
+- [libSceSsl](../../core/libs/prx/libSceSsl/Export.cpp) - no certificate bundle or network connection is maintained, so `sceSslGetNameEntryInfo` and `sceSslGetPem` report that no certificate is found (`0x8095F004`), `sceSslGetIssuerName` and `sceSslGetSubjectName` return a null name, `sceSslGetNameEntryCount` reports 0 entries, and `sceSslFreeSslCertName` returns success
 
 ### Unknown function info
 
