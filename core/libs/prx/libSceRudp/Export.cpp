@@ -242,4 +242,31 @@ int APS5_VABI sceRudpRead(int ctx_id, void* data, uint32_t len, int flags, void*
     }
     return valid_ctx(ctx_id) ? RUDP_ERROR_CONN_RESET : RUDP_ERROR_INVALID_CONTEXT_ID;
 }
+
+int APS5_VABI sceRudpNetFlush(void) {
+    std::lock_guard<std::mutex> lk(g_mutex);
+    return g_inited ? 0 : RUDP_ERROR_NOT_INITIALIZED;
+}
+
+int APS5_VABI sceRudpProcessEvents(void) {
+    std::lock_guard<std::mutex> lk(g_mutex);
+    return g_inited ? 0 : RUDP_ERROR_NOT_INITIALIZED;
+}
+
+int APS5_VABI sceRudpNetReceived(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceRudpGetMaxSegmentSize(uint16_t* size) {
+    if (size == nullptr) {
+        return RUDP_ERROR_INVALID_ARGUMENT;
+    }
+    std::lock_guard<std::mutex> lk(g_mutex);
+    if (!g_inited) {
+        return RUDP_ERROR_NOT_INITIALIZED;
+    }
+    return 0;
+}
+
 }
