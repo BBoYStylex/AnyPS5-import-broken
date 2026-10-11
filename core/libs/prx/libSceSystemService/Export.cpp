@@ -12,6 +12,10 @@
 #include "prx/libc/include/General.hpp"
 #include "prx/libkernel/KernelErrors.hpp"
 #include "prx/libSceSystemService/SystemService.hpp"
+#include "prx/libkernel/File/include/NativeStat.hpp"
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 namespace {
 
@@ -36,6 +40,58 @@ extern "C" {
 int APS5_VABI sceSystemServiceLoadExec(const char* path, const char* const* arguments) {
     if (!path || !*path) return SYSTEM_SERVICE_ERROR_PARAMETER;
     if (std::strcmp(path, "exit") != 0) {
+#ifdef _WIN32
+        // Handover to another title executable (the picker, EmulationStation) or
+        // a self-relaunch. Guest paths are "/app0/..."; a relinked sibling named
+        // "<stem>.exe" beside this executable (or beside the guest path) is
+        // launched when present, otherwise the current executable re-runs.
+        wchar_t self[MAX_PATH]{};
+        GetModuleFileNameW(nullptr, self, MAX_PATH);
+        const std::filesystem::path executableDir = std::filesystem::path(self).parent_path();
+        std::filesystem::path target = self;
+        try {
+            const std::filesystem::path guest(path);
+            if (guest.is_absolute() || (!guest.empty() && guest.native().front() == L'/')) {
+                const auto beside = executableDir / guest.relative_path();
+                std::error_code ec;
+                auto converted = beside.parent_path() / (beside.stem().wstring() + L".exe");
+                if (std::filesystem::exists(converted, ec))
+                    target = converted;
+                else {
+                    converted = executableDir / (beside.stem().wstring() + L".exe");
+                    if (std::filesystem::exists(converted, ec)) target = converted;
+                }
+            }
+        } catch (const std::exception&) {
+        }
+        std::wstring commandLine = L"\"" + target.wstring() + L"\"";
+        for (const char* const* argument = arguments; argument && *argument; ++argument) {
+            const int wideSize = MultiByteToWideChar(CP_UTF8, 0, *argument, -1, nullptr, 0);
+            std::wstring wide(static_cast<std::size_t>(wideSize), L'\0');
+            MultiByteToWideChar(CP_UTF8, 0, *argument, -1, wide.data(), wideSize);
+            wide.pop_back();
+            commandLine += L" ";
+            if (wide.find(L' ') != std::wstring::npos) {
+                commandLine += L"\"";
+                commandLine += wide;
+                commandLine += L"\"";
+            } else {
+                commandLine += wide;
+            }
+        }
+        STARTUPINFOW startup{};
+        startup.cb = sizeof(startup);
+        PROCESS_INFORMATION process{};
+        std::wstring mutableCommandLine = commandLine;
+        if (CreateProcessW(target.c_str(), mutableCommandLine.data(), nullptr, nullptr, TRUE, 0, nullptr, nullptr,
+                           &startup, &process)) {
+            File::SaveChmodCache_nid_no_patch();
+            CloseHandle(process.hThread);
+            CloseHandle(process.hProcess);
+            LibcRunShutdown_nid_postfix();
+            std::exit(0);
+        }
+#endif
         NotImplemented_nid_no_patch("sceSystemServiceLoadExec: executable replacement");
     }
     (void)arguments;
