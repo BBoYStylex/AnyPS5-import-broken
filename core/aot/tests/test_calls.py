@@ -293,7 +293,8 @@ class NativeTailCallTests(unittest.TestCase):
     def test_tail_return_abi_mismatch_and_narrow_extension_rejected(self):
         for callee_result, owner_result in [('i32', 'i64'), ('f64', 'i64'), ('u8', 'i8')]:
             with self.subTest(callee_result=callee_result, owner_result=owner_result):
-                raw, contracts = tail_fixture(bytes.fromhex('31c0c3'), result=callee_result, owner_result=owner_result)
+                body = '660f57c0c3' if callee_result == 'f64' else '31c0c3'
+                raw, contracts = tail_fixture(bytes.fromhex(body), result=callee_result, owner_result=owner_result)
                 with self.assertRaisesRegex(Rejected, 'tail-call return ABI'):
                     compile_image(self.image(raw, contracts))
 

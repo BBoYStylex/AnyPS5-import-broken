@@ -1,9 +1,8 @@
 import ctypes
 import unittest
 
-import test_compiler
-import test_pointer_provenance
-from compiler import Image, Rejected, compile_image
+import test_effects
+from compiler import Rejected
 
 
 def stores():
@@ -19,42 +18,63 @@ def stores():
 
 
 class MemoryWriteTests(unittest.TestCase):
-    setUp = test_compiler.CompilerTests.setUp
-    compile = test_compiler.CompilerTests.compile
-    assemble = test_pointer_provenance.PointerProvenanceTests.assemble
-
-    def fixture(self, body, parameters=None, result='i64', imports=None):
-        code = self.assemble('test_entry:\n.set image_cell, test_entry + 0x1000\n' + body)
-        return test_compiler.fixture(code, parameters, result, imports=imports)
-
-    def compile_ir(self, raw, contracts):
-        source = self.directory / 'image.elf'
-        source.write_bytes(raw)
-        return compile_image(Image(source, contracts))
+    setUp = test_effects.CallEffectsTests.setUp
+    compile = test_effects.CallEffectsTests.compile
+    fixture = test_effects.CallEffectsTests.fixture
+    compile_ir = test_effects.CallEffectsTests.compile_ir
 
     def test_simd_stores_invalidate_overlapping_stack_pointers(self):
         for opcode, initialize, register, size in stores():
             with self.subTest(opcode=opcode, register=register):
                 displacement = min(0, 8 - size)
-                raw, contracts = self.fixture(f'push rdi\n{initialize}\n{opcode} [rsp{displacement:+d}], {register}\npop rax\nmov rax, [rax]\nret', ['ptr'])
+                raw, contracts = self.fixture([
+                    ('test_entry', f'push rdi\n{initialize}\n{opcode} [rsp{displacement:+d}], {register}\npop rax\nmov rax, [rax]\nret', ['ptr'], 'i64')])
                 with self.assertRaisesRegex(Rejected, 'pointer origin'):
                     self.compile_ir(raw, contracts)
 
     def test_simd_stores_invalidate_import_pointer_cells(self):
         for opcode, initialize, register, _ in stores():
             with self.subTest(opcode=opcode, register=register):
-                raw, contracts = self.fixture(f'{initialize}\n{opcode} [rip+image_cell], {register}\ncall [rip+image_cell]\nret', result='void',
+                raw, contracts = self.fixture([
+                    ('test_entry', f'{initialize}\n{opcode} [rip+image_cell], {register}\ncall [rip+image_cell]\nret', [], 'void')],
                     imports={'nativeNid': {'name': 'native_probe', 'parameters': [], 'result': 'void'}})
                 with self.assertRaisesRegex(Rejected, 'import target has no proven native pointer origin'):
                     self.compile_ir(raw, contracts)
 
+    def test_callee_simd_write_invalidates_callers_pointer(self):
+        raw, contracts = self.fixture([
+            ('test_entry', 'push rdi\nsub rsp, 16\nlea rdi, [rsp+8]\ncall writer\nadd rsp, 16\npop rax\nmov rax, [rax]\nret', ['ptr'], 'i64'),
+            ('writer', 'pxor xmm0, xmm0\nmovups [rdi], xmm0\nret', ['ptr'], 'void')])
+        with self.assertRaisesRegex(Rejected, 'pointer origin'):
+            self.compile_ir(raw, contracts)
+
+    def test_callee_simd_image_write_invalidates_relocation_cell(self):
+        raw, contracts = self.fixture([
+            ('test_entry', 'call writer\nmov rax, [rip+image_other]\nmov rax, [rax]\nret', [], 'i64'),
+            ('writer', 'pxor xmm0, xmm0\nmovups [rip+image_other], xmm0\nret', [], 'void')], relocations=[[0x2010, 0x2020]])
+        with self.assertRaisesRegex(Rejected, 'pointer origin'):
+            self.compile_ir(raw, contracts)
+
+    def test_vector_read_preserves_memory_proofs(self):
+        raw, contracts = self.fixture([
+            ('test_entry', 'push rdi\ncall reader\npop rax\nmov rax, [rax]\nret', ['ptr'], 'i64'),
+            ('reader', 'movups xmm0, [rdi]\nret', ['ptr'], 'void')])
+        function, report, _ = self.compile(raw, contracts)
+        values = (ctypes.c_uint64 * 2)(123, 456)
+        self.assertEqual(function(ctypes.addressof(values)), 123)
+        self.assertEqual(report['functions'][1]['memory_effects'], {'status': 'inferred', 'image_writes': []})
+
+
     def test_nonpointer_vector_contents_cannot_inherit_spilled_pointer_origin(self):
-        raw, contracts = self.fixture('push rdi\nmov eax, 0x2000\nmovq xmm0, rax\npunpcklqdq xmm0, xmm0\nmovups [rsp-8], xmm0\npop rax\nmov rax, [rax]\nret', ['ptr'])
+        raw, contracts = self.fixture([
+            ('test_entry', 'push rdi\nmov eax, 0x2000\nmovq xmm0, rax\npunpcklqdq xmm0, xmm0\nmovups [rsp-8], xmm0\npop rax\nmov rax, [rax]\nret', ['ptr'], 'i64')])
         with self.assertRaisesRegex(Rejected, 'pointer origin'):
             self.compile_ir(raw, contracts)
 
     def test_vector_read_preserves_spilled_pointer_origin(self):
-        function, _, _ = self.compile(*self.fixture('push rdi\nmovups xmm0, [rdi]\npop rax\nmov rax, [rax]\nret', ['ptr']))
+        raw, contracts = self.fixture([
+            ('test_entry', 'push rdi\nmovups xmm0, [rdi]\npop rax\nmov rax, [rax]\nret', ['ptr'], 'i64')])
+        function, _, _ = self.compile(raw, contracts)
         values = (ctypes.c_uint64 * 2)(123, 456)
         self.assertEqual(function(ctypes.addressof(values)), 123)
 

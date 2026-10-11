@@ -20,6 +20,7 @@
 #include "prx/libSceVideoOut/include/DisplayWindow.hpp"
 #include "prx/libSceVideoOut/include/BufferReuseTracker.hpp"
 #include "prx/libc/include/Shutdown.hpp"
+#include "prx/libkernel/Time/include/TimedWait.hpp"
 
 #include "SDL.h"
 #include "SceTypes.hpp"
@@ -37,6 +38,7 @@ static constexpr int VIDEO_OUT_ERROR_FLIP_QUEUE_FULL = -2144796654;
 static constexpr int VIDEO_OUT_ERROR_UNSUPPORTED_OUTPUT_MODE = -2144796650;
 static constexpr int VIDEO_OUT_ERROR_UNAVAILABLE_OUTPUT_MODE = -2144796647;
 static constexpr int VIDEO_OUT_ERROR_INVALID_EVENT = -2144796659;
+static constexpr int VIDEO_OUT_ERROR_UNKNOWN_OUTPUT_MODE = -2144796642;
 
 static constexpr int VIDEO_OUT_BUS_TYPE_MAIN = 0;
 static constexpr int VIDEO_OUT_BUS_TYPE_OVERLAY = 1;
@@ -74,6 +76,7 @@ static constexpr int VIDEO_OUT_EVENT_FLIP = 0;
 static constexpr int VIDEO_OUT_EVENT_VBLANK = 1;
 static constexpr int VIDEO_OUT_EVENT_PRE_VBLANK_START = 2;
 static constexpr int VIDEO_OUT_EVENT_SET_MODE = 8;
+static constexpr int VIDEO_OUT_EVENT_VRR_STATUS = 16;
 
 static constexpr int VIDEO_OUT_FLIP_MODE_VSYNC = 1;
 static constexpr int VIDEO_OUT_FLIP_MODE_VSYNC_MULTI = 4;
@@ -116,10 +119,12 @@ struct VideoOutConfig {
     std::vector<EventRegistration> vblankEvents;
     std::vector<EventRegistration> preVblankEvents;
     std::vector<EventRegistration> outputModeEvents;
+    std::vector<EventRegistration> vrrStatusEvents;
 
     uint32_t width = VIDEO_OUT_DEFAULT_WIDTH;
     uint32_t height = VIDEO_OUT_DEFAULT_HEIGHT;
     uint64_t generation = 0;
+    int busType = VIDEO_OUT_BUS_TYPE_MAIN;
     bool opened = false;
     bool closing = false;
     std::exception_ptr failure;
@@ -139,10 +144,16 @@ struct VideoOutConfig {
     std::array<BufferReuseTracker, VIDEO_OUT_BUFFER_NUM_MAX> bufferReuse;
     std::array<BufferAttributeGroup, VIDEO_OUT_BUFFER_ATTRIBUTE_NUM_MAX> groups{};
 
-    void Check() const {
+    bool Closed() const { return !opened || closing; }
+
+    void CheckAlive() const {
         if (failure) std::rethrow_exception(failure);
         if (shutdownToken.stop_requested()) throw ProcessShutdown{};
-        if (!opened || closing) throw std::runtime_error("VideoOut: port is closed");
+    }
+
+    void Check() const {
+        CheckAlive();
+        if (Closed()) throw std::runtime_error("VideoOut: port is closed");
     }
 };
 
@@ -163,6 +174,7 @@ struct FlipRequest final : AgcDriver::IFlipRequest, std::enable_shared_from_this
     VideoOutBuffer buffer;
     BufferAttributeGroup group;
     bool reserved = false;
+    bool unregistered = false;
     bool ready = false;
     bool gpuComplete = false;
     bool terminal = false;
@@ -173,11 +185,13 @@ struct FlipRequest final : AgcDriver::IFlipRequest, std::enable_shared_from_this
     ~FlipRequest() override;
     void GpuReady(const std::shared_ptr<AgcDriver::FrameTiming>& frameTiming) override;
     void Fail(std::exception_ptr error) noexcept override;
+    void Cancel() noexcept;
+    void ReleaseLocked() noexcept;
 };
 
 struct FlipQueue {
     std::mutex mutex;
-    std::condition_variable changed;
+    TimedWait::Condition changed;
     std::list<std::shared_ptr<FlipRequest>> requests;
     std::atomic<std::size_t> reservations = 0;
     std::exception_ptr failure;
@@ -199,6 +213,7 @@ public:
     bool Close(int handle);
     std::shared_ptr<VideoOutConfig> GetConfig(int handle);
     bool IsOpen(int handle);
+    bool HasConfig(int handle);
 
     // 0, or VIDEO_OUT_ERROR_FLIP_QUEUE_FULL when the title has VIDEO_OUT_FLIP_QUEUE_CAPACITY flips pending.
     int SubmitFlip(int handle, int index, int flipMode, int64_t flipArg);

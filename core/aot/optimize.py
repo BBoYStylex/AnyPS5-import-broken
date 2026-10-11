@@ -2,9 +2,9 @@ import re
 
 
 def merge_constant_stores(ir):
-    require_target = re.search(r'target triple = "(?:arm64|aarch64)-apple-', ir)
+    require_target = re.search(r'target triple = "(?:arm64|aarch64)-(?:apple-|unknown-linux-gnu)', ir)
     if require_target is None:
-        raise ValueError('constant-store reconstruction requires little-endian Apple ARM64 IR')
+        raise ValueError('constant-store reconstruction requires little-endian Apple or Linux ARM64 IR')
     if '__aps5_aot_bytes_' in ir:
         raise ValueError('constant-store reconstruction has already run')
     output, constants, pending = [], [], []

@@ -129,8 +129,18 @@ void ValidateValueReferences(const IrProgram& program, ShaderStageInputInfo inpu
                     const auto kind = static_cast<StageInputKind>(kindValue->ImmediateU32());
                     const auto component = componentValue->ImmediateU32();
                     switch (kind) {
-                        case StageInputKind::PackedAncillary:
-                            return Fail("packed pixel ancillary input has an unsupported live use");
+                        case StageInputKind::PackedAncillary: {
+                            std::string uses;
+                            for (const IrValue* user : inst->Uses()) {
+                                uses += uses.empty() ? " (used by " : ", ";
+                                uses += IrOpcodeName(user->Opcode());
+                                for (std::size_t i = 1; i < user->ArgumentCount(); ++i) {
+                                    const IrValue* argument = user->Argument(i)->Resolve();
+                                    uses += argument->HasImmediate() && argument->Type() == IrType::U32 ? " " + std::to_string(argument->ImmediateU32()) : " ?";
+                                }
+                            }
+                            return Fail("packed pixel ancillary input has an unsupported live use" + uses + (uses.empty() ? "" : ")"));
+                        }
                         case StageInputKind::Layer:
                         case StageInputKind::SampleId:
                             if (program.Resources().stage != IrShaderStage::Pixel || component != 0u) {
@@ -447,7 +457,7 @@ void CollectOutputs(const IrProgram& program, ShaderStageInputInfo inputInfo, Sh
     }
 }
 
-std::uint8_t SamplerUseOf(IrOpcode opcode, std::uint32_t flags, IrShaderStage stage) {
+std::uint16_t SamplerUseOf(IrOpcode opcode, std::uint32_t flags, IrShaderStage stage) {
     if (opcode == IrOpcode::ImageGatherRaw) {
         return SamplerUseGather;
     }
@@ -455,6 +465,9 @@ std::uint8_t SamplerUseOf(IrOpcode opcode, std::uint32_t flags, IrShaderStage st
         return SamplerUseQueryLod;
     }
     std::uint32_t use = (flags & RdnaImageSampleFlagDerivative) != 0u ? SamplerUseGradient : ImageSampleExplicitLod(flags, stage) ? SamplerUseExplicitLod : SamplerUseImplicitLod;
+    if (use == SamplerUseExplicitLod && (flags & RdnaImageSampleFlagLevelZero) == 0u) {
+        use |= SamplerUseNonZeroLod;
+    }
     if ((flags & RdnaImageSampleFlagOffset) != 0u) {
         use |= SamplerUseOffset;
     }
@@ -464,7 +477,7 @@ std::uint8_t SamplerUseOf(IrOpcode opcode, std::uint32_t flags, IrShaderStage st
     if ((flags & RdnaImageSampleFlagAdjust) != 0u) {
         use |= SamplerUseAdjust;
     }
-    return static_cast<std::uint8_t>(use);
+    return static_cast<std::uint16_t>(use);
 }
 
 void CollectSamplerUses(const IrProgram& program, ShaderInfo& info) {
@@ -486,7 +499,7 @@ void CollectSamplerUses(const IrProgram& program, ShaderInfo& info) {
                 return Fail("image instruction references an unknown sampler");
             }
             auto& sampler = info.samplers[memory.sampler];
-            sampler.uses = static_cast<std::uint8_t>(sampler.uses | SamplerUseOf(inst->Opcode(), memory.imageSampleFlags, program.Resources().stage));
+            sampler.uses = static_cast<std::uint16_t>(sampler.uses | SamplerUseOf(inst->Opcode(), memory.imageSampleFlags, program.Resources().stage));
         }
     }
 }

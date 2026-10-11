@@ -64,18 +64,18 @@ std::filesystem::path ShaderCacheDirectory() {
 namespace ShaderRecompiler::ShaderDiskCache {
 
 #if defined(__linux__) && defined(__x86_64__) && defined(__GLIBCXX__)
-static_assert(sizeof(CompiledShaderArtifact) == 184, "CompiledShaderArtifact changed: update the artifact encoder");
-static_assert(sizeof(ShaderInvocation) == 104, "ShaderInvocation changed: update the invocation encoder");
-static_assert(sizeof(RecompileResult) == 296, "RecompileResult changed: update EncodeResult and DecodeResult");
-static_assert(sizeof(DescriptorBinding) == 448, "DescriptorBinding changed: update the binding encoder");
+static_assert(sizeof(CompiledShaderArtifact) == 192, "CompiledShaderArtifact changed: update the artifact encoder");
+static_assert(sizeof(ShaderInvocation) == 112, "ShaderInvocation changed: update the invocation encoder");
+static_assert(sizeof(RecompileResult) == 312, "RecompileResult changed: update EncodeResult and DecodeResult");
+static_assert(sizeof(DescriptorBinding) == 568, "DescriptorBinding changed: update the binding encoder");
 static_assert(sizeof(VertexAttribute) == 32, "VertexAttribute changed: update the attribute encoder");
 static_assert(sizeof(VertexInput) == 16, "VertexInput changed: update the vertex input encoder");
 static_assert(sizeof(FragmentParameter) == 12, "FragmentParameter changed: update the parameter encoder");
-static_assert(sizeof(CompiledShaderInfo) == 336, "CompiledShaderInfo changed: update the info encoder");
-static_assert(sizeof(ShaderInfo) == 224, "ShaderInfo changed: update the info encoder");
+static_assert(sizeof(CompiledShaderInfo) == 344, "CompiledShaderInfo changed: update the info encoder");
+static_assert(sizeof(ShaderInfo) == 232, "ShaderInfo changed: update the info encoder");
 static_assert(sizeof(BufferResource) == 32, "BufferResource changed: update the info encoder");
-static_assert(sizeof(ImageResource) == 112, "ImageResource changed: update the info encoder");
-static_assert(sizeof(SamplerResource) == 16, "SamplerResource changed: update the info encoder");
+static_assert(sizeof(ImageResource) == 120, "ImageResource changed: update the info encoder");
+static_assert(sizeof(SamplerResource) == 20, "SamplerResource changed: update the info encoder");
 static_assert(sizeof(SampledResourcePair) == 12, "SampledResourcePair changed: update the info encoder");
 static_assert(sizeof(StageInput) == 56, "StageInput changed: update the info encoder");
 static_assert(sizeof(StageOutput) == 48, "StageOutput changed: update the info encoder");
@@ -256,7 +256,10 @@ void encodeBinding(Writer& writer, const DescriptorBinding& binding) {
     writer.Flags(binding.bufferWritten);
     writer.Flags(binding.samplerUnnormalized);
     writer.Flags(binding.imageUnnormalized);
+    writer.Flags(binding.imageUnnormalizedBaseLevel);
+    writer.Flags(binding.samplerIntegerBorder);
     writer.Values(std::span<const std::uint32_t>(binding.imageSamplers));
+    writer.Flags(binding.bufferRead);
 }
 
 void decodeBinding(Reader& reader, DescriptorBinding& binding) {
@@ -279,7 +282,10 @@ void decodeBinding(Reader& reader, DescriptorBinding& binding) {
     reader.Flags(binding.bufferWritten);
     reader.Flags(binding.samplerUnnormalized);
     reader.Flags(binding.imageUnnormalized);
+    reader.Flags(binding.imageUnnormalizedBaseLevel);
+    reader.Flags(binding.samplerIntegerBorder);
     reader.Values(binding.imageSamplers);
+    reader.Flags(binding.bufferRead);
 }
 
 void encodeArtifact(Writer& writer, const CompiledShaderArtifact& result) {
@@ -317,6 +323,9 @@ void encodeArtifact(Writer& writer, const CompiledShaderArtifact& result) {
         out.Value(parameter.perVertex);
         out.Value(parameter.custom);
     });
+    writer.Value(result.barycentricEmulation.active);
+    writer.Value(result.barycentricEmulation.smooth);
+    writer.Value(result.barycentricEmulation.linear);
 }
 
 void decodeArtifact(Reader& reader, CompiledShaderArtifact& result) {
@@ -356,6 +365,9 @@ void decodeArtifact(Reader& reader, CompiledShaderArtifact& result) {
         in.Value(parameter.perVertex);
         in.Value(parameter.custom);
     });
+    reader.Value(result.barycentricEmulation.active);
+    reader.Value(result.barycentricEmulation.smooth);
+    reader.Value(result.barycentricEmulation.linear);
     result.variantId = 0;
 }
 
@@ -374,6 +386,7 @@ void encodeInvocation(Writer& writer, const ShaderInvocation& invocation) {
         out.Value(attribute.fetchIndex);
         out.Value(attribute.formatComponents);
     });
+    writer.Value(invocation.poisonedSrtReads);
 }
 
 void decodeInvocation(Reader& reader, ShaderInvocation& invocation) {
@@ -394,6 +407,7 @@ void decodeInvocation(Reader& reader, ShaderInvocation& invocation) {
         in.Value(attribute.fetchIndex);
         in.Value(attribute.formatComponents);
     });
+    reader.Value(invocation.poisonedSrtReads);
 }
 
 void encodeLayout(Writer& writer, const IrBindingLayout& layout) {
@@ -472,6 +486,11 @@ void encodeInfo(Writer& writer, const CompiledShaderInfo& compiled) {
         out.Value(image.packed);
         out.Value(image.fmaskCompatible);
         out.Value(image.depthBitsCompatible);
+        out.Value(image.constantSwizzle);
+        out.Value(image.constantSwizzleCompatible);
+        out.Value(image.flatVolumeCompatible);
+        out.Value(image.flatLineCompatible);
+        out.Value(image.foldTexelOffsetsOnly);
         out.Value(image.byElements);
         out.Value(image.byComponents);
         out.Value(image.packedFormat);
@@ -489,6 +508,7 @@ void encodeInfo(Writer& writer, const CompiledShaderInfo& compiled) {
         out.Value(sampler.forcePointFiltering);
         out.Value(sampler.depthCompare);
         out.Value(sampler.uses);
+        out.Value(sampler.foldTexelOffsetsOnly);
     });
     writer.List(info.sampledPairs, [](Writer& out, const SampledResourcePair& pair) {
         out.Value(pair.image);
@@ -518,6 +538,7 @@ void encodeInfo(Writer& writer, const CompiledShaderInfo& compiled) {
     writer.Value(info.hasBitwiseXor);
     writer.Value(info.usesDma);
     writer.Value(info.bdaWrites);
+    writer.Value(info.usesFaultBuffer);
     writer.Value(info.dispatchThreadLimit);
     encodeLayout(writer, compiled.bindings);
 }
@@ -547,7 +568,7 @@ void decodeInfo(Reader& reader, CompiledShaderInfo& compiled) {
         in.Value(buffer.scalar);
         in.Value(buffer.typedAlignment);
     });
-    reader.List(info.images, 72, [](Reader& in, ImageResource& image) {
+    reader.List(info.images, 75, [](Reader& in, ImageResource& image) {
         in.Value(image.source);
         in.Value(image.firstUsePc);
         in.Value(image.resourceClass);
@@ -572,6 +593,11 @@ void decodeInfo(Reader& reader, CompiledShaderInfo& compiled) {
         in.Value(image.packed);
         in.Value(image.fmaskCompatible);
         in.Value(image.depthBitsCompatible);
+        in.Value(image.constantSwizzle);
+        in.Value(image.constantSwizzleCompatible);
+        in.Value(image.flatVolumeCompatible);
+        in.Value(image.flatLineCompatible);
+        in.Value(image.foldTexelOffsetsOnly);
         in.Value(image.byElements);
         in.Value(image.byComponents);
         in.Value(image.packedFormat);
@@ -584,13 +610,14 @@ void decodeInfo(Reader& reader, CompiledShaderInfo& compiled) {
     bool preparedImageModes = false;
     reader.Value(preparedImageModes);
     if (preparedImageModes) ResourceMaterializer::PrepareImageModes(info);
-    reader.List(info.samplers, 15, [](Reader& in, SamplerResource& sampler) {
+    reader.List(info.samplers, 17, [](Reader& in, SamplerResource& sampler) {
         in.Value(sampler.source);
         in.Value(sampler.firstUsePc);
         in.Value(sampler.copyOf);
         in.Value(sampler.forcePointFiltering);
         in.Value(sampler.depthCompare);
         in.Value(sampler.uses);
+        in.Value(sampler.foldTexelOffsetsOnly);
     });
     reader.List(info.sampledPairs, 12, [](Reader& in, SampledResourcePair& pair) {
         in.Value(pair.image);
@@ -620,6 +647,7 @@ void decodeInfo(Reader& reader, CompiledShaderInfo& compiled) {
     reader.Value(info.hasBitwiseXor);
     reader.Value(info.usesDma);
     reader.Value(info.bdaWrites);
+    reader.Value(info.usesFaultBuffer);
     reader.Value(info.dispatchThreadLimit);
     decodeLayout(reader, compiled.bindings);
 }
@@ -641,6 +669,8 @@ constexpr std::string_view NeutralSwitches[] = {
     "APS5_DUMP_IR",
     "APS5_NO_CODE_HASH_KEY",
     "APS5_NO_FAILURE_MEMO",
+    "APS5_NO_PERF_FRONTEND_PAIR",
+    "APS5_NO_PERF_DOM_INTERSECTION",
     "APS5_NO_RESULT_MEMO",
 };
 
@@ -880,12 +910,14 @@ void EncodeResult(const RecompileResult& result, std::vector<std::byte>& out) {
     Writer writer(out);
     encodeArtifact(writer, result);
     encodeInvocation(writer, result);
+    writer.Value(result.workgroupMemoryDwords);
 }
 
 bool DecodeResult(std::span<const std::byte> bytes, RecompileResult& result) {
     Reader reader(bytes);
     decodeArtifact(reader, result);
     decodeInvocation(reader, result);
+    reader.Value(result.workgroupMemoryDwords);
     result.cacheHit = false;
     return reader.Done() && result.runtimeAbiVersion == RuntimeAbi::Version;
 }

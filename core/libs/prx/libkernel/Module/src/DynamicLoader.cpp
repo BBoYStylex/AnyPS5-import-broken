@@ -1,4 +1,6 @@
 #include "prx/libc/include/General.hpp"
+#include "prx/libc/include/GuestAllocations.hpp"
+#include "prx/libkernel/Module/ModuleArgs.hpp"
 #include <nid/NidCompute.hpp>
 #include <array>
 #include <filesystem>
@@ -7,6 +9,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <set>
 #include <vector>
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -103,6 +106,28 @@ char* APS5_VABI dlerror_nid_postfix() {
     pendingError = false;
     return loaderError.data();
 }
+#ifdef _WIN32
+static void InitializeDeferredModule(HMODULE native) {
+    using Entry = int (APS5_VABI *)(std::size_t, const void*, void*);
+    using Initializer = void (APS5_VABI *)(int, char**, char**);
+    static std::mutex initializedLock;
+    static std::set<HMODULE> initialized;
+    const auto* table = reinterpret_cast<const std::uint32_t*>(GetProcAddress(native, "__aps5_guest_initialize"));
+    if (!table) return;
+    {
+        std::lock_guard lock(initializedLock);
+        if (!initialized.insert(native).second) return;
+    }
+    auto* base = reinterpret_cast<std::uint8_t*>(native);
+    const auto* pending = static_cast<const PendingModuleArgs*>(__aps5_get_pending_module_args_nid_no_patch());
+    if (table[0] != 0) __aps5_set_module_init_result_nid_no_patch(reinterpret_cast<Entry>(base + table[0])(pending->args, pending->argp, nullptr));
+    for (std::uint32_t index = 0; index < table[1]; ++index) {
+        const auto initializer = *reinterpret_cast<Initializer*>(base + table[2 + index]);
+        if (initializer) initializer(0, nullptr, nullptr);
+    }
+}
+#endif
+
 static std::filesystem::path RelinkedModulePath(const std::filesystem::path& path) {
     auto relinked = path;
     relinked += ".guest.prx";
@@ -125,6 +150,7 @@ void* APS5_VABI dlopen_nid_postfix(const char* path, int flags) {
             if (!*path) { Error("dlopen: empty module path"); return nullptr; }
             const auto resolved = RelinkedModulePath(ResolvePath_nid_no_patch(path));
             module->native = LoadLibraryExW(resolved.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
+            if (module->native) InitializeDeferredModule(static_cast<HMODULE>(module->native));
         }
         if (!module->native) {
             char message[128];
@@ -171,12 +197,32 @@ void* APS5_VABI dlsym_nid_postfix(void* handle, const char* name) {
     } catch (const std::exception& error) { Error(error.what()); return nullptr; }
 }
 int APS5_VABI dlclose_nid_postfix(void* handle) {
+    const auto key = reinterpret_cast<std::uintptr_t>(handle);
     std::shared_ptr<Module> module;
+#ifdef _WIN32
+    bool lastReference = true;
+#endif
     {
         std::lock_guard lock(modulesMutex);
-        auto found = modules.find(reinterpret_cast<std::uintptr_t>(handle));
+        auto found = modules.find(key);
         if (found == modules.end()) { Error("dlclose: invalid module handle"); return -1; }
-        module = std::move(found->second);
+        module = found->second;
+#ifdef _WIN32
+        for (const auto& [other, entry] : modules) {
+            if (other != key && entry->native == module->native) lastReference = false;
+        }
+#endif
+    }
+#ifdef _WIN32
+    if (module->owned && module->native && lastReference) {
+        GuestAllocations::Mutation mutation;
+        mutation.UnregisterImage(module->native);
+    }
+#endif
+    {
+        std::lock_guard lock(modulesMutex);
+        auto found = modules.find(key);
+        if (found == modules.end()) { Error("dlclose: invalid module handle"); return -1; }
         modules.erase(found);
     }
     // Unload outside the registry lock: module destructors may call loader APIs.

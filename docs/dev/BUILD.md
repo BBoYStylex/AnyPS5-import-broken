@@ -10,6 +10,8 @@ cmake --build build-relinker --parallel
 ctest --test-dir build-relinker --output-on-failure
 ```
 
+Python must be found during CMake configuration for Python tests to be registered. List registered tests with `ctest --test-dir build-relinker -N` and look for `input_magic`, a Python-backed relinker test. If automatic discovery fails, add `-DPython3_EXECUTABLE="C:/path/to/python.exe"` to the configure command, using the path to your Python interpreter, then list the tests again.
+
 This mode builds the conversion tool and its tests on Linux, Windows and macOS, including Apple Silicon. macOS uses AppleClang from the Xcode command-line tools; Windows uses the MinGW-w64 toolchain below. The executable is `build-relinker/core/relinker/relinker` (`relinker.exe` on Windows with Ninja).
 
 The output remains x86-64 Linux ELF or Windows PE. Converted games need system libraries built for the target OS and a compatible x86-64 host. This mode does not build those libraries or provide macOS game execution. Tests inspect both output formats; execution checks run only on their compatible hosts.
@@ -18,9 +20,9 @@ Use a separate build directory for the full build.
 
 ## Experimental native Apple ARM64 compiler
 
-`ANYPS5_NATIVE_AOT` enables an offline compiler on Apple Silicon. It reads x86-64 ELF code and explicit function/data contracts, emits LLVM IR, and optionally builds an ARM64 Mach-O object with Xcode's Clang. Generated code uses native calls and stack frames; there is no shipped x86 decoder, interpreter or JIT. This target is an initial compiler implementation, not a complete macOS game runtime.
+`ANYPS5_NATIVE_AOT` enables an offline Apple ARM64 compiler on Apple Silicon or Linux. The default `apple-arm64` target emits Mach-O for Apple Silicon. The optional `linux-arm64` validation target emits AArch64 ELF so Linux ARM64 CI can execute compiler output natively. It reads x86-64 ELF code and explicit function/data contracts, emits LLVM IR, and optionally builds an ARM64 Mach-O object with Xcode's Clang. Generated code uses native calls and stack frames; there is no shipped x86 decoder, interpreter or JIT. This target is an initial compiler implementation, not a complete macOS game runtime.
 
-It requires native ARM64 Python 3.10 or newer, the Xcode command-line tools, and two pinned source submodules. The regular relinker and full build keep their existing behavior when the option is off.
+It requires Python 3.10 or newer, Xcode command-line tools on macOS or Clang on Linux, and two pinned source submodules. Execution tests require a native ARM64 host. Linux x86-64 can cross-compile both object formats but does not run them. The regular relinker and full build keep their existing behavior when the option is off.
 
 ```sh
 git submodule update --init 3rdparty/capstone 3rdparty/pyelftools
@@ -36,7 +38,49 @@ Supported operations cover declared scalar integer, SSE and VEX integer/bitwise 
 
 The tests build synthetic ELF inputs, compile and execute ARM64 code, check native callback/tail-call ABIs and compare supported operations with independent integer oracles and x86 SSE probes. The SSE reference executables use Rosetta on Apple Silicon; generated ARM64 programs do not. Those differential tests therefore require Rosetta to be installed. They do not qualify console hardware, complete games or performance.
 
-Guest TLS and C++ exceptions, aggregate and variadic ABIs, general computed jumps, x87, atomics, guest fault delivery, concurrent memory semantics and full module lifecycle are incomplete. Unsupported instructions and declared ABIs reject. Pointer operands need a proven native origin: declared pointer arguments/results, reconstructed image/frame addresses or tracked pointer cells. Arbitrary pointer fields loaded from structs, and pointer-cell reuse after calls that could modify memory, currently reject; typed memory-effect contracts remain future work. Concurrent accesses are not qualified by the single-threaded memory model. See [TechnicalDebt](TechnicalDebt.md) for the remaining qualification limits.
+### Source-built native runtime example
+
+Initialize `3rdparty/ps5link-sdk` at its recorded commit. This optional source dependency builds the public SDK linker and startup code under its GPL-3.0 license; no third-party fixture binaries are checked in. The ordinary compiler build does not require it.
+
+```
+git submodule update --init 3rdparty/capstone 3rdparty/pyelftools 3rdparty/ps5link-sdk
+cmake -S . -B build-aot -G Ninja -DCMAKE_BUILD_TYPE=Release -DANYPS5_RELINKER_ONLY=ON -DANYPS5_NATIVE_AOT=ON -DANYPS5_NATIVE_AOT_EXAMPLE=ON -DBUILD_TESTING=ON
+cmake --build build-aot --target native_aot_hello_notify --parallel 3
+```
+
+On Apple Silicon this command compiles the SDK's `hello_notify` source to x86-64 ELF, derives hash-bound contracts from matched companion objects and DWARF stack locations, emits ARM64 Mach-O, links the runtime, and executes the resulting program. It checks the notification, process exit and teardown callback, an ARM64-only executable, and `sysctl.proc_translated=0`. The runtime reuses the repository's application heap, notification and timer implementations with native image registration and startup glue. Missing imports fail during contract generation or linking. No game runtime, module loader or interpreter is bundled.
+
+The default CI source variant changes only the example's 30-second delay to 1,000 microseconds so each test remains below 30 seconds; the runtime's sleep function is not bypassed. The source hashes, function coverage, frame prologue and debug stack object must match the declared example. The generated `build-aot/core/aot/hello-notify/contracts.json`, `module.ll`, `module.optimized.ll` and `result.json` describe the actual input and result. To build and run the original delay on Apple Silicon or Linux ARM64, use `cmake --build build-aot --target native_aot_hello_notify_original`. This manual target writes to the `hello-notify/original` subdirectory and remains outside the time-limited CTest suite.
+
+On Linux ARM64 the same target emits AArch64 ELF and executes it natively, checking the notification, exit, teardown, executable machine type and host architecture. Immutable imports use ELF RELRO and startup checks of the actual process mappings. Linux x86-64 cross-compiles the example to Apple ARM64 Mach-O without executing it. Both Linux configurations also run the native C++ image, heap, notification, timer and readonly-page tests. The ARM64 CI job runs the AOT tests only; the relinker's x86-only execution tests remain in the x86-64 job. Apple Silicon runs the full native compiler suite and the Mach-O example. Rosetta is needed only for the older x86 SSE reference tests, not for building or executing either native runtime example.
+
+The CLI accepts `--target apple-arm64` (default) or `--target linux-arm64`; the selected target is recorded in the compilation report. Linux ARM64 exists to validate the same lowering and runtime consumer in Linux CI. Its qualification is limited to the tested scalar/provider/example paths and is not a complete additional platform port.
+
+
+Guest TLS and C++ exceptions, aggregate and variadic ABIs, general computed jumps, x87, atomics, guest fault delivery, concurrent memory semantics and full module lifecycle are incomplete. Unsupported instructions and declared ABIs reject. Pointer operands need a proven native origin: declared pointer arguments/results, reconstructed image/frame addresses or tracked pointer cells. For acyclic direct calls within the image, the compiler infers writes from validated instruction states, including transitive tail calls. Private frame writes preserve caller memory proofs; fixed image writes invalidate overlapping pointer cells. For a single-entry straight-line loop, constant initialization, one positive 64-bit increment after an equality exit test, and exact reachability of the exit value can prove an unsigned index range without wraparound. The range applies only inside that loop; indexed frame writes preserve unrelated pointer cells only when their entire byte range stays inside the native frame. The report records these bounded-loop proofs. Fixed-size writes through declared pointer parameters are inferred with signed constant offsets and propagated through acyclic direct and tail calls. A known register argument or tracked stack argument resolves them to a bounded frame/image region or to a caller parameter. Overlapping ranges are combined per parameter; different parameters may alias. Unresolved caller parameters still invalidate memory proofs, while their relative writes remain available to higher-level callers. Other loop shapes, unqualified imports, indirect calls, recursive call chains and unresolved aliases retain conservative invalidation. Exact eight-byte pointer stores, spills and reloads retain their frame/image/parameter origin, including declared incoming stack parameters. Partial, wide or potentially aliasing writes invalidate every overlapping cell; unknown calls clear these origins. Control-flow joins retain only identical origins on all paths. Arbitrary pointer fields loaded from structs still reject. Inferred effects and provider-binding preconditions are included in the compilation report. Concurrent accesses are not qualified by the single-threaded memory model. See [TechnicalDebt](TechnicalDebt.md) for the remaining qualification limits.
+
+Import contracts optionally accept `memory_effects` with exactly `writes`, `callbacks` and a nonempty `evidence` string. These are caller-verified assertions about the actual native provider and execution profile, not inferred or checked against its binary. `writes` must cover all changes to guest-visible memory, including captured aliases and globals. `callbacks: false` asserts no guest callback or reentry during the call. Private host state is excluded only when it cannot alias tracked guest memory; asynchronous mutation is outside this profile. Missing effects or possible guest callbacks invalidate memory proofs.
+
+For example, a verified native `memset(ptr, i32, u64)` provider may declare:
+
+```json
+"memory_effects": {
+  "writes": [{"parameter": 0, "size_parameter": 2}],
+  "callbacks": false,
+  "evidence": "Identify the provider implementation/version, source and verified execution constraints"
+}
+```
+
+Each write starts at a pointer parameter and specifies either a constant unsigned byte `size` or an integer `size_parameter`. Indices are zero-based. The current analysis requires a register or tracked stack pointer argument with a proven frame/image address and a constant extent; unresolved or out-of-region destinations and unknown extents retain conservative invalidation. A zero extent performs no write. `writes: []` asserts no guest-visible writes. Known scalar stack bytes can supply null pointer arguments and constant extents, including stack-passed sizes. Partial values and conflicting control-flow paths do not prove a complete constant. An all-zero pointer argument is accepted as native null without assigning pointer provenance to arbitrary integers. Native return-pointer identity still follows the result ABI contract; return aliases are not inferred.
+
+Provider effects apply only while the import slot retains its original binding. Writes invalidate binding proofs even when they store another native pointer. Callee binding preconditions propagate through direct, tail and declared indirect calls, including recursive dependencies, and must hold before calling code compiled under those assumptions. External native callers must honor the reported preconditions as well. Internal functions cannot override inferred effects with annotations. The report retains provider evidence for review; linking the matching provider remains the caller's responsibility.
+
+
+The optional `native_runtime_registration: true` contract validates the process/libc parameter chain and allocator callback ABIs, emits a versioned native image descriptor, and registers it after pointer relocations. Link these objects with the `anyps5_native_image` static target and the actual native import providers. The registry supplies `ApplicationProcessParameters_nid_no_patch`; do not also link the ordinary executable-image implementation of that symbol. No fixed guest data address is required in the launcher. The component accepts one main image with static metadata lifetime; module loading/unloading and complete runtime integration remain outside this target. Allocator extension callbacks without a supported signature reject.
+
+Functions may opt into `checked_stack_accesses`: each record has an instruction `address`, memory `operand` index, a declared stack object's `object_offset`, and a boolean `pointer`. The instruction must have one memory operand with a proven native frame base. The compiler emits native bounds checks before the access and traps on violation; this does not provide guest fault delivery. A `pointer: true` scalar load additionally checks eight-byte cell alignment and requires every candidate cell to contain an independently proved native pointer. Declaring a pointer table does not establish its contents. Stores conservatively invalidate the object's affected pointer proofs. Object layouts remain source/recovery contracts. The report lists these checked accesses separately from statically bounded loops; their runtime cost must be measured on each workload.
+
+`immutable_data` optionally lists complete data segments as `{"address": ..., "evidence": "..."}`. This profile forbids writes, rebinding, unmapping or reprotection of those segments. Pointer relocations are emitted as symbolic native initializers in Mach-O `__DATA_CONST`; they are not patched by stores in the AOT constructor. The native image support library verifies readable, non-writable mappings before guest entry. Statically resolved writes and writable call effects into those ranges reject. Their pointer cells/import bindings remain invariant across calls; mutable segments retain conservative invalidation. External providers must honor the immutable-region contract. This is a constrained static-linking profile, not support for self-modifying import tables. See [LLVM global variables](https://llvm.org/docs/LangRef.html#global-variables) and [Apple dyld initialization](https://github.com/apple-oss-distributions/dyld/blob/main/doc/dyld4.md).
 
 ## Full build
 
@@ -48,7 +92,9 @@ git submodule update --init --recursive
 
 - x86-64, Git, CMake 3.22.1 or newer, Ninja, C++20.
 - Linux: GCC, G++, binutils. SDL's X11 backend requires X11 and Xext development headers (`libx11-dev` and `libxext-dev` on Debian/Ubuntu).
+- Fedora: if CMake reports `Could NOT find Threads`, install `glibc-static` and `libstdc++-static` with `sudo dnf install glibc-static libstdc++-static`, then rerun configuration. The project enables static executable linking, and FFmpeg's thread check needs these libraries.
 - Windows: only MinGW-w64 GCC 15.2.0 (WinLibs `x86_64-ucrt-posix-seh`, release `15.2.0posix-14.0.0-ucrt-r7`) is currently supported. Add its `mingw64/bin` directory to `PATH` before configuring.
+- Windows antivirus software can quarantine the executables that the relinker tests create in the temp directory, which fails `optional_plt`, `empty_tls`, `windows_address_space` and `windows_icon`. Set `TEMP` and `TMP` to a directory the scanner excludes before running `ctest`.
 - FFmpeg binaries are downloaded during configuration unless `FFMPEG_PREBUILT_DIR` is set. With the WinLibs CMake, the download fails with status 60 (`SSL peer certificate or SSH remote key was not OK`) unless `SSL_CERT_FILE` names a CA bundle, for example `C:\Program Files\Git\mingw64\etc\ssl\certs\ca-bundle.crt` from Git for Windows, as in CI.
 
 ## Commands
@@ -75,6 +121,7 @@ Project switches accept `ON` or `OFF`:
 | `-DBUILD_TESTING=ON`             | `OFF`   | Build and register tests.                        |
 | `-DANYPS5_RELINKER_ONLY=ON`      | `OFF`   | Build only the relinker and its tests, without third-party dependencies. |
 | `-DANYPS5_ENABLE_SPIRV_TOOLS=ON` | `OFF`   | Enable SPIR-V validation and optimization.       |
+| `-DANYPS5_USE_SYSTEM_DEPS=ON`    | `OFF`   | Resolve SDL2, freetype, Vulkan-Headers, SPIRV-Headers, glslang and SPIRV-Tools from the system instead of the submodules. |
 | `-DAPS5_ENABLE_TIMING_LOG=ON`    | `OFF`   | Compile frame timing logging.                    |
 | `-DAPS5_AGC_CREATE_LOG=OFF`      | `ON`    | Disable successful `sceAgcCreateShader` logging. |
 | `-DAGC_BUILD_VISUAL_TEST=ON`     | `OFF`   | Build the standalone AGC SPIR-V visual test.     |
@@ -92,10 +139,40 @@ Build configuration parameters:
 
 SDL and FreeType settings forced by the root `CMakeLists.txt` cannot be overridden with `-D`.
 
+With `ANYPS5_USE_SYSTEM_DEPS=ON` those libraries come from the system (on Debian and Ubuntu: `libsdl2-dev`, `libfreetype-dev`, `libvulkan-dev`, `spirv-headers`, `glslang-dev`, `glslang-tools` and `spirv-tools`). A missing package, Vulkan-Headers older than 1.4.310 (the agc driver uses `VK_KHR_maintenance8`), or an SDL2 without the HIDAPI joystick driver (sdl2-compat over SDL3, or a build with HIDAPI disabled, which breaks the pad and disk-audio tests), fails the configure with an error and never falls back to the submodule. The forced SDL and FreeType settings from the root `CMakeLists.txt` do not apply with the flag ON: the system SDL2 comes with whatever its distribution enabled. The prx libraries are shared objects, so SDL2 is linked from the system as a shared library; the default build keeps its own static SDL2. `ffmpeg-core`, `libjpeg-turbo`, `stb`, `VulkanMemoryAllocator` and `LibAtrac9` always stay bundled and still need `git submodule update --init`.
+
+## Write watch tests
+
+The macOS write watch can be built and tested separately, without submodules or the prx libraries:
+
+```sh
+cmake -S core/libs/tests/write_watch -B build/write-watch -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
+cmake --build build/write-watch
+ctest --test-dir build/write-watch --output-on-failure
+```
+
+With `CMAKE_OSX_ARCHITECTURES=x86_64` Apple silicon runs the tests through Rosetta, which is how relinked titles run; without it they run natively. The full `BUILD_TESTING` build on macOS also registers them.
+
 ## Pipeline statistics
 
 Set `APS5_PIPELINE_STATS=1` to capture and print driver statistics for each newly created graphics or compute pipeline. This requires `VK_KHR_pipeline_executable_properties` and `pipelineExecutableInfo`; an unsupported device fails with an error. Statistic names and units are driver-specific. Capturing statistics can increase pipeline compilation cost. The setting is disabled by default.
 
+## Driver thread priority
+
+Set `APS5_THREAD_PRIORITY=high` to raise the AGC driver's queue workers and the video output presenter above the title's threads. On Linux the threads get nice `APS5_THREAD_NICE` (default -10) through rtkit; on Windows they get `THREAD_PRIORITY_HIGHEST`. `APS5_THREAD_PRIORITY=rt` asks rtkit for real-time priority `APS5_THREAD_RT` (default 10, at most rtkit's `MaxRealtimePriority`) under rtkit's policy, `SCHED_RR` by default; on Windows it sets `THREAD_PRIORITY_TIME_CRITICAL`. rtkit only grants it when the process's hard `RLIMIT_RTTIME` is at most its `RTTimeUSecMax` (200000 us by default), so a hard limit above `APS5_THREAD_RTTIME_US` (default 200000, capped at `RTTimeUSecMax`) is lowered to it and the soft limit to at most half of it. The hard limit cannot be raised again and stays lowered for the whole process even if rtkit then refuses; see [technical debt](TechnicalDebt.md#functional). There is no fallback between the modes: when rtkit or `SetThreadPriority` refuses, a queue worker reports the refusal as a driver failure, which the next submission, wait or shutdown rethrows, and the presenter's start throws it. Each raised thread logs its priority once as `[thread-priority]`. The setting is `off` by default; a value other than `off`, `high` or `rt` is reported the same way as a refusal.
+
 ## Shader recompiler
 
 The shader recompilation logic in [core/shader/recompiler](../../core/shader/recompiler) is isolated from the rest of the project and is a pure function of its input data, designed for integration into any other project. The current CMake target also includes cache support and links a supplied runtime target, glslang, and optionally SPIRV-Tools.
+
+## Register context tests
+
+The x86-64 register capture and restore tests can be built separately on Linux and macOS, without submodules or the prx libraries. On macOS:
+
+```sh
+cmake -S core/libs/tests/register_context -B build/register-context -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
+cmake --build build/register-context
+ctest --test-dir build/register-context --output-on-failure
+```
+
+On Linux x86-64, omit `CMAKE_OSX_ARCHITECTURES`; the full `BUILD_TESTING` build also registers these tests. Apple silicon runs the x86-64 tests through Rosetta. They cover the unwinder's register transfer, not the complete macOS runtime or guest exception handling.

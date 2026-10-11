@@ -1,11 +1,24 @@
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
+#include <cerrno>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#endif
 #include "prx/libc/include/general/VabiMacros.hpp"
+#include "prx/libkernel/Socket/include/SocketSelectDeadline.hpp"
 #include "SceTypes.hpp"
 #include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <future>
 #include <stdexcept>
 #include <thread>
 
@@ -24,12 +37,14 @@ std::int64_t APS5_VABI sceNetRecv(int, void*, std::size_t, int);
 std::int64_t APS5_VABI sceNetSendto(int, const void*, std::size_t, int, const void*, std::uint32_t);
 std::int64_t APS5_VABI sceNetRecvfrom(int, void*, std::size_t, int, void*, std::uint32_t*);
 int APS5_VABI sceNetSocketClose(int);
+int APS5_VABI sceNetShutdown(int, int);
 int APS5_VABI sceNetSetsockopt(int, int, int, const void*, std::uint32_t);
 int* APS5_VABI sceNetErrnoLoc(void);
 int APS5_VABI sceNetEpollCreate(const char*, int);
 int APS5_VABI sceNetEpollControl(int, int, int, const NetEpollEvent*);
 int APS5_VABI sceNetEpollWait(int, NetEpollEvent*, int, int);
 int APS5_VABI sceNetEpollDestroy(int);
+int APS5_VABI sceNetEpollAbort(int, int);
 extern const std::uint32_t sce_net_in6addr_any[4];
 int APS5_VABI sceNetResolverCreate(const char*, int, int);
 int APS5_VABI sceNetResolverStartNtoa(int, const char*, void*, int, int, int);
@@ -38,6 +53,8 @@ int APS5_VABI sceNetResolverDestroy(int);
 int APS5_VABI sceNetResolverGetError(int, int*);
 int APS5_VABI sceNetCtlGetState(int*);
 int APS5_VABI select_nid_postfix(int, void*, void*, void*, const void*);
+int APS5_VABI open_nid_postfix(const char*, int, int);
+int APS5_VABI close_nid_postfix(int);
 int* APS5_VABI __error_nid_postfix();
 int APS5_VABI sceNetInetPton(int, const char*, void*);
 const char* APS5_VABI sceNetInetNtop(int, const void*, char*, std::uint32_t);
@@ -90,6 +107,44 @@ static void CheckPoolStats() {
     Require(Failed(sceNetGetMemoryPoolStats(pool, nullptr), 22));
     Require(sceNetPoolDestroy(pool) == 0);
     Require(Failed(sceNetGetMemoryPoolStats(pool, &stats), 9));
+}
+
+static void CheckEmptyEpoll() {
+    const int epoll = sceNetEpollCreate("empty-epoll", 0);
+    Require(epoll >= 0);
+    NetEpollEvent event{};
+    Require(sceNetEpollWait(epoll, &event, 1, 0) == 0);
+    std::array<std::chrono::steady_clock::duration, 9> elapsed{};
+    for (auto& sample : elapsed) {
+        const auto start = std::chrono::steady_clock::now();
+        Require(sceNetEpollWait(epoll, &event, 1, 1000) == 0);
+        sample = std::chrono::steady_clock::now() - start;
+        Require(sample >= std::chrono::microseconds(1000));
+    }
+#ifdef _WIN32
+    if (std::getenv("APS5_NO_TIMER_RESOLUTION") == nullptr) {
+        std::sort(elapsed.begin(), elapsed.end());
+        Require(elapsed[elapsed.size() / 2] < std::chrono::milliseconds(8));
+    }
+#endif
+    Require(sceNetEpollAbort(epoll, 0) == 0);
+    Require(Failed(sceNetEpollWait(epoll, &event, 1, 1000), 53));
+    Require(sceNetEpollWait(epoll, &event, 1, 0) == 0);
+    Require(sceNetEpollDestroy(epoll) == 0);
+
+    for (const bool abort : {true, false}) {
+        const int waiting_epoll = sceNetEpollCreate("waiting-epoll", 0);
+        Require(waiting_epoll >= 0);
+        auto waiter = std::async(std::launch::async, [waiting_epoll, abort] {
+            NetEpollEvent ready{};
+            Require(Failed(sceNetEpollWait(waiting_epoll, &ready, 1, -1), abort ? 53 : 9));
+        });
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        Require((abort ? sceNetEpollAbort(waiting_epoll, 0) : sceNetEpollDestroy(waiting_epoll)) == 0);
+        Require(waiter.wait_for(std::chrono::seconds(1)) == std::future_status::ready);
+        waiter.get();
+        if (abort) Require(sceNetEpollDestroy(waiting_epoll) == 0);
+    }
 }
 
 static void CheckMessages(int receiver, int sender, const std::array<std::uint8_t, 16>& address) {
@@ -169,6 +224,37 @@ static void CheckAddressText(int family, const char* text) {
     Require(sceNetInetNtop(family, address.data(), nullptr, output.size()) == nullptr && *sceNetErrnoLoc() == 22);
 }
 
+static bool ipv6Unavailable = false;
+
+static bool HostIpv6LoopbackUnavailable() {
+    const auto hostSocket = ::socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP);
+#ifdef _WIN32
+    if (hostSocket == INVALID_SOCKET) {
+        const int error = WSAGetLastError();
+        return error == WSAEAFNOSUPPORT || error == WSAEPROTONOSUPPORT;
+    }
+#else
+    if (hostSocket < 0) return errno == EAFNOSUPPORT || errno == EPROTONOSUPPORT;
+#endif
+
+    sockaddr_in6 loopback{};
+    loopback.sin6_family = AF_INET6;
+    loopback.sin6_port = htons(9);
+    loopback.sin6_addr = in6addr_loopback;
+    const char payload = 0;
+    const auto sent = ::sendto(hostSocket, &payload, sizeof(payload), 0,
+        reinterpret_cast<const sockaddr*>(&loopback), sizeof(loopback));
+#ifdef _WIN32
+    const int error = sent < 0 ? WSAGetLastError() : 0;
+    closesocket(hostSocket);
+    return sent < 0 && (error == WSAEADDRNOTAVAIL || error == WSAENETUNREACH || error == WSAEHOSTUNREACH);
+#else
+    const int error = sent < 0 ? errno : 0;
+    close(hostSocket);
+    return sent < 0 && (error == EADDRNOTAVAIL || error == ENETUNREACH || error == EHOSTUNREACH);
+#endif
+}
+
 static void CheckUnspecifiedIpv6() {
     std::array<std::uint8_t, 16> unspecified{};
     Require(sceNetInetPton(28, "::", unspecified.data()) == 1);
@@ -178,6 +264,10 @@ static void CheckUnspecifiedIpv6() {
     Require(std::strcmp(text, "::") == 0 && text[3] == 'x');
 
     const int receiver = sceNetSocket("ipv6-any", 28, 2, 17);
+    if (receiver < 0 && *sceNetErrnoLoc() == 47) {
+        ipv6Unavailable = true;
+        return;
+    }
     const int sender = sceNetSocket("ipv6-loopback", 28, 2, 17);
     Require(receiver >= 0 && sender >= 0);
     std::array<std::uint8_t, 28> address{28, 28};
@@ -191,7 +281,14 @@ static void CheckUnspecifiedIpv6() {
     Require(sceNetInetPton(28, "::1", address.data() + 8) == 1);
 
     const char payload[] = "IPv6 wildcard receive";
-    Require(sceNetSendto(sender, payload, sizeof(payload), 0, address.data(), address.size()) == sizeof(payload));
+    const auto sent = sceNetSendto(sender, payload, sizeof(payload), 0, address.data(), address.size());
+    if (sent < 0 && *sceNetErrnoLoc() == 51 && HostIpv6LoopbackUnavailable()) {
+        Require(sceNetSocketClose(sender) == 0);
+        Require(sceNetSocketClose(receiver) == 0);
+        ipv6Unavailable = true;
+        return;
+    }
+    Require(sent == sizeof(payload));
     char received[sizeof(payload)]{};
     std::array<std::uint8_t, 28> peer{};
     size = peer.size();
@@ -204,12 +301,20 @@ static void CheckUnspecifiedIpv6() {
 }
 
 int main() {
+    const auto epoch = std::chrono::steady_clock::time_point{};
+    Require(KernelSocketSelect::DeadlineAfter(epoch, 2, 250000) == epoch + std::chrono::milliseconds(2250));
+    Require(KernelSocketSelect::DeadlineAfter(epoch, INT64_MAX, 0) == std::chrono::steady_clock::time_point::max());
+    Require(KernelSocketSelect::DeadlineAfter(epoch, 10000000000LL, 0) == std::chrono::steady_clock::time_point::max());
+    const auto almostMax = std::chrono::steady_clock::time_point::max() - std::chrono::microseconds(1);
+    Require(KernelSocketSelect::DeadlineAfter(almostMax, 0, 1) == std::chrono::steady_clock::time_point::max());
+    Require(KernelSocketSelect::DeadlineAfter(almostMax, 0, 2) == std::chrono::steady_clock::time_point::max());
     for (int i = 0; i < 16; ++i) {
         Require(in6addr_any_nid_postfix[i] == 0);
         Require(in6addr_loopback_nid_postfix[i] == (i == 15 ? 1 : 0));
     }
     Require(sceNetInit_nid_postfix() == 0);
     CheckPoolStats();
+    CheckEmptyEpoll();
     CheckAddressText(2, "127.0.0.1");
     CheckAddressText(2, "255.255.255.255");
     CheckAddressText(28, "::1");
@@ -250,13 +355,17 @@ int main() {
     registration.events = 1;
     registration.ident = static_cast<std::uint64_t>(accepted);
     registration.data.u32 = 77;
+    NetEpollEvent ready{};
+    auto waiter = std::async(std::launch::async, [&] { return sceNetEpollWait(epoll, &ready, 1, -1); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
     Require(sceNetEpollControl(epoll, 1, accepted, &registration) == 0);
     const char request[] = "guest tcp loopback";
     char response[sizeof(request)]{};
     Require(sceNetSend(client, request, sizeof(request), 0) == sizeof(request));
-    NetEpollEvent ready{};
-    const int ready_count = sceNetEpollWait(epoll, &ready, 1, 1000000);
-    Require(ready_count == 1 && (ready.events & 1) && ready.ident == static_cast<std::uint64_t>(accepted));
+    Require(waiter.wait_for(std::chrono::seconds(1)) == std::future_status::ready);
+    const int ready_count = waiter.get();
+    Require(ready_count == 1 && (ready.events & 1) && ready.ident == static_cast<std::uint64_t>(accepted) && ready.data.u32 == 77);
+    Require(sceNetEpollWait(epoll, &ready, 1, 1000000) == 1);
     Require(sceNetRecv(accepted, response, sizeof(response), 0) == sizeof(response));
     Require(std::strcmp(request, response) == 0);
     char reply[] = "stream reply";
@@ -269,6 +378,11 @@ int main() {
     NetMsghdr reply_receive{reply_name.data(), 16, reply_in, 1, nullptr, 0, -1};
     Require(sceNetRecvmsg(client, &reply_receive, 0) == sizeof(reply));
     Require(std::strcmp(reply, reply_result) == 0 && reply_receive.flags == 0 && reply_receive.name_length == 0);
+    Require(sceNetSend(client, request, sizeof(request), 0) == sizeof(request));
+    ready = {};
+    Require(sceNetEpollWait(epoll, &ready, 1, 1000000) == 1 && (ready.events & 1) && ready.ident == static_cast<std::uint64_t>(accepted));
+    Require(sceNetShutdown(accepted, 1) == 0);
+    Require(Failed(sceNetSend(accepted, request, sizeof(request), 0), 32));
     Require(sceNetEpollDestroy(epoll) == 0);
     Require(sceNetSocketClose(accepted) == 0);
     bool send_failed = false;
@@ -310,6 +424,24 @@ int main() {
     const std::int64_t bad_timeout[2]{0, 1000000};
     Require(select_nid_postfix(udp_receiver + 1, readable, nullptr, nullptr, bad_timeout) == -1 && *__error_nid_postfix() == 22);
     Require(select_nid_postfix(1025, nullptr, nullptr, nullptr, poll_now) == -1 && *__error_nid_postfix() == 22);
+    const int random = open_nid_postfix("/dev/urandom", 0, 0);
+    Require(random >= 0 && random < 1024);
+    std::uint64_t random_readable[16]{};
+    std::uint64_t random_urgent[16]{};
+    random_readable[random / 64] |= std::uint64_t{1} << (random % 64);
+    random_readable[udp_receiver / 64] |= std::uint64_t{1} << (udp_receiver % 64);
+    random_urgent[random / 64] |= std::uint64_t{1} << (random % 64);
+    Require(select_nid_postfix(std::max(random, udp_receiver) + 1, random_readable, nullptr, random_urgent, nullptr) == 1);
+    Require(((random_readable[random / 64] >> (random % 64)) & 1u) != 0);
+    Require(((random_readable[udp_receiver / 64] >> (udp_receiver % 64)) & 1u) == 0);
+    Require(random_urgent[random / 64] == 0);
+    Require(close_nid_postfix(random) == 0);
+    std::uint64_t stdio_readable[16]{1};
+    std::uint64_t stdio_writable[16]{6};
+    Require(select_nid_postfix(3, stdio_readable, stdio_writable, nullptr, poll_now) == 2);
+    Require(stdio_readable[0] == 0 && stdio_writable[0] == 6);
+    stdio_readable[0] = 1;
+    Require(select_nid_postfix(1, stdio_readable, nullptr, nullptr, poll_now) == 0 && stdio_readable[0] == 0);
     CheckMessages(udp_receiver, udp_sender, address);
     Require(sceNetSocketClose(udp_sender) == 0);
     Require(sceNetSocketClose(udp_receiver) == 0);
@@ -371,4 +503,8 @@ int main() {
     int state = -1;
     Require(sceNetCtlGetState(&state) == 0);
     Require(state == 0 || state == 3);
+    if (ipv6Unavailable) {
+        std::puts("skipped the IPv6 socket checks, the host has no usable IPv6 loopback");
+        return 77;
+    }
 }

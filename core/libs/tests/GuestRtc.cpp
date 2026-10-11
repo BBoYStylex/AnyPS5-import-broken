@@ -402,4 +402,51 @@ int main() {
     Require(sceRtcFormatRFC2822LocalTime(rfc2822, nullptr) == invalidPointer);
     Require(sceRtcFormatRFC3339LocalTime(nullptr, &tick) == invalidPointer);
     Require(sceRtcFormatRFC3339LocalTime(text, nullptr) == invalidPointer);
+    for (const char* zone : {"UTC0", "XXX-5:30", "XXX+3"}) {
+        SetTimeZone(zone);
+        for (std::uint64_t invalidTick : {maxTick + 1, std::uint64_t{1} << 63u, std::numeric_limits<std::uint64_t>::max()}) {
+            source.tick = invalidTick;
+            result.tick = 123;
+            Require(sceRtcConvertUtcToLocalTime(&source, &result) == invalidValue && result.tick == 123);
+            Require(sceRtcConvertLocalTimeToUtc(&source, &result) == invalidValue && result.tick == 123);
+            Require(sceRtcConvertUtcToLocalTime(&source, &source) == invalidValue && source.tick == invalidTick);
+            Require(sceRtcConvertLocalTimeToUtc(&source, &source) == invalidValue && source.tick == invalidTick);
+            std::memset(text, 'x', sizeof(text));
+            char originalText[sizeof(text)];
+            std::memcpy(originalText, text, sizeof(text));
+            Require(sceRtcFormatRFC3339LocalTime(text, &source) == invalidValue);
+            Require(std::memcmp(text, originalText, sizeof(text)) == 0);
+            std::memset(rfc2822, 'x', sizeof(rfc2822));
+            char originalRfc2822[sizeof(rfc2822)];
+            std::memcpy(originalRfc2822, rfc2822, sizeof(rfc2822));
+            Require(sceRtcFormatRFC2822LocalTime(rfc2822, &source) == invalidValue);
+            Require(std::memcmp(rfc2822, originalRfc2822, sizeof(rfc2822)) == 0);
+        }
+        source.tick = leapDayTick;
+        Require(sceRtcConvertUtcToLocalTime(&source, &result) == 0);
+        Require(sceRtcConvertLocalTimeToUtc(&result, &result) == 0 && result.tick == source.tick);
+    }
+    SetTimeZone("UTC0");
+
+#ifndef _WIN32
+    SetTimeZone("STD0DST,J1/0,J2/0");
+    const std::time_t beforeTransition = -1;
+    const std::time_t atTransition = 0;
+    std::tm beforeState{}, afterState{};
+    Require(localtime_r(&beforeTransition, &beforeState) != nullptr && beforeState.tm_isdst == 0);
+    Require(localtime_r(&atTransition, &afterState) != nullptr && afterState.tm_isdst == 1);
+    for (const std::uint64_t distance : {1000000ull, 500000ull, 1ull}) {
+        source.tick = unixEpochTick - distance;
+        Require(sceRtcConvertUtcToLocalTime(&source, &result) == 0 && result.tick == source.tick);
+        Require(sceRtcConvertUtcToLocalTime(&source, &source) == 0 && source.tick == unixEpochTick - distance);
+    }
+    for (const std::uint64_t distance : {0ull, 500000ull}) {
+        source.tick = unixEpochTick + distance;
+        Require(sceRtcConvertUtcToLocalTime(&source, &result) == 0 && result.tick == source.tick + 3600000000ull);
+    }
+    tick.tick = unixEpochTick - 500000ull;
+    Require(sceRtcFormatRFC3339LocalTime(text, &tick) == 0 && std::strcmp(text, "1969-12-31T23:59:59.50Z") == 0);
+    Require(sceRtcFormatRFC2822LocalTime(rfc2822, &tick) == 0 && std::strcmp(rfc2822, "Wed, 31 Dec 1969 23:59:59 +0000") == 0);
+    SetTimeZone("UTC0");
+#endif
 }

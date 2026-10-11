@@ -164,11 +164,27 @@ class ImportAuditTests(unittest.TestCase):
         write_source(source, "libSceTwin.native", DONE_SOURCE.format(name="sceTwinCall"))
         write_source(source, "libSceOnly", STUB_SOURCE.format(name="sceOnlyPending"))
         stubs = import_audit.source_stubs(source)
-        self.assertEqual(stubs, {nid_names.compute_nid("printf"): "printf_nid_postfix", nid_names.compute_nid("sceOnlyPending"): "sceOnlyPending"})
-        self.assertNotIn(nid_names.compute_nid("sceTwinCall"), stubs)
+        twin = nid_names.compute_nid("sceTwinCall")
+        self.assertEqual(stubs, {
+            ("libSceTwin.prx", twin): "sceTwinCall",
+            ("libSceTwin.prx", nid_names.compute_nid("printf")): "printf_nid_postfix",
+            ("libSceOnly.prx", nid_names.compute_nid("sceOnlyPending")): "sceOnlyPending"})
+        self.assertNotIn(("libSceTwin.native.prx", twin), stubs)
         self.assertNotEqual(nid_names.compute_nid("printf"), nid_names.compute_nid("printf_nid_postfix"))
-        write_source(source, "libSceTwin.native", "")
-        self.assertIn(nid_names.compute_nid("sceTwinCall"), import_audit.source_stubs(source))
+
+    def test_stub_in_one_library_is_not_hidden_by_another(self):
+        source = self.work.source
+        write_source(source, "libA", DONE_SOURCE.format(name="sceTwinCall"))
+        write_source(source, "libB", STUB_SOURCE.format(name="sceTwinCall"))
+        nid = nid_names.compute_nid("sceTwinCall")
+        stubs = import_audit.source_stubs(source)
+        exports = {nid: ["libA.prx", "libB.prx"]}
+        records, _ = import_audit.audit([(nid, "libB.prx")], {nid: ["libB.prx"]}, stubs, {"libB.prx"}, set())
+        self.assertEqual((records[0]["class"], records[0]["name"]), ("stub", "sceTwinCall"))
+        records, _ = import_audit.audit([(nid, "libA.prx")], {nid: ["libA.prx"]}, stubs, {"libA.prx"}, set())
+        self.assertEqual((records[0]["class"], records[0]["name"]), ("implemented", None))
+        records, _ = import_audit.audit([(nid, "libB.prx")], exports, stubs, {"libA.prx", "libB.prx"}, set())
+        self.assertEqual(records[0]["class"], "implemented")
 
     @unittest.skipUnless((import_audit.ROOT / ".git").exists(), "needs a git checkout")
     def test_json_is_stamped_with_the_source_commit(self):
@@ -272,6 +288,22 @@ class ImportAuditTests(unittest.TestCase):
         code, out, err = work.run(registry)
         self.assertEqual((code, out), (2, ""))
         self.assertIn("game.json: entry 0 has an invalid NID 'short'", err)
+
+    def test_unreadable_library_and_unwritable_json_exit_two(self):
+        work = self.work
+        library = work.libs / "libSceA.prx"
+        library.write_bytes(exporting("AAAAAAAAAAA"))
+        registry = work.root / "game.json"
+        write_registry(registry, [("AAAAAAAAAAA", "libSceA.prx")])
+        code, out, err = work.run(registry, "--json", str(work.modules))
+        self.assertEqual((code, out), (2, ""))
+        self.assertIn("FAIL: ", err)
+        self.assertIn(str(work.modules), err)
+        denied = PermissionError(13, "Permission denied", str(library))
+        with patch.object(Path, "read_bytes", side_effect=denied):
+            code, out, err = work.run(registry)
+        self.assertEqual((code, out), (2, ""))
+        self.assertIn(f"FAIL: Permission denied: {library}", err)
 
 
 if __name__ == "__main__":

@@ -14,8 +14,15 @@ import abi
 import vector
 import avx
 import integer
+import effects
+import loop_ranges
+import native_image
+import checked_stack
+import immutable_data
+import stack_values
 from dynamic import parse_dynamic, DynamicError
 from calls import validate_indirect_calls, CallError
+from targets import TARGETS, target_spec
 
 
 class Rejected(ValueError):
@@ -62,11 +69,13 @@ def signature(contract):
 
 
 class Image:
-    def __init__(self, path, contracts):
+    def __init__(self, path, contracts, target='apple-arm64'):
+        self.target = target
+        self.target_spec = target_spec(target)
         self.contracts = contracts
         self.bytes = Path(path).read_bytes()
         require(contracts.get('schema') == 1, 'unsupported contract schema')
-        require(not contracts.get('native_runtime_registration'), 'native runtime image registration is outside this compiler build')
+        require(type(contracts.get('native_runtime_registration', False)) is bool, 'native_runtime_registration must be a boolean')
         require(hashlib.sha256(self.bytes).hexdigest() == contracts['sha256'], 'input hash does not match contracts')
         self.elf = ELFFile(io.BytesIO(self.bytes))
         require(self.elf.elfclass == 64 and self.elf.little_endian and self.elf['e_machine'] == 'EM_X86_64', 'expected little-endian x86-64 ELF')
@@ -86,6 +95,7 @@ class Image:
         self.functions = {}
         for function in contracts['functions']:
             signature(function)
+            require('memory_effects' not in function, 'internal memory effects must be inferred from code')
             objects = sorted(function.get('stack_objects', []), key=lambda o: o['offset'])
             for index, obj in enumerate(objects):
                 require(obj['size'] > 0 and obj['offset'] + obj['size'] <= 0 and obj['offset'] >= -1024 * 1024,
@@ -104,6 +114,10 @@ class Image:
         self.imports = contracts['imports']
         for contract in self.imports.values():
             signature(contract)
+            try:
+                effects.validate_provider(contract)
+            except ValueError as error:
+                raise Rejected(str(error)) from error
         self.data = []
         for spec in contracts['data']:
             seg = self.segment(spec['address'], spec['size'])
@@ -151,6 +165,12 @@ class Image:
         self.decoder = Cs(CS_ARCH_X86, CS_MODE_64)
         self.decoder.detail = True
         self.call_contracts = {}
+        self.memory_effects = {}
+        self.provider_requirements = {}
+        try:
+            immutable_data.configure(self)
+        except ValueError as error:
+            raise Rejected(str(error)) from error
 
     def segment(self, address, size=1):
         matches = [s for s in self.segments if s['p_vaddr'] <= address and address + size <= s['p_vaddr'] + s['p_memsz']]
@@ -224,12 +244,16 @@ class Function:
         self.memory_writes = {}
         self.lines = []
         self.serial = 0
-        self.depth = 128
+        self.depth = max([128] + [-obj['offset'] for obj in contract.get('stack_objects', [])])
         self.argument_locations = abi.locations(contract['parameters'])
         self.stack_end = max([8] + [loc['offset'] + 8 for loc in self.argument_locations if loc['kind'] == 'stack'])
         self.image.annotated_calls(contract)
         self.discover()
-        self.analyze()
+        try:
+            self.checked_accesses = checked_stack.parse(self)
+        except ValueError as error:
+            raise Rejected(str(error)) from error
+        self.index_ranges, self.loop_proofs = loop_ranges.discover(self, ALIASES, VOLATILE)
 
     def fail(self, ins, message):
         raise Rejected(f"{self.contract['name']} at 0x{ins.address:x} ({ins.mnemonic} {ins.op_str}): {message}")
@@ -291,6 +315,8 @@ class Function:
         if operand.type == X86_OP_REG:
             self.check_register(ins, state, *self.reg(ins, operand))
         elif operand.type == X86_OP_MEM:
+            checked_stack.region(self, ins, state, operand)
+            checked_stack.pointer(self, ins, state, operand)
             mem = operand.mem
             if ins.mnemonic != 'lea' and ins.addr_size != 8:
                 self.fail(ins, '32-bit memory addressing requires pointer reconstruction')
@@ -330,6 +356,9 @@ class Function:
         elif operand.type == X86_OP_MEM:
             self.memory_writes[ins.address] = (operand,)
             self.read_operand(ins, state, operand)
+            region = self.memory_write_region(ins, state, operand)
+            if region is not None and region[0] == 'image' and immutable_data.overlaps(self.image, region[1], region[2]):
+                self.fail(ins, 'write overlaps immutable image data')
             clean = state.get('tail_stack_clean', frozenset())
             base_name = ins.reg_name(operand.mem.base)
             frame = state['pointers'].get(base_name)
@@ -354,8 +383,23 @@ class Function:
         state['saved'] = {offset: (saved[0], saved[1], None, None) for offset, saved in state['saved'].items()}
         state['tail_stack_clean'] = frozenset()
 
+    def check_immutable_call(self, ins, callee, state, writes):
+        if writes is not None:
+            if any(kind == 'image' and immutable_data.overlaps(self.image, begin, end) for kind, begin, end in writes.writes):
+                self.fail(ins, 'call writes immutable image data')
+            return
+        for index, kind in enumerate(callee['parameters']):
+            if kind != 'ptr':
+                continue
+            pointer = effects.argument_pointer(self, ins, callee, index, state)
+            if pointer and pointer[0] == 'image' and immutable_data.overlaps(self.image, pointer[2], pointer[2] + 1):
+                self.fail(ins, 'immutable image pointer passed to a call with unknown effects')
+
     def check_tail_call(self, ins, state):
         callee, slot = self.tail_calls[ins.address]
+        self.check_immutable_call(ins, callee, state, effects.call_writes(self, ins, state))
+        if not effects.required_bindings(self, ins) <= state['import_bindings']:
+            self.fail(ins, 'native callee requires original provider bindings')
         if slot is not None and slot not in state['image_pointers']:
             self.fail(ins, 'import target has no proven native pointer origin')
         if state['rsp'] != 0 or state['saved']:
@@ -380,7 +424,8 @@ class Function:
                  'saved': original['saved'].copy(), 'flags': set(original['flags']), 'pointers': original['pointers'].copy(),
                  'constants': original.get('constants', {}).copy(), 'tail_stack_clean': original['tail_stack_clean'],
                  'native_pointers': original['native_pointers'].copy(), 'stack_pointers': original['stack_pointers'].copy(),
-                 'image_pointers': original['image_pointers'].copy(), 'callback_memory_unmodified': original['callback_memory_unmodified']}
+                 'stack_origins': original['stack_origins'].copy(), 'stack_values': original['stack_values'].copy(),
+                 'image_pointers': original['image_pointers'].copy(), 'import_bindings': original['import_bindings'].copy(), 'callback_memory_unmodified': original['callback_memory_unmodified']}
         op, args = ins.mnemonic, ins.operands
         if avx.analyze(self, ins, state) or vector.analyze(self, ins, state):
             return state
@@ -427,6 +472,8 @@ class Function:
             return state
         if op == 'call':
             callee, slot = self.image.call(ins, self.contract)
+            if not effects.required_bindings(self, ins) <= state['import_bindings']:
+                self.fail(ins, 'native callee requires original provider bindings')
             if slot == 'operand':
                 self.read_operand(ins, state, args[0])
                 if (args[0].type == X86_OP_REG or self.memory_origin(ins, state, args[0]) is not None) and not self.pointer_operand(ins, state, args[0]):
@@ -449,13 +496,16 @@ class Function:
                     offset = state['rsp'] + loc['offset'] - 8
                     if offset + 8 > 0:
                         self.fail(ins, 'outgoing stack argument is not allocated')
-                    if loc['type'] == 'ptr' and offset not in state['stack_pointers']:
+                    if loc['type'] == 'ptr' and offset not in state['stack_pointers'] and stack_values.read(state, offset, 8) != 0:
                         self.fail(ins, 'stack pointer argument has no proven native pointer origin')
             for reg in VOLATILE | set(VECTOR_STORAGE):
                 state['known'].pop(reg, None)
                 state['pointers'].pop(reg, None)
                 state['constants'].pop(reg, None)
-            self.invalidate_stack_aliases(state)
+            memory_effects = effects.call_writes(self, ins, original)
+            self.check_immutable_call(ins, callee, original, memory_effects)
+            if memory_effects is None or memory_effects.parameter_writes or any(kind == 'frame' for kind, _, _ in memory_effects.writes):
+                self.invalidate_stack_aliases(state)
             state['flags'] = set()
             if callee['result'] != 'void':
                 state['known'][abi.return_register(callee['result'])] = (1 << abi.bits(callee['result'])) - 1
@@ -560,7 +610,31 @@ class Function:
             return pointer[0], pointer[2] + displacement
         return None
 
+    def memory_write_region(self, ins, state, operand):
+        checked = checked_stack.region(self, ins, state, operand)
+        if checked is not None:
+            return checked
+        if operand.mem.index:
+            return loop_ranges.frame_write(self, ins, state, operand)
+        origin = self.memory_origin(ins, state, operand)
+        return None if origin is None else (origin[0], origin[1], origin[1] + operand.size)
+
+    def pointer_origin(self, ins, state, operand):
+        if operand.size != 8 or not self.pointer_operand(ins, state, operand):
+            return None
+        if operand.type == X86_OP_REG:
+            name = self.reg(ins, operand)[0]
+            if name in ('rsp', 'rbp') and state[name] is not None:
+                return 'frame', 0, state[name]
+            return state['pointers'].get(name)
+        origin = self.memory_origin(ins, state, operand)
+        if origin is not None and origin[0] == 'frame':
+            return state['stack_origins'].get(origin[1])
+        return None
+
     def pointer_operand(self, ins, state, operand):
+        if checked_stack.pointer(self, ins, state, operand):
+            return True
         if operand.size != 8:
             return False
         if operand.type == X86_OP_REG:
@@ -581,37 +655,71 @@ class Function:
             if name in ALIASES:
                 native.discard(ALIASES[name][0])
         stack = original['stack_pointers'].copy()
+        origins = original['stack_origins'].copy()
         image = original['image_pointers'].copy()
+        bindings = original['import_bindings'].copy()
         callback_memory_unmodified = original['callback_memory_unmodified']
         op, args = ins.mnemonic, ins.operands
         for operand in self.memory_writes.get(ins.address, ()):
-            origin = self.memory_origin(ins, original, operand)
+            origin = self.memory_write_region(ins, original, operand)
             if origin is None or origin[0] != 'frame':
                 callback_memory_unmodified = False
             if origin is None:
                 stack.clear()
+                origins.clear()
                 image.clear()
+                bindings.clear()
             else:
-                cells, begin = (stack if origin[0] == 'frame' else image), origin[1]
-                cells.difference_update(offset for offset in list(cells) if begin < offset + 8 and offset < begin + operand.size)
-                if op == 'mov' and operand is args[0] and self.pointer_operand(ins, original, args[1]):
+                cells, begin, end = (stack if origin[0] == 'frame' else image), origin[1], origin[2]
+                cells.difference_update(offset for offset in list(cells) if begin < offset + 8 and offset < end)
+                if origin[0] == 'frame':
+                    origins = {offset: pointer for offset, pointer in origins.items() if not (begin < offset + 8 and offset < end)}
+                if origin[0] == 'image':
+                    bindings.difference_update(offset for offset in list(bindings) if begin < offset + 8 and offset < end)
+                if op == 'mov' and checked_stack.lookup(self, ins, operand) is None and not operand.mem.index and operand is args[0] and self.pointer_operand(ins, original, args[1]):
                     cells.add(begin)
+                    pointer = self.pointer_origin(ins, original, args[1])
+                    if origin[0] == 'frame' and pointer is not None:
+                        origins[begin] = pointer
         if op == 'push':
             offset = original['rsp'] - 8
             stack = {saved for saved in stack if not (offset < saved + 8 and saved < offset + 8)}
+            origins = {saved: pointer for saved, pointer in origins.items() if not (offset < saved + 8 and saved < offset + 8)}
+            pointer = self.pointer_origin(ins, original, args[0])
+            if pointer is not None:
+                origins[offset] = pointer
             if self.pointer_operand(ins, original, args[0]):
                 stack.add(offset)
             native.add('rsp')
         elif op == 'pop':
             if original['rsp'] in original['stack_pointers']:
                 native.add(self.reg(ins, args[0])[0])
+            name = self.reg(ins, args[0])[0]
+            pointer = original['stack_origins'].get(original['rsp'])
+            state['pointers'].pop(name, None)
+            if pointer is not None:
+                state['pointers'][name] = pointer
+            origins.pop(original['rsp'], None)
             stack.discard(original['rsp'])
             native.add('rsp')
         elif op == 'call':
             native.difference_update(VOLATILE | set(VECTOR_STORAGE))
-            stack.clear()
-            image.clear()
-            callback_memory_unmodified = False
+            writes = effects.call_writes(self, ins, original)
+            if writes is None or writes.parameter_writes:
+                stack.clear()
+                origins.clear()
+                image.clear()
+                bindings.clear()
+                callback_memory_unmodified = False
+            else:
+                for kind, begin, end in writes.writes:
+                    cells = stack if kind == 'frame' else image
+                    cells.difference_update(offset for offset in list(cells) if begin < offset + 8 and offset < end)
+                    if kind == 'frame':
+                        origins = {offset: pointer for offset, pointer in origins.items() if not (begin < offset + 8 and offset < end)}
+                    if kind == 'image':
+                        bindings.difference_update(offset for offset in list(bindings) if begin < offset + 8 and offset < end)
+                        callback_memory_unmodified = False
             callee, _ = self.image.call(ins, self.contract)
             if callee['result'] == 'ptr':
                 native.add('rax')
@@ -621,6 +729,9 @@ class Function:
             proven = False
             if op in ('mov', 'movabs'):
                 proven = self.pointer_operand(ins, original, args[1])
+                pointer = self.pointer_origin(ins, original, args[1])
+                if pointer is not None:
+                    state['pointers'][destination] = pointer
             elif op == 'lea':
                 memory = args[1].mem
                 base, index = ins.reg_name(memory.base), ins.reg_name(memory.index)
@@ -634,8 +745,13 @@ class Function:
                 proven = all(self.pointer_operand(ins, original, operand) for operand in args)
             if proven:
                 native.add(destination)
+        image.update(self.image.immutable_cells)
+        bindings.update(self.image.immutable_bindings)
         state['native_pointers'], state['stack_pointers'], state['image_pointers'] = native, stack, image
         state['callback_memory_unmodified'] = callback_memory_unmodified
+        state['import_bindings'] = bindings
+        state['stack_origins'] = origins
+        stack_values.transfer(self, ins, original, state)
         return state
 
     def constant_operand(self, ins, state, operand):
@@ -669,8 +785,10 @@ class Function:
                    'tail_stack_clean': frozenset(loc['offset'] for loc in self.argument_locations if loc['kind'] == 'stack'),
                    'native_pointers': {'rsp'} | set(pointers),
                    'stack_pointers': {loc['offset'] for loc in self.argument_locations if loc['kind'] == 'stack' and loc['type'] == 'ptr'},
+                   'stack_origins': {loc['offset']: ('parameter', index, 0) for index, loc in enumerate(self.argument_locations) if loc['kind'] == 'stack' and loc['type'] == 'ptr'},
                    'image_pointers': set(self.image.import_slots) | {slot for slot, _ in self.image.relocations},
-                   'callback_memory_unmodified': True}
+                   'stack_values': {},
+                   'import_bindings': set(self.image.import_slots), 'callback_memory_unmodified': True}
         entry = self.contract['address']
         self.states[entry] = initial
         pending = deque([entry])
@@ -695,7 +813,10 @@ class Function:
                     new['tail_stack_clean'] = old['tail_stack_clean'] & state['tail_stack_clean']
                     new['native_pointers'] = old['native_pointers'] & state['native_pointers']
                     new['stack_pointers'] = old['stack_pointers'] & state['stack_pointers']
+                    new['stack_origins'] = {offset: pointer for offset, pointer in state['stack_origins'].items() if old['stack_origins'].get(offset) == pointer}
+                    new['stack_values'] = {offset: value for offset, value in state['stack_values'].items() if old['stack_values'].get(offset) == value}
                     new['image_pointers'] = old['image_pointers'] & state['image_pointers']
+                    new['import_bindings'] = old['import_bindings'] & state['import_bindings']
                     new['callback_memory_unmodified'] = old['callback_memory_unmodified'] and state['callback_memory_unmodified']
                     new['pointers'] = {name: pointer for name, pointer in state['pointers'].items() if old['pointers'].get(name) == pointer}
                     new['constants'] = {name: value for name, value in state['constants'].items() if old['constants'].get(name) == value}
@@ -796,7 +917,8 @@ class Function:
             if mem.scale != 1:
                 value = self.emit(f'mul i64 {value}, {mem.scale}')
             offset = self.emit(f'add i64 {value}, {offset}')
-        return self.emit(f'getelementptr i8, ptr {pointer}, i64 {offset}') if offset != '0' else pointer
+        address = self.emit(f'getelementptr i8, ptr {pointer}, i64 {offset}') if offset != '0' else pointer
+        return checked_stack.guard(self, ins, operand, address)
 
     def read(self, ins, operand, bits=None):
         bits = operand.size * 8 if bits is None else bits
@@ -1010,7 +1132,12 @@ class Function:
 
 def compile_image(image):
     functions = [Function(image, spec) for spec in image.functions.values()]
-    lines = ['target triple = "arm64-apple-macosx13.0.0"', 'declare void @llvm.trap()', 'declare i8 @llvm.ctpop.i8(i8)']
+    effects.analyze(functions)
+    try:
+        descriptor = native_image.describe(image) if image.contracts.get('native_runtime_registration') else None
+    except ValueError as error:
+        raise Rejected(str(error)) from error
+    lines = [f'target triple = "{image.target_spec["triple"]}"', 'declare void @llvm.trap()', 'declare i8 @llvm.ctpop.i8(i8)']
     names = {spec['name'] for spec in image.functions.values()}
     for contract in image.imports.values():
         result, parameters = signature(contract)
@@ -1019,23 +1146,45 @@ def compile_image(image):
         suffix = ' noreturn' if contract.get('noreturn') else ''
         lines.append(f"declare {abi.result_type(result)} @{contract['name']}({', '.join(abi.parameter_type(t) for t in parameters)}){suffix}")
     for spec in image.data:
+        if spec['address'] in image.immutable_initializers:
+            lines.append(immutable_data.declaration(image, spec))
+            continue
         raw = image.read(spec['address'], spec['size'])
         value = ''.join(f'\\{byte:02X}' for byte in raw)
         writable = image.segment(spec['address'])['p_flags'] & 2 or any(spec['address'] <= slot < spec['address'] + spec['size'] for slot in [*image.import_slots, *(slot for slot, _ in image.relocations)])
         lines.append(f"@data_{spec['address']:x} = {'global' if writable else 'constant'} [{len(raw)} x i8] c\"{value}\", align 16")
-    if image.relocations or image.import_slots:
+    if descriptor is not None:
+        lines.extend(native_image.declarations(image, descriptor))
+    if image.immutable_regions:
+        lines.extend(immutable_data.declarations(image))
+    if image.relocations or image.import_slots or descriptor is not None or image.immutable_regions:
         lines.extend(['@llvm.global_ctors = appending global [1 x { i32, ptr, ptr }] [{ i32, ptr, ptr } { i32 101, ptr @native_image_init, ptr null }]',
                       'define internal void @native_image_init() {'])
         for slot, target in image.relocations:
+            if slot in image.immutable_cells:
+                continue
             lines.append(f'  store ptr {image.pointer(target)}, ptr {image.pointer(slot, 8)}, align 1')
         for slot, contract in image.import_slots.items():
+            if slot in image.immutable_cells:
+                continue
             lines.append(f"  store ptr @{contract['name']}, ptr {image.pointer(slot, 8)}, align 1")
+        if image.immutable_regions:
+            lines.append(f'  call void @NativeAotRequireReadOnly_nid_no_patch(ptr @__aps5_aot_readonly_ranges, i64 {len(image.immutable_regions)})')
+        if descriptor is not None:
+            lines.append('  call void @NativeAotRegisterImage_nid_no_patch(ptr @__aps5_aot_image)')
         lines.extend(['  ret void', '}'])
     lines.extend(function.lower() for function in functions)
-    report = {'schema': 1, 'status': 'experimental_native_ir', 'input_sha256': hashlib.sha256(image.bytes).hexdigest(),
+    report = {'schema': 1, 'target': image.target, 'status': 'experimental_native_ir', 'input_sha256': hashlib.sha256(image.bytes).hexdigest(),
               'functions': [{'name': f.contract['name'], 'address': f.contract['address'], 'instructions': len(f.instructions),
                              'native_tail_calls': len(f.tail_calls),
+                             'bounded_loops': f.loop_proofs,
+                             'checked_stack_accesses': list(f.checked_accesses.values()),
+                             'memory_effects': effects.report(image.memory_effects.get(f.contract['address'])),
                              'native_frame_bytes_before_optimization': f.depth} for f in functions],
+              'native_image': descriptor,
+              'immutable_data': image.contracts.get('immutable_data', []),
+              'required_provider_bindings': {image.functions[address]['name']: sorted(slots) for address, slots in image.provider_requirements.items() if slots},
+              'provider_effect_contracts': {name: contract['memory_effects'] for name, contract in image.imports.items() if 'memory_effects' in contract},
               'imports': len(image.import_slots), 'pointer_relocations': len(image.relocations),
               'indirect_calls': [site for sites in image.call_contracts.values() for site in sites.values()],
               'limitations': ['declared function boundaries and ABIs', 'declared scalar, SSE and AVX instruction subsets', 'no guest exception, TLS or computed-jump target recovery', 'indirect call target sets are declared, not inferred',
@@ -1049,13 +1198,14 @@ def main():
     parser.add_argument('--contracts', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--object', type=Path)
+    parser.add_argument('--target', choices=TARGETS, default='apple-arm64')
     args = parser.parse_args()
     try:
-        image = Image(args.input, json.loads(args.contracts.read_text()))
+        image = Image(args.input, json.loads(args.contracts.read_text()), args.target)
         ir, report = compile_image(image)
         if args.object:
             from toolchain import build_native_object
-            report['native_object'] = build_native_object(ir, args.object)
+            report['native_object'] = build_native_object(ir, args.object, args.target)
     except (Rejected, KeyError, ValueError, subprocess.CalledProcessError) as error:
         parser.exit(2, f'Native AOT rejected: {error}\n')
     args.output.write_text(ir)

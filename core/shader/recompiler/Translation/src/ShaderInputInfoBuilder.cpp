@@ -121,6 +121,8 @@ ShaderStageInputInfo BuildShaderStageInputInfo(ShaderStageKind stage, const Gues
         place(PixelInput::PositionW, pixel.posW);
         place(PixelInput::FrontFace, pixel.frontFace);
         place(PixelInput::Ancillary, pixel.ancillary);
+        place(PixelInput::LineStipple, (pixel.inputAddr & PixelInputBit(PixelInput::LineStipple)) != 0u);
+        place(PixelInput::PositionFixedPoint, (pixel.inputAddr & PixelInputBit(PixelInput::PositionFixedPoint)) != 0u);
         for (std::uint32_t i = 0; i < 8; ++i) {
             pixelStorage.targetOutputMode[i] = pixel.targetOutputMode[i];
         }
@@ -139,6 +141,7 @@ ShaderStageInputInfo BuildShaderStageInputInfo(ShaderStageKind stage, const Gues
         pixelStorage.psExecuteOnNoop = pixel.executeOnNoop;
         pixelStorage.psConservativeZExport = pixel.conservativeZExport;
         pixelStorage.psOrderedPixelShader = pixel.orderedPixelShader;
+        pixelStorage.psAlphaToCoverage = pixel.alphaToCoverage;
         ShaderStageInputInfo result;
         result.pixel = &pixelStorage;
         return result;
