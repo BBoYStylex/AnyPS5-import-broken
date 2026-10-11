@@ -10,6 +10,7 @@
 #include <stdexcept>
 #include <vector>
 #include <prx/libc/include/General.hpp>
+#include <prx/libc/include/Shutdown.hpp>
 
 #include "SDL.h"
 #include "SceTypes.hpp"
@@ -99,6 +100,28 @@ static std::mutex g_mutex;
 static std::mutex g_outputMutex;
 static Port g_ports[PORTS_MAX];
 static bool g_sdlInitialized = false;
+static std::atomic<bool> g_stopping{false};
+static std::atomic<std::uint32_t> g_activeCalls{0};
+static constexpr int INVALID_PORT = -2144993277;
+
+class AudioCall {
+    bool admitted = false;
+public:
+    AudioCall() {
+        if (g_stopping.load()) return;
+        g_activeCalls.fetch_add(1);
+        if (!g_stopping.load()) admitted = true;
+        else release();
+    }
+    AudioCall(const AudioCall&) = delete;
+    AudioCall& operator=(const AudioCall&) = delete;
+    ~AudioCall() { if (admitted) release(); }
+    explicit operator bool() const { return admitted; }
+private:
+    static void release() {
+        if (g_activeCalls.fetch_sub(1) == 1) g_activeCalls.notify_all();
+    }
+};
 
 static bool ensureSdlAudio() {
     if (g_sdlInitialized) {
@@ -139,6 +162,27 @@ static void closeDevice(Port& port) {
     port.device = 0;
     port.spec = {};
 }
+
+static void shutdownAudio() {
+    g_stopping.store(true);
+    for (auto active = g_activeCalls.load(); active != 0; active = g_activeCalls.load())
+        g_activeCalls.wait(active);
+    std::lock_guard outputLock(g_outputMutex);
+    std::lock_guard lock(g_mutex);
+    for (auto& port : g_ports) {
+        closeDevice(port);
+        port = Port{};
+    }
+    if (g_sdlInitialized) {
+        SDL_QuitSubSystem(SDL_INIT_AUDIO);
+        g_sdlInitialized = false;
+    }
+}
+
+static const bool g_shutdownRegistered = [] {
+    LibcRegisterShutdown_nid_postfix(shutdownAudio);
+    return true;
+}();
 
 static constexpr std::uint32_t STD_8CH_MAP[8] = {0, 1, 2, 3, 6, 7, 4, 5};
 
@@ -192,13 +236,20 @@ static const void* prepareBuffer(const Port& port, const void* data, std::vector
     return buf.data();
 }
 
-static void sleepUs(std::unique_lock<std::mutex>& lock, std::uint64_t us) {
+static bool sleepUs(std::unique_lock<std::mutex>& lock, std::uint64_t us) {
+    const auto start = sceKernelGetProcessTime();
     lock.unlock();
-    PreciseSleepUs(us);
+    while (!g_stopping.load()) {
+        const auto elapsed = sceKernelGetProcessTime() - start;
+        if (elapsed >= us) break;
+        PreciseSleepUs(std::min(us - elapsed, DRAIN_SLEEP_US));
+    }
     lock.lock();
+    return !g_stopping.load();
 }
 
-static void queueAudio(Port& port, const void* data, std::unique_lock<std::mutex>& lock) {
+static bool queueAudio(Port& port, const void* data, std::unique_lock<std::mutex>& lock) {
+    if (g_stopping.load()) return false;
     if (data == nullptr) {
         const std::uint64_t waitStart = sceKernelGetProcessTime();
         while (SDL_GetQueuedAudioSize(port.device) > 0) {
@@ -206,9 +257,9 @@ static void queueAudio(Port& port, const void* data, std::unique_lock<std::mutex
                 SDL_ClearQueuedAudio(port.device);
                 break;
             }
-            sleepUs(lock, DRAIN_SLEEP_US);
+            if (!sleepUs(lock, DRAIN_SLEEP_US)) return false;
         }
-        return;
+        return !g_stopping.load();
     }
 
     std::vector<std::uint8_t> prepareBuf;
@@ -256,25 +307,29 @@ static void queueAudio(Port& port, const void* data, std::unique_lock<std::mutex
             SDL_ClearQueuedAudio(port.device);
             break;
         }
-        sleepUs(lock, DRAIN_SLEEP_US);
+        if (!sleepUs(lock, DRAIN_SLEEP_US)) return false;
     }
 
+    if (g_stopping.load()) return false;
     if (SDL_QueueAudio(port.device, queueData, queueSize) < 0) {
         throw std::runtime_error(std::string("SDL_QueueAudio: ") + SDL_GetError());
     }
     // APS5_LOG_OUT("device=%u type=%d bytes=%u queued=%u", port.device, port.type, queueSize, SDL_GetQueuedAudioSize(port.device));
+    return true;
 }
 
-static void paceVirtualPort(Port& port, bool hasData, std::unique_lock<std::mutex>& lock) {
+static bool paceVirtualPort(Port& port, bool hasData, std::unique_lock<std::mutex>& lock) {
+    if (g_stopping.load()) return false;
     const std::uint64_t now = sceKernelGetProcessTime();
     const auto queued = static_cast<std::int64_t>(port.virtualQueueEnd - now);
     if (queued <= 0) port.virtualQueueEnd = now;
     if (!hasData) {
-        if (queued > 0) sleepUs(lock, static_cast<std::uint64_t>(queued));
-        return;
+        if (queued > 0 && !sleepUs(lock, static_cast<std::uint64_t>(queued))) return false;
+        return !g_stopping.load();
     }
-    if (queued > static_cast<std::int64_t>(TARGET_LATENCY_US)) sleepUs(lock, static_cast<std::uint64_t>(queued) - TARGET_LATENCY_US);
+    if (queued > static_cast<std::int64_t>(TARGET_LATENCY_US) && !sleepUs(lock, static_cast<std::uint64_t>(queued) - TARGET_LATENCY_US)) return false;
     port.virtualQueueEnd += (1000000ULL * port.samplesNum) / port.freq;
+    return true;
 }
 
 static bool portTypeValid(int type) {
@@ -295,11 +350,15 @@ static Port* getPort(int handle) {
 extern "C" {
 
 int APS5_VABI sceAudioOutInit() {
+    const AudioCall call;
+    if (!call) return INVALID_PORT;
     return 0;
 }
 
 int APS5_VABI sceAudioOutOpen(int userId, int type, int index, std::uint32_t len,
     std::uint32_t freq, std::uint32_t param) {
+    const AudioCall call;
+    if (!call) return INVALID_PORT;
     (void)userId;
     if (!portTypeValid(type)) {
         return -2144993270;
@@ -356,6 +415,8 @@ int APS5_VABI sceAudioOutOpen(int userId, int type, int index, std::uint32_t len
 }
 
 int APS5_VABI sceAudioOutClose(int handle) {
+    const AudioCall call;
+    if (!call) return INVALID_PORT;
     std::lock_guard<std::mutex> outputLock(g_outputMutex);
     std::lock_guard<std::mutex> lock(g_mutex);
     Port* port = getPort(handle);
@@ -368,6 +429,8 @@ int APS5_VABI sceAudioOutClose(int handle) {
 }
 
 int APS5_VABI sceAudioOutOutput(int handle, const void* ptr) {
+    const AudioCall call;
+    if (!call) return INVALID_PORT;
     std::lock_guard<std::mutex> outputLock(g_outputMutex);
     std::unique_lock<std::mutex> lock(g_mutex);
     Port* port = getPort(handle);
@@ -376,15 +439,17 @@ int APS5_VABI sceAudioOutOutput(int handle, const void* ptr) {
     }
 
     if (port->device == 0) {
-        paceVirtualPort(*port, ptr != nullptr, lock);
+        if (!paceVirtualPort(*port, ptr != nullptr, lock)) return INVALID_PORT;
     } else {
-        queueAudio(*port, ptr, lock);
+        if (!queueAudio(*port, ptr, lock)) return INVALID_PORT;
     }
     if (ptr != nullptr) port->lastDataOutputTime = sceKernelGetProcessTime();
     return static_cast<int>(port->samplesNum);
 }
 
 int APS5_VABI sceAudioOutOutputs(AudioOutOutputParam* param, std::uint32_t num) {
+    const AudioCall call;
+    if (!call) return INVALID_PORT;
     if (param == nullptr || num == 0) {
         return -2144993276;
     }
@@ -402,9 +467,9 @@ int APS5_VABI sceAudioOutOutputs(AudioOutOutputParam* param, std::uint32_t num) 
     for (std::uint32_t i = 0; i < num; i++) {
         Port& port = *getPort(param[i].handle);
         if (port.device == 0) {
-            paceVirtualPort(port, param[i].ptr != nullptr, lock);
+            if (!paceVirtualPort(port, param[i].ptr != nullptr, lock)) return INVALID_PORT;
         } else {
-            queueAudio(port, param[i].ptr, lock);
+            if (!queueAudio(port, param[i].ptr, lock)) return INVALID_PORT;
         }
     }
 
@@ -417,6 +482,8 @@ int APS5_VABI sceAudioOutOutputs(AudioOutOutputParam* param, std::uint32_t num) 
 }
 
 int APS5_VABI sceAudioOutSetVolume(int handle, std::uint32_t flag, int* vol) {
+    const AudioCall call;
+    if (!call) return INVALID_PORT;
     if (vol == nullptr) {
         return -2144993276;
     }
@@ -443,6 +510,8 @@ int APS5_VABI sceAudioOutSetVolume(int handle, std::uint32_t flag, int* vol) {
 }
 
 int APS5_VABI sceAudioOutGetLastOutputTime(int handle, std::uint64_t* outputTime) {
+    const AudioCall call;
+    if (!call) return INVALID_PORT;
     if (outputTime == nullptr) {
         return -2144993276;
     }
@@ -456,6 +525,8 @@ int APS5_VABI sceAudioOutGetLastOutputTime(int handle, std::uint64_t* outputTime
 }
 
 int APS5_VABI sceAudioOutGetPortState(int handle, AudioOutPortState* state) {
+    const AudioCall call;
+    if (!call) return INVALID_PORT;
     if (state == nullptr) {
         return -2144993276;
     }
@@ -517,6 +588,8 @@ int APS5_VABI sceAudioOutSysOpen() {
 }
 
 int APS5_VABI sceAudioOutSetMixLevelPadSpk(int handle, int mixLevel) {
+    const AudioCall call;
+    if (!call) return INVALID_PORT;
     std::lock_guard<std::mutex> lock(g_mutex);
     Port* port = getPort(handle);
     if (port == nullptr) {
