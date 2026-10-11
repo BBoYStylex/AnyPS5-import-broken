@@ -4,11 +4,25 @@
 extern "C" {
 int APS5_VABI sched_get_priority_max_nid_postfix(int policy);
 int APS5_VABI sched_get_priority_min_nid_postfix(int policy);
+int APS5_VABI getpriority_nid_postfix(int which, int who);
+int APS5_VABI getpid_nid_postfix(void);
+int* APS5_VABI __error_nid_postfix();
 }
+static constexpr int PrioProcess = 0;
+static constexpr int PrioGroup = 1;
+static constexpr int PrioUser = 2;
 static void Require(bool value) { if (!value) std::abort(); }
 static bool Rejects(int policy) {
     try { sched_get_priority_max_nid_postfix(policy); } catch (const std::invalid_argument&) { return true; }
     return false;
+}
+static void RequireNice(int which, int who) {
+    *__error_nid_postfix() = 13;
+    Require(getpriority_nid_postfix(which, who) == 0 && *__error_nid_postfix() == 13);
+}
+static void RequireError(int which, int who, int error) {
+    *__error_nid_postfix() = 0;
+    Require(getpriority_nid_postfix(which, who) == -1 && *__error_nid_postfix() == error);
 }
 int main() {
     for (int policy : {1, 2, 3}) {
@@ -16,4 +30,16 @@ int main() {
         Require(sched_get_priority_min_nid_postfix(policy) == 767);
     }
     Require(Rejects(0) && Rejects(4));
+    const int self = getpid_nid_postfix();
+    RequireNice(PrioProcess, 0);
+    RequireNice(PrioProcess, self);
+    RequireNice(PrioGroup, 0);
+    RequireNice(PrioGroup, self);
+    RequireNice(PrioUser, 0);
+    RequireError(PrioProcess, self + 1, 3);
+    RequireError(PrioProcess, -1, 3);
+    RequireError(PrioGroup, self + 1, 3);
+    RequireError(PrioUser, 1000, 3);
+    RequireError(3, 0, 22);
+    RequireError(-1, self, 22);
 }
