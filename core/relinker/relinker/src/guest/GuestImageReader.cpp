@@ -208,7 +208,10 @@ GuestImage GuestImageReader::Read(const std::filesystem::path& path, std::vector
     for (std::uint64_t offset = 0; offset < symSize; offset += 24) {
         auto name = string(Io::ReadU32(bytes, symOffset + offset));
         const auto library = Io::ReadU16(bytes, symOffset + offset + 6) == 0 ? Domain::ImportModule(name, importModules, neededLibraries) : std::string{};
-        if (Io::ReadU16(bytes, symOffset + offset + 6) == 0 && library.empty() && !name.empty()) image.Dynamic.UnmatchedImportModules.insert(Domain::DeclaredImportModule(name, importModules));
+        if (Io::ReadU16(bytes, symOffset + offset + 6) == 0 && library.empty() && !name.empty()) {
+            auto declaredModule = Domain::DeclaredImportModule(name, importModules);
+            if (!declaredModule.empty()) image.Dynamic.UnmatchedImportModules.insert(std::move(declaredModule));
+        }
         name = name.substr(0, name.find('#'));
         const auto info = bytes[symOffset + offset + 4];
         const auto visibility = bytes[symOffset + offset + 5];
