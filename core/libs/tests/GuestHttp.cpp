@@ -262,6 +262,12 @@ int main() {
     Require(major == 10 && minor == 25 && code == 404);
     Require(phrase == lineFeedOnly + 14 && phraseLength == 10);
 
+    const char* maxVersion = "HTTP/2147483647.2147483647 200 OK\n";
+    Require(parse(maxVersion, std::strlen(maxVersion)) == static_cast<int>(std::strlen(maxVersion)));
+    Require(major == 2147483647 && minor == 2147483647);
+    Require(parse("HTTP/2147483648.1 200 OK\n", std::strlen("HTTP/2147483648.1 200 OK\n")) == parseInvalidResponse);
+    Require(parse("HTTP/1.2147483648 200 OK\n", std::strlen("HTTP/1.2147483648 200 OK\n")) == parseInvalidResponse);
+
     const char* noPhrase = "HTTP/2.0 204\r\n";
     Require(parse(noPhrase, std::strlen(noPhrase)) == 14);
     Require(major == 2 && minor == 0 && code == 204);
@@ -284,6 +290,8 @@ int main() {
     Require(parse("HTTP/1.1/200 OK\n", 16) == parseInvalidResponse);
     Require(parse("HTTP/1.1 2x0 OK\n", 16) == parseInvalidResponse);
     Require(parse("HTTP/1.1 20", 11) == parseInvalidResponse);
+    Require(parse("HTTP/1.1 2000 OK\n", std::strlen("HTTP/1.1 2000 OK\n")) == parseInvalidResponse);
+    Require(parse("HTTP/1.1 200OK\n", std::strlen("HTTP/1.1 200OK\n")) == parseInvalidResponse);
     Require(parse(response, 15) == parseInvalidResponse);
     Require(parse(response, 16) == parseInvalidResponse);
     Require(phrase == nullptr && phraseLength == 0);
