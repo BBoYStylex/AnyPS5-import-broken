@@ -4,9 +4,11 @@
 #include "prx/libScePad/include/InputCommandFile.hpp"
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <stdexcept>
 #include <thread>
 
 extern "C" {
@@ -85,6 +87,28 @@ static void CheckTiltCorrection(int handle) {
     Require(scePadSetTiltCorrectionState(handle, true) == PAD_OK);
     Require(SettleOrientationW() < 0.999f);
     PadPublishInput_nid_postfix(PadInputState{});
+}
+
+static void CheckAngularVelocityBiasCorrection(int handle) {
+    PadInputState input;
+    input.hasMotion = true;
+    input.accel = {9.80665f, 0.0f, 0.0f};
+    input.gyro = {0.0f, 0.0f, 0.5f};
+    PadPublishInput_nid_postfix(input);
+
+    Require(scePadSetAngularVelocityBiasCorrectionState(handle, false) == PAD_OK);
+    Require(Pad::ReadState().connected);
+
+    bool enabledThrew = false;
+    try {
+        scePadSetAngularVelocityBiasCorrectionState(handle, true);
+    } catch (const std::exception&) {
+        enabledThrew = true;
+    }
+    Require(enabledThrew);
+
+    PadPublishInput_nid_postfix(PadInputState{});
+    Pad::ReadState();
 }
 
 static void CheckTouchContact() {
@@ -187,6 +211,9 @@ int main() {
     Require(handle > 0);
     Require(scePadGetHandle(user, 0, 0) == handle);
     Require(scePadGetHandle(user, 2, 0) == handle);
+    PadInputState motion;
+    motion.hasMotion = true;
+    PadPublishInput_nid_postfix(motion);
     CheckTiltCorrection(handle);
     CheckTouchContact();
     CheckReadQueue(handle);
@@ -205,6 +232,6 @@ int main() {
     Require(scePadSetVibrationTriggerEffectWeakWhileEmbeddedMicInUse(true) == 0);
     Require(scePadSetAngularVelocityDeadbandState(handle, false) == 0);
     Require(scePadSetAngularVelocityDeadbandState(handle + 1, false) == PAD_ERROR_INVALID_HANDLE);
-    Require(scePadSetAngularVelocityBiasCorrectionState(handle, false) == PAD_OK);
+    CheckAngularVelocityBiasCorrection(handle);
     Require(scePadSetAngularVelocityBiasCorrectionState(handle + 1, false) == PAD_ERROR_INVALID_HANDLE);
 }

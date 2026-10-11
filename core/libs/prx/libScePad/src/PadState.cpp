@@ -1,6 +1,7 @@
 #include "prx/libScePad/include/PadState.hpp"
 #include "prx/libScePad/include/Pad.hpp"
 #include "prx/libScePad/include/InputCommandFile.hpp"
+#include "prx/libc/include/General.hpp"
 #include "prx/libkernel/Time/include/Time.hpp"
 #include <algorithm>
 #include <cmath>
@@ -310,6 +311,10 @@ void Pad::SetTiltCorrection(bool enabled) {
     std::lock_guard lock(stateMutex);
     tiltCorrection = enabled;
     biasIntegral[0] = biasIntegral[1] = biasIntegral[2] = 0.0f;
+}
+
+void Pad::SetAngularVelocityBiasCorrection(bool enabled) {
+    if (enabled) NotImplemented_nid_no_patch(__func__);
 }
 
 void Pad::SetMotionEnabled(bool enabled) {
