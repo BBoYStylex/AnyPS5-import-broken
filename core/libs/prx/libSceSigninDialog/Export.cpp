@@ -1,6 +1,7 @@
 #include <atomic>
 #include <cstdint>
 #include <cstddef>
+#include <cstring>
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
 
@@ -12,6 +13,7 @@ constexpr int COMMON_DIALOG_STATUS_RUNNING = 2;
 constexpr int COMMON_DIALOG_STATUS_FINISHED = 3;
 constexpr int COMMON_DIALOG_ERROR_NOT_INITIALIZED = static_cast<int>(0x80B80003u);
 constexpr int COMMON_DIALOG_ERROR_ALREADY_INITIALIZED = static_cast<int>(0x80B80004u);
+constexpr int COMMON_DIALOG_ERROR_NOT_FINISHED = static_cast<int>(0x80B80005u);
 constexpr int COMMON_DIALOG_ERROR_BUSY = static_cast<int>(0x80B80007u);
 constexpr int COMMON_DIALOG_ERROR_ARG_NULL = static_cast<int>(0x80B8000Du);
 
@@ -22,19 +24,22 @@ std::atomic<int> g_status{COMMON_DIALOG_STATUS_NONE};
 extern "C" {
 
 int APS5_VABI sceSigninDialogClose(void) {
- NotImplemented_nid_no_patch(__func__);
- return 0;
+    if (g_status.load() == COMMON_DIALOG_STATUS_NONE) return COMMON_DIALOG_ERROR_NOT_INITIALIZED;
+    return 0;
 }
 
 int APS5_VABI sceSigninDialogGetResult(void* result) {
- (void)result;
- NotImplemented_nid_no_patch(__func__);
- return 0;
+    const int status = g_status.load();
+    if (status == COMMON_DIALOG_STATUS_NONE) return COMMON_DIALOG_ERROR_NOT_INITIALIZED;
+    if (result == nullptr) return COMMON_DIALOG_ERROR_ARG_NULL;
+    if (status != COMMON_DIALOG_STATUS_FINISHED) return COMMON_DIALOG_ERROR_NOT_FINISHED;
+    const std::int32_t canceled = 1;
+    std::memcpy(result, &canceled, sizeof(canceled));
+    return 0;
 }
 
 int APS5_VABI sceSigninDialogGetStatus(void) {
- NotImplemented_nid_no_patch(__func__);
- return 0;
+    return g_status.load();
 }
 
 int APS5_VABI sceSigninDialogInitialize(void) {

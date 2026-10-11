@@ -10,6 +10,9 @@ int APS5_VABI sceSystemGestureGetPrimitiveTouchEvents(std::int32_t, void*, std::
 int APS5_VABI sceSystemGestureGetPrimitiveTouchEventsCount(std::int32_t);
 int APS5_VABI sceSystemGestureGetTouchEvents(std::int32_t, const void*, void*, std::uint32_t, std::uint32_t*);
 int APS5_VABI sceSystemGestureGetPrimitiveTouchEventByIndex(std::int32_t, std::uint32_t, void*);
+int APS5_VABI sceSystemGestureGetPrimitiveTouchEventByPrimitiveID(std::int32_t, std::uint16_t, void*);
+int APS5_VABI sceSystemGestureGetTouchEventByEventID(std::int32_t, const void*, std::uint32_t, void*);
+int APS5_VABI sceSystemGestureGetTouchRecognizerInformation(std::int32_t, const void*, void*);
 int APS5_VABI sceSystemGestureAppendTouchRecognizer(std::int32_t, void*);
 int APS5_VABI sceSystemGestureRemoveTouchRecognizer(std::int32_t, void*);
 int APS5_VABI sceSystemGestureResetTouchRecognizer(std::int32_t, void*);
@@ -76,5 +79,17 @@ int main() {
     Require(sceSystemGestureResetPrimitiveTouchRecognizer(handle + 1) == invalidHandle);
     Require(sceSystemGestureUpdateAllTouchRecognizer(handle + 1) == invalidHandle);
     Require(sceSystemGestureUpdatePrimitiveTouchRecognizer(handle + 1, nullptr) == invalidHandle);
+
+    Require(sceSystemGestureGetPrimitiveTouchEventByPrimitiveID(handle, 0, buffer.data()) == indexOutOfArray);
+    Require(sceSystemGestureGetPrimitiveTouchEventByPrimitiveID(handle + 1, 0, buffer.data()) == invalidHandle);
+    Require(sceSystemGestureGetTouchEventByEventID(handle, &recognizer, 0, buffer.data()) == indexOutOfArray);
+    Require(sceSystemGestureGetTouchEventByEventID(handle + 1, &recognizer, 0, buffer.data()) == invalidHandle);
+    std::array<unsigned char, 300> info;
+    info.fill(0x5a);
+    Require(sceSystemGestureGetTouchRecognizerInformation(handle, &recognizer, info.data()) == 0);
+    for (unsigned char byte : info) Require(byte == 0);
+    Require(sceSystemGestureGetTouchRecognizerInformation(handle + 1, &recognizer, info.data()) == invalidHandle);
+    Require(sceSystemGestureGetTouchRecognizerInformation(handle, nullptr, info.data()) == invalidArgument);
+    Require(sceSystemGestureGetTouchRecognizerInformation(handle, &recognizer, nullptr) == invalidArgument);
     return 0;
 }

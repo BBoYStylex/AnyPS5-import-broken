@@ -1,5 +1,6 @@
 #include <cstdint>
 #include <cstddef>
+#include <stdexcept>
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
 
@@ -12,7 +13,7 @@ constexpr std::int32_t SCE_KERNEL_ERROR_EOPNOTSUPP = static_cast<std::int32_t>(0
 extern "C" {
 
 int APS5_VABI sceTextToSpeech2GetSystemStatus() {
-    NotImplemented_nid_no_patch(__func__);
+    throw std::runtime_error("libSceTextToSpeech2: speech engine not supported");
     return 0;
 }
 
@@ -22,32 +23,32 @@ std::int32_t APS5_VABI sceTextToSpeech2Initialize(const void* param) {
 }
 
 int APS5_VABI sceTextToSpeech2Cancel() {
-    NotImplemented_nid_no_patch(__func__);
+    throw std::runtime_error("libSceTextToSpeech2: speech engine not supported");
     return 0;
 }
 
 int APS5_VABI sceTextToSpeech2Close() {
-    NotImplemented_nid_no_patch(__func__);
+    throw std::runtime_error("libSceTextToSpeech2: speech engine not supported");
     return 0;
 }
 
 int APS5_VABI sceTextToSpeech2GetSpeechStatus() {
-    NotImplemented_nid_no_patch(__func__);
+    throw std::runtime_error("libSceTextToSpeech2: speech engine not supported");
     return 0;
 }
 
 int APS5_VABI sceTextToSpeech2Open() {
-    NotImplemented_nid_no_patch(__func__);
+    throw std::runtime_error("libSceTextToSpeech2: speech engine not supported");
     return 0;
 }
 
 int APS5_VABI sceTextToSpeech2Speak() {
-    NotImplemented_nid_no_patch(__func__);
+    throw std::runtime_error("libSceTextToSpeech2: speech engine not supported");
     return 0;
 }
 
 int APS5_VABI sceTextToSpeech2Terminate() {
-    NotImplemented_nid_no_patch(__func__);
+    throw std::runtime_error("libSceTextToSpeech2: speech engine not supported");
     return 0;
 }
 

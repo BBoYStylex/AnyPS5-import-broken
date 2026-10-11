@@ -117,98 +117,79 @@ void APS5_VABI sceUsbdFreeConfigDescriptor(void* config) {
 }
 
 int APS5_VABI sceUsbdAttachKernelDriver() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return SCE_USBD_ERROR_NOT_FOUND;
 }
 
 int APS5_VABI sceUsbdCheckConnected() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return SCE_USBD_ERROR_NOT_FOUND;
 }
 
 int APS5_VABI sceUsbdClaimInterface() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return SCE_USBD_ERROR_NOT_FOUND;
 }
 
 int APS5_VABI sceUsbdClose() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return SCE_USBD_ERROR_NOT_FOUND;
 }
 
 int APS5_VABI sceUsbdControlTransfer() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return SCE_USBD_ERROR_NOT_FOUND;
 }
 
 int APS5_VABI sceUsbdGetActiveConfigDescriptor() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return SCE_USBD_ERROR_NOT_FOUND;
 }
 
 int APS5_VABI sceUsbdGetBusNumber() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return SCE_USBD_ERROR_NOT_FOUND;
 }
 
 int APS5_VABI sceUsbdGetConfigDescriptor() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return SCE_USBD_ERROR_NOT_FOUND;
 }
 
 int APS5_VABI sceUsbdGetDeviceAddress() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return SCE_USBD_ERROR_NOT_FOUND;
 }
 
 int APS5_VABI sceUsbdGetDeviceDescriptor() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return SCE_USBD_ERROR_NOT_FOUND;
 }
 
 int APS5_VABI sceUsbdGetStringDescriptor() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return SCE_USBD_ERROR_NOT_FOUND;
 }
 
 int APS5_VABI sceUsbdKernelDriverActive() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return SCE_USBD_ERROR_NOT_FOUND;
 }
 
 int APS5_VABI sceUsbdOpen() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return SCE_USBD_ERROR_NOT_FOUND;
 }
 
 int APS5_VABI sceUsbdRefDevice() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return SCE_USBD_ERROR_NOT_FOUND;
 }
 
 int APS5_VABI sceUsbdReleaseInterface() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return SCE_USBD_ERROR_NOT_FOUND;
 }
 
 int APS5_VABI sceUsbdResetDevice() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return SCE_USBD_ERROR_NOT_FOUND;
 }
 
 int APS5_VABI sceUsbdSetConfiguration() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return SCE_USBD_ERROR_NOT_FOUND;
 }
 
 int APS5_VABI sceUsbdSubmitTransfer() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return SCE_USBD_ERROR_NOT_FOUND;
 }
 
 int APS5_VABI sceUsbdUnrefDevice() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return SCE_USBD_ERROR_NOT_FOUND;
 }
 
 }

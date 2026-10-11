@@ -15,6 +15,8 @@ int APS5_VABI sceNpCreateAsyncRequest(const NpCreateAsyncRequestParameter* param
 int APS5_VABI sceNpDeleteRequest(int reqId);
 int APS5_VABI sceNpSetTimeout(int reqId, std::int32_t resolveRetry, std::uint32_t resolveTimeout,
     std::uint32_t connTimeout, std::uint32_t sendTimeout, std::uint32_t recvTimeout);
+void APS5_VABI sceNpRegisterGamePresenceCallback(void* callback, void* userdata);
+int APS5_VABI sceNpSetContentRestriction(const NpContentRestriction* restriction);
 }
 
 namespace {
@@ -67,5 +69,14 @@ int main() {
     Require(sceNpGetNpId(0x10000, &npId) == SignedOut, "sceNpGetNpId must report the user as signed out");
     Require(std::memcmp(&npId, &untouched, sizeof(npId)) == 0, "sceNpGetNpId must leave the NpId untouched");
     Require(sceNpGetNpId(0x10000, nullptr) == InvalidArgument, "sceNpGetNpId must reject a null NpId");
+
+    bool threw = false;
+    try { sceNpRegisterGamePresenceCallback(nullptr, nullptr); }
+    catch (const std::exception&) { threw = true; }
+    Require(threw, "sceNpRegisterGamePresenceCallback must reject a null callback");
+    sceNpRegisterGamePresenceCallback(reinterpret_cast<void*>(0x1), nullptr);
+    NpContentRestriction restriction{};
+    Require(sceNpSetContentRestriction(&restriction) == 0, "sceNpSetContentRestriction failed");
+    Require(sceNpSetContentRestriction(nullptr) == 0, "sceNpSetContentRestriction must accept null");
     return 0;
 }

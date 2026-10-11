@@ -9,6 +9,10 @@ int APS5_VABI sceNpSessionSignalingInitialize(void* param);
 int APS5_VABI sceNpSessionSignalingCreateContext2(const void* param, std::uint32_t* contextId);
 std::int32_t APS5_VABI sceNpSessionSignalingGetLocalNetInfo(std::int32_t contextId, void* info);
 int APS5_VABI sceNpSessionSignalingRequestPrepare(std::uint32_t contextId, std::uint32_t* requestId);
+std::int32_t APS5_VABI sceNpSessionSignalingGetConnectionStatus(std::int32_t contextId, std::int32_t connectionId, std::int32_t* status, void* peerAddress, std::uint16_t* peerPort);
+int APS5_VABI sceNpSessionSignalingGetMemoryInfo(void);
+int APS5_VABI sceNpSessionSignalingGetConnectionStatistics(void);
+int APS5_VABI sceNpSessionSignalingGetConnectionFromPeerAddress(void);
 int APS5_VABI sceNpSessionSignalingTerminate(void);
 }
 
@@ -46,6 +50,14 @@ int main() {
     Require(sceNpSessionSignalingGetLocalNetInfo(netContextId, nullptr) == InvalidArgument, "null info");
     Require(sceNpSessionSignalingGetLocalNetInfo(netContextId, info) == Unavailable, "local net info without network");
     Require(std::memcmp(info, untouched, sizeof(info)) == 0, "failed query modified the info");
+
+    std::int32_t status = 0x5a5a5a5a;
+    Require(sceNpSessionSignalingGetConnectionStatus(netContextId, 0, nullptr, nullptr, nullptr) == InvalidArgument, "null status");
+    Require(sceNpSessionSignalingGetConnectionStatus(netContextId, 0, &status, nullptr, nullptr) == Unavailable, "connection status without network");
+    Require(status == 0x5a5a5a5a, "failed status query modified the status");
+    Require(sceNpSessionSignalingGetMemoryInfo() == Unavailable, "memory info without network");
+    Require(sceNpSessionSignalingGetConnectionStatistics() == Unavailable, "connection statistics without network");
+    Require(sceNpSessionSignalingGetConnectionFromPeerAddress() == Unavailable, "connection from peer without network");
 
     Require(sceNpSessionSignalingTerminate() == 0, "terminate failed");
 }

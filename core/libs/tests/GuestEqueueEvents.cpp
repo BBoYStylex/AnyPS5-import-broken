@@ -24,6 +24,7 @@ intptr_t APS5_VABI sceKernelGetEventFflags(const KernelEvent* ev);
 int APS5_VABI sceKernelGetEventFilter(const KernelEvent* ev);
 uintptr_t APS5_VABI sceKernelGetEventId(const KernelEvent* ev);
 void* APS5_VABI sceKernelGetEventUserData(const KernelEvent* ev);
+int APS5_VABI sceKernelGetEventError(const KernelEvent* ev);
 }
 
 static constexpr int SCE_OK = 0;
@@ -288,10 +289,16 @@ int main() {
     Require(sceKernelGetEventFflags(&rawEvent) == static_cast<intptr_t>(0x80000001LL));
     Require(sceKernelGetEventData(&rawEvent) == -5);
     Require(sceKernelGetEventUserData(&rawEvent) == nullptr);
+    Require(sceKernelGetEventError(&rawEvent) == 0);
+    KernelEvent errorEvent{};
+    errorEvent.flags = 0x4000;
+    errorEvent.data = -13;
+    Require(sceKernelGetEventError(&errorEvent) == -13);
 
     Require(RejectsNull(sceKernelGetEventData));
     Require(RejectsNull(sceKernelGetEventFflags));
     Require(RejectsNull(sceKernelGetEventFilter));
     Require(RejectsNull(sceKernelGetEventId));
     Require(RejectsNull(sceKernelGetEventUserData));
+    Require(RejectsNull(sceKernelGetEventError));
 }

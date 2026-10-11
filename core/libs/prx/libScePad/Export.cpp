@@ -16,6 +16,8 @@ constexpr int PAD_ERROR_DEVICE_NOT_CONNECTED = static_cast<int>(0x80920007);
 constexpr int PAD_ERROR_DEVICE_NO_HANDLE = static_cast<int>(0x80920008);
 
 bool g_opened = false;
+bool g_angularDeadband = false;
+bool g_angularBiasCorrection = false;
 
 bool ValidPort(int userId, int type, int index) {
     const bool personalPort = type == PAD_PORT_TYPE_STANDARD || type == PAD_PORT_TYPE_SPECIAL;
@@ -144,8 +146,10 @@ int APS5_VABI scePadOpenExt(int userId, int type, int index, const void* param) 
  if (!ValidPort(userId, type, index) || param == nullptr) {
   return PAD_ERROR_INVALID_ARG;
  }
- if (type != PAD_PORT_TYPE_SPECIAL) NotImplemented_nid_no_patch(__func__);
- return PAD_ERROR_DEVICE_NOT_CONNECTED;
+ if (type == PAD_PORT_TYPE_SPECIAL) return PAD_ERROR_DEVICE_NOT_CONNECTED;
+ if (type == PAD_PORT_TYPE_REMOTE) return PAD_ERROR_DEVICE_NOT_CONNECTED;
+ g_opened = true;
+ return PAD_HANDLE;
 }
 
 int APS5_VABI scePadReadExt() { NotImplemented_nid_no_patch(__func__); return 0; }
@@ -185,7 +189,7 @@ int APS5_VABI scePadResetOrientation(int handle) {
 
 int APS5_VABI scePadSetAngularVelocityDeadbandState(int handle, bool enable) {
  if (handle != PAD_HANDLE) return PAD_ERROR_INVALID_HANDLE;
- if (enable) NotImplemented_nid_no_patch(__func__);
+ g_angularDeadband = enable;
  return PAD_OK;
 }
 
@@ -273,7 +277,7 @@ int APS5_VABI scePadIsRemoteController(int handle, bool* remote) {
 
 int APS5_VABI scePadSetAngularVelocityBiasCorrectionState(int handle, bool enabled) {
  if (handle != PAD_HANDLE) return PAD_ERROR_INVALID_HANDLE;
- if (enabled) NotImplemented_nid_no_patch(__func__);
+ g_angularBiasCorrection = enabled;
  return PAD_OK;
 }
 

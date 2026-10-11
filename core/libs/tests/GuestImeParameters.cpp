@@ -15,6 +15,7 @@ int APS5_VABI sceImeSetTextGeometry(TextAreaMode mode, const TextGeometry* geome
 int APS5_VABI sceImeKeyboardOpen(int32_t user_id, const KeyboardParam* param);
 int APS5_VABI sceImeKeyboardClose(int32_t user_id);
 int APS5_VABI sceImeKeyboardGetResourceId(int32_t user_id, KeyboardResourceIdArray* resource_ids);
+int APS5_VABI sceImeOpen_nid_postfix(const Param* param, const ExtendedParam* extended);
 }
 
 static_assert(sizeof(Param) == 96);
@@ -160,4 +161,18 @@ int main() {
     CheckErrors();
     CheckClosedPanel();
     CheckKeyboardResourceIds();
+
+    constexpr int InvalidAddress = static_cast<int>(0x80bc0031u);
+    constexpr int InvalidType = static_cast<int>(0x80bc0011u);
+    constexpr int InvalidOption = static_cast<int>(0x80bc0015u);
+    Param openParam{};
+    openParam.type = 0;
+    openParam.option = 0;
+    Require(sceImeOpen_nid_postfix(nullptr, nullptr) == InvalidAddress, "open null param");
+    Require(sceImeOpen_nid_postfix(&openParam, nullptr) == 0, "open valid param");
+    openParam.type = 5;
+    Require(sceImeOpen_nid_postfix(&openParam, nullptr) == InvalidType, "open invalid type");
+    openParam.type = 0;
+    openParam.option = 0x80000000u;
+    Require(sceImeOpen_nid_postfix(&openParam, nullptr) == InvalidOption, "open invalid option");
 }
