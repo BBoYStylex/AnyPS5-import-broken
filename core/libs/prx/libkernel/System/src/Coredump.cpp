@@ -68,17 +68,26 @@ int APS5_VABI sceCoredumpGetThreadContextInfo(void* threadContextInfo, size_t th
     return 0;
 }
 
-int APS5_VABI sceCoredumpWriteUserString() {
+int APS5_VABI sceCoredumpWriteUserString(const char* string) {
+    if (!string) {
+        return static_cast<int>(0x80B50002);
+    }
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceCoredumpAttachUserMemoryFile(void) {
+int APS5_VABI sceCoredumpAttachUserMemoryFile(const void* addr, std::size_t size) {
+    if (!addr || size == 0) {
+        return static_cast<int>(0x80B50002);
+    }
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceCoredumpAttachMemoryRegion(void) {
+int APS5_VABI sceCoredumpAttachMemoryRegion(const void* addr, std::size_t size) {
+    if (!addr || size == 0) {
+        return static_cast<int>(0x80B50002);
+    }
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }

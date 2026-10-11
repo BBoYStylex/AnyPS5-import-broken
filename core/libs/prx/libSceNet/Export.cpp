@@ -1249,8 +1249,12 @@ int APS5_VABI sceNetResolverGetError(int rid, int* status) {
     return 0;
 }
 
-int APS5_VABI sceNetResolverAbort(void) {
-    NotImplemented_nid_no_patch(__func__);
+int APS5_VABI sceNetResolverAbort(int rid) {
+    std::lock_guard lk(g_mutex);
+    if (g_resolvers.erase(rid) == 0) {
+        return fail(NET_EBADF);
+    }
+    g_cv.NotifyAll();
     return 0;
 }
 

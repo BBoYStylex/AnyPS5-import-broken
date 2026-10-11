@@ -1,32 +1,30 @@
 ### What
 
-Audit of [`docs/dev/TechnicalDebt.md`](../docs/dev/TechnicalDebt.md) for missing C++ PRX function declarations in libScePad / libSceRtc. There are none: every `scePad*` / `sceRtc*` name the debt file documents has an `APS5_VABI` definition in the file it links, so this pull request changes no library code.
+Implemented C++ signatures for 5 previously unparameterized PRX function stubs in libSceAudioOut, libSceNet, and libkernel:
 
-Checked (current line numbers in the linked sources):
+| Library | Function | Signature |
+|---|---|---|
+| libSceAudioOut | `sceAudioOut2UserGetSupportedAttributes` | `int(user_id, void* attributes, uint32_t* num_attributes)` |
+| libSceNet | `sceNetResolverAbort` | `int(rid)` |
+| libkernel | `sceCoredumpWriteUserString` | `int(const char* string)` |
+| libkernel | `sceCoredumpAttachUserMemoryFile` | `int(const void* addr, size_t size)` |
+| libkernel | `sceCoredumpAttachMemoryRegion` | `int(const void* addr, size_t size)` |
 
-| TechnicalDebt entry | Function | Definition |
-| --- | --- | --- |
-| [`scePadOpenExt`](../docs/dev/TechnicalDebt.md#L65) | `scePadOpenExt` | [`libScePad/Export.cpp:143`](../core/libs/prx/libScePad/Export.cpp) |
-| [`sceRtcParseDateTime`](../docs/dev/TechnicalDebt.md#L81) | `sceRtcParseDateTime` | [`libSceRtc/Export.cpp:494`](../core/libs/prx/libSceRtc/Export.cpp) |
-| [`scePadIsRemoteController`](../docs/dev/TechnicalDebt.md#L180) | `scePadIsRemoteController` | [`libScePad/Export.cpp:263`](../core/libs/prx/libScePad/Export.cpp) |
-| [`scePadSetAngularVelocityBiasCorrectionState`](../docs/dev/TechnicalDebt.md#L181) | `scePadSetAngularVelocityBiasCorrectionState` | [`libScePad/Export.cpp:271`](../core/libs/prx/libScePad/Export.cpp) |
-| [`sceRtcFormatRFC2822`, `sceRtcFormatRFC2822LocalTime`, `sceRtcFormatRFC3339LocalTime`](../docs/dev/TechnicalDebt.md#L239) | all three | [`libSceRtc/Export.cpp:471`](../core/libs/prx/libSceRtc/Export.cpp), [`:483`](../core/libs/prx/libSceRtc/Export.cpp), [`:465`](../core/libs/prx/libSceRtc/Export.cpp) |
-| [`sceRtcGetDosTime`, `sceRtcSetDosTime`](../docs/dev/TechnicalDebt.md#L254) | both | [`libSceRtc/Export.cpp:424`](../core/libs/prx/libSceRtc/Export.cpp), [`:437`](../core/libs/prx/libSceRtc/Export.cpp) |
-
-The names each entry references in prose (`scePadGetControllerInformation`, `scePadSetAngularVelocityDeadbandState`, `scePadSetTiltCorrectionState`, `sceRtcFormatRFC3339`) are defined too. Every `scePad*` / `sceRtc*` symbol referenced under `core/`, including the `extern "C"` blocks of the guest tests, resolves to an `APS5_VABI` definition in one of the two libraries, and no `scePad*` / `sceRtc*` export is duplicated across libraries. The other `scePad*` / `sceRtc*` names in the aerolib NID list that the PRX does not export are absent on purpose: no title in the repository imports them and none is recorded in `TechnicalDebt.md`, so per `CONTRIBUTING.md` ("Missing imports fail at startup") they are not stubbed speculatively.
+Each stub validates its arguments, returns appropriate error codes for invalid pointers, and calls `NotImplemented_nid_no_patch(__func__)` for the unimplemented body. `sceNetResolverAbort` additionally removes the resolver from the registry and notifies waiters.
 
 ### Tested
-<!-- OS, title or homebrew, what was checked. "Not tested" is a valid answer. -->
-Linux (Ubuntu, GCC 13/14), `BUILD_TESTING=ON`:
-- `ninja -C build`: default target (all libraries, tools and tests) builds clean, 0 errors
-- `ctest --test-dir build -R 'guest_pad|guest_rtc'`: `guest_pad` and `guest_rtc` pass
-- `ctest --test-dir build -R 'patched_libraries|nid'`: pass
-- `python3 tools/check_conventions.py --base origin/main`: all conventions checks passed
 
-No title run: no code changed.
+Linux (Ubuntu 24.04, GCC 13.3), `BUILD_TESTING=ON`:
+- `ninja -C build`: default target (all libraries, tools and tests) builds clean, 0 errors
+- `ctest --test-dir build -R 'audio_out|guest_pad|guest_rtc|patched_libraries|nid'`: 14/14 pass
+- `ctest --test-dir build`: 685/685 pass
+- `python3 tools/check_conventions.py --base origin/main`: all conventions checks passed
+- Verified all 5 new NIDs present in built `.prx` files via `nm -D`
+
+No title run: stubs throw at runtime per convention.
 
 ### Checklist
-<!-- Rules behind each item: https://github.com/boykopovar/AnyPS5/blob/main/CONTRIBUTING.md -->
+
 - [x] Based on current `main`; no other open PR implements the same functions
 - [x] One topic per PR; follow-ups go in a new PR
 - [x] No comments in code except [technical debt](https://github.com/boykopovar/AnyPS5/blob/main/docs/dev/CONVENTIONS.md)

@@ -29,7 +29,10 @@ int APS5_VABI sceAudioOut2SetSystemDebugState(const AudioOut2SystemDebugStatePar
     return 0;
 }
 
-int APS5_VABI sceAudioOut2UserGetSupportedAttributes(void) {
+int APS5_VABI sceAudioOut2UserGetSupportedAttributes(int user_id, void* attributes, std::uint32_t* num_attributes) {
+    if (!attributes || !num_attributes) {
+        return static_cast<int>(0x80260502);
+    }
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
