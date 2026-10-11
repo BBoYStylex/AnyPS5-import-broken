@@ -2,6 +2,7 @@ target_sources(libc PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/Export.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/General.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/CreationMask.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/GuestWideRejectSpan.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/specifics/gcc/StackGuard.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/specifics/windows/CrashReport.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/specifics/linux/DlIteratePhdr.cpp
@@ -84,6 +85,16 @@ if(BUILD_TESTING)
     add_test(NAME guest_scan_count COMMAND guest_scan_count_tests)
     if(WIN32)
         set_tests_properties(guest_scan_count PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+    endif()
+    add_test_executable(guest_libc_wide_reject_span_tests ${LIBS_INCLUDE_DIR}/tests/GuestLibcWideRejectSpan.cpp)
+    target_include_directories(guest_libc_wide_reject_span_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_libc_wide_reject_span_tests PRIVATE libc)
+    configure_windows_unwind(guest_libc_wide_reject_span_tests)
+    add_test(NAME guest_libc_wide_reject_span COMMAND guest_libc_wide_reject_span_tests)
+    set_tests_properties(guest_libc_wide_reject_span PROPERTIES TIMEOUT 10)
+    if(WIN32)
+        set_tests_properties(guest_libc_wide_reject_span PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
     endif()
     add_test_executable(guest_access_tests ${LIBS_INCLUDE_DIR}/tests/GuestAccess.cpp)
