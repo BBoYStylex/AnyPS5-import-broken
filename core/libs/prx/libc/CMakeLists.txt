@@ -36,6 +36,7 @@ target_sources(libc PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src/LocaleSupport.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/Process.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/Hostname.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/GuestRoundingExtended.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/Environment.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/Directory.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/Filesystem.cpp
@@ -402,6 +403,16 @@ if(BUILD_TESTING)
     add_test(NAME guest_demangle COMMAND guest_demangle_tests)
     if(WIN32)
         set_tests_properties(guest_demangle PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+    endif()
+    add_test_executable(guest_libc_rounding_extended_tests ${LIBS_INCLUDE_DIR}/tests/GuestLibcRoundingExtended.cpp)
+    target_include_directories(guest_libc_rounding_extended_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_libc_rounding_extended_tests PRIVATE libc)
+    configure_windows_unwind(guest_libc_rounding_extended_tests)
+    add_test(NAME guest_libc_rounding_extended COMMAND guest_libc_rounding_extended_tests)
+    set_tests_properties(guest_libc_rounding_extended PROPERTIES TIMEOUT 10)
+    if(WIN32)
+        set_tests_properties(guest_libc_rounding_extended PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
     endif()
     add_test_executable(guest_string_tests ${LIBS_INCLUDE_DIR}/tests/GuestStrings.cpp)
