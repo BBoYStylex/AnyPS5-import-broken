@@ -30,9 +30,48 @@ namespace {
     std::uint64_t lastFuseTime = 0;
     float biasIntegral[3] = {0.0f, 0.0f, 0.0f};
     bool tiltCorrection = true;
+    constexpr float kGravity = 9.80665f;
+    constexpr float kAngularVelocityDeadband = 0.02f;
+    constexpr float kStillAngularVelocity = 0.1f;
+    constexpr float kStillAccelerationTolerance = 0.05f * kGravity;
+    constexpr std::uint64_t kStillDuration = 500000;
+    constexpr float kBiasTimeConstant = 0.5f;
+    bool angularVelocityDeadband = false;
+    bool angularVelocityBiasCorrection = false;
+    std::array<float, 3> gyroBias{0.0f, 0.0f, 0.0f};
+    bool stillTracking = false;
+    std::uint64_t stillSince = 0;
     std::uint8_t nextTouchId = 0;
     bool prevTouchActive[2] = {false, false};
     std::uint8_t touchIds[2] = {0, 0};
+
+    float magnitude(const std::array<float, 3>& v) {
+        return std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+    }
+
+    void resetGyroBias() {
+        gyroBias = {0.0f, 0.0f, 0.0f};
+        stillTracking = false;
+        stillSince = 0;
+    }
+
+    std::array<float, 3> filterGyro(float dt, std::uint64_t now, const std::array<float, 3>& accel, std::array<float, 3> gyro) {
+        if (angularVelocityBiasCorrection) {
+            const bool still = magnitude(gyro) < kStillAngularVelocity && std::fabs(magnitude(accel) - kGravity) < kStillAccelerationTolerance;
+            if (!still) {
+                stillTracking = false;
+            } else if (!stillTracking) {
+                stillTracking = true;
+                stillSince = now;
+            } else if (now - stillSince >= kStillDuration) {
+                const float weight = dt / (kBiasTimeConstant + dt);
+                for (int i = 0; i < 3; ++i) gyroBias[i] += weight * (gyro[i] - gyroBias[i]);
+            }
+            for (int i = 0; i < 3; ++i) gyro[i] -= gyroBias[i];
+        }
+        if (angularVelocityDeadband && magnitude(gyro) < kAngularVelocityDeadband) gyro = {0.0f, 0.0f, 0.0f};
+        return gyro;
+    }
 
     void normalize(Quat& q) {
         const float n = std::sqrt(q.w * q.w + q.x * q.x + q.y * q.y + q.z * q.z);
@@ -122,21 +161,22 @@ PadData BuildData(const PadInputState& state, std::uint64_t changeTime, std::uin
     const bool live = state.hasMotion && output.motionEnabled;
     const std::array<float, 3> rest{0.0f, 9.80665f, 0.0f};
     const std::array<float, 3>& accel = live ? state.accel : rest;
-    const std::array<float, 3> gyro = live ? state.gyro : std::array<float, 3>{0.0f, 0.0f, 0.0f};
+    std::array<float, 3> gyro = live ? state.gyro : std::array<float, 3>{0.0f, 0.0f, 0.0f};
     if (live) {
         float dt = lastFuseTime != 0 && now > lastFuseTime ? static_cast<float>(now - lastFuseTime) * 1e-6f : 0.0f;
         dt = std::min(dt, 0.1f);
+        gyro = filterGyro(dt, now, accel, gyro);
         fuse(dt, accel, gyro);
     } else {
         orientation = Quat{};
         biasIntegral[0] = biasIntegral[1] = biasIntegral[2] = 0.0f;
+        resetGyroBias();
     }
     lastFuseTime = now;
     data.orientation_x = orientation.x;
     data.orientation_y = orientation.y;
     data.orientation_z = orientation.z;
     data.orientation_w = orientation.w;
-    constexpr float kGravity = 9.80665f;
     data.acceleration_x = accel[0] / kGravity;
     data.acceleration_y = accel[1] / kGravity;
     data.acceleration_z = accel[2] / kGravity;
@@ -310,6 +350,17 @@ void Pad::SetTiltCorrection(bool enabled) {
     std::lock_guard lock(stateMutex);
     tiltCorrection = enabled;
     biasIntegral[0] = biasIntegral[1] = biasIntegral[2] = 0.0f;
+}
+
+void Pad::SetAngularVelocityDeadband(bool enabled) {
+    std::lock_guard lock(stateMutex);
+    angularVelocityDeadband = enabled;
+}
+
+void Pad::SetAngularVelocityBiasCorrection(bool enabled) {
+    std::lock_guard lock(stateMutex);
+    angularVelocityBiasCorrection = enabled;
+    resetGyroBias();
 }
 
 void Pad::SetMotionEnabled(bool enabled) {

@@ -4,6 +4,7 @@
 #include "prx/libScePad/include/InputCommandFile.hpp"
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -85,6 +86,66 @@ static void CheckTiltCorrection(int handle) {
     Require(scePadSetTiltCorrectionState(handle, true) == PAD_OK);
     Require(SettleOrientationW() < 0.999f);
     PadPublishInput_nid_postfix(PadInputState{});
+}
+
+static PadInputState Moving(float x, float y, float z) {
+    PadInputState input;
+    input.hasMotion = true;
+    input.gyro = {x, y, z};
+    return input;
+}
+
+static float ReadAngularVelocityX() {
+    return Pad::ReadState().angular_velocity_x;
+}
+
+static float SettleAngularVelocityX(int milliseconds) {
+    float value = 0.0f;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(milliseconds);
+    do {
+        value = ReadAngularVelocityX();
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    } while (std::chrono::steady_clock::now() < deadline);
+    return value;
+}
+
+static void CheckAngularVelocityDeadband(int handle) {
+    Require(scePadSetAngularVelocityDeadbandState(handle + 1, true) == PAD_ERROR_INVALID_HANDLE);
+    PadPublishInput_nid_postfix(Moving(0.005f, 0.0f, 0.0f));
+    Require(ReadAngularVelocityX() == 0.005f);
+    Require(scePadSetAngularVelocityDeadbandState(handle, true) == PAD_OK);
+    Require(ReadAngularVelocityX() == 0.0f);
+    PadPublishInput_nid_postfix(Moving(0.01f, -0.01f, 0.01f));
+    const auto small = Pad::ReadState();
+    Require(small.angular_velocity_x == 0.0f && small.angular_velocity_y == 0.0f && small.angular_velocity_z == 0.0f);
+    PadPublishInput_nid_postfix(Moving(0.5f, 0.0f, -0.25f));
+    const auto large = Pad::ReadState();
+    Require(large.angular_velocity_x == 0.5f && large.angular_velocity_z == -0.25f);
+    PadPublishInput_nid_postfix(Moving(0.005f, 0.0f, 0.0f));
+    Require(scePadSetAngularVelocityDeadbandState(handle, false) == PAD_OK);
+    Require(ReadAngularVelocityX() == 0.005f);
+    PadPublishInput_nid_postfix(PadInputState{});
+    Pad::ReadState();
+}
+
+static void CheckAngularVelocityBiasCorrection(int handle) {
+    Require(scePadSetAngularVelocityBiasCorrectionState(handle + 1, true) == PAD_ERROR_INVALID_HANDLE);
+    PadPublishInput_nid_postfix(Moving(0.03f, 0.0f, 0.0f));
+    Require(scePadSetAngularVelocityBiasCorrectionState(handle, true) == PAD_OK);
+    Require(ReadAngularVelocityX() == 0.03f);
+    Require(SettleAngularVelocityX(300) == 0.03f);
+    Require(std::fabs(SettleAngularVelocityX(2700)) < 0.003f);
+    PadPublishInput_nid_postfix(Moving(1.0f, 0.0f, 0.0f));
+    const float turning = SettleAngularVelocityX(1000);
+    Require(turning > 0.96f && turning < 0.98f);
+    PadPublishInput_nid_postfix(Moving(0.03f, 0.0f, 0.0f));
+    Require(std::fabs(ReadAngularVelocityX()) < 0.003f);
+    Require(scePadSetAngularVelocityBiasCorrectionState(handle, true) == PAD_OK);
+    Require(ReadAngularVelocityX() == 0.03f);
+    Require(scePadSetAngularVelocityBiasCorrectionState(handle, false) == PAD_OK);
+    Require(SettleAngularVelocityX(1000) == 0.03f);
+    PadPublishInput_nid_postfix(PadInputState{});
+    Pad::ReadState();
 }
 
 static void CheckTouchContact() {
@@ -188,6 +249,8 @@ int main() {
     Require(scePadGetHandle(user, 0, 0) == handle);
     Require(scePadGetHandle(user, 2, 0) == handle);
     CheckTiltCorrection(handle);
+    CheckAngularVelocityDeadband(handle);
+    CheckAngularVelocityBiasCorrection(handle);
     CheckTouchContact();
     CheckReadQueue(handle);
     CheckReadStateHandle(handle);
