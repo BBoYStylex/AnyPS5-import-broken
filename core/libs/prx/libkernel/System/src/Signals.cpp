@@ -307,6 +307,21 @@ int APS5_VABI pause_nid_postfix(void) {
     NotImplemented_nid_no_patch("pause: waiting for a delivered signal");
     return -1;
 }
+
+int APS5_VABI sigpending_nid_postfix(GuestSignalSet* set) {
+    if (set == nullptr) { *__error_nid_postfix() = 14; return -1; }
+    for (auto& word : set->bits) word = 0;
+    return 0;
+}
+
+int APS5_VABI sigsuspend_nid_postfix(const GuestSignalSet* mask) {
+    if (mask == nullptr) { *__error_nid_postfix() = 14; return -1; }
+    char message[160];
+    std::snprintf(message, sizeof(message), "sigsuspend: waiting for a delivered signal (mask 0x%x 0x%x 0x%x 0x%x)",
+                  mask->bits[0], mask->bits[1], mask->bits[2], mask->bits[3]);
+    NotImplemented_nid_no_patch(message);
+    return -1;
+}
 }
 
 extern "C" {
