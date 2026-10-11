@@ -389,6 +389,7 @@ std::vector<GuestArtifact> GuestModuleBuilder::Build(const std::filesystem::path
         artifacts.push_back({target, std::move(output), std::move(imports), image.SourcePath});
         std::cout << " [DONE]" << std::endl;
     }
+    for (const auto& [name, providers] : exports) dynamic.GuestExports.insert(name);
     return artifacts;
 }
 
