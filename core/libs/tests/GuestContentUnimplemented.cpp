@@ -5,7 +5,6 @@
 #include <string>
 
 extern "C" {
-int APS5_VABI sceContentDeleteById();
 int APS5_VABI sceContentSearchGetContentLastUpdateId();
 int APS5_VABI sceContentSearchOpenMetadataByContentId();
 int APS5_VABI sceContentSearchGetTotalContentSize();
@@ -30,7 +29,6 @@ bool ReportsNotImplemented(const char* name, int (APS5_VABI *function)()) {
 
 int main() {
     bool correct = true;
-    correct &= ReportsNotImplemented("sceContentDeleteById", sceContentDeleteById);
     correct &= ReportsNotImplemented("sceContentSearchGetContentLastUpdateId", sceContentSearchGetContentLastUpdateId);
     correct &= ReportsNotImplemented("sceContentSearchOpenMetadataByContentId", sceContentSearchOpenMetadataByContentId);
     correct &= ReportsNotImplemented("sceContentSearchGetTotalContentSize", sceContentSearchGetTotalContentSize);
