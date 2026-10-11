@@ -20,6 +20,7 @@ extern "C" int APS5_VABI sceKernelVirtualQuery(const void* addr, int flags, Virt
 
 namespace {
 // FreeBSD/PS5 ABI values, independent of the host's errno and mmap constants.
+constexpr int GuestNotPermitted = 1;
 constexpr int GuestInvalid = 22;
 constexpr int GuestNoMemory = 12;
 constexpr int GuestBadDescriptor = 9;
@@ -225,7 +226,10 @@ int APS5_VABI msync_nid_postfix(void* address, std::size_t length, int flags) {
 }
 
 int APS5_VABI madvise_nid_postfix(void* address, std::size_t length, int advice) {
-    if (advice == GuestAdviceProtect) NotImplemented_nid_no_patch("madvise MADV_PROTECT");
+    if (advice == GuestAdviceProtect) {
+        SetError(GuestNotPermitted);
+        return -1;
+    }
     const auto start = reinterpret_cast<std::uintptr_t>(address);
     if (advice < 0 || advice > GuestAdviceCore || start > GuestUserAddressEnd || length > GuestUserAddressEnd - start) {
         SetError(GuestInvalid);
