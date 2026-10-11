@@ -337,5 +337,6 @@ if(BUILD_TESTING)
         prx/libkernel/DirectMemory/MemoryPool.cpp
     )
     target_include_directories(MemoryPoolTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    configure_windows_unwind(MemoryPoolTest)
     add_test(NAME MemoryPoolTest COMMAND MemoryPoolTest)
 endif()
