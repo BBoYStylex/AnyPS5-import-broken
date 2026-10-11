@@ -26,6 +26,7 @@ target_sources(libc PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src/GuestHeap.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/HeapDiagnostics.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/Mspace.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/GuestExpm1Float.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/ApplicationHeap.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/ApplicationProcessParameters.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/JumpBuffer.cpp
@@ -311,6 +312,16 @@ if(BUILD_TESTING)
     set_tests_properties(guest_atoi PROPERTIES TIMEOUT 20)
     if(WIN32)
         set_tests_properties(guest_atoi PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+    endif()
+    add_test_executable(guest_libc_expm1_float_tests ${LIBS_INCLUDE_DIR}/tests/GuestLibcExpm1Float.cpp)
+    target_include_directories(guest_libc_expm1_float_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_libc_expm1_float_tests PRIVATE libc)
+    configure_windows_unwind(guest_libc_expm1_float_tests)
+    add_test(NAME guest_libc_expm1_float COMMAND guest_libc_expm1_float_tests)
+    set_tests_properties(guest_libc_expm1_float PROPERTIES TIMEOUT 10)
+    if(WIN32)
+        set_tests_properties(guest_libc_expm1_float PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
     endif()
     add_test_executable(guest_reallocalign_tests ${LIBS_INCLUDE_DIR}/tests/GuestReallocalign.cpp)
