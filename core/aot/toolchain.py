@@ -1,3 +1,5 @@
+import os
+import platform
 import re
 import struct
 import subprocess
@@ -9,11 +11,14 @@ from optimize import merge_constant_stores
 
 def build_native_object(ir, destination):
     destination = Path(destination)
+    compiler = [os.environ.get('ANYPS5_AOT_CLANG', 'clang'), '--target=arm64-apple-macosx13.0.0']
+    if platform.system() == 'Darwin' and 'ANYPS5_AOT_CLANG' not in os.environ:
+        compiler = ['xcrun', 'clang', '-arch', 'arm64']
     with tempfile.TemporaryDirectory(prefix='anyps5-native-build-') as directory:
         folder = Path(directory)
         source, optimized, merged, object_file = (folder / name for name in ('input.ll', 'optimized.ll', 'merged.ll', 'native.o'))
         source.write_text(ir)
-        subprocess.run(['xcrun', 'clang', '-arch', 'arm64', '-O3', '-S', '-emit-llvm', str(source), '-o', str(optimized)],
+        subprocess.run([*compiler, '-O3', '-S', '-emit-llvm', str(source), '-o', str(optimized)],
                        check=True, capture_output=True, text=True)
         result, count = merge_constant_stores(optimized.read_text())
         if re.search(r'%(?:rax|rbx|rcx|rdx|rsi|rdi|rsp|rbp|r[8-9]|r1[0-5]|(?:xmm|ymm_hi)(?:[0-9]|1[0-5])|[czsop]f)(?:\.\w+)?\s*=\s*alloca', result) or 'freeze ' in result:
@@ -21,7 +26,7 @@ def build_native_object(ir, destination):
         if re.search(r'^\s*ret\b.*\b(?:undef|poison)\b', result, re.MULTILINE):
             raise ValueError('native lowering produced an undefined return value')
         merged.write_text(result)
-        subprocess.run(['xcrun', 'clang', '-arch', 'arm64', '-O3', '-c', str(merged), '-o', str(object_file)],
+        subprocess.run([*compiler, '-O3', '-c', str(merged), '-o', str(object_file)],
                        check=True, capture_output=True, text=True)
         raw = object_file.read_bytes()
         if len(raw) < 32 or struct.unpack_from('<III', raw)[:2] != (0xfeedfacf, 0x100000c) or struct.unpack_from('<I', raw, 12)[0] != 1:

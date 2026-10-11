@@ -1,9 +1,17 @@
 name: Native ARM64 AOT
 
 on:
+  push:
+    branches: ['feature/aot-native-runtime']
   pull_request:
     paths:
       - 'core/aot/**'
+      - 'core/libs/native/**'
+      - 'core/libs/prx/libc/**'
+      - 'core/libs/prx/libkernel/Time/**'
+      - 'core/libs/prx/libkernel/System/src/Notification.cpp'
+      - 'core/libs/tests/NativeAot*'
+      - '3rdparty/ps5link-sdk'
       - 'CMakeLists.txt'
       - '.gitmodules'
       - '3rdparty/capstone'
@@ -20,13 +28,24 @@ concurrency:
 
 jobs:
   native-aot:
-    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            example: 'ON'
+          - os: ubuntu-latest
+            example: 'ON'
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - run: git submodule update --init 3rdparty/capstone 3rdparty/pyelftools
-      - run: test "$(uname -m)" = arm64
-      - run: /usr/bin/arch -x86_64 /usr/bin/true
-      - run: cmake -S . -B build-aot -G Ninja -DCMAKE_BUILD_TYPE=Release -DANYPS5_RELINKER_ONLY=ON -DANYPS5_NATIVE_AOT=ON -DBUILD_TESTING=ON
+      - run: git submodule update --init 3rdparty/ps5link-sdk
+      - if: runner.os == 'macOS'
+        run: test "$(uname -m)" = arm64
+      - if: runner.os == 'macOS'
+        run: /usr/bin/arch -x86_64 /usr/bin/true
+      - run: cmake -S . -B build-aot -G Ninja -DCMAKE_BUILD_TYPE=Release -DANYPS5_RELINKER_ONLY=ON -DANYPS5_NATIVE_AOT=ON -DBUILD_TESTING=ON -DANYPS5_NATIVE_AOT_EXAMPLE=${{ matrix.example }}
       - run: cmake --build build-aot --parallel 3
       - run: ctest --test-dir build-aot --output-on-failure --parallel 2
