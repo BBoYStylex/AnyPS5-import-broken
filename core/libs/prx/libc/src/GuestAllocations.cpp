@@ -348,13 +348,18 @@ void GuestAllocationsRequireUnpinned_nid_postfix(void* mutation, const void* poi
 void GuestAllocationsRequireAvailable_nid_postfix(void*, const void* pointer, std::size_t bytes) {
     const auto address = reinterpret_cast<std::uintptr_t>(pointer);
     require(address != 0 && bytes != 0 && bytes <= std::numeric_limits<std::uint64_t>::max() - address, "invalid fixed guest mapping");
-    for (const auto& [base, range] : registry().ranges) {
+    for (auto it = registry().ranges.begin(); it != registry().ranges.end();) {
+        const auto base = it->first;
+        const auto& range = it->second;
         if (base >= address + bytes) break;
         if (base + range->bytes > address) {
-            char message[160];
-            std::snprintf(message, sizeof(message), "fixed mapping 0x%llx+0x%llx overlaps a registered guest allocation 0x%llx+0x%llx", static_cast<unsigned long long>(address), static_cast<unsigned long long>(bytes), static_cast<unsigned long long>(base), static_cast<unsigned long long>(range->bytes));
-            throw std::runtime_error(message);
+            std::fprintf(stderr, "[GuestAllocations] Replacing existing overlapping mapping 0x%llx+0x%llx with fixed 0x%llx+0x%llx\n",
+                         static_cast<unsigned long long>(base), static_cast<unsigned long long>(range->bytes),
+                         static_cast<unsigned long long>(address), static_cast<unsigned long long>(bytes));
+            it = registry().ranges.erase(it);
+            continue;
         }
+        ++it;
     }
 }
 

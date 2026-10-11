@@ -98,13 +98,26 @@ public:
     void MarkUsed(const void* pointer, std::size_t bytes) {
         std::lock_guard lock(_lock);
         const auto start = reinterpret_cast<std::uintptr_t>(pointer);
-        const auto next = _used.lower_bound(start);
-        if ((next != _used.end() && next->first < start + bytes) || (next != _used.begin() && std::prev(next)->second > start)) {
+        const auto end = start + bytes;
+        if (OverlapsHostRegion(start, bytes)) {
             char message[160];
-            std::snprintf(message, sizeof(message), "fixed guest mapping 0x%llx+0x%zx overlaps %s", static_cast<unsigned long long>(start), bytes, OverlapsHostRegion(start, bytes) ? "a host region in the guest arena" : "a guest arena range");
+            std::snprintf(message, sizeof(message), "fixed guest mapping 0x%llx+0x%zx overlaps a host region in the guest arena", static_cast<unsigned long long>(start), bytes);
             throw std::runtime_error(message);
         }
-        _used.emplace(start, start + bytes);
+        auto it = _used.upper_bound(start);
+        if (it != _used.begin()) --it;
+        while (it != _used.end() && it->first < end) {
+            const auto rangeStart = it->first;
+            const auto rangeEnd = it->second;
+            if (rangeEnd <= start) {
+                ++it;
+                continue;
+            }
+            it = _used.erase(it);
+            if (rangeStart < start) _used.emplace(rangeStart, start);
+            if (rangeEnd > end) _used.emplace(end, rangeEnd);
+        }
+        _used.emplace(start, end);
     }
 
     void Release(const void* pointer, std::size_t bytes) {
