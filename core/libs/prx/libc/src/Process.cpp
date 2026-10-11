@@ -10,6 +10,11 @@
 #include <vector>
 #ifdef _WIN32
 #include <windows.h>
+#include <fcntl.h>
+#include <io.h>
+#else
+#include <fcntl.h>
+#include <unistd.h>
 #endif
 #include <atomic>
 #include <stdexcept>
@@ -196,11 +201,33 @@ int APS5_VABI at_quick_exit_nid_postfix(GuestExitCallback func) {
     _Exit_nid_postfix(status);
 }
 
+int APS5_VABI chdir_nid_postfix(const char* path);
+
 int APS5_VABI daemon_nid_postfix(int noChdir, int noClose) {
-    (void)noChdir;
-    (void)noClose;
-    NotImplemented_nid_no_patch("daemon: forking into the background");
-    return -1;
+    if (noChdir == 0 && chdir_nid_postfix("/") != 0) return -1;
+    if (noClose != 0) return 0;
+#ifdef _WIN32
+    const int null = ::_open("NUL", _O_RDWR);
+    if (null < 0) return -1;
+    for (int descriptor = 0; descriptor < 3; ++descriptor) {
+        if (::_dup2(null, descriptor) != 0) {
+            ::_close(null);
+            return -1;
+        }
+    }
+    if (null > 2) ::_close(null);
+#else
+    const int null = ::open("/dev/null", O_RDWR);
+    if (null < 0) return -1;
+    for (int descriptor = 0; descriptor < 3; ++descriptor) {
+        if (::dup2(null, descriptor) < 0) {
+            ::close(null);
+            return -1;
+        }
+    }
+    if (null > 2) ::close(null);
+#endif
+    return 0;
 }
 
 }
