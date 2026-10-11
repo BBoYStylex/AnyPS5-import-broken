@@ -342,6 +342,8 @@ Throughout the project, every function at every stage either **does exactly what
 - [gethostbyname](../../core/libs/prx/libScePosixForWebKit/Resolver.cpp) (libScePosixForWebKit) - numeric IPv4 forms, trailing whitespace and 64-bit accumulation follow FreeBSD 11.4 [inet_aton](https://github.com/freebsd/freebsd-src/blob/releng/11.4/lib/libc/inet/inet_addr.c); clearing the resolver error on numeric success follows [fakeaddr](https://github.com/freebsd/freebsd-src/blob/releng/11.4/lib/libc/net/gethostnamadr.c). Exact PS5 behavior is unverified; hostname lookup still uses the host resolver
 
 - [sceAppContentGetAddcontDownloadProgress](../../core/libs/prx/libSceAppContent/Export.cpp) (libSceAppContent) - imported by PPSA08755, which fails to load without it; added without an implementation because its behavior is unverified. [SharpProspero](https://github.com/SvenGDK/SharpProspero) lists `(uint32_t serviceLabel, entitlementLabel, SceAppContentAddcontDownloadProgress*)`, but no PS5 reference gives the progress layout or the error codes
+- [_ZSt14_Atomic_assert](../../core/libs/prx/libc/Export.cpp) (libc) - dead Cyberpunk 2077 (PPSA04029) import with no call sites; kept because the Windows loader resolves imports strictly. Console signature and behavior unverified
+- [vsnprintf_s, vsscanf_s](../../core/libs/prx/libc/Export.cpp) (libc) - declared without parameters; Cyberpunk 2077 uses them in an fopen/fseek/ftell-like file-size idiom as (handle, 0, 2) and (handle, 0, 0), and returning 0 reports success. Console signatures and behavior unverified
 
 ### Functional
 
