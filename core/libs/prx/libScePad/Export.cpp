@@ -148,7 +148,14 @@ int APS5_VABI scePadOpenExt(int userId, int type, int index, const void* param) 
  return PAD_ERROR_DEVICE_NOT_CONNECTED;
 }
 
-int APS5_VABI scePadReadExt() { NotImplemented_nid_no_patch(__func__); return 0; }
+int APS5_VABI scePadReadState(int handle, PadData* data);
+
+int APS5_VABI scePadReadExt(int handle, PadData* data, int num) {
+    if (data == nullptr || num <= 0) APS5_INVALID_ARG_EX;
+    const int result = scePadReadState(handle, data);
+    if (result != 0) return result;
+    return 1;
+}
 
 int APS5_VABI scePadGetFeatureReport() { NotImplemented_nid_no_patch(__func__); return 0; }
 
