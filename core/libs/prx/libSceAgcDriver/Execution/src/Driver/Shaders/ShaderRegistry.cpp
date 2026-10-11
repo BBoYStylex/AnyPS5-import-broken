@@ -251,7 +251,7 @@ std::shared_ptr<const ShaderSnapshot> RegisteredHeader(const ShaderRegistry& reg
     for (const auto& snapshot : found->second) {
         if (SameHeader(*snapshot, shader)) return snapshot;
     }
-    return {};
+    return found->second.empty() ? nullptr : found->second.front();
 }
 
 std::shared_ptr<const ShaderSnapshot> RegisteredProgram(const ShaderRegistry& registry, std::uint64_t address, std::initializer_list<std::uint8_t> types) {
