@@ -239,6 +239,18 @@ int APS5_VABI pthread_sigmask_nid_postfix(int how, const GuestSignalSet* set, Gu
     if (set != nullptr && (how < 1 || how > 3)) return 22;
     return _sigprocmask_nid_postfix(how, set, previousSet);
 }
+
+int APS5_VABI sigpending_nid_postfix(GuestSignalSet* set) {
+    if (set == nullptr) { *__error_nid_postfix() = 14; return -1; }
+    for (auto& word : set->bits) word = 0;
+    return 0;
+}
+
+int APS5_VABI sigsuspend_nid_postfix(const GuestSignalSet* mask) {
+    if (mask == nullptr) { *__error_nid_postfix() = 14; return -1; }
+    *__error_nid_postfix() = 4;
+    return -1;
+}
 }
 
 extern "C" {

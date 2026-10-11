@@ -16,6 +16,8 @@ int APS5_VABI pthread_sigmask_nid_postfix(int, const void*, void*);
 int* APS5_VABI __error_nid_postfix();
 int APS5_VABI _is_signal_return_nid_postfix(std::uint64_t);
 unsigned int APS5_VABI GuestAlarm_nid_no_patch(unsigned int);
+int APS5_VABI sigpending_nid_postfix(GuestSignalSet*);
+int APS5_VABI sigsuspend_nid_postfix(const GuestSignalSet*);
 }
 struct GuestSignalSet {
     std::uint32_t bits[4];
@@ -142,4 +144,18 @@ int main() {
     Require(GuestAlarm_nid_no_patch(1) == 0);
     std::this_thread::sleep_for(std::chrono::milliseconds(1500));
     Require(GuestAlarm_nid_no_patch(0) == 0);
+    *__error_nid_postfix() = 0;
+    Require(sigpending_nid_postfix(nullptr) == -1);
+    Require(*__error_nid_postfix() == 14);
+    *__error_nid_postfix() = 42;
+    GuestSignalSet pendingSignals{{0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff}};
+    Require(sigpending_nid_postfix(&pendingSignals) == 0);
+    Require(pendingSignals.bits[0] == 0 && pendingSignals.bits[1] == 0 && pendingSignals.bits[2] == 0 && pendingSignals.bits[3] == 0);
+    Require(*__error_nid_postfix() == 42);
+    *__error_nid_postfix() = 0;
+    Require(sigsuspend_nid_postfix(nullptr) == -1);
+    Require(*__error_nid_postfix() == 14);
+    GuestSignalSet suspendMask{{0x1, 0, 0, 0}};
+    Require(sigsuspend_nid_postfix(&suspendMask) == -1);
+    Require(*__error_nid_postfix() == 4);
 }
