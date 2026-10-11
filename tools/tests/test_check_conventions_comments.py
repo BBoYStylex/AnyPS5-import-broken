@@ -226,5 +226,37 @@ class PullRequestTemplateTests(unittest.TestCase):
         self.assertEqual(self.findings("- [x] all"), [])
 
 
+class SpacedPathTests(unittest.TestCase):
+    def test_comment_in_path_with_space_is_reported(self):
+        checker = Path(__file__).resolve().parents[1] / "check_conventions.py"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+
+            def git(*args):
+                return subprocess.run(
+                    ["git", "-c", "user.name=Conventions Test", "-c", "user.email=test@example.com",
+                     "-c", "commit.gpgsign=false", *args],
+                    cwd=root, capture_output=True, text=True, check=True,
+                )
+
+            git("init", "-q")
+            (root / "readme.txt").write_text("x\n", encoding="utf-8")
+            git("add", ".")
+            git("commit", "-qm", "docs: add readme")
+            source = root / "core/a b.cpp"
+            source.parent.mkdir(parents=True)
+            source.write_text("int x; // note\n", encoding="utf-8")
+            git("add", ".")
+            git("commit", "-qm", "feat: add spaced file")
+            result = subprocess.run(
+                [sys.executable, "-I", str(checker), "--base", "HEAD~1"],
+                cwd=root, capture_output=True, text=True,
+                env={key: value for key, value in os.environ.items()
+                     if key not in ("GITHUB_EVENT_PATH", "GITHUB_STEP_SUMMARY", "GITHUB_ACTIONS")},
+            )
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            self.assertIn("core/a b.cpp:1: error: [comment]", result.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

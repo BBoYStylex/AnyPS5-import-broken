@@ -66,7 +66,7 @@ class Check:
         path = None
         for line in git("diff", "-U0", "--no-color", "--no-renames", "--no-prefix", self.base, head).splitlines():
             if line.startswith("+++ "):
-                path = None if line == "+++ /dev/null" else line[4:]
+                path = None if line == "+++ /dev/null" else line[4:].rstrip("\t")
             elif line.startswith("@@"):
                 number = int(re.search(r"\+(\d+)", line).group(1))
             elif line.startswith("+") and path:

@@ -3612,7 +3612,7 @@ void unorm10_11_11TargetTests() {
     expectFailure([&] { validate(packed, plainState); }, "float4 colors");
     auto uintExport = request;
     uintExport.context.pixel->targetOutputMode[0] = 7;
-    expectFailure([&] { ShaderRecompiler::Recompile(uintExport); }, "fragment output 0 has no 10_11_11 unorm packing path");
+    expectFailure([&] { static_cast<void>(ShaderRecompiler::Recompile(uintExport)); }, "fragment output 0 has no 10_11_11 unorm packing path");
 }
 
 AgcDriver::QueueState dualSourceQueue() {
