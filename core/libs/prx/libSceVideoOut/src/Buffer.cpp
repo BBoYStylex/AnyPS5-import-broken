@@ -31,6 +31,13 @@ AgcDriver::DisplayBuffer DescribeVideoOutBuffer(const VideoOutBuffer& buffer, co
 
 extern "C" {
 
+void APS5_VABI sceVideoOutAddBufferAttributeOption(VideoOutBufferAttribute2* attribute, uint64_t option) {
+    if (attribute == nullptr) {
+        throw std::runtime_error("sceVideoOutAddBufferAttributeOption: null attribute");
+    }
+    attribute->option |= option;
+}
+
 void APS5_VABI sceVideoOutSetBufferAttribute2(VideoOutBufferAttribute2* attribute, uint64_t pixelFormat, uint32_t tilingMode, uint32_t width, uint32_t height, uint64_t option, uint32_t dccControl, uint64_t dccCbRegisterClearColor) {
     if (attribute == nullptr) {
         throw std::runtime_error("sceVideoOutSetBufferAttribute2: null attribute");

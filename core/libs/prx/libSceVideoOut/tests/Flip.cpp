@@ -224,6 +224,13 @@ void testDecode() {
     const VideoOutBuffer registered{0, reinterpret_cast<uint64_t>(tiled.data()), 0};
     BufferAttributeGroup group{};
     sceVideoOutSetBufferAttribute2(&group.attribute, 0x8000000000000000ull, 0, 259, 137, VIDEO_OUT_BUFFER_ATTRIBUTE_OPTION_NONE, 0, 0);
+    sceVideoOutAddBufferAttributeOption(&group.attribute, 0x20);
+    check(group.attribute.option == 0x20, "the buffer attribute option was not added");
+    sceVideoOutAddBufferAttributeOption(&group.attribute, VIDEO_OUT_BUFFER_ATTRIBUTE_OPTION_STRICT_COLORIMETRY);
+    check(group.attribute.option == 0x28, "adding a buffer attribute option cleared existing bits");
+    check(expectFailure([&] { sceVideoOutAddBufferAttributeOption(nullptr, 0x20); }).find("null attribute") != std::string::npos,
+          "a null buffer attribute was accepted");
+    sceVideoOutSetBufferAttribute2(&group.attribute, 0x8000000000000000ull, 0, 259, 137, VIDEO_OUT_BUFFER_ATTRIBUTE_OPTION_NONE, 0, 0);
     group.occupied = true;
     const auto plain = DescribeVideoOutBuffer(registered, group);
     group.attribute.option = VIDEO_OUT_BUFFER_ATTRIBUTE_OPTION_STRICT_COLORIMETRY;
