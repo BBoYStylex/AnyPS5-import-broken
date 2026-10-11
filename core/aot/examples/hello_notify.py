@@ -2,6 +2,7 @@ import argparse
 import hashlib
 import io
 import json
+import os
 import subprocess
 import sys
 import time
@@ -145,7 +146,7 @@ def main():
         require(text.count('30000000') == 1, 'example sleep constant is ambiguous')
         text = text.replace('30000000', '1000')
     (folder / 'main.c').write_text(text)
-    cc = (['xcrun', 'clang'] if sys.platform == 'darwin' else ['clang']) + ['--target=x86_64-unknown-freebsd']
+    cc = (['xcrun', 'clang'] if sys.platform == 'darwin' else [os.environ.get('ANYPS5_AOT_CLANG', 'clang')]) + ['--target=x86_64-unknown-freebsd']
     run([*cc, '-c', args.sdk / 'linker/crt1.S', '-o', 'crt.o'], folder)
     run([*cc, '-O2', '-fPIC', '-g', '-gdwarf-4', '-fno-omit-frame-pointer', '-c', 'main.c', '-o', 'main.o'], folder)
     run([args.linker, 'app.elf', 'crt.o', 'main.o'], folder)
