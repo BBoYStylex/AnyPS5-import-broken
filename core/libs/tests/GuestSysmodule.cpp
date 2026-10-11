@@ -44,6 +44,7 @@ constexpr int kInvalidValue = static_cast<int>(0x805A1000);
 constexpr int kModuleUnloaded = static_cast<int>(0x805A1001);
 constexpr std::uint32_t kInternalFlag = 0x80000000u;
 constexpr std::uint16_t kTrophy2ModuleId = 0x0110;
+constexpr std::uint16_t kPsmlModuleId = 0x0137;
 constexpr std::uint32_t kAgcModuleId = 0x80000094;
 
 #ifdef __linux__
@@ -140,6 +141,13 @@ int main() {
     Require(sceSysmoduleUnloadModuleInternal(kTrophy2ModuleId) == 0);
     Require(sceSysmoduleIsLoaded(kTrophy2ModuleId) == kModuleUnloaded);
     Require(sceSysmoduleUnloadModuleInternal(kTrophy2ModuleId) == kModuleUnloaded);
+
+    Require(sceSysmoduleIsLoaded(kPsmlModuleId) == kModuleUnloaded);
+    Require(sceSysmoduleUnloadModule(kPsmlModuleId) == kModuleUnloaded);
+    Require(sceSysmoduleLoadModule(kPsmlModuleId) == 0);
+    Require(sceSysmoduleIsLoaded(kPsmlModuleId) == 0);
+    Require(sceSysmoduleUnloadModule(kPsmlModuleId) == 0);
+    Require(sceSysmoduleIsLoaded(kPsmlModuleId) == kModuleUnloaded);
 
     Require(sceSysmoduleUnloadModuleInternal(kAgcModuleId) == kModuleUnloaded);
     Require(sceSysmoduleLoadModuleInternal(kAgcModuleId) == 0);
