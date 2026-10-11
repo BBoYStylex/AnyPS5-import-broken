@@ -1188,6 +1188,10 @@ bool WriteWatched() {
     return tracker.watched;
 }
 
+void EnsureWriteTrackerLifetime() {
+    static_cast<void>(Tracker());
+}
+
 bool Watched(std::uint64_t address, std::size_t bytes) {
     if (bytes == 0 || bytes > std::numeric_limits<std::uint64_t>::max() - address) return false;
 #ifdef _WIN32

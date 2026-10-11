@@ -11,6 +11,7 @@
 namespace AgcDriver::DriverDetail {
 
 Driver& Driver::Get() {
+    GuestMemory::EnsureWriteTrackerLifetime();
     static Driver driver;
     return driver;
 }
