@@ -383,6 +383,8 @@ void EmitDirectInstruction(SpirvValueEmitContext& ctx, const IrValue& inst) {
         case IrOpcode::UDiv32: return Invoke(EmitUDiv32, ctx, inst);
         case IrOpcode::SMulHi: return Invoke(EmitSMulHi, ctx, inst);
         case IrOpcode::UMulHi: return Invoke(EmitUMulHi, ctx, inst);
+        case IrOpcode::SDot4x8: return Invoke(EmitSDot4x8, ctx, inst);
+        case IrOpcode::UDot4x8: return Invoke(EmitUDot4x8, ctx, inst);
         case IrOpcode::IAbs32: return Invoke(EmitIAbs32, ctx, inst);
         case IrOpcode::ShiftLeftLogical32: return Invoke(EmitShiftLeftLogical32, ctx, inst);
         case IrOpcode::ShiftLeftLogical64: return Invoke(EmitShiftLeftLogical64, ctx, inst);

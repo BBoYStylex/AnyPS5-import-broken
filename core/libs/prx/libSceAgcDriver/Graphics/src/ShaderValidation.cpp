@@ -279,7 +279,9 @@ Module Inspect(const CompiledShader& compiled, const State& state, const VkPhysi
                     capability == spv::CapabilityStorageBuffer8BitAccess ||
                     capability == spv::CapabilityPhysicalStorageBufferAddresses ||
                     capability == spv::CapabilitySampledImageArrayDynamicIndexing ||
-                    capability == spv::CapabilityStorageImageArrayDynamicIndexing;
+                    capability == spv::CapabilityStorageImageArrayDynamicIndexing ||
+                    capability == spv::CapabilityDotProduct ||
+                    capability == spv::CapabilityDotProductInput4x8BitPacked;
 
                 // Bindless image tables index their slots non-uniformly in graphics stages
                 // (VK_EXT_descriptor_indexing, enabled by the device setup when available).

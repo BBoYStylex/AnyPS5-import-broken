@@ -204,6 +204,8 @@ constexpr std::array<OpcodeMeta, static_cast<std::size_t>(IrOpcode::Count)> Meta
     makeMeta("UDiv32", U32, U32, U32),
     makeMeta("SMulHi", U32, U32, U32),
     makeMeta("UMulHi", U32, U32, U32),
+    makeMeta("SDot4x8", U32, U32, U32),
+    makeMeta("UDot4x8", U32, U32, U32),
     makeMeta("IAbs32", U32, U32),
     makeMeta("ShiftLeftLogical32", U32, U32, U32),
     makeMeta("ShiftLeftLogical64", U64, U64, U32),

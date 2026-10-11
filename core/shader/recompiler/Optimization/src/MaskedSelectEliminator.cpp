@@ -75,6 +75,8 @@ bool isLaneLocal(IrOpcode opcode) {
         case IrOpcode::IMul64:
         case IrOpcode::SMulHi:
         case IrOpcode::UMulHi:
+        case IrOpcode::SDot4x8:
+        case IrOpcode::UDot4x8:
         case IrOpcode::IAbs32:
         case IrOpcode::ShiftLeftLogical32:
         case IrOpcode::ShiftLeftLogical64:

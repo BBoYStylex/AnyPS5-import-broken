@@ -687,6 +687,23 @@ std::uint32_t EmitUMulHi(SpirvEmitterState& state, std::uint32_t arg0, std::uint
     return EmitMulHigh(state, arg0, arg1, false);
 }
 
+static std::uint32_t EmitDot4x8(SpirvEmitterState& state, spv::Op opcode, std::uint32_t type, std::uint32_t arg0, std::uint32_t arg1) {
+    state.module.EmitCapability(spv::CapabilityDotProduct);
+    state.module.EmitCapability(spv::CapabilityDotProductInput4x8BitPacked);
+    state.module.EmitExtension("SPV_KHR_integer_dot_product");
+    const auto result = state.module.AllocateId();
+    state.module.AddFunction(opcode, type, result, arg0, arg1, spv::PackedVectorFormatPackedVectorFormat4x8Bit);
+    return result;
+}
+
+std::uint32_t EmitSDot4x8(SpirvEmitterState& state, std::uint32_t arg0, std::uint32_t arg1) {
+    return Unary(state, spv::OpBitcast, TypeU32(state), EmitDot4x8(state, spv::OpSDot, TypeI32(state), arg0, arg1));
+}
+
+std::uint32_t EmitUDot4x8(SpirvEmitterState& state, std::uint32_t arg0, std::uint32_t arg1) {
+    return EmitDot4x8(state, spv::OpUDot, TypeU32(state), arg0, arg1);
+}
+
 std::uint32_t EmitIAbs32(SpirvEmitterState& state, std::uint32_t arg0) {
     const auto negated = Unary(state, spv::OpSNegate, TypeU32(state), arg0);
     const auto negative = Binary(state, spv::OpSLessThan, TypeBool(state), arg0, ConstantU32(state, 0u));

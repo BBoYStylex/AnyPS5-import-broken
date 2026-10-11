@@ -1,6 +1,7 @@
 #include "Recompiler.hpp"
 #include <algorithm>
 #include <cstring>
+#include <spirv/unified1/spirv.hpp>
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
@@ -180,6 +181,7 @@ IrProgram PrepareResourceProgram(const RecompileRequest& request, ShaderPreparat
     const auto supports = [&](spv::Capability capability) { return std::ranges::find(request.target.supportedCapabilities, static_cast<std::uint32_t>(capability)) != request.target.supportedCapabilities.end(); };
     translateOptions.nativeFloat16 = supports(spv::CapabilityFloat16) && supports(spv::CapabilityRoundingModeRTE) && supports(spv::CapabilityDenormPreserve);
     translateOptions.floatMode = request.context.floatMode;
+    translateOptions.integerDot4x8 = std::ranges::find(request.target.supportedCapabilities, static_cast<std::uint32_t>(spv::CapabilityDotProductInput4x8BitPacked)) != request.target.supportedCapabilities.end();
     translateOptions.inputInfo = inputInfo;
 
     constexpr InstructionTranslator translator;
