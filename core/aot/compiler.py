@@ -17,6 +17,7 @@ import integer
 import effects
 import loop_ranges
 import native_image
+import module_lifecycle
 import checked_stack
 import finite_tables
 import immutable_data
@@ -154,15 +155,16 @@ class Image:
         tags = self.dynamic['tags']
         self.needed = self.dynamic['needed']
         lifecycle = contracts.get('lifecycle', {})
-        for tag, field in (('DT_INIT', 'init'), ('DT_FINI', 'fini')):
-            address = tags.get(tag, 0)
-            if address:
-                require(lifecycle.get('owner') == 'entry' and lifecycle.get(field) == address,
-                        'nonzero INIT/FINI requires an explicit entry lifecycle contract')
-                require(address in self.functions and signature(self.functions[address]) == ('void', []),
-                        'lifecycle function lacks a native void() contract')
-        require(tags.get('DT_INIT_ARRAYSZ', 0) == 0 and tags.get('DT_FINI_ARRAYSZ', 0) == 0 and tags.get('DT_PREINIT_ARRAYSZ', 0) == 0,
-                'initializer arrays require native lifecycle lowering')
+        if lifecycle.get('owner') != 'bundle':
+            for tag, field in (('DT_INIT', 'init'), ('DT_FINI', 'fini')):
+                address = tags.get(tag, 0)
+                if address:
+                    require(lifecycle.get('owner') == 'entry' and lifecycle.get(field) == address,
+                            'nonzero INIT/FINI requires an explicit entry lifecycle contract')
+                    require(address in self.functions and signature(self.functions[address]) == ('void', []),
+                            'lifecycle function lacks a native void() contract')
+            require(tags.get('DT_INIT_ARRAYSZ', 0) == 0 and tags.get('DT_FINI_ARRAYSZ', 0) == 0 and tags.get('DT_PREINIT_ARRAYSZ', 0) == 0,
+                    'initializer arrays require native lifecycle lowering')
         referenced_imports = set()
         for relocation in self.dynamic['relocations']:
             slot, kind, index, addend = (relocation[key] for key in ('slot', 'kind', 'symbol_index', 'addend'))
@@ -206,6 +208,10 @@ class Image:
         require(set(self.relocations) == expected and len(expected) == len(self.relocations), 'pointer relocation contracts do not match the image')
         require(referenced_imports == set(self.imports), 'unused import contracts')
         require(referenced_data == set(self.data_imports), 'unused data import contracts')
+        try:
+            self.module_lifecycle = module_lifecycle.describe(self) if lifecycle.get('owner') == 'bundle' else {}
+        except ValueError as error:
+            raise Rejected(str(error)) from error
         self.decoder = Cs(CS_ARCH_X86, CS_MODE_64)
         self.decoder.detail = True
         try:
@@ -1341,6 +1347,7 @@ def compile_image(image):
               'provider_pointer_outputs': {name: contract['pointer_outputs'] for name, contract in image.imports.items() if 'pointer_outputs' in contract},
               'provider_effect_contracts': {name: contract['memory_effects'] for name, contract in image.imports.items() if 'memory_effects' in contract},
               'imports': len(image.import_slots), 'pointer_relocations': len(image.relocations),
+              'module_lifecycle': image.module_lifecycle,
               'finite_tables': list(image.finite_tables.values()),
               'indirect_calls': [site for sites in image.call_contracts.values() for site in sites.values()],
               'limitations': ['declared function boundaries and ABIs', 'declared scalar, SSE and AVX instruction subsets', 'no guest exception or TLS recovery', 'computed jumps limited to immutable absolute relocation tables', 'other indirect call target sets remain declared with runtime membership checks',

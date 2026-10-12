@@ -1,6 +1,8 @@
 #include "prx/libc/include/NativeAotBundle.hpp"
 #include <algorithm>
 #include <functional>
+#include <exception>
+#include <mutex>
 #include <limits>
 #include <map>
 #include <stdexcept>
@@ -39,10 +41,17 @@ struct NativeAotBundleRegistry::State {
         std::map<std::string, NativeAotModuleExport> exports;
         std::vector<NativeAotModuleDependency> dependencies;
         std::vector<const void*> functions;
+        std::vector<NativeAotLifecycleFunction> preinitializers;
+        std::vector<NativeAotLifecycleFunction> initializers;
+        std::vector<NativeAotLifecycleFunction> finalizers;
     };
     std::vector<Module> modules;
     std::vector<std::size_t> order;
     std::size_t mainIndex;
+    enum class Phase { Created, Starting, Active, Stopping, Stopped, Failed };
+    Phase phase = Phase::Created;
+    std::recursive_mutex lifecycleMutex;
+    std::vector<std::size_t> initialized;
 };
 
 NativeAotBundleRegistry::NativeAotBundleRegistry(std::span<const NativeAotModule> modules, std::size_t mainIndex)
@@ -51,8 +60,8 @@ NativeAotBundleRegistry::NativeAotBundleRegistry(std::span<const NativeAotModule
     state->mainIndex = mainIndex;
     std::vector<std::pair<std::uintptr_t, std::uintptr_t>> ranges;
     for (const auto& source : modules) {
-        Require(source.descriptorVersion == 1 && source.moduleVersion <= 65535, "unsupported native module descriptor");
-        State::Module module{Name(source.id), source.moduleVersion, {}, {}, {}, {}};
+        Require(source.descriptorVersion == 2 && source.moduleVersion <= 65535, "unsupported native module descriptor");
+        State::Module module{Name(source.id), source.moduleVersion, {}, {}, {}, {}, {}, {}, {}};
         Require(std::none_of(state->modules.begin(), state->modules.end(), [&](const auto& previous) { return previous.id == module.id; }),
             "duplicate native module id");
         Require(source.rangeCount <= 65536 && (source.rangeCount == 0 || source.ranges != nullptr), "invalid native module ranges");
@@ -88,6 +97,21 @@ NativeAotBundleRegistry::NativeAotBundleRegistry(std::span<const NativeAotModule
             }), "duplicate native dependency");
             module.dependencies.push_back(dependency);
         }
+        const auto callbacks = [&](const NativeAotLifecycleFunction* values, std::size_t count) {
+            Require(count <= 4096 && (count == 0 || values != nullptr), "invalid native lifecycle array");
+            std::vector<NativeAotLifecycleFunction> result;
+            for (std::size_t index = 0; index < count; ++index) {
+                const auto address = reinterpret_cast<const void*>(values[index]);
+                Require(address != nullptr && std::find(module.functions.begin(), module.functions.end(), address) != module.functions.end(),
+                    "native lifecycle callback does not belong to its module");
+                result.push_back(values[index]);
+            }
+            return result;
+        };
+        module.preinitializers = callbacks(source.preinitializers, source.preinitializerCount);
+        module.initializers = callbacks(source.initializers, source.initializerCount);
+        module.finalizers = callbacks(source.finalizers, source.finalizerCount);
+        Require(module.preinitializers.empty() || state->modules.size() == mainIndex, "only the main module may have preinitializers");
         state->modules.push_back(std::move(module));
     }
     std::sort(ranges.begin(), ranges.end());
@@ -120,3 +144,43 @@ const void* NativeAotBundleRegistry::Find(const char* module, std::uint64_t vers
 
 std::span<const std::size_t> NativeAotBundleRegistry::InitializationOrder() const { return state->order; }
 std::size_t NativeAotBundleRegistry::MainIndex() const { return state->mainIndex; }
+
+void NativeAotBundleRegistry::Start() {
+    const std::lock_guard lock(state->lifecycleMutex);
+    if (state->phase == State::Phase::Active) return;
+    Require(state->phase == State::Phase::Created, "native bundle cannot start in its current state");
+    state->phase = State::Phase::Starting;
+    try {
+        for (const auto callback : state->modules[state->mainIndex].preinitializers) callback();
+        for (const auto index : state->order) {
+            for (const auto callback : state->modules[index].initializers) callback();
+            state->initialized.push_back(index);
+        }
+        state->phase = State::Phase::Active;
+    } catch (...) {
+        const auto failure = std::current_exception();
+        state->phase = State::Phase::Stopping;
+        std::size_t cleanupFailures = 0;
+        for (auto current = state->initialized.rbegin(); current != state->initialized.rend(); ++current)
+            for (const auto callback : state->modules[*current].finalizers)
+                try { callback(); } catch (...) { ++cleanupFailures; }
+        state->initialized.clear();
+        state->phase = State::Phase::Failed;
+        if (cleanupFailures != 0) std::throw_with_nested(std::runtime_error("native bundle initialization and rollback failed"));
+        std::rethrow_exception(failure);
+    }
+}
+
+void NativeAotBundleRegistry::Stop() {
+    const std::lock_guard lock(state->lifecycleMutex);
+    if (state->phase == State::Phase::Stopped) return;
+    Require(state->phase == State::Phase::Active, "native bundle cannot stop in its current state");
+    state->phase = State::Phase::Stopping;
+    std::exception_ptr failure;
+    for (auto current = state->initialized.rbegin(); current != state->initialized.rend(); ++current)
+        for (const auto callback : state->modules[*current].finalizers)
+            try { callback(); } catch (...) { if (!failure) failure = std::current_exception(); }
+    state->initialized.clear();
+    state->phase = State::Phase::Stopped;
+    if (failure) std::rethrow_exception(failure);
+}

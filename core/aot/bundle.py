@@ -125,6 +125,8 @@ def plan_bundle(specification, root):
         require(not contracts.get('native_namespace'), 'module namespace already assigned')
         contracts['native_namespace'] = module['namespace']
         contracts['module_image'] = True
+        contracts['bundle_main'] = name == specification['main']
+        contracts['lifecycle'] = {'owner': 'bundle'}
         immutable = contracts.setdefault('immutable_data', [])
         selected = {row['address'] for row in immutable}
         for data in contracts['data']:
@@ -186,6 +188,7 @@ def compile_bundle(specification, root, destination):
     for module in modules:
         image = Image(module['source'], module['contracts'])
         ir, report = compile_image(image)
+        module['lifecycle'] = image.module_lifecycle
         aliases = []
         for export in module['exports']:
             if export['kind'] == 'data':
@@ -239,6 +242,11 @@ def registry_source(specification, modules):
         lines.append(f'static const std::array<const void*, {len(functions)}> {name}_functions{{{{')
         lines += [f"    reinterpret_cast<const void*>(&{function['name']})," for function in functions]
         lines.append('}};')
+        for stage in ('preinit', 'init', 'fini'):
+            callbacks = module.get('lifecycle', {}).get(stage, [])
+            lines.append(f'static const std::array<NativeAotLifecycleFunction, {len(callbacks)}> {name}_{stage}{{{{')
+            lines += [f'    &{callback},' for callback in callbacks]
+            lines.append('}};')
         dependencies = records[name]['dependencies']
         lines.append(f'static const std::array<NativeAotModuleDependency, {len(dependencies)}> {name}_dependencies{{{{')
         lines += [f'    {{{positions[dependency]}, {version}}},' for dependency, version in dependencies.items()]
@@ -246,9 +254,10 @@ def registry_source(specification, modules):
     lines.append(f'static const std::array<NativeAotModule, {len(modules)}> modules{{{{')
     for module in modules:
         name = module['id']
-        lines.append(f'    {{1, "{name}", {records[name]["version"]}, {name}_ranges.data(), {name}_ranges.size(), '
+        lines.append(f'    {{2, "{name}", {records[name]["version"]}, {name}_ranges.data(), {name}_ranges.size(), '
                      f'{name}_exports.data(), {name}_exports.size(), {name}_dependencies.data(), {name}_dependencies.size(), '
-                     f'{name}_functions.data(), {name}_functions.size()}},')
+                     f'{name}_functions.data(), {name}_functions.size(), '
+                     f'{name}_preinit.data(), {name}_preinit.size(), {name}_init.data(), {name}_init.size(), {name}_fini.data(), {name}_fini.size()}},')
     lines += ['}};', '}', 'extern "C" NativeAotBundleRegistry* NativeAotCompiledBundle_nid_no_patch() {',
               f'    static NativeAotBundleRegistry registry(modules, {positions[specification["main"]]});',
               '    return &registry;', '}']

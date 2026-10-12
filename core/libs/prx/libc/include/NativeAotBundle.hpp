@@ -19,6 +19,8 @@ struct NativeAotModuleDependency {
     std::uint64_t version;
 };
 
+using NativeAotLifecycleFunction = void (*)();
+
 struct NativeAotModule {
     std::uint64_t descriptorVersion;
     const char* id;
@@ -31,6 +33,12 @@ struct NativeAotModule {
     std::size_t dependencyCount;
     const void* const* functions;
     std::size_t functionCount;
+    const NativeAotLifecycleFunction* preinitializers;
+    std::size_t preinitializerCount;
+    const NativeAotLifecycleFunction* initializers;
+    std::size_t initializerCount;
+    const NativeAotLifecycleFunction* finalizers;
+    std::size_t finalizerCount;
 };
 
 class NativeAotBundleRegistry {
@@ -42,6 +50,8 @@ public:
     const void* Find(const char* module, std::uint64_t version, const char* symbol, std::uint64_t kind) const;
     std::span<const std::size_t> InitializationOrder() const;
     std::size_t MainIndex() const;
+    void Start();
+    void Stop();
 private:
     struct State;
     std::unique_ptr<State> state;
