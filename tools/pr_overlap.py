@@ -37,9 +37,9 @@ def depends_on(body):
 
 def open_prs(base):
     query = urlencode({"state": "open", "base": base, "per_page": 100})
-    out = gh("api", "--paginate", f"repos/{REPO}/pulls?{query}")
+    out = gh("api", "--paginate", "--slurp", f"repos/{REPO}/pulls?{query}")
     prs = {}
-    for pr in json.loads(out):
+    for pr in (pr for page in json.loads(out) for pr in page):
         prs[pr["number"]] = {
             "ref": f"refs/pr/{pr['number']}",
             "sha": pr["head"]["sha"],

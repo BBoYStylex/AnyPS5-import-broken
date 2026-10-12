@@ -9,6 +9,25 @@ import pr_overlap
 
 
 class OpenPullRequestsTests(unittest.TestCase):
+    def test_real_paginated_cli_output_preserves_every_page(self):
+        pages = [
+            [{"number": number, "user": {"login": "author"}, "head": {"sha": str(number)}, "body": None}
+             for number in range(start, end)]
+            for start, end in ((1, 101), (101, 201), (201, 202))
+        ]
+        pages[-1][0]["body"] = "Depends on: #7"
+
+        def response(*arguments):
+            if "--slurp" in arguments:
+                return json.dumps(pages)
+            return "\n".join(json.dumps(page) for page in pages)
+
+        with patch.object(pr_overlap, "REPO", "owner/project", create=True), patch.object(pr_overlap, "gh", side_effect=response):
+            found = pr_overlap.open_prs("main")
+        self.assertEqual(set(found), set(range(1, 202)))
+        self.assertEqual(found[201]["depends"], {7})
+        self.assertEqual(found[201]["sha"], "201")
+
     def test_collects_pull_requests_beyond_the_previous_limit(self):
         pull_requests = [
             {"number": number, "user": {"login": f"author{number}"},
@@ -19,7 +38,7 @@ class OpenPullRequestsTests(unittest.TestCase):
 
         def response(*args):
             if args[0] == "api":
-                return json.dumps(pull_requests)
+                return json.dumps([pull_requests])
             limit = int(args[args.index("-L") + 1])
             return json.dumps([
                 {"number": pr["number"], "author": pr["user"], "headRefOid": pr["head"]["sha"],
@@ -37,10 +56,10 @@ class OpenPullRequestsTests(unittest.TestCase):
 
     def test_base_branch_is_encoded_in_the_paginated_request(self):
         with patch.object(pr_overlap, "REPO", "owner/project", create=True), \
-                patch.object(pr_overlap, "gh", return_value="[]") as gh:
+                patch.object(pr_overlap, "gh", return_value="[[]]") as gh:
             self.assertEqual(pr_overlap.open_prs("topic/one&two"), {})
         gh.assert_called_once_with(
-            "api", "--paginate",
+            "api", "--paginate", "--slurp",
             "repos/owner/project/pulls?state=open&base=topic%2Fone%26two&per_page=100",
         )
 
@@ -48,7 +67,7 @@ class OpenPullRequestsTests(unittest.TestCase):
         pull_requests = [{"number": 7, "user": {"login": "contributor"}, "head": {"sha": "head-sha"},
                           "body": "Depends on: none\nUnrelated issue #42"}]
         with patch.object(pr_overlap, "REPO", "owner/project", create=True), \
-                patch.object(pr_overlap, "gh", return_value=json.dumps(pull_requests)):
+                patch.object(pr_overlap, "gh", return_value=json.dumps([pull_requests])):
             found = pr_overlap.open_prs("main")
         self.assertEqual(found, {
             7: {"ref": "refs/pr/7", "sha": "head-sha", "author": "contributor", "depends": set()},
