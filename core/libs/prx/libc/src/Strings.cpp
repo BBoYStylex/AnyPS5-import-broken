@@ -372,6 +372,13 @@ size_t APS5_VABI wcslen_nid_postfix(const char16_t* s) {
     return Length(s);
 }
 
+size_t APS5_VABI wcsnlen_s_nid_postfix(const char16_t* s, size_t maxsize) {
+    if (!s) return 0;
+    size_t length = 0;
+    while (length < maxsize && s[length] != 0) ++length;
+    return length;
+}
+
 int APS5_VABI wcscmp_nid_postfix(const char16_t* s1, const char16_t* s2) {
     for (; *s1 == *s2; ++s1, ++s2) {
         if (*s1 == 0) return 0;
@@ -389,6 +396,13 @@ int APS5_VABI wcsncmp_nid_postfix(const char16_t* s1, const char16_t* s2, size_t
 
 char16_t* APS5_VABI wcscpy_nid_postfix(char16_t* dest, const char16_t* src) {
     std::memcpy(dest, src, (Length(src) + 1) * sizeof(char16_t));
+    return dest;
+}
+
+char16_t* APS5_VABI wcscat_nid_postfix(char16_t* dest, const char16_t* src) {
+    const size_t destLen = Length(dest);
+    const size_t srcLen = Length(src);
+    std::memcpy(dest + destLen, src, (srcLen + 1) * sizeof(char16_t));
     return dest;
 }
 

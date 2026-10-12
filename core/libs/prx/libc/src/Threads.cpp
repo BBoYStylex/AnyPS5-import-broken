@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cerrno>
+#include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <limits>
@@ -44,6 +45,7 @@ timespec XtimeDeadline(const Xtime& time) {
 
 constexpr int threadSuccess = 0;
 constexpr int threadNomem = 1;
+constexpr int threadTimedout = 2;
 constexpr int threadBusy = 3;
 constexpr int threadError = 4;
 
@@ -105,6 +107,10 @@ int APS5_VABI _Mtx_init_nid_postfix(void** handle, int type) {
     mutex->type = type;
     *handle = mutex;
     return threadSuccess;
+}
+
+int APS5_VABI _Mtx_init_with_name_nid_postfix(void** handle, int type, const char*) {
+    return _Mtx_init_nid_postfix(handle, type);
 }
 
 void APS5_VABI _Mtx_destroy_nid_postfix(void** handle) {
@@ -214,6 +220,39 @@ int APS5_VABI _Cnd_wait_nid_postfix(void** conditionHandle, void** mutexHandle) 
     mutex->owner.store(std::this_thread::get_id(), std::memory_order_release);
     mutex->count = 1;
     return threadSuccess;
+}
+
+int APS5_VABI _Cnd_timedwait_nid_postfix(void** conditionHandle, void** mutexHandle, const Xtime* target) {
+    if (!target)
+        APS5_INVALID_ARG_EX;
+    auto* condition = ResolveCondition(conditionHandle, "_Cnd_timedwait");
+    auto* mutex = ResolveMutex(mutexHandle, "_Cnd_timedwait");
+    if (!IsOwnedByCaller(mutex))
+        return threadSuccess;
+    if (mutex->count != 1)
+        return threadSuccess;
+    const auto deadline = XtimeDeadline(*target);
+    const auto targetTime = std::chrono::system_clock::time_point{
+        std::chrono::duration_cast<std::chrono::system_clock::duration>(
+            std::chrono::seconds(deadline.tv_sec) + std::chrono::nanoseconds(deadline.tv_nsec)
+        )
+    };
+    mutex->count = 0;
+    mutex->owner.store(std::thread::id{}, std::memory_order_release);
+    std::unique_lock lock(mutex->native, std::adopt_lock);
+    std::cv_status status{};
+    try {
+        status = condition->native.wait_until(lock, targetTime);
+    } catch (const std::system_error&) {
+        lock.release();
+        mutex->owner.store(std::this_thread::get_id(), std::memory_order_release);
+        mutex->count = 1;
+        throw;
+    }
+    lock.release();
+    mutex->owner.store(std::this_thread::get_id(), std::memory_order_release);
+    mutex->count = 1;
+    return status == std::cv_status::timeout ? threadTimedout : threadSuccess;
 }
 
 int APS5_VABI _Cnd_broadcast_nid_postfix(void** handle) {

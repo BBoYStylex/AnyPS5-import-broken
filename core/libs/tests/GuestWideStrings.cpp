@@ -10,9 +10,11 @@ int APS5_VABI wmemcmp_nid_postfix(const char16_t* s1, const char16_t* s2, std::s
 char16_t* APS5_VABI wmemcpy_nid_postfix(char16_t* dest, const char16_t* src, std::size_t n);
 char16_t* APS5_VABI wmemmove_nid_postfix(char16_t* dest, const char16_t* src, std::size_t n);
 std::size_t APS5_VABI wcslen_nid_postfix(const char16_t* s);
+std::size_t APS5_VABI wcsnlen_s_nid_postfix(const char16_t* s, std::size_t maxsize);
 int APS5_VABI wcscmp_nid_postfix(const char16_t* s1, const char16_t* s2);
 int APS5_VABI wcsncmp_nid_postfix(const char16_t* s1, const char16_t* s2, std::size_t n);
 char16_t* APS5_VABI wcscpy_nid_postfix(char16_t* dest, const char16_t* src);
+char16_t* APS5_VABI wcscat_nid_postfix(char16_t* dest, const char16_t* src);
 char16_t* APS5_VABI wcsncpy_nid_postfix(char16_t* dest, const char16_t* src, std::size_t n);
 const char16_t* APS5_VABI wcschr_nid_postfix(const char16_t* s, char16_t c);
 const char16_t* APS5_VABI wcsrchr_nid_postfix(const char16_t* s, char16_t c);
@@ -52,6 +54,10 @@ int main() {
     require(wcslen_nid_postfix(u"") == 0);
     require(wcslen_nid_postfix(u"héllo") == 5);
     require(wcslen_nid_postfix(split) == 2);
+    require(wcsnlen_s_nid_postfix(nullptr, 10) == 0);
+    require(wcsnlen_s_nid_postfix(u"abc", 10) == 3);
+    require(wcsnlen_s_nid_postfix(u"abcdef", 4) == 4);
+    require(wcsnlen_s_nid_postfix(u"", 5) == 0);
 
     require(wcscmp_nid_postfix(u"abc", u"abc") == 0);
     require(wcscmp_nid_postfix(u"abc", u"abd") < 0);
@@ -68,6 +74,11 @@ int main() {
     wmemset_nid_postfix(buffer, 0xaaaa, 8);
     require(wcscpy_nid_postfix(buffer, u"wide") == buffer);
     require(same(buffer, u"wide", 5) && buffer[5] == 0xaaaa);
+
+    char16_t catBuffer[16] = {u'h', u'e', u'l', u'l', u'o', 0};
+    require(wcscat_nid_postfix(catBuffer, u" world") == catBuffer);
+    const char16_t expectedCat[] = u"hello world";
+    require(same(catBuffer, expectedCat, 12));
 
     wmemset_nid_postfix(buffer, 0xaaaa, 8);
     require(wcsncpy_nid_postfix(buffer, u"ab", 5) == buffer);
