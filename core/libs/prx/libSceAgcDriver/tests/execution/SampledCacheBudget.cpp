@@ -451,7 +451,9 @@ void viewEvictionTests(const Context& context) {
     const std::weak_ptr<Texture> view = Sampled(context, imported.Surface(0));
     Require(!view.expired() && TextureCacheUsage().sampledBytes == 0, "the view of a cached storage image did not enter the sampled texture cache at 0 bytes");
     Sampled(context, snapshots.Surface(0));
-    const auto capacity = static_cast<std::size_t>(Budget / TextureCacheUsage().sampledBytes);
+    const auto snapshotBytes = TextureCacheUsage().sampledBytes;
+    Require(snapshotBytes != 0, "the snapshot shares the imported storage image's host view");
+    const auto capacity = static_cast<std::size_t>(Budget / snapshotBytes);
     for (std::size_t surface = 1; surface <= capacity; ++surface) Sampled(context, snapshots.Surface(surface));
     Require(!view.expired(), "the sampled texture cache evicted a view of a cached storage image, which frees no memory");
 }
