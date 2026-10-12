@@ -167,7 +167,11 @@ add_executable(native_pad_linker EXCLUDE_FROM_ALL
     "${padSdk}/linker/catalog_lookup.c" "${padSdk}/linker/nid.c" "${padSdk}/linker/sha1.c")
 file(GLOB padBuildInputs CONFIGURE_DEPENDS "${padExample}/*.py" "${CMAKE_SOURCE_DIR}/core/aot/*.py"
     "${CMAKE_SOURCE_DIR}/core/aot/catalogs/*.json")
-set(padInputHashes "${CMAKE_C_COMPILER_ID}-${CMAKE_C_COMPILER_VERSION}")
+set(ANYPS5_PAD_OPTIMIZATION "O0" CACHE STRING "Qualified x86 controller consumer optimization")
+if(NOT ANYPS5_PAD_OPTIMIZATION MATCHES "^(O0|O2)$")
+    message(FATAL_ERROR "ANYPS5_PAD_OPTIMIZATION must be O0 or O2")
+endif()
+set(padInputHashes "${CMAKE_C_COMPILER_ID}-${CMAKE_C_COMPILER_VERSION}-${ANYPS5_PAD_OPTIMIZATION}")
 foreach(input IN LISTS padBuildInputs)
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${input}")
     file(SHA256 "${input}" inputHash)
@@ -178,7 +182,7 @@ set(padArtifacts "${CMAKE_CURRENT_BINARY_DIR}/pad-input-${padInputKey}")
 add_custom_command(OUTPUT "${padArtifacts}/module.o" "${padArtifacts}/reference.o" "${padArtifacts}/build.json"
     COMMAND ${CMAKE_COMMAND} -E env "PYTHONPATH=${cubePythonPath}" "LIBCAPSTONE_PATH=$<TARGET_FILE_DIR:capstone_shared>"
         ${Python3_EXECUTABLE} "${padExample}/build.py" --sdk "${padSdk}" --linker $<TARGET_FILE:native_pad_linker>
-        --output "${padArtifacts}"
+        --optimization "${ANYPS5_PAD_OPTIMIZATION}" --output "${padArtifacts}"
     DEPENDS native_pad_linker capstone_shared ${padBuildInputs} VERBATIM)
 set_source_files_properties("${padArtifacts}/module.o" "${padArtifacts}/reference.o" PROPERTIES GENERATED TRUE EXTERNAL_OBJECT TRUE)
 add_executable(native_pad_input EXCLUDE_FROM_ALL "${padExample}/launcher.cpp" "${padArtifacts}/module.o"
@@ -225,3 +229,26 @@ add_test(NAME native_pad_input COMMAND ${Python3_EXECUTABLE} "${padExample}/veri
     --aot $<TARGET_FILE:native_pad_aot_test> --reference $<TARGET_FILE:native_pad_reference_test>
     --build "${padArtifacts}/build.json" --output-parent "${CMAKE_CURRENT_BINARY_DIR}/pad-runs")
 set_tests_properties(native_pad_input PROPERTIES TIMEOUT 30)
+
+set(ANYPS5_AOT_SHA256_SOURCE_ROOT "" CACHE PATH "External qualified SHA-256 source checkout")
+set(ANYPS5_AOT_MEMCMP_SOURCE "" CACHE FILEPATH "External qualified memcmp source")
+foreach(profile IN ITEMS sha256 memcmp)
+    if(profile STREQUAL "sha256")
+        set(componentSource "${ANYPS5_AOT_SHA256_SOURCE_ROOT}")
+        set(componentSourceFlag --source-root)
+    else()
+        set(componentSource "${ANYPS5_AOT_MEMCMP_SOURCE}")
+        set(componentSourceFlag --holdout-source)
+    endif()
+    if(componentSource)
+        foreach(optimization IN ITEMS O0 O2)
+            add_test(NAME native_component_${profile}_${optimization}
+                COMMAND ${CMAKE_COMMAND} -E env "PYTHONPATH=${cubePythonPath}" "LIBCAPSTONE_PATH=$<TARGET_FILE_DIR:capstone_shared>"
+                    ${Python3_EXECUTABLE} "${CMAKE_SOURCE_DIR}/core/aot/examples/sha256_transfer.py"
+                    ${componentSourceFlag} "${componentSource}" --sdk "${padSdk}" --linker $<TARGET_FILE:native_pad_linker>
+                    --runtime $<TARGET_FILE:anyps5_native_graphics> --image-runtime $<TARGET_FILE:anyps5_native_image>
+                    --optimization ${optimization} --output-parent "${CMAKE_CURRENT_BINARY_DIR}/component-runs")
+            set_tests_properties(native_component_${profile}_${optimization} PROPERTIES TIMEOUT 30)
+        endforeach()
+    endif()
+endforeach()

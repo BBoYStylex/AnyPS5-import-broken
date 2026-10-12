@@ -396,6 +396,107 @@
         }
       ],
       "facts_sha256": "72375e4916640ddaef826ed5714440691810e4e06d3f60916e99f385f844e8a7"
+    },
+    {
+      "identity": {
+        "nid": "8zTFvBIAIN8",
+        "library": "libc",
+        "library_version": 1,
+        "module": "libc",
+        "module_version": 257
+      },
+      "contract": {
+        "name": "memset",
+        "result": "ptr",
+        "parameters": [
+          "ptr",
+          "i32",
+          "u64"
+        ],
+        "memory_effects": {
+          "writes": [
+            {
+              "parameter": 0,
+              "size_parameter": 2
+            }
+          ],
+          "callbacks": false,
+          "evidence": "Reviewed AnyPS5 wrapper delegates directly to host std::memset. Valid C objects and, for memcpy, nonoverlap are caller preconditions. Host libc binding uses the same LP64 signature."
+        }
+      },
+      "sources": [
+        {
+          "path": "core/libs/prx/libc/src/Strings.cpp",
+          "sha256": "0aa54e038cdd641ff40b745de8cfd741dcd1628328d36cda8cbd136c54b44ec7",
+          "excerpt": "return std::memset(s, c, n);"
+        }
+      ],
+      "facts_sha256": "55995b225b1491a7c00306ebe39058c2b504dce7eba1cfc7ff5064271d20fee9"
+    },
+    {
+      "identity": {
+        "nid": "Q3VBxCXhUHs",
+        "library": "libc",
+        "library_version": 1,
+        "module": "libc",
+        "module_version": 257
+      },
+      "contract": {
+        "name": "memcpy",
+        "result": "ptr",
+        "parameters": [
+          "ptr",
+          "ptr",
+          "u64"
+        ],
+        "memory_effects": {
+          "writes": [
+            {
+              "parameter": 0,
+              "size_parameter": 2
+            }
+          ],
+          "callbacks": false,
+          "evidence": "Reviewed AnyPS5 wrapper delegates directly to host std::memcpy. Valid C objects and, for memcpy, nonoverlap are caller preconditions. Host libc binding uses the same LP64 signature."
+        }
+      },
+      "sources": [
+        {
+          "path": "core/libs/prx/libc/src/Strings.cpp",
+          "sha256": "0aa54e038cdd641ff40b745de8cfd741dcd1628328d36cda8cbd136c54b44ec7",
+          "excerpt": "return std::memcpy(dest, src, n);"
+        }
+      ],
+      "facts_sha256": "2f52c197f9485968ae4bb70243e762137eb521d3644d82093fdf79341d87156b"
+    },
+    {
+      "identity": {
+        "nid": "j4ViWNHEgww",
+        "library": "libc",
+        "library_version": 1,
+        "module": "libc",
+        "module_version": 257
+      },
+      "contract": {
+        "name": "strlen",
+        "result": "u64",
+        "parameters": [
+          "ptr"
+        ],
+        "memory_effects": {
+          "writes": [],
+          "callbacks": false,
+          "evidence": "Reviewed AnyPS5 wrapper delegates directly to host std::strlen. Valid C objects and, for memcpy, nonoverlap are caller preconditions. Host libc binding uses the same LP64 signature."
+        }
+      },
+      "sources": [
+        {
+          "path": "core/libs/prx/libc/src/Strings.cpp",
+          "sha256": "0aa54e038cdd641ff40b745de8cfd741dcd1628328d36cda8cbd136c54b44ec7",
+          "excerpt": "return std::strlen(s);"
+        }
+      ],
+      "facts_sha256": "7ed5487872f10ed9f0b9e4b3f8cd138545a15d3e4b40ebbbc8c58d810bf090e5"
     }
   ]
 }

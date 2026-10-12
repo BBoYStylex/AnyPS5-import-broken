@@ -80,7 +80,6 @@ def build(args, folder):
     catalog = json.loads((ROOT / 'core/aot/catalogs/apple-runtime.json').read_text())
     imports, resolution = resolve_imports(source, catalog, ROOT)
     manual = {'bzQExy189ZI': ('aot_bridge_init_env', 'void', ['ptr']),
-              '8zTFvBIAIN8': ('memset', 'ptr', ['ptr', 'i32', 'u64']),
               '6sJWiWSRuqk': ('strncpy', 'ptr', ['ptr', 'ptr', 'u64'])}
     require({row['identity']['nid'] for row in resolution['missing']} == set(manual), 'different provider obligations')
     for row in resolution['missing']:
@@ -116,7 +115,7 @@ def build(args, folder):
                   runtime_archives={str(args.runtime): sha(args.runtime), str(args.image_runtime): sha(args.image_runtime)},
                   limitations=['Independent source is unchanged, but uses declaration-only cross headers and the ps5link CRT, not its original payload loader.',
                                'main() ABI and request layout require this explicit source profile. memset and strncpy use host libc bindings.',
-                               'Only three provider contracts transferred automatically. No console, performance or general SDK compatibility claim.'])
+                               'Four provider contracts resolved automatically, including the subsequently qualified memset. No console, performance or general SDK compatibility claim.'])
     (folder / 'acceptance.json').write_text(json.dumps(report, indent=2) + '\n')
 
 

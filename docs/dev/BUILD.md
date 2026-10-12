@@ -276,3 +276,25 @@ python3 core/aot/examples/notification_transfer.py --source /path/to/main.c \
 The script checks the source hash and compares AOT against the source independently compiled for ARM64. Three catalog bindings transfer. The unprototyped `main()` is rejected by generic recovery and qualified explicitly in this source profile; its request storage is checked against matching DWARF. The probe supplies declaration-only cross headers and uses the verified ps5link CRT. It does not reproduce the original payload SDK loader. Startup, the C entry signature and host string bindings remain explicit facts.
 
 The incremental DWARF dossier is produced with `python3 core/aot/debug_candidates.py input.elf --companion matching.o --output dossier.json` using the AOT Python environment. It retains independently recovered boundaries, source signatures, fixed frame facts and PC-scoped locations when another fact is unresolved. `facts.source_abi` describes the source type; it does not qualify an optimized internal machine ABI. `storage_candidates` and `value_locations` retain DIE and PC provenance and cannot be copied into whole-function lifetime contracts. `unresolved` identifies the stage and missing qualification. Both input bytes and companion mappings are checked on each run; changing either requires recovery again. The strict `recover_debug_candidates` API remains available for existing qualified consumers.
+
+For the optimized controller consumer, configure the native graphics build with `-DANYPS5_PAD_OPTIMIZATION=O2`, then build `native_pad_input_check`. The default remains O0. Both profiles use the unchanged pinned SDK source and the same six deterministic input scenarios, source-compiled ARM64 reference and production sleep smoke. The minimal AOT test suite additionally compiles both profiles without requiring graphics dependencies.
+
+`core/aot/examples/sha256_transfer.py` reproduces the external component comparison. Supply the original GPL-3.0-or-later `blackbearreloaded/ps5-native-app-boilerplate` checkout at `3ada439fa044f60c8b488678577a740761385711`; no external source is copied into this repository. Use the AOT Python environment and a built native graphics runtime:
+
+```
+python3 core/aot/examples/sha256_transfer.py \
+  --source-root /path/to/ps5-native-app-boilerplate \
+  --sdk 3rdparty/ps5link-sdk \
+  --linker build/core/libs/native/native_pad_linker \
+  --runtime build/core/libs/native/libanyps5_native_graphics.a \
+  --image-runtime build/core/aot/libanyps5_native_image.a \
+  --optimization O2 --output-parent /path/to/fresh-component-results
+```
+
+Repeat with `--optimization O0`. The component's original source and header hashes are checked before compilation. Each profile checks 64 combinations of known/random messages and stream chunk sizes against Python hashlib and an independently compiled native C reference, including block boundaries, output guards, hexadecimal conversion and comparison errors. The wrapper adds only an unused main for ELF packaging; the test calls the converted component functions. Scoped debug locations remain candidates. The qualified C source/profile supplies ABI and lifetime preconditions; compiler dataflow still checks each actual machine frame, including the optimized early-return path.
+
+A holdout uses the unchanged MIT-licensed musl `src/string/memcmp.c` from the `AssemblyScript/musl` mirror at `aad50fcd791e009961621ddfbe3d4c245fd689a3`. Download the source and its COPYRIGHT from that revision separately, then replace `--source-root` with `--holdout-source /path/to/memcmp.c`. The hash is checked, and 108 buffer/length/alignment cases plus alias checks run against a bytewise oracle and an independently compiled native reference. No compiler rule was added for this input.
+
+Set `ANYPS5_AOT_SHA256_SOURCE_ROOT` and/or `ANYPS5_AOT_MEMCMP_SOURCE` when configuring the native graphics build to register the corresponding O0/O2 component tests with CTest. Build `native_pad_linker` and `anyps5_native_graphics` first. These optional tests consume caller-supplied source files and never download dependencies during configure or test execution.
+
+Each component receipt binds the source, linked input, generated object, contracts, native libraries, runtime archives, compiler and linker identities. The same symbol-free ELF is also analyzed without its companion; that report retains missing boundaries/ABIs and is not converted into an executable contract. Automated elapsed time covers build and acceptance only. Manual qualification time and port-wide speedups are not inferred from test or annotation counts.
