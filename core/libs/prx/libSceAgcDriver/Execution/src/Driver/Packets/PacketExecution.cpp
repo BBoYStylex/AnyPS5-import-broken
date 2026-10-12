@@ -294,6 +294,7 @@ void Driver::execute(const Submission& submission) {
             }
             if (!flipInterruptDeferred) AgcDriverDeliverEopInterrupt(submission.queue);
             ++flipsCounted;
+            GuestMemory::BumpFrameSerial();
             if (batchesAtFlip != 0) flipSerial = batchesAtFlip;
             flipBatchesUnsignaled += unsignaledAtFlip;
 
