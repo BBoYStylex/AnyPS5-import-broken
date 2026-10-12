@@ -35,7 +35,16 @@ int APS5_VABI sceGameLiveStreamingGetCurrentStatus2(GameLiveStreamingStatus2* st
     return 0;
 }
 
-int APS5_VABI sceGameLiveStreamingGetProgramInfo() {
+struct GameLiveStreamingProgramInfo {
+    char title[128];
+    char detail[512];
+    char content_id[32];
+    std::uint32_t program_type;
+    std::uint32_t reserved[3];
+};
+
+int APS5_VABI sceGameLiveStreamingGetProgramInfo(GameLiveStreamingProgramInfo* info) {
+    if (!info) APS5_INVALID_ARG_EX;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }

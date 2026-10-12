@@ -381,27 +381,30 @@ int APS5_VABI sceHttp2SetResolveRetry(int id, int32_t retry) {
     return 0;
 }
 
-int APS5_VABI sceHttp2WebSocketCreateRequest() {
+int APS5_VABI sceHttp2WebSocketCreateRequest(int id, const char* url, const Http2AsyncOption* async_option, int* req_id) {
+    if (!url || !req_id) return ERROR_INVALID_ID;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceHttp2WebSocketCloseAsync() {
+int APS5_VABI sceHttp2WebSocketCloseAsync(int id, int req_id, const Http2AsyncOption* async_option) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceHttp2WebSocketSendTextMessageAsync() {
+int APS5_VABI sceHttp2WebSocketSendTextMessageAsync(int id, int req_id, const char* text, const Http2AsyncOption* async_option) {
+    if (!text) return ERROR_INVALID_ID;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceHttp2WebSocketSendDataMessageAsync() {
+int APS5_VABI sceHttp2WebSocketSendDataMessageAsync(int id, int req_id, const void* data, std::size_t size, const Http2AsyncOption* async_option) {
+    if (!data) return ERROR_INVALID_ID;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceHttp2WebSocketSetPingInterval() {
+int APS5_VABI sceHttp2WebSocketSetPingInterval(int id, int req_id, uint32_t interval_ms) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }

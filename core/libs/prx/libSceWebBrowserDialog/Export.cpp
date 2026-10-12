@@ -64,17 +64,20 @@ int APS5_VABI sceWebBrowserDialogUpdateStatus(void) {
 }
 
 
-int APS5_VABI sceWebBrowserDialogSetCookie(void) {
+int APS5_VABI sceWebBrowserDialogSetCookie(const char* name, const char* value, const char* domain, const char* path) {
+    if (!name || !value) APS5_INVALID_ARG_EX;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceWebBrowserDialogOpenForPredeterminedContent() {
+int APS5_VABI sceWebBrowserDialogOpenForPredeterminedContent(const void* param) {
+    (void)param;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceWebBrowserDialogResetCookie() {
+int APS5_VABI sceWebBrowserDialogResetCookie(const char* domain) {
+    (void)domain;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }

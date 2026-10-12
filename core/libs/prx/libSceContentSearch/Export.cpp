@@ -69,6 +69,7 @@ int APS5_VABI sceContentSearchInit(const ContentSearchInitParam* init_param) {
     return 0;
 }
 
+<<<<<<< HEAD
 int APS5_VABI sceContentSearchCloseMetadata(std::int32_t metadataId) {
     if (!g_initialized.load()) return ErrorNotInitialized;
     ThrowUnknownMetadataId(__func__, metadataId);

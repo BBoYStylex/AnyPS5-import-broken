@@ -32,13 +32,15 @@ const char* APS5_VABI sceAjmStrError(int error) {
  return nullptr;
 }
 
-int APS5_VABI sceAjmDecWVorbisCreateHeaderPacket(void) {
-    NotImplemented_nid_no_patch(__func__);
+int APS5_VABI sceAjmDecWVorbisCreateHeaderPacket(const void* input, size_t input_size, void* output, size_t* output_size) {
+    if (!input || !output || !output_size) APS5_INVALID_ARG_EX;
+    AjmStub(__func__);
     return 0;
 }
 
-int APS5_VABI sceAjmDecWVorbisCreateSetupPacket(void) {
-    NotImplemented_nid_no_patch(__func__);
+int APS5_VABI sceAjmDecWVorbisCreateSetupPacket(const void* input, size_t input_size, void* output, size_t* output_size) {
+    if (!input || !output || !output_size) APS5_INVALID_ARG_EX;
+    AjmStub(__func__);
     return 0;
 }
 
