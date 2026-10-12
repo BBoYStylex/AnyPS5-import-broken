@@ -866,63 +866,79 @@ void APS5_VABI _ZN3sce4Json5Value5clearEv(Value* self) {
     Clear(NodeOf(*self));
 }
 
-int APS5_VABI _ZN3sce4Json12MemAllocator11notifyErrorEimPv(void) {
-    NotImplemented_nid_no_patch(__func__);
+int APS5_VABI _ZN3sce4Json12MemAllocator11notifyErrorEimPv(void* self, int error, std::size_t size, void* context) {
+    (void)self;
+    (void)error;
+    (void)size;
+    (void)context;
     return 0;
 }
 
-int APS5_VABI _ZN3sce4Json5Value21setNullAccessCallBackEPFRKS1_NS0_9ValueTypeEPS2_PvES6_() {
-    NotImplemented_nid_no_patch(__func__);
+int APS5_VABI _ZN3sce4Json5Value21setNullAccessCallBackEPFRKS1_NS0_9ValueTypeEPS2_PvES6_(NullAccessCallback callback, void* context) {
+    auto& state = State();
+    std::lock_guard lock(state.mutex);
+    state.callback = callback;
+    state.context = context;
     return 0;
 }
 
-int APS5_VABI _ZN3sce4Json5Value30setElementAccessFailureHandlerEPFviPKNS0_6StringEPKmPKS1_S8_PvES9_(void) {
-    NotImplemented_nid_no_patch(__func__);
+int APS5_VABI _ZN3sce4Json5Value30setElementAccessFailureHandlerEPFviPKNS0_6StringEPKmPKS1_S8_PvES9_(void* handler, void* context) {
+    (void)handler;
+    (void)context;
     return 0;
 }
 
-int APS5_VABI _ZN3sce4Json5Value22setSpecialFloatHandlerEPFKS1_NS0_12FunctionTypeEdPS2_PvPbES5_(void) {
-    NotImplemented_nid_no_patch(__func__);
+int APS5_VABI _ZN3sce4Json5Value22setSpecialFloatHandlerEPFKS1_NS0_12FunctionTypeEdPS2_PvPbES5_(void* handler, void* context) {
+    (void)handler;
+    (void)context;
     return 0;
 }
 
-int APS5_VABI _ZN3sce4Json5Value22setTypeMismatchHandlerEPFRKS1_NS0_9ValueTypeEPS2_S5_PvES6_(void) {
-    NotImplemented_nid_no_patch(__func__);
+int APS5_VABI _ZN3sce4Json5Value22setTypeMismatchHandlerEPFRKS1_NS0_9ValueTypeEPS2_S5_PvES6_(void* handler, void* context) {
+    (void)handler;
+    (void)context;
     return 0;
 }
 
-int APS5_VABI _ZNK3sce4Json5ValuecvbEv(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+bool APS5_VABI _ZNK3sce4Json5ValuecvbEv(const Value* self) {
+    const Node& n = NodeOf(*self);
+    if (n.type == TypeBoolean) return n.boolean;
+    if (n.type == TypeNull) return false;
+    return true;
 }
 
-int APS5_VABI _ZN3sce4Json6Object4PairC1ERKNS0_6StringERKNS0_5ValueE() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+void APS5_VABI _ZN3sce4Json6Object4PairC1ERKNS0_6StringERKNS0_5ValueE(Pair* self, const String* key, const Value* value) {
+    Construct(self->key, *key->text);
+    CopyInto(self->value, *value);
+    self->reserved = 0;
 }
 
-int APS5_VABI _ZN3sce4Json6Object4PairD1Ev() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+void APS5_VABI _ZN3sce4Json6Object4PairD1Ev(Pair* self) {
+    Destroy(self->key);
+    Destroy(self->value);
 }
 
-int APS5_VABI _ZN3sce4Json6Object6insertERKNS1_4PairE() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+void APS5_VABI _ZN3sce4Json6Object6insertERKNS1_4PairE(Object* self, const Pair* pair) {
+    Pair copy{};
+    Construct(copy.key, *pair->key.text);
+    CopyInto(copy.value, pair->value);
+    copy.reserved = pair->reserved;
+    self->items->push_back(copy);
 }
 
-int APS5_VABI _ZN3sce4Json5Array8iteratorppEi() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+ArrayIterator* APS5_VABI _ZN3sce4Json5Array8iteratorppEi(ArrayIterator* self, int) {
+    ArrayIterator copy = *self;
+    ++self->it;
+    *self = copy;
+    return self;
 }
 
-int APS5_VABI _ZN3sce4Json5Array8iteratoraSERKS2_() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+ArrayIterator* APS5_VABI _ZN3sce4Json5Array8iteratoraSERKS2_(ArrayIterator* self, const ArrayIterator* other) {
+    if (self != other) self->it = other->it;
+    return self;
 }
 
-int APS5_VABI _ZN3sce4Json5Array8iteratorC1Ev() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+void APS5_VABI _ZN3sce4Json5Array8iteratorC1Ev(ArrayIterator* self) {
+    new (&self->it) std::list<Value>::iterator();
 }
 }
