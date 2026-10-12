@@ -11,14 +11,18 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
+#include <condition_variable>
 #include <cstring>
 #include <cwctype>
+#include <deque>
 #include <memory>
 #include <limits>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <thread>
+#include <utility>
 #include <vector>
 
 #if defined(__linux__)
@@ -64,6 +68,57 @@ struct KernelArena {
 
 static void CommitArenaRange(void* addr, size_t len, DWORD winProt) {
     GuestArena::GuestArenaCommit_nid_postfix(addr, len, winProt, PS5_PAGE_SIZE);
+}
+
+class PrefaultWorker {
+public:
+    static constexpr size_t Chunk = 2u << 20;
+
+    PrefaultWorker() {
+        SIZE_T minimum = 0;
+        SIZE_T maximum = 0;
+        DWORD flags = 0;
+        if (GetProcessWorkingSetSizeEx(GetCurrentProcess(), &minimum, &maximum, &flags)) {
+            SetProcessWorkingSetSizeEx(GetCurrentProcess(), std::max<SIZE_T>(minimum, 32 * Chunk), std::max<SIZE_T>(maximum, 64 * Chunk), QUOTA_LIMITS_HARDWS_MIN_DISABLE | QUOTA_LIMITS_HARDWS_MAX_DISABLE);
+        }
+        std::thread([this] { run(); }).detach();
+    }
+
+    void Add(void* addr, size_t len) {
+        {
+            std::lock_guard lock(mutex);
+            ranges.emplace_back(static_cast<char*>(addr), len);
+        }
+        ready.notify_one();
+    }
+
+private:
+    void run() {
+        for (;;) {
+            std::pair<char*, size_t> range;
+            {
+                std::unique_lock lock(mutex);
+                ready.wait(lock, [this] { return !ranges.empty(); });
+                range = ranges.front();
+                ranges.pop_front();
+            }
+            for (size_t offset = 0; offset < range.second; offset += Chunk) {
+                const size_t size = std::min(Chunk, range.second - offset);
+                if (VirtualLock(range.first + offset, size)) VirtualUnlock(range.first + offset, size);
+            }
+        }
+    }
+
+    std::mutex mutex;
+    std::condition_variable ready;
+    std::deque<std::pair<char*, size_t>> ranges;
+};
+
+static void PrefaultRange(void* addr, size_t len) {
+    static const bool enabled = std::getenv("APS5_PREFAULT_MEMORY") != nullptr;
+    if (!enabled || len < PrefaultWorker::Chunk) return;
+    static PrefaultWorker* const worker = new PrefaultWorker;
+    worker->Add(addr, len);
 }
 
 static void* mmap_aligned(size_t len, int prot, size_t alignment, std::uintptr_t hint = 0) {
@@ -314,6 +369,7 @@ public:
     void Map(std::uintptr_t address, std::size_t bytes, std::uint64_t offset, int protection) const {
 #ifdef _WIN32
         GuestArena::GuestArenaMap_nid_postfix(reinterpret_cast<void*>(address), bytes, section, offset, WinProtFromPosix(protection));
+        if (protection != PROT_NONE) PrefaultRange(reinterpret_cast<void*>(address), bytes);
 #else
         if (::mmap(reinterpret_cast<void*>(address), bytes, protection, MAP_SHARED | MAP_FIXED, file, static_cast<off_t>(fileOffset + offset)) == MAP_FAILED) throw std::system_error(errno, std::generic_category(), "map direct memory backing");
 #endif
