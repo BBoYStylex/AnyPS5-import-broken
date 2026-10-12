@@ -99,6 +99,7 @@ downloads/
 
 *.json
 !core/aot/examples/gpu_cube/contract-recipe.json
+!core/aot/catalogs/apple-runtime.json
 !demo/web/i18n/*.json
 
 !/assets/*.jpg
