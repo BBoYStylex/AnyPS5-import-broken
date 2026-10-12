@@ -34,17 +34,20 @@ std::int32_t APS5_VABI sceBluetoothHidUnregisterDevice(std::uint16_t vendorId, s
     return 0;
 }
 
-int APS5_VABI sceBluetoothHidGetDeviceName() {
+int APS5_VABI sceBluetoothHidGetDeviceName(std::uint16_t vendor_id, std::uint16_t product_id, char* name, std::size_t size) {
+    if (!name || size == 0) APS5_INVALID_ARG_EX;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceBluetoothHidGetInputReport() {
+int APS5_VABI sceBluetoothHidGetInputReport(std::uint16_t vendor_id, std::uint16_t product_id, void* report, std::size_t* size) {
+    if (!report || !size) APS5_INVALID_ARG_EX;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceBluetoothHidSetOutputReport() {
+int APS5_VABI sceBluetoothHidSetOutputReport(std::uint16_t vendor_id, std::uint16_t product_id, const void* report, std::size_t size) {
+    if (!report || size == 0) APS5_INVALID_ARG_EX;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }

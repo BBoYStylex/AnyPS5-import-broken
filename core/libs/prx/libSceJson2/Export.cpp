@@ -866,62 +866,61 @@ void APS5_VABI _ZN3sce4Json5Value5clearEv(Value* self) {
     Clear(NodeOf(*self));
 }
 
-int APS5_VABI _ZN3sce4Json12MemAllocator11notifyErrorEimPv(void) {
+int APS5_VABI _ZN3sce4Json12MemAllocator11notifyErrorEimPv(int code, int param, void* context) {
+    (void)code;
+    (void)param;
+    (void)context;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI _ZN3sce4Json5Value21setNullAccessCallBackEPFRKS1_NS0_9ValueTypeEPS2_PvES6_() {
+int APS5_VABI _ZN3sce4Json5Value21setNullAccessCallBackEPFRKS1_NS0_9ValueTypeEPS2_PvES6_(Value* self, void (*callback)(ValueType, const Value*, void*), void* context) {
+    if (!self) APS5_INVALID_ARG_EX;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI _ZN3sce4Json5Value30setElementAccessFailureHandlerEPFviPKNS0_6StringEPKmPKS1_S8_PvES9_(void) {
+int APS5_VABI _ZN3sce4Json5Value30setElementAccessFailureHandlerEPFviPKNS0_6StringEPKmPKS1_S8_PvES9_(Value* self, void* handler) {
+    (void)self;
+    (void)handler;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI _ZN3sce4Json5Value22setSpecialFloatHandlerEPFKS1_NS0_12FunctionTypeEdPS2_PvPbES5_(void) {
+int APS5_VABI _ZN3sce4Json5Value22setSpecialFloatHandlerEPFKS1_NS0_12FunctionTypeEdPS2_PvPbES5_(Value* self, void* handler) {
+    (void)self;
+    (void)handler;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI _ZN3sce4Json5Value22setTypeMismatchHandlerEPFRKS1_NS0_9ValueTypeEPS2_S5_PvES6_(void) {
+int APS5_VABI _ZN3sce4Json5Value22setTypeMismatchHandlerEPFRKS1_NS0_9ValueTypeEPS2_S5_PvES6_(Value* self, void* handler) {
+    (void)self;
+    (void)handler;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI _ZNK3sce4Json5ValuecvbEv(void) {
+int APS5_VABI _ZNK3sce4Json5ValuecvbEv(const Value* self) {
+    if (!self) APS5_INVALID_ARG_EX;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI _ZN3sce4Json6Object4PairC1ERKNS0_6StringERKNS0_5ValueE() {
+int APS5_VABI _ZN3sce4Json6Object6insertERKNS1_4PairE(Object* self, const Pair* pair) {
+    if (!self || !pair) APS5_INVALID_ARG_EX;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI _ZN3sce4Json6Object4PairD1Ev() {
+int APS5_VABI _ZN3sce4Json5Array8iteratorppEi(ArrayIterator* self, int n) {
+    if (!self) APS5_INVALID_ARG_EX;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI _ZN3sce4Json6Object6insertERKNS1_4PairE() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI _ZN3sce4Json5Array8iteratorppEi() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI _ZN3sce4Json5Array8iteratoraSERKS2_() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI _ZN3sce4Json5Array8iteratorC1Ev() {
+int APS5_VABI _ZN3sce4Json5Array8iteratoraSERKS2_(ArrayIterator* self, const ArrayIterator* other) {
+    if (!self || !other) APS5_INVALID_ARG_EX;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
