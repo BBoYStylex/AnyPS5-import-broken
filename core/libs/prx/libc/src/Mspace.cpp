@@ -30,6 +30,7 @@ struct Arena {
     std::uintptr_t end;
     std::map<std::uintptr_t, Chunk> chunks;
     std::set<std::pair<std::size_t, std::uintptr_t>> free;
+    std::set<std::pair<std::size_t, std::uintptr_t>> freeAligned;
     std::size_t inUse = 0;
     std::size_t peakInUse = 0;
 };
@@ -50,13 +51,20 @@ Arena* Find(void* handle) {
     return nullptr;
 }
 
+std::size_t AlignedBytes(std::uintptr_t start, std::uintptr_t end) {
+    const auto aligned = AlignUp(start, MinimumAlignment);
+    return aligned < start || aligned > end ? 0 : end - aligned;
+}
+
 void AddFree(Arena& arena, std::uintptr_t start, std::uintptr_t end) {
     arena.chunks[start] = {end, false, 0};
     arena.free.emplace(end - start, start);
+    arena.freeAligned.emplace(AlignedBytes(start, end), start);
 }
 
 void RemoveFree(Arena& arena, std::map<std::uintptr_t, Chunk>::iterator chunk) {
     arena.free.erase({chunk->second.end - chunk->first, chunk->first});
+    arena.freeAligned.erase({AlignedBytes(chunk->first, chunk->second.end), chunk->first});
 }
 
 void* Allocate(Arena* arena, std::size_t size, std::size_t alignment) {
@@ -67,7 +75,8 @@ void* Allocate(Arena* arena, std::size_t size, std::size_t alignment) {
         Error(12);
         return nullptr;
     }
-    for (auto candidate = arena->free.lower_bound({needed, 0}); candidate != arena->free.end(); ++candidate) {
+    auto& index = alignment == MinimumAlignment ? arena->freeAligned : arena->free;
+    for (auto candidate = index.lower_bound({needed, 0}); candidate != index.end(); ++candidate) {
         const auto start = candidate->second;
         const auto chunk = arena->chunks.find(start);
         const auto end = chunk->second.end;
