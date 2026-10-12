@@ -36,6 +36,13 @@ int APS5_VABI sceNpWebApi2AddHttpRequestHeader(int64_t request_id, const char* f
     return 0;
 }
 
+int APS5_VABI sceNpWebApi2AddWebTraceTag(int64_t request_id, const char* tag_name, const char* value) {
+    (void)request_id;
+    (void)tag_name;
+    (void)value;
+    return 0;
+}
+
 void APS5_VABI sceNpWebApi2CheckTimeout(void) {
 }
 

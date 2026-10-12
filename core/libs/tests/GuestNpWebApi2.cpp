@@ -15,6 +15,7 @@ extern "C" {
 int APS5_VABI sceNpWebApi2Initialize(int, std::size_t);
 int APS5_VABI sceNpWebApi2Terminate(int);
 int APS5_VABI sceNpWebApi2GetMemoryPoolStats(int, NpWebApi2MemoryPoolStats*);
+int APS5_VABI sceNpWebApi2AddWebTraceTag(int64_t, const char*, const char*);
 }
 
 static void Require(bool value) { if (!value) std::abort(); }
@@ -38,6 +39,7 @@ int main() {
     Require(stats.pool_size == 0x20000 && stats.max_inuse_size == 0 && stats.current_inuse_size == 0 && stats.reserved == 0);
     Require(sceNpWebApi2GetMemoryPoolStats(other, &stats) == 0 && stats.pool_size == 0x8000);
     Require(Throws([&] { sceNpWebApi2GetMemoryPoolStats(context, nullptr); }));
+    Require(sceNpWebApi2AddWebTraceTag(1, "tag", "value") == 0);
     Require(sceNpWebApi2Terminate(context) == 0);
     Require(Throws([&] { sceNpWebApi2GetMemoryPoolStats(context, &stats); }));
     Require(sceNpWebApi2Terminate(other) == 0);
