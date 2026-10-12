@@ -1070,7 +1070,6 @@ DrawInputs prepareDrawInputs(const Context& context, const State& state, const P
     if (args == nullptr) Require(draw.indexCount != 0 && draw.instanceCount != 0, "zero-count indexed draws are unsupported");
     else Require((!state.stages.mesh || draw.indexed) && !state.stages.tessellation && !state.rectList, "indirect draw on a non-vertex path must be resolved by the driver");
     Require(draw.IndexReadCount() <= draw.indexCount, "readable index count exceeds the draw count");
-    // Alias evidence covers the guest prefix; the Vulkan copy also contains zero-filled fetches.
     inputs.indexBytes = static_cast<std::uint64_t>(draw.IndexReadCount()) * draw.indexSize;
     const auto indexBytes = inputs.indexBytes;
     const auto drawIndexBytes = static_cast<std::uint64_t>(draw.indexCount) * draw.indexSize;

@@ -795,7 +795,6 @@ if(BUILD_TESTING)
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}" TIMEOUT 60)
 endif()
 
-
 foreach(agcCoverStage IN ITEMS vert frag)
     string(TOUPPER "${agcCoverStage}" agcCoverSymbol)
     set(agcCoverShaderSpv ${agcTestShaderGeneratedRoot}/Cover_${agcCoverStage}.spv)

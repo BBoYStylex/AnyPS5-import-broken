@@ -780,8 +780,6 @@ DrawParameters ResolveDraw(std::span<const std::uint32_t> packet, const QueueSta
     const std::uint32_t indexSize = queue.indexType == 0 ? 2 : queue.indexType == 1 ? 4 : 1;
     const auto base = explicitAddress ? address(packet[2], packet[3]) : queue.indexBase;
     const auto count = explicitAddress ? packet[4] : packet[3];
-    // max_size bounds the readable prefix, not the draw count. For OFFSET_2 it is already
-    // relative to index_offset; the CP returns index zero for subsequent fetches.
     const auto readableCount = std::min(count, packet[1]);
     require(readableCount == 0 || (base != 0 && base % indexSize == 0), "null or misaligned index base");
     const auto offset = explicitAddress ? 0 : static_cast<std::uint64_t>(packet[2]) * indexSize;

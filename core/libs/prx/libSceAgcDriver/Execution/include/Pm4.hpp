@@ -60,8 +60,6 @@ struct DrawParameters {
         std::uint32_t InstanceDwordOffset() const { return recordBytes == 20 ? 16u : 12u; }
     };
     std::optional<IndirectDraw> indirect;
-    // Direct indexed packets bound index fetches independently of the requested draw count.
-    // Fetches beyond this readable prefix produce index zero, rather than reducing the draw.
     std::optional<std::uint32_t> readableIndexCount;
     std::uint32_t IndexReadCount() const { return readableIndexCount.value_or(indexCount); }
 };
