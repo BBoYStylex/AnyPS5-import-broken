@@ -23,7 +23,6 @@ static void Require(bool condition, int line) {
 
 extern "C" {
 double APS5_VABI nearbyint_nid_postfix(double);
-int* APS5_VABI __error_nid_postfix();
 }
 
 int main() {
@@ -45,4 +44,12 @@ int main() {
     CHECK(std::signbit(nearbyint_nid_postfix(-0.0)));
     CHECK(std::isinf(nearbyint_nid_postfix(std::numeric_limits<double>::infinity())));
     CHECK(std::isnan(nearbyint_nid_postfix(std::numeric_limits<double>::quiet_NaN())));
+    std::feclearexcept(FE_ALL_EXCEPT);
+    const double signaling = std::bit_cast<double>(0x7ff0000000000001ull);
+    const auto quieted = std::bit_cast<std::uint64_t>(nearbyint_nid_postfix(signaling));
+    CHECK((quieted & 0x7ff8000000000000ull) == 0x7ff8000000000000ull);
+    CHECK(std::fetestexcept(FE_ALL_EXCEPT) == 0);
+    std::feraiseexcept(FE_INVALID | FE_DIVBYZERO);
+    CHECK(nearbyint_nid_postfix(1.2) == 1.0);
+    CHECK(std::fetestexcept(FE_ALL_EXCEPT) == (FE_INVALID | FE_DIVBYZERO));
 }
