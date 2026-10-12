@@ -177,6 +177,10 @@ void stateTests() {
     queue.context[0x103] = 0xffffffffu;
     Require(AgcDriver::Graphics::DrawRejection(queue, true).empty(), "primitive restart was rejected for an indexed strip");
     Require(AgcDriver::Graphics::DecodeState(queue).primitiveRestart, "primitive restart was not decoded for a strip");
+    queue.userConfig[0x242] = 3;
+    Require(AgcDriver::Graphics::DrawRejection(queue, true).empty(), "primitive restart was rejected for an indexed line strip");
+    Require(AgcDriver::Graphics::DecodeState(queue).primitiveRestart, "primitive restart was not decoded for a line strip");
+    Require(AgcDriver::Graphics::DecodeState(queue).topology == VK_PRIMITIVE_TOPOLOGY_LINE_STRIP, "primitive type 3 was not decoded as line strip");
     queue.context[0x103] = 5;
     Require(AgcDriver::Graphics::DrawRejection(queue, true).find("all ones") != std::string::npos, "a restart index other than all ones was accepted");
     queue = makeState();
@@ -4514,7 +4518,7 @@ void ConservativeRasterizationTests() {
         Require(AgcDriver::Graphics::DecodeState(queue).conservativeRasterization == VK_CONSERVATIVE_RASTERIZATION_MODE_OVERESTIMATE_EXT, "OVER_RAST_ENABLE did not decode to overestimation for primitive type " + std::to_string(primitive));
         Require(AgcDriver::Graphics::DrawRejection(queue, false).empty(), "the precheck rejected OVER_RAST_ENABLE");
     }
-    for (const auto& [primitive, rejected] : std::array<std::pair<std::uint32_t, std::string_view>, 3>{{{1u, "conservative rasterization of points is unsupported (VGT_PRIMITIVE_TYPE=0x1)"}, {2u, "conservative rasterization of lines is unsupported (VGT_PRIMITIVE_TYPE=0x2)"}, {17u, "conservative rasterization of rectangles is unsupported (VGT_PRIMITIVE_TYPE=0x11)"}}}) {
+    for (const auto& [primitive, rejected] : std::array<std::pair<std::uint32_t, std::string_view>, 4>{{{1u, "conservative rasterization of points is unsupported (VGT_PRIMITIVE_TYPE=0x1)"}, {2u, "conservative rasterization of lines is unsupported (VGT_PRIMITIVE_TYPE=0x2)"}, {3u, "conservative rasterization of lines is unsupported (VGT_PRIMITIVE_TYPE=0x3)"}, {17u, "conservative rasterization of rectangles is unsupported (VGT_PRIMITIVE_TYPE=0x11)"}}}) {
         queue.userConfig[0x242] = primitive;
         expectFailure([&] { AgcDriver::Graphics::DecodeState(queue); }, rejected);
     }
