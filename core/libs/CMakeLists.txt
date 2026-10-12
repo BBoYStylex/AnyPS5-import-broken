@@ -189,6 +189,16 @@ if(BUILD_TESTING)
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceHttp>")
     endif()
 
+    add_test_executable(guest_content_search_tests tests/GuestContentSearch.cpp)
+    target_include_directories(guest_content_search_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(guest_content_search_tests PRIVATE libSceContentSearch libc)
+    configure_windows_unwind(guest_content_search_tests)
+    add_test(NAME guest_content_search COMMAND guest_content_search_tests)
+    if(WIN32)
+        set_tests_properties(guest_content_search PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceContentSearch>")
+    endif()
+
     add_test_executable(guest_signin_dialog_tests tests/GuestSigninDialog.cpp)
     target_include_directories(guest_signin_dialog_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_link_libraries(guest_signin_dialog_tests PRIVATE libSceSigninDialog libc)
