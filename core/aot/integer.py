@@ -144,7 +144,7 @@ def lower_shift(function, ins):
             function.write(ins, args[0], function.read(ins, args[0]))
         return
     previous = function.states[ins.address]['flags']
-    old = {name: load_flag(function, name) if name in previous else 'false' for name in FLAGS}
+    old = {name: load_flag(function, name) if name in previous else 'false' for name in sorted(FLAGS)}
     value = function.read(ins, args[0])
     raw_count = function.read(ins, args[1])
     count_width = args[1].size * 8
@@ -176,7 +176,7 @@ def lower_shift(function, ins):
         overflow = 'false'
     store_flag(function, 'cf', carry)
     store_flag(function, 'of', overflow)
-    for name in FLAGS:
+    for name in sorted(FLAGS):
         current = load_flag(function, name)
         store_flag(function, name, function.emit(f'select i1 {zero}, i1 {old[name]}, i1 {current}'))
     function.write(ins, args[0], result)

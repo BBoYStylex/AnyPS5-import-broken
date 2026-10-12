@@ -220,6 +220,18 @@ On Linux x86-64, omit `CMAKE_OSX_ARCHITECTURES`; the full `BUILD_TESTING` build 
 
 This optional target runs the public SDK's `gpu_cube` as an ARM64-only macOS process through Vulkan/MoltenVK. It is a source-qualified fixture, not general game compatibility. The guest CPU code comes from the x86-64 ELF through the AOT compiler. The C-compiled ARM64 executable is an independent test reference only.
 
+The fixture stores `core/aot/examples/gpu_cube/contract-recipe.json`. Before compilation, `contract_recipe.py` verifies the input hash, a canonical digest of declared facts and guard policies, and source identities, including structured provider evidence. It derives memory-base guard sites from decoded operands and pointer-argument guard sites from resolved call ABIs. The build report records the derivation separately from the declared function/import ABIs and remaining pointer-load, stack and frame-exclusion annotations. Existing guards and compiler rejection rules still apply. The recipe does not infer object lifetime, pointee layout or missing call targets; changing a hash is not a substitute for requalifying those facts.
+
+A qualified recipe can also be expanded independently with the AOT dependency environment active:
+
+```sh
+python3 core/aot/contract_recipe.py input.elf --recipe contract-recipe.json --source-root . --output generated-contracts.json
+python3 build-aot/core/aot/native_aot.py input.elf --contracts generated-contracts.json --output module.ll --object module.o
+```
+
+The first command writes the contracts and `generated-contracts.derivation.json`; it refuses existing output paths. Source paths are relative to `--source-root`. The second command still performs the compiler's semantic validation. Expanded site counts measure generated records, not recovered ABI coverage or the number of independent manual facts.
+
+
 Requirements: Apple Silicon, a logged-in macOS graphical session, Apple clang 21.0.0 (`clang-2100.3.34.2`), CMake, Ninja and Python 3. The input contract is hash-bound; another compiler revision that changes the ELF is rejected and requires contract requalification. Install a native Vulkan loader and MoltenVK; the validated driver is MoltenVK 1.4.2. Set `DYLD_LIBRARY_PATH` to the directory containing `libvulkan.1.dylib`, `SDL_VULKAN_LIBRARY` to that library, and `VK_ICD_FILENAMES` to the MoltenVK ICD JSON. These are GPU driver dependencies, not another AnyPS5 checkout. Do not set `APS5_*` diagnostic overrides for the acceptance run.
 
 ```sh

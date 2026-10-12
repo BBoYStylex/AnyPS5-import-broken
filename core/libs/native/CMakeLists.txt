@@ -69,7 +69,7 @@ set_tests_properties(native_runtime_smoke PROPERTIES TIMEOUT 30)
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 set(cubeExample "${CMAKE_SOURCE_DIR}/core/aot/examples/gpu_cube")
-file(GLOB cubeBuildInputs CONFIGURE_DEPENDS "${cubeExample}/*.py" "${cubeExample}/contracts.json" "${CMAKE_SOURCE_DIR}/core/aot/*.py")
+file(GLOB cubeBuildInputs CONFIGURE_DEPENDS "${cubeExample}/*.py" "${cubeExample}/contract-recipe.json" "${CMAKE_SOURCE_DIR}/core/aot/*.py")
 set(cubeInputHashes "${CMAKE_C_COMPILER_ID}-${CMAKE_C_COMPILER_VERSION}")
 foreach(input IN LISTS cubeBuildInputs)
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${input}")
