@@ -1698,31 +1698,12 @@ static void CheckAvailableDirectMemoryIsLargestFreeBlock() {
     Require(sceKernelAvailableDirectMemorySize(top, top + window, 0, &start, &size) == 0);
     Require(start == top && size == static_cast<std::size_t>(window));
 }
-#ifdef _WIN32
-static void CheckMprotectOfHostMemoryOutsideTheGuestRegistry() {
-    constexpr std::size_t length = 0x40000;
-    void* host = VirtualAlloc(nullptr, length, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-    Require(host != nullptr);
-    Require(sceKernelMprotect(host, length, 0x3) == 0);
-    static_cast<volatile unsigned char*>(host)[length - 1] = 7;
-    Require(static_cast<volatile unsigned char*>(host)[length - 1] == 7);
-    Require(sceKernelMprotect(host, length, 0x1) == 0);
-    MEMORY_BASIC_INFORMATION info{};
-    Require(VirtualQuery(host, &info, sizeof(info)) == sizeof(info) && info.Protect == PAGE_READONLY);
-    Require(sceKernelMprotect(host, length, 0x3) == 0);
-    Require(VirtualQuery(host, &info, sizeof(info)) == sizeof(info) && info.Protect == PAGE_READWRITE);
-    Require(VirtualFree(host, 0, MEM_RELEASE) != 0);
-}
-#endif
 
 int main() {
 #ifdef _WIN32
     _putenv_s("APS5_PIN_WAIT_MS", "1000");
 #endif
     CheckAvailableDirectMemoryIsLargestFreeBlock();
-#ifdef _WIN32
-    CheckMprotectOfHostMemoryOutsideTheGuestRegistry();
-#endif
     CheckVirtualQuerySplitFlexibleRanges();
     CheckVirtualQueryForNonReadableGuestRange();
     CheckReleaseFlexibleMemory();

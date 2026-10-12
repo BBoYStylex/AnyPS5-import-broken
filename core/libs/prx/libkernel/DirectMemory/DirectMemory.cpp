@@ -921,10 +921,6 @@ int DoMprotect(const void* addr, size_t len, int prot) {
         else if (IsGuestModuleImage(memory.AllocationBase)) mutation.RegisterImage(memory.AllocationBase);
         else throw std::invalid_argument("Memory protection of a foreign image is not supported");
     }
-    if (memory.Type == MEM_PRIVATE && memory.State == MEM_COMMIT && memory.RegionSize >= bytes && !mutation.Overlaps(pointer, bytes)) {
-        if (mprotect(const_cast<void*>(pointer), bytes, nativeProtection) != 0) throw std::system_error(errno, std::generic_category(), "mprotect failed");
-        return 0;
-    }
 #else
     mutation.RegisterMainImage();
 #endif
