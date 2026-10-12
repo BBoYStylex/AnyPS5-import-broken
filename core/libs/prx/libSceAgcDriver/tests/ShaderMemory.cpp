@@ -3540,6 +3540,32 @@ void verifySrgbDepthCompareModes() {
     }
 }
 
+void verifySrgbSampleFallbackState() {
+    using namespace ShaderRecompiler;
+    ShaderInfo info;
+    ImageResource image{};
+    image.resourceClass = ImageResourceClass::Sampled;
+    image.dimension = RdnaImageDimension::Dim2D;
+    image.srgbDecodeFormats = 1u;
+    info.images = {image};
+    info.samplers = {SamplerResource{}};
+    info.sampledPairs = {{0u, 0u, 0u}};
+    ResourceSnapshot snapshot;
+    snapshot.images = {DescriptorValue{{0x100u, 128u << 20u, 0u, 0x90000facu, 0u, 0u, 0u, 0u}, 8u}};
+    snapshot.samplers = {DescriptorValue{{0x12u, 0x00fff000u, (1u << 20u) | (1u << 22u) | (1u << 24u), 0u}, 4u}};
+    const auto state = ResourceMaterializer::EmulatedSrgbSampleState(info, snapshot, 0u);
+    require(state == (EmulatedSrgbSample::Linear | (EmulatedCompare::AddressEdge << EmulatedSrgbSample::ClampXShift) | (EmulatedCompare::AddressEdge << EmulatedSrgbSample::ClampYShift)),
+            "sRGB sample fallback did not preserve its bilinear filter and edge address modes");
+    snapshot.samplers[0].dwords[2] = (1u << 22u) | (1u << 24u);
+    expectFailure([&] { static_cast<void>(ResourceMaterializer::EmulatedSrgbSampleState(info, snapshot, 0u)); },
+                  "equal point or bilinear minification and magnification filters", "sRGB sample fallback accepted mismatched min/mag filters");
+    snapshot.samplers[0].dwords[2] = (1u << 20u) | (1u << 22u) | (1u << 24u);
+    snapshot.samplers[0].dwords[0] = 6u | (2u << 3u);
+    snapshot.samplers[0].dwords[3] = 2u << 30u;
+    const auto whiteBorder = ResourceMaterializer::EmulatedSrgbSampleState(info, snapshot, 0u);
+    require((whiteBorder & EmulatedSrgbSample::BorderWhite) != 0u, "sRGB sample fallback lost its white border color");
+}
+
 int main(int argc, char** argv) {
     try {
         using namespace ShaderRecompiler;
@@ -3600,6 +3626,7 @@ int main(int argc, char** argv) {
         verifyCubeDepthCompareMode();
         verifySrgbDepthCompareModes();
         verifyCoherentGds();
+        verifySrgbSampleFallbackState();
 #if ANYPS5_ENABLE_SPIRV_TOOLS
         const std::vector<std::uint32_t> minimalSpirv{
             0x07230203u, 0x00010000u, 0u, 5u, 0u,

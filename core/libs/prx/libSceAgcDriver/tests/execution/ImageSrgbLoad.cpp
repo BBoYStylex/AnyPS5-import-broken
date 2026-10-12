@@ -77,9 +77,7 @@ alignas(256) constexpr auto LoadXyzw = LoadCode(0xfu);
 alignas(256) constexpr auto LoadXy = LoadCode(0x3u);
 alignas(256) constexpr auto StoreX = StoreCode(0x1u);
 alignas(256) constexpr auto StoreXy = StoreCode(0x3u);
-alignas(256) constexpr auto SampleLz = SamplerCode(0xf09c0f08u);
 alignas(256) constexpr auto Gather4Lz = SamplerCode(0xf11c0108u);
-alignas(256) constexpr auto MixedSampleLz = MixedSamplerCode(0xf09c0f08u);
 alignas(256) constexpr auto MixedGather4Lz = MixedSamplerCode(0xf11c0108u);
 
 class GuestBlock {
@@ -242,9 +240,7 @@ int main() {
         CheckStoredLoad(*device, block, LoadXy, 0x3u, Srgb8_8, SwizzleXY01, "8_8_SRGB image_load dmask:0x3 X Y 0 1 of 8_8_UNORM image_stores");
         CheckStoredLoad(*device, block, LoadXyzw, 0xfu, Srgb8_8, SwizzleYX10, "8_8_SRGB image_load dmask:0xf Y X 1 0 of 8_8_UNORM image_stores");
         CheckStoredLoad(*device, block, LoadXyzw, 0xfu, Srgb8, SwizzleXXX1, "8_SRGB image_load dmask:0xf X X X 1 of 8_UNORM image_stores");
-        RequireRefused(*device, SampleLz, "image_sample_lz");
         RequireRefused(*device, Gather4Lz, "image_gather4_lz");
-        RequireRefused(*device, MixedSampleLz, "image_sample_c_lz followed by image_sample_lz");
         RequireRefused(*device, MixedGather4Lz, "image_sample_c_lz followed by image_gather4_lz");
         std::puts("image sRGB load tests passed");
         return 0;

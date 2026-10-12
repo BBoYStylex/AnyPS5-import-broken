@@ -22,6 +22,8 @@ using ShaderRecompiler::ShaderStage;
 
 constexpr std::uint32_t Threads = 32;
 constexpr std::uint32_t Size = 4;
+constexpr std::uint32_t Format8Srgb = 128;
+constexpr std::uint32_t Format8_8Srgb = 129;
 constexpr std::uint32_t Format8888UNorm = 56;
 constexpr std::uint32_t Format8888Srgb = 130;
 constexpr std::uint32_t Type2D = 9;
@@ -75,6 +77,30 @@ void FillTexels() {
         for (std::uint32_t x = 0; x < Size; ++x) {
             auto* texel = &Texels[mips[0].tiledOffset + static_cast<std::uint64_t>(y) * mips[0].pitchBytes + x * 4u];
             for (std::uint32_t channel = 0; channel < 4u; ++channel) texel[channel] = Code8(x, y, channel);
+        }
+    }
+}
+
+void FillR8SrgbTexels() {
+    const auto mips = AgcDriver::Graphics::ComputeMipLayout(AgcDriver::Graphics::TextureTileMode::kLinear, Format8Srgb, Size, Size, 1);
+    Require(AgcDriver::Graphics::ComputeSurfaceSize(mips, 1) <= Texels.size(), "image sample force degamma: the R8 sRGB texture does not fit its storage");
+    Texels.fill(0);
+    for (std::uint32_t y = 0; y < Size; ++y) {
+        for (std::uint32_t x = 0; x < Size; ++x) {
+            Texels[mips[0].tiledOffset + static_cast<std::uint64_t>(y) * mips[0].pitchBytes + x] = Code8(x, y, 0u);
+        }
+    }
+}
+
+void FillRG8SrgbTexels() {
+    const auto mips = AgcDriver::Graphics::ComputeMipLayout(AgcDriver::Graphics::TextureTileMode::kLinear, Format8_8Srgb, Size, Size, 1);
+    Require(AgcDriver::Graphics::ComputeSurfaceSize(mips, 1) <= Texels.size(), "image sample force degamma: the RG8 sRGB texture does not fit its storage");
+    Texels.fill(0);
+    for (std::uint32_t y = 0; y < Size; ++y) {
+        for (std::uint32_t x = 0; x < Size; ++x) {
+            auto* texel = &Texels[mips[0].tiledOffset + static_cast<std::uint64_t>(y) * mips[0].pitchBytes + x * 2u];
+            texel[0] = Code8(x, y, 0u);
+            texel[1] = Code8(x, y, 1u);
         }
     }
 }
@@ -139,6 +165,58 @@ void RequireDecoded(const std::array<float, Threads * 4>& sampled) {
     }
 }
 
+void RequireR8SrgbDecoded(const std::array<float, Threads * 4>& sampled, std::string_view filter) {
+    for (std::uint32_t tid = 0; tid < Threads; ++tid) {
+        const float u = Input[tid * 3u];
+        const float v = Input[tid * 3u + 1u];
+        const float x = u * static_cast<float>(Size) - 0.5f;
+        const float y = v * static_cast<float>(Size) - 0.5f;
+        const auto x0 = static_cast<std::int32_t>(std::floor(x));
+        const auto y0 = static_cast<std::int32_t>(std::floor(y));
+        const float tx = x - static_cast<float>(x0);
+        const float ty = y - static_cast<float>(y0);
+        const auto texel = [&](std::int32_t ix, std::int32_t iy) {
+            ix = std::clamp(ix, 0, static_cast<std::int32_t>(Size) - 1);
+            iy = std::clamp(iy, 0, static_cast<std::int32_t>(Size) - 1);
+            return SrgbToLinear(Code8(static_cast<std::uint32_t>(ix), static_cast<std::uint32_t>(iy), 0u));
+        };
+        const float top = texel(x0, y0) * (1.0f - tx) + texel(x0 + 1, y0) * tx;
+        const float bottom = texel(x0, y0 + 1) * (1.0f - tx) + texel(x0 + 1, y0 + 1) * tx;
+        const float expected = top * (1.0f - ty) + bottom * ty;
+        const float actual = sampled[tid * 4u];
+        Require(std::fabs(actual - expected) <= 0.005f, "R8_SRGB " + std::string(filter) + ": thread " + std::to_string(tid) + " sampled " + std::to_string(actual) + ", expected " + std::to_string(expected));
+        Require(sampled[tid * 4u + 1u] == 0.0f && sampled[tid * 4u + 2u] == 0.0f && sampled[tid * 4u + 3u] == 1.0f,
+                "R8_SRGB " + std::string(filter) + ": missing Vulkan R8 default components");
+    }
+}
+
+void RequireRG8SrgbDecoded(const std::array<float, Threads * 4>& sampled, std::string_view filter) {
+    for (std::uint32_t tid = 0; tid < Threads; ++tid) {
+        const float u = Input[tid * 3u];
+        const float v = Input[tid * 3u + 1u];
+        const float x = u * static_cast<float>(Size) - 0.5f;
+        const float y = v * static_cast<float>(Size) - 0.5f;
+        const auto x0 = static_cast<std::int32_t>(std::floor(x));
+        const auto y0 = static_cast<std::int32_t>(std::floor(y));
+        const float tx = x - static_cast<float>(x0);
+        const float ty = y - static_cast<float>(y0);
+        for (std::uint32_t channel = 0; channel < 2u; ++channel) {
+            const auto texel = [&](std::int32_t ix, std::int32_t iy) {
+                ix = std::clamp(ix, 0, static_cast<std::int32_t>(Size) - 1);
+                iy = std::clamp(iy, 0, static_cast<std::int32_t>(Size) - 1);
+                return SrgbToLinear(Code8(static_cast<std::uint32_t>(ix), static_cast<std::uint32_t>(iy), channel));
+            };
+            const float top = texel(x0, y0) * (1.0f - tx) + texel(x0 + 1, y0) * tx;
+            const float bottom = texel(x0, y0 + 1) * (1.0f - tx) + texel(x0 + 1, y0 + 1) * tx;
+            const float expected = top * (1.0f - ty) + bottom * ty;
+            const float actual = sampled[tid * 4u + channel];
+            Require(std::fabs(actual - expected) <= 0.005f, "RG8_SRGB " + std::string(filter) + ": thread " + std::to_string(tid) + " component " + std::to_string(channel) + " sampled " + std::to_string(actual) + ", expected " + std::to_string(expected));
+        }
+        Require(sampled[tid * 4u + 2u] == 0.0f && sampled[tid * 4u + 3u] == 1.0f,
+                "RG8_SRGB " + std::string(filter) + ": missing Vulkan RG8 default components");
+    }
+}
+
 void Reject(AgcDriver::VulkanDevice& device, std::uint32_t format, std::string_view reason) {
     try {
         static_cast<void>(Sample(device, format, FilterPoint, ForceDegamma));
@@ -151,10 +229,25 @@ void Reject(AgcDriver::VulkanDevice& device, std::uint32_t format, std::string_v
 
 }
 
-int main() {
+int main(int argc, char** argv) {
     try {
         const auto device = OpenVulkanTestDevice();
         if (!device) return VulkanTestSkipped;
+        if (argc == 2 && std::string_view(argv[1]) == "--srgb-fallback") {
+            Require((device->Target().srgbDecodeFormats & 3u) == 3u, "forced R8 and RG8 sRGB shader decoding is unavailable");
+            FillR8SrgbTexels();
+            FillInput(true);
+            RequireR8SrgbDecoded(Sample(*device, Format8Srgb, FilterPoint, 0u), "point");
+            FillInput(false);
+            RequireR8SrgbDecoded(Sample(*device, Format8Srgb, FilterBilinear, 0u), "bilinear");
+            FillRG8SrgbTexels();
+            FillInput(true);
+            RequireRG8SrgbDecoded(Sample(*device, Format8_8Srgb, FilterPoint, 0u), "point");
+            FillInput(false);
+            RequireRG8SrgbDecoded(Sample(*device, Format8_8Srgb, FilterBilinear, 0u), "bilinear");
+            std::puts("image R8/RG8 sRGB fallback sampling tests passed");
+            return 0;
+        }
         FillTexels();
         FillInput(true);
         const auto forcedPoint = Sample(*device, Format8888Srgb, FilterPoint, ForceDegamma);

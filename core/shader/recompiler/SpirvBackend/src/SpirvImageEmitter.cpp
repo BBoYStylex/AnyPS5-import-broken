@@ -1265,6 +1265,114 @@ TableSelection EmitIndirectImageSelector(SpirvValueEmitContext& ctx, const Image
     return {selected, mapped};
 }
 
+void EmitEmulatedSrgbSample(SpirvValueEmitContext& ctx, const ImageEmitAccess& access, const SampleSetup& setup) {
+    auto& state = ctx.state;
+    const auto& mem = access.mem;
+    if (setup.dref) ctx.Fail(access.inst, "uses depth comparison with an sRGB shader sampling fallback");
+    if (access.slot != 0u) ctx.Fail(access.inst, "samples an sRGB texture through a bindless image table, which is not implemented");
+    if (access.image.dimension != RdnaImageDimension::Dim2D) ctx.Fail(access.inst, "samples or gathers an sRGB image the device cannot sample: the shader fallback currently supports only 2D images");
+    const auto f32 = TypeF32(state);
+    const auto i32 = TypeI32(state);
+    const auto u32 = TypeU32(state);
+    const auto ext = [&](std::uint32_t type, std::uint32_t op, std::initializer_list<std::uint32_t> args) {
+        const auto value = state.module.AllocateId();
+        std::vector<std::uint32_t> words{spv::OpExtInst, type, value, GlslStd450(state), op};
+        words.insert(words.end(), args.begin(), args.end());
+        state.module.AddFunction(std::span<const std::uint32_t>(words));
+        return value;
+    };
+    const auto extract = [&](std::uint32_t type, std::uint32_t composite, std::uint32_t component) {
+        const auto value = state.module.AllocateId();
+        state.module.AddFunction(spv::OpCompositeExtract, type, value, composite, component);
+        return value;
+    };
+    const auto sampleState = state.registrationModules
+        ? EmitAndConstant(state, Binary(state, spv::OpShiftRightLogical, u32, RuntimeImageDword(state, mem.resource, offsetof(RuntimeAbi::ResourceMetadata, flags) / sizeof(std::uint32_t)), ConstantU32(state, RuntimeAbi::SrgbSampleStateShift)), RuntimeAbi::SrgbSampleStateMask)
+        : state.module.SpecializationConstant(u32, PipelineSpecialization::SrgbSampleBase + mem.resource, 0u);
+    const auto parameter = [&](std::uint32_t shift, std::uint32_t mask) {
+        return EmitAndConstant(state, Binary(state, spv::OpShiftRightLogical, u32, sampleState, ConstantU32(state, shift)), mask);
+    };
+    const auto equal = [&](std::uint32_t value, std::uint32_t literal) { return Binary(state, spv::OpIEqual, TypeBool(state), value, ConstantU32(state, literal)); };
+    const auto descriptor = LoadSampledImageDescriptor(state, mem.resource, access.slot);
+    state.module.EmitCapability(spv::CapabilityImageQuery);
+    const auto size = state.module.AllocateId();
+    state.module.AddFunction(spv::OpImageQuerySizeLod, ImageViewSizeType(state, access.image.dimension), size, descriptor, ConstantU32(state, 0u));
+    const auto width = Unary(state, spv::OpBitcast, i32, extract(u32, size, 0u));
+    const auto height = Unary(state, spv::OpBitcast, i32, extract(u32, size, 1u));
+    const auto address = [&](std::uint32_t index, std::uint32_t extent, std::uint32_t mode) {
+        const auto remainder = Binary(state, spv::OpSRem, i32, index, extent);
+        const auto negative = Binary(state, spv::OpSLessThan, TypeBool(state), remainder, ConstantI32(state, 0));
+        const auto wrapped = Binary(state, spv::OpIAdd, i32, remainder, Select(state, i32, negative, extent, ConstantI32(state, 0)));
+        const auto last = Binary(state, spv::OpISub, i32, extent, ConstantI32(state, 1));
+        const auto low = Select(state, i32, Binary(state, spv::OpSLessThan, TypeBool(state), index, ConstantI32(state, 0)), ConstantI32(state, 0), index);
+        const auto clamped = Select(state, i32, Binary(state, spv::OpSGreaterThan, TypeBool(state), low, last), last, low);
+        return Select(state, i32, equal(mode, EmulatedCompare::AddressWrap), wrapped, clamped);
+    };
+    const auto inside = [&](std::uint32_t index, std::uint32_t extent) {
+        return Binary(state, spv::OpLogicalAnd, TypeBool(state), Binary(state, spv::OpSGreaterThanEqual, TypeBool(state), index, ConstantI32(state, 0)), Binary(state, spv::OpSLessThan, TypeBool(state), index, extent));
+    };
+    const auto fetch = [&](std::uint32_t x, std::uint32_t y) {
+        const auto mappedX = address(x, width, parameter(EmulatedSrgbSample::ClampXShift, 0x3u));
+        const auto mappedY = address(y, height, parameter(EmulatedSrgbSample::ClampYShift, 0x3u));
+        const auto coord = state.module.AllocateId();
+        state.module.AddFunction(spv::OpCompositeConstruct, TypeU32Vector(state, 2), coord, Unary(state, spv::OpBitcast, u32, mappedX), Unary(state, spv::OpBitcast, u32, mappedY));
+        const auto encoded = state.module.AllocateId();
+        state.module.AddFunction(spv::OpImageFetch, TypeF32Vector(state, 4), encoded, descriptor, coord, spv::ImageOperandsLodMask, ConstantU32(state, 0u));
+        auto decoded = UnpackImageTexel(ctx, access, encoded);
+        const auto border = Binary(state, spv::OpLogicalOr, TypeBool(state),
+            Binary(state, spv::OpLogicalAnd, TypeBool(state), equal(parameter(EmulatedSrgbSample::ClampXShift, 0x3u), EmulatedCompare::AddressBorder), Unary(state, spv::OpLogicalNot, TypeBool(state), inside(x, width))),
+            Binary(state, spv::OpLogicalAnd, TypeBool(state), equal(parameter(EmulatedSrgbSample::ClampYShift, 0x3u), EmulatedCompare::AddressBorder), Unary(state, spv::OpLogicalNot, TypeBool(state), inside(y, height))));
+        const auto borderOne = ConstantF32(state, 0x3f800000u);
+        const auto borderZero = ConstantF32(state, 0u);
+        const auto borderWhite = equal(parameter(5u, 1u), 1u);
+        const auto borderOpaque = equal(parameter(6u, 1u), 1u);
+        const auto borderRgb = Select(state, f32, borderWhite, borderOne, borderZero);
+        const auto borderAlpha = Select(state, f32, Binary(state, spv::OpLogicalOr, TypeBool(state), borderWhite, borderOpaque), borderOne, borderZero);
+        const std::array<std::uint32_t, 4> borderChannels{borderRgb, borderRgb, borderRgb, borderAlpha};
+        const auto borderColor = state.module.AllocateId();
+        state.module.AddFunction(spv::OpCompositeConstruct, TypeF32Vector(state, 4), borderColor, borderChannels[0], borderChannels[1], borderChannels[2], borderChannels[3]);
+        const auto color = state.module.AllocateId();
+        state.module.AddFunction(spv::OpSelect, TypeF32Vector(state, 4), color, border, borderColor, decoded);
+        return color;
+    };
+    const auto scaledU = Binary(state, spv::OpFMul, f32, extract(f32, setup.coord, 0u), Unary(state, spv::OpConvertSToF, f32, width));
+    const auto scaledV = Binary(state, spv::OpFMul, f32, extract(f32, setup.coord, 1u), Unary(state, spv::OpConvertSToF, f32, height));
+    auto offsetX = ConstantI32(state, 0);
+    auto offsetY = ConstantI32(state, 0);
+    if (setup.layout.offset != NoImageComponent) {
+        const auto offset = PackedOffset(ctx, access, setup.layout);
+        offsetX = extract(i32, offset, 0u);
+        offsetY = extract(i32, offset, 1u);
+    }
+    const auto texelIndex = [&](std::uint32_t coordinate, std::uint32_t offset) {
+        const auto floor = ext(f32, GLSLstd450Floor, {coordinate});
+        return Binary(state, spv::OpIAdd, i32, Unary(state, spv::OpConvertFToS, i32, floor), offset);
+    };
+    const auto point = [&] { return fetch(texelIndex(scaledU, offsetX), texelIndex(scaledV, offsetY)); };
+    const auto linear = [&] {
+        const auto half = ConstantF32(state, 0x3f000000u);
+        const auto centreU = Binary(state, spv::OpFSub, f32, scaledU, half);
+        const auto centreV = Binary(state, spv::OpFSub, f32, scaledV, half);
+        const auto floorU = ext(f32, GLSLstd450Floor, {centreU});
+        const auto floorV = ext(f32, GLSLstd450Floor, {centreV});
+        const auto weightU = Binary(state, spv::OpFSub, f32, centreU, floorU);
+        const auto weightV = Binary(state, spv::OpFSub, f32, centreV, floorV);
+        const auto x0 = Binary(state, spv::OpIAdd, i32, Unary(state, spv::OpConvertFToS, i32, floorU), offsetX);
+        const auto y0 = Binary(state, spv::OpIAdd, i32, Unary(state, spv::OpConvertFToS, i32, floorV), offsetY);
+        const auto x1 = Binary(state, spv::OpIAdd, i32, x0, ConstantI32(state, 1));
+        const auto y1 = Binary(state, spv::OpIAdd, i32, y0, ConstantI32(state, 1));
+        const auto weightUVector = state.module.AllocateId();
+        state.module.AddFunction(spv::OpCompositeConstruct, TypeF32Vector(state, 4), weightUVector, weightU, weightU, weightU, weightU);
+        const auto weightVVector = state.module.AllocateId();
+        state.module.AddFunction(spv::OpCompositeConstruct, TypeF32Vector(state, 4), weightVVector, weightV, weightV, weightV, weightV);
+        const auto top = ext(TypeF32Vector(state, 4), GLSLstd450FMix, {fetch(x0, y0), fetch(x1, y0), weightUVector});
+        const auto bottom = ext(TypeF32Vector(state, 4), GLSLstd450FMix, {fetch(x0, y1), fetch(x1, y1), weightUVector});
+        return ext(TypeF32Vector(state, 4), GLSLstd450FMix, {top, bottom, weightVVector});
+    };
+    const auto sampled = EmitValueIfElse(state, equal(parameter(0u, 1u), 1u), TypeF32Vector(state, 4), linear, point);
+    ctx.Define(access.inst, TableResult(ctx, access, ResultVector(ctx, access, sampled, IrTextureNumericClass::Float, false, false)));
+}
+
 void EmitEmulatedCompareSample(SpirvValueEmitContext& ctx, const ImageEmitAccess& access, const SampleSetup& setup) {
     auto& state = ctx.state;
     const auto& mem = access.mem;
@@ -1395,6 +1503,10 @@ void EmitSampleOp(SpirvValueEmitContext& ctx, const ImageEmitAccess& access, con
     auto& state = ctx.state;
     const auto& mem = access.mem;
     const auto& image = access.image;
+    if (image.srgbDecode) {
+        EmitEmulatedSrgbSample(ctx, access, setup);
+        return;
+    }
     if (setup.dref && (image.emulatedCompare & EmulatedCompare::Enabled) != 0u) {
         EmitEmulatedCompareSample(ctx, access, setup);
         return;
@@ -1567,8 +1679,8 @@ void EmitSamplingOp(SpirvValueEmitContext& ctx, const ImageEmitAccess& access) {
         EmitConstantSwizzleSample(ctx, access);
         return;
     }
-    if (access.image.srgbDecode) {
-        ctx.Fail(access.inst, "samples or gathers an sRGB image the device cannot sample, which is not implemented");
+    if (access.image.srgbDecode && access.inst.Opcode() == IrOpcode::ImageGatherRaw) {
+        ctx.Fail(access.inst, "samples or gathers an sRGB image the device cannot sample: shader decoding is not implemented for gathers");
     }
     if (access.mem.imagePacked) {
         EmitPackedHorizontalGatherOp(ctx, access);
