@@ -1321,7 +1321,10 @@ void DepthStencilTests() {
     expectFailure([&] { AgcDriver::Graphics::DecodeState(queue); }, "beyond the 3D surface");
     queue.context[0x31b] = 0;
     queue.context[0x31c] |= 0x10000000;
-    expectFailure([&] { AgcDriver::Graphics::DecodeState(queue); }, "DCC 3D color targets");
+    queue.context[0x325] = 0x1234;
+    Require(AgcDriver::Graphics::DecodeState(queue).color.dccAddress == 0x123400u, "a DCC 3D color target did not keep its metadata address");
+    queue.context[0x3b0] |= 1u << 28u;
+    expectFailure([&] { AgcDriver::Graphics::DecodeState(queue); }, "mipmapped 3D color targets");
 }
 
 void OneDimensionalColorTests() {
