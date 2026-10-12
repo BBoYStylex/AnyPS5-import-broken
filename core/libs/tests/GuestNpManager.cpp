@@ -7,6 +7,8 @@
 
 extern "C" {
 int APS5_VABI sceNpGetNpId(int user_id, NpId* np_id);
+int APS5_VABI sceNpSetContentRestriction(const NpContentRestriction* restriction);
+void APS5_VABI sceNpRegisterGamePresenceCallback(void* callback, void* userdata);
 }
 
 extern "C" {
@@ -21,6 +23,7 @@ namespace {
 
 constexpr int InvalidArgument = static_cast<int>(0x80550003u);
 constexpr int SignedOut = static_cast<int>(0x80550006u);
+constexpr int InvalidSize = static_cast<int>(0x80550011u);
 constexpr int RequestNotFound = static_cast<int>(0x80550014u);
 
 void Require(bool condition, const char* message) {
@@ -56,9 +59,37 @@ void CheckRequestTimeouts() {
     Require(sceNpSetTimeout(asyncId, 2, 0, 0, 0, 0) == RequestNotFound, "deleted async request");
 }
 
+void CheckContentRestriction() {
+    NpAgeRestriction ages[2]{};
+    NpContentRestriction restriction{};
+    restriction.size = sizeof(restriction);
+    restriction.default_age_restriction = 12;
+    Require(sceNpSetContentRestriction(&restriction) == 0, "a default age only");
+    restriction.age_restriction_count = 2;
+    restriction.age_restriction = ages;
+    Require(sceNpSetContentRestriction(&restriction) == 0, "per country ages");
+    restriction.age_restriction = nullptr;
+    Require(sceNpSetContentRestriction(&restriction) == InvalidArgument, "a missing age list");
+    restriction.age_restriction_count = 0x101;
+    restriction.age_restriction = ages;
+    Require(sceNpSetContentRestriction(&restriction) == InvalidArgument, "more than 256 ages");
+    restriction.age_restriction_count = -1;
+    Require(sceNpSetContentRestriction(&restriction) == InvalidArgument, "a negative count");
+    restriction.age_restriction_count = 0;
+    restriction.default_age_restriction = -1;
+    Require(sceNpSetContentRestriction(&restriction) == InvalidArgument, "a negative default age");
+    restriction.default_age_restriction = 0;
+    restriction.size = sizeof(restriction) - 1;
+    Require(sceNpSetContentRestriction(&restriction) == InvalidSize, "a wrong size");
+    Require(sceNpSetContentRestriction(nullptr) == InvalidArgument, "a null structure");
+}
+
 }
 
 int main() {
+    CheckContentRestriction();
+    sceNpRegisterGamePresenceCallback(reinterpret_cast<void*>(1), nullptr);
+    sceNpRegisterGamePresenceCallback(nullptr, nullptr);
     CheckRequestTimeouts();
     NpId npId{};
     std::memset(&npId, 0x5a, sizeof(npId));
