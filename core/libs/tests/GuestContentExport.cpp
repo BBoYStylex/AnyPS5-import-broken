@@ -12,6 +12,9 @@ extern "C" int APS5_VABI sceContentExportGetProgress(std::int32_t expId);
 extern "C" int APS5_VABI sceContentExportCancel(std::int32_t expId);
 extern "C" int APS5_VABI sceContentExportFromDataWithThumbnail(std::int32_t expId, const ContentExportParam* param, const ContentExportCallbackParam* contentCallbackParam,
     const char* thumbnailType, const ContentExportCallbackParam* thumbnailCallbackParam, char* path, std::size_t pathBufferLength);
+extern "C" int APS5_VABI sceContentExportFromData(void);
+extern "C" int APS5_VABI sceContentExportFromFile(void);
+extern "C" int APS5_VABI sceContentExportFromFileWithThumbnail(void);
 
 namespace {
 
@@ -48,9 +51,18 @@ int main() {
     ContentExportInitParam2 missing = param;
     missing.free_func = nullptr;
     Require(Throws([&] { sceContentExportInit2(&missing); }));
+    ContentExportInitParam2 missingMalloc = param;
+    missingMalloc.malloc_func = nullptr;
+    Require(Throws([&] { sceContentExportInit2(&missingMalloc); }));
+    ContentExportInitParam2 reserved0 = param;
+    reserved0.reserved0 = 1;
+    Require(Throws([&] { sceContentExportInit2(&reserved0); }));
     ContentExportInitParam2 reserved = param;
     reserved.reserved1 = 1;
     Require(Throws([&] { sceContentExportInit2(&reserved); }));
+    Require(Throws<std::runtime_error>([] { sceContentExportFromData(); }));
+    Require(Throws<std::runtime_error>([] { sceContentExportFromFile(); }));
+    Require(Throws<std::runtime_error>([] { sceContentExportFromFileWithThumbnail(); }));
     Require(sceContentExportInit2(&param) == 0);
     Require(Throws([&] { sceContentExportInit2(&param); }));
     Require(sceContentExportTerm() == 0);
