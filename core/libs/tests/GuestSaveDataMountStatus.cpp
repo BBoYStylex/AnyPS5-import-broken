@@ -90,6 +90,7 @@ int main() {
         file << sentinel;
         Check(static_cast<bool>(file), "collision file created");
     }
+    CheckError("collision", MountReadWrite, ErrorNotFound, "open below non-directory parent");
     CheckError("collision", MountReadWrite | MountCreate2, ErrorInternal, "regular parent collision");
     {
         std::ifstream file("_sd", std::ios::binary);

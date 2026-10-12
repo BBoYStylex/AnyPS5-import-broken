@@ -482,10 +482,11 @@ static int mount3(const SaveDataMount3* mount, SaveDataMountResult* mount_result
         }
     }
     std::error_code error;
-    const bool exists = std::filesystem::is_directory(real_path, error);
-    if (error && error != std::errc::no_such_file_or_directory) {
+    const auto status = std::filesystem::status(real_path, error);
+    if (error && status.type() != std::filesystem::file_type::not_found) {
         return SAVE_DATA_ERROR_INTERNAL;
     }
+    const bool exists = std::filesystem::is_directory(status);
     error.clear();
     if (create && exists) {
         return SAVE_DATA_ERROR_EXISTS;
