@@ -29,12 +29,16 @@ int APS5_VABI sceAudioOut2SetSystemDebugState(const AudioOut2SystemDebugStatePar
     return 0;
 }
 
-int APS5_VABI sceAudioOut2UserGetSupportedAttributes(void) {
+int APS5_VABI sceAudioOut2UserGetSupportedAttributes(AudioOut2Attribute* attributes, std::uint32_t* num, std::uint32_t flags) {
+    if (!attributes || !num) return static_cast<int>(0x80260502);
+    (void)flags;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceAudioOut2EnableChat(void) {
+int APS5_VABI sceAudioOut2EnableChat(int userId, const AudioOut2ChatParam* param) {
+    if (userId != USER_ID_SYSTEM) return static_cast<int>(0x80260502);
+    (void)param;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }

@@ -531,6 +531,12 @@ struct AudioOut2SpeakerInfo {
     AudioOut2SpeakerAngle speaker_angle[16];
 };
 
+struct AudioOut2ChatParam {
+    std::uint32_t size;
+    std::uint32_t flags;
+    std::uint32_t reserved[14];
+};
+
 struct AudioOut2SystemDebugStateParam {
     std::uint32_t debug_state_id;
     std::int32_t reserved;

@@ -315,12 +315,21 @@ int APS5_VABI EqueueDeleteEvent_nid_postfix(KernelEqueue eq, uintptr_t ident, in
 }
 
 
-int APS5_VABI kqueue_nid_postfix() {
+int APS5_VABI kqueue_nid_postfix(void) {
     NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return -1;
 }
 
-int APS5_VABI kevent_nid_postfix() {
+int APS5_VABI kevent_nid_postfix(int kq, const struct kevent* changelist, int nchanges,
+    struct kevent* eventlist, int nevents, const struct timespec* timeout) {
+    (void)changelist;
+    (void)nchanges;
+    (void)eventlist;
+    (void)nevents;
+    (void)timeout;
+    if (kq < 0) {
+        return -1;
+    }
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }

@@ -403,6 +403,18 @@ int APS5_VABI sceNetShowNetstat(void) {
     return 0;
 }
 
+int APS5_VABI sceNetResolverAbort(int rid) {
+    if (rid <= 0) {
+        return NET_ERROR_BASE | NET_EINVAL;
+    }
+    std::lock_guard lk(g_mutex);
+    if (g_resolvers.find(rid) == g_resolvers.end()) {
+        return NET_ERROR_BASE | NET_EBADF;
+    }
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
 int PollSockets(KernelSocketPoll::Entry* entries, int count, int timeoutMilliseconds) {
     std::vector<std::shared_ptr<NativeSocketHandle>> natives(static_cast<std::size_t>(count));
     {
@@ -1309,17 +1321,26 @@ int APS5_VABI sceNetResolverGetError(int rid, int* status) {
     return 0;
 }
 
-int APS5_VABI sceNetResolverAbort(void) {
+int APS5_VABI sceNetResolverStartNtoaMultipleRecords(int rid, const char* hostname, NetResolverRecord* records, int max_records, int timeout, int retry) {
+    (void)timeout;
+    (void)retry;
+    if (!hostname || !records || max_records <= 0) return fail(NET_EINVAL);
+    std::vector<std::uint32_t> addresses;
+    if (const int error = lookup_ipv4(rid, hostname, __func__, addresses)) return error;
+    int count = static_cast<int>(std::min<std::size_t>(addresses.size(), static_cast<std::size_t>(max_records)));
+    for (int i = 0; i < count; ++i) {
+        records[i].address = addresses[i];
+        records[i].family = NET_AF_INET;
+        records[i].address6[0] = 0;
+        records[i].reserved[0] = 0;
+        records[i].reserved[1] = 0;
+        records[i].reserved[2] = 0;
+    }
     NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return count;
 }
 
-int APS5_VABI sceNetResolverStartNtoaMultipleRecords() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceNetShowIfconfig() {
+int APS5_VABI sceNetShowIfconfig(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
