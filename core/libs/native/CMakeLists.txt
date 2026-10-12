@@ -253,3 +253,26 @@ foreach(profile IN ITEMS sha256 memcmp)
         endforeach()
     endif()
 endforeach()
+
+set(ANYPS5_AOT_MODULE_ELF_LINKER "" CACHE FILEPATH "Optional LLD linker for the modular consumer")
+set(ANYPS5_AOT_MODULE_ZIG "" CACHE FILEPATH "Optional Zig fixture linker for the modular consumer")
+if(ANYPS5_AOT_MODULE_ELF_LINKER AND ANYPS5_AOT_MODULE_ZIG)
+    message(FATAL_ERROR "Select only one modular consumer ELF linker")
+endif()
+if(ANYPS5_AOT_SHA256_SOURCE_ROOT AND (ANYPS5_AOT_MODULE_ELF_LINKER OR ANYPS5_AOT_MODULE_ZIG))
+    if(ANYPS5_AOT_MODULE_ZIG)
+        set(moduleLinker --zig "${ANYPS5_AOT_MODULE_ZIG}")
+    else()
+        set(moduleLinker --ld-lld "${ANYPS5_AOT_MODULE_ELF_LINKER}")
+    endif()
+    set(moduleConsumerCommand ${CMAKE_COMMAND} -E env "PYTHONPATH=${cubePythonPath}"
+        "LIBCAPSTONE_PATH=$<TARGET_FILE_DIR:capstone_shared>" "ZIG_GLOBAL_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/module-linker-cache"
+        ${Python3_EXECUTABLE} "${CMAKE_SOURCE_DIR}/core/aot/examples/module_bundle/build.py"
+        --sha-root "${ANYPS5_AOT_SHA256_SOURCE_ROOT}" ${moduleLinker}
+        --runtime $<TARGET_FILE:anyps5_native_graphics> --image-runtime $<TARGET_FILE:anyps5_native_image>
+        --output-parent "${CMAKE_CURRENT_BINARY_DIR}/module-runs" --run)
+    add_custom_target(native_module_bundle_check COMMAND ${moduleConsumerCommand}
+        DEPENDS anyps5_native_graphics anyps5_native_image capstone_shared USES_TERMINAL VERBATIM)
+    add_test(NAME native_module_bundle COMMAND ${moduleConsumerCommand})
+    set_tests_properties(native_module_bundle PROPERTIES TIMEOUT 30)
+endif()
