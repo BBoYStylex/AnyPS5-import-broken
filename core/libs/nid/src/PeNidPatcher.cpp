@@ -199,8 +199,6 @@ void PeNidPatcher::PatchNids(std::vector<std::uint8_t>& pe, const std::string& l
                 throw std::runtime_error(
                     "conflicting patched export name: " + entry.Name);
 
-            // Both exports reference the same function.
-            // Keep one name-table entry.
             continue;
         }
 
