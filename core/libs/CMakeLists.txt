@@ -209,6 +209,16 @@ if(BUILD_TESTING)
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceRudp>")
     endif()
 
+    add_test_executable(guest_react_native_vsh_tests tests/GuestReactNativeVsh.cpp)
+    target_include_directories(guest_react_native_vsh_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(guest_react_native_vsh_tests PRIVATE libReactNative.Modules.Vsh libc)
+    configure_windows_unwind(guest_react_native_vsh_tests)
+    add_test(NAME guest_react_native_vsh COMMAND guest_react_native_vsh_tests)
+    if(WIN32)
+        set_tests_properties(guest_react_native_vsh PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libReactNative.Modules.Vsh>")
+    endif()
+
     add_test_executable(guest_rudp_context_queries_tests tests/GuestRudpContextQueries.cpp)
     target_include_directories(guest_rudp_context_queries_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_link_libraries(guest_rudp_context_queries_tests PRIVATE libSceRudp libc)
