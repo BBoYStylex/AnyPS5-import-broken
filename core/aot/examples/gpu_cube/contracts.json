@@ -4202,7 +4202,7 @@
         "dependencies": [
           {
             "path": "core/libs/prx/libc/src/RuntimeSupport.cpp",
-            "sha256": "e2569f17630a33f733e7fb31359c599d6d141f9f761de26ab33c4a05b10ed508",
+            "sha256": "68157f1e8844eebceb0b169447729dc3b9c8996723b7be54cce0c28ef19f7f70",
             "excerpt": "int APS5_VABI __cxa_atexit_nid_postfix(void (APS5_VABI *func)(void*), void* arg, void* dsoHandle) {"
           }
         ]
@@ -4279,7 +4279,7 @@
         "evidence": [
           {
             "path": "core/libs/prx/libkernel/System/src/Notification.cpp",
-            "sha256": "a235753aa059b038cb827fcb877c1a7af3acded57027d53b0b3c1b379e6abdbf",
+            "sha256": "b6050f45e4d7abf37fc5c11874613d1035c456595b860d6d0cd78d8a811132d2",
             "excerpt": "sceKernelSendNotificationRequest(int device, const void* request, std::size_t size, int flags)"
           }
         ]
