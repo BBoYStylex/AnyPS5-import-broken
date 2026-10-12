@@ -115,6 +115,20 @@ struct WorkingDirectory {
     std::filesystem::path current = root;
 };
 WorkingDirectory& Directories() { static WorkingDirectory state; return state; }
+
+std::filesystem::path ExpandPathSegment(const std::filesystem::path& segment) {
+    const auto text = segment.generic_string();
+    if (text.size() < 3 || text.front() != '%' || text.back() != '%') return segment;
+    const std::string_view name(text.data() + 1, text.size() - 2);
+    if (name.empty() || name.find('%') != std::string_view::npos) return segment;
+    const auto value = LookupGuestEnvironment_nid_no_patch(name);
+    if (!value || value->empty()) return segment;
+    std::string normalised = *value;
+    for (auto& character : normalised) if (character == '\\') character = '/';
+    const auto start = normalised.find_first_not_of('/');
+    if (start == std::string::npos) return segment;
+    return std::filesystem::path(normalised.substr(start));
+}
 std::filesystem::path HostPath(WorkingDirectory& state, const std::filesystem::path& guest) {
     if (auto aliased = ResolveAlias(guest.relative_path().generic_string())) return *aliased;
     return ResolveHostPath(state.root, guest.relative_path()).make_preferred();
@@ -154,7 +168,7 @@ std::filesystem::path Resolve(WorkingDirectory& state, const char* path) {
             const auto parent = guest.lexically_normal();
             if (parent.has_relative_path()) RequireHostDirectory(state, parent);
         }
-        guest /= *part;
+        guest /= ExpandPathSegment(*part);
     }
     return HostPath(state, guest.lexically_normal());
 }

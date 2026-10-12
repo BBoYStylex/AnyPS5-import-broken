@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -46,6 +47,17 @@ bool ValidEnvironmentName(const char* name) {
     return name && *name && !std::strchr(name, '=');
 }
 int EnvironmentError(int error) { errno = error; return -1; }
+}
+
+std::optional<std::string> LookupGuestEnvironment_nid_no_patch(std::string_view name) {
+    if (name.empty() || name.find('=') != std::string_view::npos) return std::nullopt;
+    std::lock_guard lock(environmentMutex);
+    for (auto& entry : Environment()) {
+        const char* data = entry.Data();
+        const char* separator = std::strchr(data, '=');
+        if (separator && std::string_view(data, separator - data) == name) return std::string(separator + 1);
+    }
+    return std::nullopt;
 }
 
 extern "C" {

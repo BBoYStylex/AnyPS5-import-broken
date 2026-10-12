@@ -3,6 +3,9 @@
 
 #include <stdexcept>
 #include <filesystem>
+#include <optional>
+#include <string>
+#include <string_view>
 #include <vector>
 
 #include "general/LogMacros.hpp"
@@ -24,6 +27,8 @@ extern "C" void RecordWrittenPath_nid_no_patch(const std::filesystem::path& path
 extern "C" std::vector<std::filesystem::path> WrittenPaths_nid_no_patch();
 extern "C" void SyncWrittenPaths_nid_no_patch();
 extern "C" void BlockPathAlias_nid_no_patch(const char* guestPrefix);
+
+std::optional<std::string> LookupGuestEnvironment_nid_no_patch(std::string_view name);
 #ifdef _WIN32
 extern "C" int WindowsOpenError_nid_no_patch(unsigned long error);
 #endif

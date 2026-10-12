@@ -18,6 +18,8 @@ int APS5_VABI chdir_nid_postfix(const char*);
 int APS5_VABI access_nid_postfix(const char*, int);
 int APS5_VABI rename_nid_postfix(const char*, const char*);
 int APS5_VABI remove_nid_postfix(const char*);
+int APS5_VABI setenv_nid_postfix(const char*, const char*, int);
+int APS5_VABI unsetenv_nid_postfix(const char*);
 FileStream* APS5_VABI fopen_nid_postfix(const char*, const char*);
 std::size_t APS5_VABI fread_nid_postfix(void*, std::size_t, std::size_t, FileStream*);
 int APS5_VABI fclose_nid_postfix(FileStream*);
@@ -86,6 +88,27 @@ int main() {
     std::filesystem::create_symlink("absent", directory / "Dangling");
     Require(sceKernelOpen("dangling", SCE_KERNEL_O_RDONLY, 0) == static_cast<int>(0x80020002u));
 #endif
+    Require(std::filesystem::create_directories(directory / "Mount" / "sound"));
+    { std::ofstream file(directory / "Mount" / "sound" / "Config.xml"); file << 'c'; }
+    { std::ofstream file(directory / "Mount" / "100%done.txt"); file << 'p'; }
+    { std::ofstream file(directory / "%UNSET_TOKEN%"); file << 'u'; }
+    { std::ofstream file(directory / "Mount" / "%SET_VAR%"); file << 'v'; }
+    Require(setenv_nid_postfix("ASOBI_ROOT", (name + "/Mount").c_str(), 1) == 0);
+    CheckRead("/%ASOBI_ROOT%/sound/CONFIG.xml", 'c');
+    Require(setenv_nid_postfix("ASOBI_ROOT", (name + "/Mount/sound").c_str(), 1) == 0);
+    CheckRead("/%ASOBI_ROOT%/config.XML", 'c');
+    Require(setenv_nid_postfix("ASOBI_ROOT", (name + "\\Mount").c_str(), 1) == 0);
+    CheckRead("/%ASOBI_ROOT%/100%done.txt", 'p');
+    Require(unsetenv_nid_postfix("UNSET_TOKEN") == 0);
+    CheckRead("/" + lower + "/%UNSET_TOKEN%", 'u');
+    Require(setenv_nid_postfix("SET_VAR", "", 1) == 0);
+    CheckRead("/" + lower + "/mount/%SET_VAR%", 'v');
+    Require(setenv_nid_postfix("SET_VAR", "/", 1) == 0);
+    CheckRead("/" + lower + "/mount/%SET_VAR%", 'v');
+    Require(unsetenv_nid_postfix("SET_VAR") == 0);
+    Require(unsetenv_nid_postfix("ASOBI_ROOT") == 0);
+    std::filesystem::remove(directory / "%UNSET_TOKEN%");
+    std::filesystem::remove_all(directory / "Mount");
     Require(chdir_nid_postfix("/") == 0);
     Require(std::filesystem::current_path() == host);
     std::filesystem::remove_all(directory);
