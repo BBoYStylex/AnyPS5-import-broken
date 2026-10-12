@@ -1251,7 +1251,7 @@
           "dependencies": [
             {
               "path": "core/libs/prx/libc/src/RuntimeSupport.cpp",
-              "sha256": "a9a46a50655bfcfd86cc02deaf2652a1b1000787b260ac756e333150b39278f0",
+              "sha256": "e2569f17630a33f733e7fb31359c599d6d141f9f761de26ab33c4a05b10ed508",
               "excerpt": "int APS5_VABI __cxa_atexit_nid_postfix(void (APS5_VABI *func)(void*), void* arg, void* dsoHandle) {"
             }
           ]
@@ -1869,7 +1869,7 @@
     }
   },
   "qualification": {
-    "facts_sha256": "6656c367491c8113eb602d12b73056a8d7362eaf139c38d8f7964f0870191728",
+    "facts_sha256": "fa2854fddf9aa5b2193e1a96729c84a51a2cc51ce41a89be59912f28773de3b0",
     "sources": [
       {
         "path": "core/aot/examples/gpu_cube/variant.py",
