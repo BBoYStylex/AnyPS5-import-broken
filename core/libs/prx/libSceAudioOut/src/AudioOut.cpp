@@ -504,7 +504,10 @@ int APS5_VABI sceAudioOutSysClose() {
     return 0;
 }
 
-int APS5_VABI sceAudioOutSysConfigureOutput() {
+int APS5_VABI sceAudioOutSysConfigureOutput(const void* config, std::uint32_t configSize) {
+    if (config == nullptr && configSize != 0) {
+        return -2144993276;
+    }
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -523,7 +526,10 @@ int APS5_VABI sceAudioOutSysGetHdmiMonitorInfo(int type, void* info, std::uint32
     return 0;
 }
 
-int APS5_VABI sceAudioOutSysOpen() {
+int APS5_VABI sceAudioOutSysOpen(int type, const void* param, std::uint32_t paramSize) {
+    (void)type;
+    (void)param;
+    (void)paramSize;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -552,17 +558,30 @@ int APS5_VABI sceAudioOutExClose() {
     return 0;
 }
 
-int APS5_VABI sceAudioOutExConfigureOutput() {
+int APS5_VABI sceAudioOutExConfigureOutput(int port, const void* config, std::uint32_t configSize) {
+    if (config == nullptr && configSize != 0) {
+        return -2144993276;
+    }
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceAudioOutExGetMonitorInfo() {
+int APS5_VABI sceAudioOutExGetMonitorInfo(int type, void* info, std::uint32_t size) {
+    if (info == nullptr) {
+        return -2144993276;
+    }
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceAudioOutExOpen() {
+int APS5_VABI sceAudioOutExOpen(int userId, int type, int index, std::uint32_t len,
+    std::uint32_t freq, std::uint32_t param) {
+    (void)userId;
+    (void)type;
+    (void)index;
+    (void)len;
+    (void)freq;
+    (void)param;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }

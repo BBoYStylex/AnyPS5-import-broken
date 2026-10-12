@@ -403,6 +403,18 @@ int APS5_VABI sceNetShowNetstat(void) {
     return 0;
 }
 
+int APS5_VABI sceNetResolverAbort(int rid) {
+    if (rid <= 0) {
+        return NET_ERROR_BASE | NET_EINVAL;
+    }
+    std::lock_guard lk(g_mutex);
+    if (g_resolvers.find(rid) == g_resolvers.end()) {
+        return NET_ERROR_BASE | NET_EBADF;
+    }
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
 int PollSockets(KernelSocketPoll::Entry* entries, int count, int timeoutMilliseconds) {
     std::vector<std::shared_ptr<NativeSocketHandle>> natives(static_cast<std::size_t>(count));
     {
@@ -1309,17 +1321,12 @@ int APS5_VABI sceNetResolverGetError(int rid, int* status) {
     return 0;
 }
 
-int APS5_VABI sceNetResolverAbort(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
 int APS5_VABI sceNetResolverStartNtoaMultipleRecords() {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceNetShowIfconfig() {
+int APS5_VABI sceNetShowIfconfig(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
