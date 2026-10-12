@@ -68,6 +68,7 @@ struct NativeAotGuestImage {
     const NativeAotGuestExport* Exports;
     std::uint64_t ExportCount;
     std::uint64_t Concurrent;
+    std::uint64_t Abi;
 };
 
 [[noreturn]] void NativeAotGuestTrap(std::uint64_t kind, std::uint64_t address, std::uint64_t detail);
@@ -98,6 +99,8 @@ enum SymbolFlag : std::uint64_t {
     Weak = 1,
 };
 
+enum class Abi : std::uint64_t { Glibc = 0, SceApplication = 1 };
+
 using Provider = void (*)(NativeAotGuestState&);
 
 struct ProviderBinding {
@@ -108,7 +111,7 @@ struct ProviderBinding {
 
 void RegisterProviders(const ProviderBinding* bindings, std::size_t count);
 const ProviderBinding* FindProviderBinding(const char* name);
-std::uint64_t Load(const NativeAotGuestImage& image);
+std::uint64_t Load(const NativeAotGuestImage& image, Abi abi = Abi::Glibc);
 std::uint64_t ImageBase();
 std::uint64_t ImageSpan();
 std::uint64_t ExportAddress(const char* name);
@@ -126,6 +129,7 @@ std::uint64_t CreateThreadArea();
 void FreeThreadArea(std::uint64_t pointer);
 void FreeStack(std::uint64_t top, std::size_t bytes);
 bool ConcurrentMemory();
+[[noreturn]] void StartSceApplication(const NativeAotGuestImage& image, int argc, char** argv);
 [[noreturn]] void Start(const NativeAotGuestImage& image, int argc, char** argv, char** envp);
 
 }

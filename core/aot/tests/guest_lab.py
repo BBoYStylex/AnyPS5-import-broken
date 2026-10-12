@@ -425,12 +425,12 @@ def program_image(code, labels, imports=(), data_imports=(), entry='_start', rel
     return bytes(image)
 
 
-def build_program(raw, directory, roots=(), strict=True, concurrent=False):
+def build_program(raw, directory, roots=(), strict=True, concurrent=False, abi="glibc", launcher=None):
     directory = Path(directory)
     image = directory / 'program.elf'
     image.write_bytes(raw)
     output = directory / 'converted'
-    report = guest_emit.build(image, output, shards=1, jobs=1, extra=roots, strict=strict, concurrent=concurrent)
+    report = guest_emit.build(image, output, shards=1, jobs=1, extra=roots, strict=strict, concurrent=concurrent, abi=abi)
     objects = []
     for module in sorted(output.glob('*.ll')):
         obj = module.with_suffix('.o')
@@ -438,5 +438,10 @@ def build_program(raw, directory, roots=(), strict=True, concurrent=False):
         objects.append(str(obj))
     binary = directory / 'program'
     sources = [str(path) for path in sorted(NATIVE.glob('NativeAotGuest*.cpp')) + sorted(NATIVE.glob('NativeAotGlibc*.cpp'))]
+    if launcher is not None:
+        sources.remove(str(NATIVE / 'NativeAotGuestMain.cpp'))
+        main = directory / 'launcher.cpp'
+        main.write_text(launcher)
+        sources.append(str(main))
     run(['xcrun', 'clang++', '-std=c++20', '-O1', '-arch', 'arm64', f'-I{ROOT / "core/libs"}', *sources, *objects, '-o', str(binary)])
     return binary, report

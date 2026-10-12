@@ -182,8 +182,9 @@ std::uint64_t ProviderAddress(const char* name) {
     Fail(std::string("provider is not imported by the guest image: ") + name);
 }
 
-std::uint64_t Load(const NativeAotGuestImage& image) {
-    if (image.Version != 2) Fail("unsupported guest image descriptor");
+std::uint64_t Load(const NativeAotGuestImage& image, Abi abi) {
+    if (image.Version != 3) Fail("unsupported guest image descriptor");
+    if (image.Abi != static_cast<std::uint64_t>(abi)) Fail("guest image startup ABI does not match the launcher");
     if (loaded != nullptr) Fail("only one guest image is supported per process");
     const auto span = (image.Span + PageSize - 1) & ~(PageSize - 1);
     auto* memory = mmap(nullptr, span, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
@@ -353,6 +354,27 @@ std::uint64_t AllocateStack(std::size_t bytes) {
     if (memory == MAP_FAILED) Fail("cannot allocate guest stack");
     if (mprotect(memory, PageSize, PROT_NONE) != 0) Fail("cannot protect guest stack guard");
     return reinterpret_cast<std::uint64_t>(memory) + size + PageSize;
+}
+
+void StartSceApplication(const NativeAotGuestImage& image, int argc, char** argv) {
+    if (argc < 0 || (argc != 0 && argv == nullptr)) Fail("invalid SCE application arguments");
+    Load(image, Abi::SceApplication);
+    NativeAotGuestState state{};
+    state.Mxcsr = 0x1f80;
+    state.X87Control = 0x37f;
+    const auto top = AllocateStack(8 * 1024 * 1024);
+    std::vector<std::uint64_t> parameters(static_cast<std::size_t>(argc) + 2, 0);
+    parameters[0] = static_cast<std::uint64_t>(argc);
+    for (int index = 0; index < argc; ++index) parameters[index + 1] = reinterpret_cast<std::uint64_t>(argv[index]);
+    state.Gpr[Rsp] = top;
+    state.Gpr[7] = reinterpret_cast<std::uint64_t>(parameters.data());
+    state.Gpr[6] = 0;
+    state.FsBase = CreateThreadArea();
+    const auto entry = imageBase + image.EntryPoint;
+    const auto result = Invoke(state, entry);
+    FreeThreadArea(state.FsBase);
+    FreeStack(top, 8 * 1024 * 1024);
+    NativeAotGuestTrap(UnexpectedReturn, result, entry);
 }
 
 void Start(const NativeAotGuestImage& image, int argc, char** argv, char** envp) {
