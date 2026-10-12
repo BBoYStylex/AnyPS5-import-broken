@@ -172,6 +172,52 @@ int APS5_VABI scePadSetFeatureReport() { NotImplemented_nid_no_patch(__func__); 
 
 int APS5_VABI scePadOutputReport() { NotImplemented_nid_no_patch(__func__); return 0; }
 
+int APS5_VABI scePadGetCapability() { NotImplemented_nid_no_patch(__func__); return 0; }
+
+int APS5_VABI scePadGetControllerType() { NotImplemented_nid_no_patch(__func__); return 0; }
+
+int APS5_VABI scePadGetDeviceInfo() { NotImplemented_nid_no_patch(__func__); return 0; }
+
+int APS5_VABI scePadGetExtensionUnitInfo() { NotImplemented_nid_no_patch(__func__); return 0; }
+
+int APS5_VABI scePadGetIdleCount() { NotImplemented_nid_no_patch(__func__); return 0; }
+
+int APS5_VABI scePadGetMotionSensorPosition() { NotImplemented_nid_no_patch(__func__); return 0; }
+
+int APS5_VABI scePadGetMotionTimerUnit() { NotImplemented_nid_no_patch(__func__); return 0; }
+
+int APS5_VABI scePadGetSphereRadius() { NotImplemented_nid_no_patch(__func__); return 0; }
+
+int APS5_VABI scePadIsDS4Connected() { NotImplemented_nid_no_patch(__func__); return 0; }
+
+int APS5_VABI scePadIsLightBarBaseBrightnessControllable() { NotImplemented_nid_no_patch(__func__); return 0; }
+
+int APS5_VABI scePadIsMoveConnected() { NotImplemented_nid_no_patch(__func__); return 0; }
+
+int APS5_VABI scePadIsMoveReproductionModel() { NotImplemented_nid_no_patch(__func__); return 0; }
+
+int APS5_VABI scePadIsSupportedAudioFunction() { NotImplemented_nid_no_patch(__func__); return 0; }
+
+int APS5_VABI scePadIsValidHandle() { NotImplemented_nid_no_patch(__func__); return 0; }
+
+int APS5_VABI scePadOpenExt2() { NotImplemented_nid_no_patch(__func__); return 0; }
+
+int APS5_VABI scePadReadHistory() { NotImplemented_nid_no_patch(__func__); return 0; }
+
+int APS5_VABI scePadReadStateExt() { NotImplemented_nid_no_patch(__func__); return 0; }
+
+int APS5_VABI scePadResetLightBarAll() { NotImplemented_nid_no_patch(__func__); return 0; }
+
+int APS5_VABI scePadResetLightBarAllByPortType() { NotImplemented_nid_no_patch(__func__); return 0; }
+
+int APS5_VABI scePadSetExtensionReport() { NotImplemented_nid_no_patch(__func__); return 0; }
+
+int APS5_VABI scePadSetLightBarBaseBrightness() { NotImplemented_nid_no_patch(__func__); return 0; }
+
+int APS5_VABI scePadSetLightBarBlinking() { NotImplemented_nid_no_patch(__func__); return 0; }
+
+int APS5_VABI scePadVrControllerGetPhysicalUsbConnectionStatus() { NotImplemented_nid_no_patch(__func__); return 0; }
+
 int APS5_VABI scePadRead_nid_postfix(int handle, PadData* data, int num) {
  if (handle != PAD_HANDLE) return PAD_ERROR_INVALID_HANDLE;
  if (data == nullptr || num <= 0) APS5_INVALID_ARG_EX;
