@@ -118,7 +118,7 @@ add_custom_target(native_gpu_cube_check
     DEPENDS native_gpu_cube native_gpu_cube_reference
     USES_TERMINAL VERBATIM)
 
-foreach(test IN ITEMS GuestSocketEvents GuestSocketPair GuestEqueueEvents)
+foreach(test IN ITEMS GuestSocketEvents GuestSocketPair GuestEqueueEvents GuestKernelFcntl)
     string(TOLOWER "${test}" lower)
     add_test_executable(native_${lower}_tests "${LIBS_INCLUDE_DIR}/tests/${test}.cpp")
     target_link_libraries(native_${lower}_tests PRIVATE anyps5_native_graphics)
