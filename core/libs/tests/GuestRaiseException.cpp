@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
@@ -33,6 +34,7 @@ int APS5_VABI scePthreadRwlockDestroy(PthreadRwlock* rwlock);
 int APS5_VABI scePthreadRwlockWrlock(PthreadRwlock* rwlock);
 int APS5_VABI scePthreadRwlockUnlock(PthreadRwlock* rwlock);
 int APS5_VABI sceKernelSyncOnAddressWait(std::uint32_t* address, std::uint32_t expected, const KernelUseconds* timeout, const char* name);
+int APS5_VABI sceKernelSyncOnAddressWake(void* address, std::int32_t count);
 }
 
 static constexpr int SCE_KERNEL_ERROR_EINVAL = static_cast<int>(0x80020016);
@@ -63,6 +65,7 @@ static std::atomic<bool> patchContext{false};
 static std::atomic<std::uint64_t> observedR13{0};
 static std::atomic<std::uint64_t> observedXmm8{0};
 static std::atomic<std::uint32_t> observedMxcsr{0};
+static std::atomic<bool> holdHandler{false};
 
 static void APS5_VABI Handler(int signum, void* context) {
     Require(signum == SIGUSR1);
@@ -90,6 +93,7 @@ static void APS5_VABI Handler(int signum, void* context) {
     handlerSelf.store(scePthreadSelf());
     if (clobberVectors.load()) asm volatile("vzeroall" ::: "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7", "xmm8", "xmm9", "xmm10", "xmm11", "xmm12", "xmm13", "xmm14", "xmm15");
     calls.fetch_add(1);
+    while (holdHandler.load()) std::this_thread::yield();
 }
 
 struct SpinState {
@@ -194,6 +198,18 @@ static LONG CALLBACK ContinueRaised(EXCEPTION_POINTERS* info) {
     if (info->ExceptionRecord->ExceptionCode != ContinuedCode) return EXCEPTION_CONTINUE_SEARCH;
     continued.fetch_add(1);
     return EXCEPTION_CONTINUE_EXECUTION;
+}
+
+static constexpr int WakingRounds = 100;
+static std::uint32_t wakingAddress = 0;
+static std::uint32_t otherAddress = 0;
+
+static void* APS5_VABI Waking(void* arg) {
+    auto& worker = *static_cast<Worker*>(arg);
+    worker.id = std::this_thread::get_id();
+    worker.started.store(true);
+    while (!worker.stop.load()) sceKernelSyncOnAddressWake(&wakingAddress, 1);
+    return nullptr;
 }
 
 static constexpr int SelfingRounds = 100;
@@ -646,6 +662,35 @@ int main() {
     Require(scePthreadRwlockInit(&guestRwlock, nullptr, "raise") == 0);
     ExpectDeliveryWhileLockHeld(LockRwlock, UnlockRwlock, beforeLocks + 2 * LockRounds);
     Require(scePthreadRwlockDestroy(&guestRwlock) == 0);
+
+#ifdef _WIN32
+    const int beforeWaking = calls.load();
+    Worker waking;
+    Pthread wakingThread = nullptr;
+    Require(scePthreadCreate(&wakingThread, nullptr, Waking, &waking, "waking") == 0);
+    while (!waking.started.load()) std::this_thread::yield();
+    for (int round = 0; round < WakingRounds; ++round) {
+        holdHandler.store(true);
+        Require(sceKernelRaiseException(wakingThread, SIGUSR1) == 0);
+        const auto delivered = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (calls.load() == beforeWaking + round && std::chrono::steady_clock::now() < delivered) std::this_thread::yield();
+        ExpectDelivery(beforeWaking + round, waking.id);
+        std::atomic<bool> woke{false};
+        std::thread other([&woke] {
+            Require(sceKernelSyncOnAddressWake(&otherAddress, 1) == 0);
+            woke.store(true);
+        });
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+        while (!woke.load() && std::chrono::steady_clock::now() < deadline) std::this_thread::yield();
+        const bool progressed = woke.load();
+        holdHandler.store(false);
+        other.join();
+        if (!progressed) std::fprintf(stderr, "waking round %d: a wake on another address blocked while the handler held the thread\n", round);
+        Require(progressed);
+    }
+    waking.stop.store(true);
+    Require(scePthreadJoin(wakingThread, nullptr) == 0);
+#endif
 
     Pthread finishedThread = nullptr;
     Require(scePthreadCreate(&finishedThread, nullptr, Finished, nullptr, "finished") == 0);

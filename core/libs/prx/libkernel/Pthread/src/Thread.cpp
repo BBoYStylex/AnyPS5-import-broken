@@ -4,6 +4,7 @@
 #include "../include/Cancel.hpp"
 #include "prx/libc/include/General.hpp"
 #include "prx/libkernel/KernelErrors.hpp"
+#include "prx/libkernel/System/include/RaiseDeferral.hpp"
 #include "prx/libc/include/CpuTopology.hpp"
 #include <algorithm>
 #include <cstdio>
@@ -365,6 +366,7 @@ static void finishThread(PthreadPrivate* self, void* retval) {
         self->_finished.store(true, std::memory_order_release);
     }
     self->_join_cv.NotifyAll();
+    RaiseDeferral::BindThread(nullptr, nullptr);
 }
 
 bool ThreadCancel::Requested() {
@@ -400,6 +402,7 @@ static void RunThread(std::unique_ptr<ThreadArgs> args) {
     PthreadPrivate* self = args->self;
     BindHostCpuClock(self);
     TimedWait::BindThreadWaitState(&self->waitCount);
+    RaiseDeferral::BindThread(&self->hostLocks, &self->pendingException);
     CurrentGuestState().current = self;
     RegisterStack(self);
 #ifndef _WIN32
@@ -703,6 +706,7 @@ Pthread APS5_VABI scePthreadSelf() {
         adopted->_detached = true;
         adopted->references.store(1, std::memory_order_relaxed);
         TimedWait::BindThreadWaitState(&adopted->waitCount);
+        RaiseDeferral::BindThread(&adopted->hostLocks, &adopted->pendingException);
         SetStackFromHost(adopted.get());
         CurrentGuestState().current = adopted.release();
     }

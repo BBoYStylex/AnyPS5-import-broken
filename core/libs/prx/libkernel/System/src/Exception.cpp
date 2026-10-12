@@ -4,6 +4,8 @@
 #include "prx/libc/include/General.hpp"
 #include "prx/libkernel/KernelErrors.hpp"
 #include "prx/libkernel/Pthread/include/Pthread.hpp"
+#include "prx/libkernel/Pthread/include/WindowsThreadLocal.hpp"
+#include "prx/libkernel/System/include/RaiseDeferral.hpp"
 #include <array>
 #include <chrono>
 #include <atomic>
@@ -131,6 +133,22 @@ void CallHandler(GuestExceptionHandler handler, int signum, GuestUcontext& ucont
     SetFpWord(m, MxcsrMaskOffset, mxcsrMask);
 }
 
+struct DeferralState {
+    std::atomic<int> ownLocks{0};
+    std::atomic<int> ownPending{0};
+    std::atomic<int>* locks = &ownLocks;
+    std::atomic<int>* pending = &ownPending;
+};
+
+DeferralState& Deferral() {
+#ifdef _WIN32
+    return WindowsThreadLocal<DeferralState>::Get();
+#else
+    static thread_local DeferralState state;
+    return state;
+#endif
+}
+
 #ifdef _WIN32
 constexpr std::size_t RedZone = 128;
 constexpr std::size_t HomeArea = 32;
@@ -225,7 +243,15 @@ void CALLBACK WaitingEntry(ULONG_PTR parameter) {
     Deliver(handler, signum, context);
 }
 
-static_assert(HomeArea + 8 == 40, "Aps5RedirectedEntryStub finds the delivery 40 bytes above its stack pointer");
+void DeliverDeferred() {
+    const auto handler = Handler(RaisedSignal);
+    if (handler == nullptr) throw std::runtime_error("sceKernelRaiseException: the handler was removed before the deferred signal was delivered");
+    CONTEXT context{};
+    RtlCaptureContext(&context);
+    Deliver(handler, RaisedSignal, context);
+}
+
+static_assert(HomeArea + 8 == 40,"Aps5RedirectedEntryStub finds the delivery 40 bytes above its stack pointer");
 static_assert(offsetof(Delivery, context) == 16 && offsetof(CONTEXT, Rax) == 0x78 && offsetof(CONTEXT, Rbp) == 0xa0 && offsetof(CONTEXT, R15) == 0xf0, "Aps5RedirectedEntryStub stores the live registers into the delivery's context");
 static_assert(offsetof(Delivery, vectors) == 1248 && offsetof(Delivery, saveVectors) == 1760, "Aps5RedirectedEntryStub stores ymm0-ymm15 into the delivery when saveVectors is set");
 
@@ -273,6 +299,11 @@ bool RaiseOn(Pthread thread, GuestExceptionHandler handler, int signum) {
         if (!GetThreadContext(native, &delivery.context)) {
             ResumeThread(native);
             throw std::runtime_error("sceKernelRaiseException: cannot read the target thread context");
+        }
+        if (thread->hostLocks.load(std::memory_order_seq_cst) > 0) {
+            thread->pendingException.fetch_add(1, std::memory_order_seq_cst);
+            ResumeThread(native);
+            return true;
         }
         if (thread->waitCount.load(std::memory_order_seq_cst) > 0) {
             const bool accepted = QueueUserAPC(WaitingEntry, native, reinterpret_cast<ULONG_PTR>(queued.get())) != 0;
@@ -416,6 +447,28 @@ bool RaiseOn(Pthread thread) {
     return Send(thread);
 }
 #endif
+
+}
+
+namespace RaiseDeferral {
+
+void BindThread(std::atomic<int>* locks, std::atomic<int>* pending) {
+    auto& state = Deferral();
+    state.locks = locks != nullptr ? locks : &state.ownLocks;
+    state.pending = pending != nullptr ? pending : &state.ownPending;
+}
+
+void Enter() {
+    Deferral().locks->fetch_add(1, std::memory_order_seq_cst);
+}
+
+void Leave() {
+    auto& state = Deferral();
+    if (state.locks->fetch_sub(1, std::memory_order_seq_cst) != 1) return;
+#ifdef _WIN32
+    for (int pending = state.pending->exchange(0, std::memory_order_seq_cst); pending > 0; --pending) DeliverDeferred();
+#endif
+}
 
 }
 

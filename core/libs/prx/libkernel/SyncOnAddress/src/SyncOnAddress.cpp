@@ -12,6 +12,7 @@
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
 #include "prx/libkernel/KernelErrors.hpp"
+#include "prx/libkernel/System/include/RaiseDeferral.hpp"
 #include "prx/libkernel/Time/include/Time.hpp"
 #include "prx/libkernel/Time/include/TimedWait.hpp"
 
@@ -51,7 +52,7 @@ struct AddressWaiter {
     bool woken = false;
 };
 
-std::mutex g_waitersLock;
+RaiseDeferral::Mutex g_waitersLock;
 std::unordered_map<std::uintptr_t, std::list<AddressWaiter*>> g_waiters;
 
 template <class TValue>
@@ -62,7 +63,7 @@ bool IsAlignedAddress(std::uintptr_t address) {
 template <class TValue>
 bool WaitOnAddressUntil(TValue* address, TValue expected, std::optional<std::uint64_t> deadlineNanos, const void* caller) {
     const auto key = reinterpret_cast<std::uintptr_t>(address);
-    std::unique_lock<std::mutex> lock(g_waitersLock);
+    std::unique_lock<RaiseDeferral::Mutex> lock(g_waitersLock);
     if (std::atomic_ref<TValue>(*address).load() != expected) {
         return true;
     }
@@ -98,7 +99,7 @@ int WaitOnAddress(TValue* address, TValue expected, const KernelUseconds* timeou
 }
 
 void WakeAddress(std::uintptr_t key, std::int32_t count, bool wakesAtLeastOne) {
-    std::lock_guard<std::mutex> lock(g_waitersLock);
+    std::lock_guard<RaiseDeferral::Mutex> lock(g_waitersLock);
     const auto entry = g_waiters.find(key);
     if (entry == g_waiters.end()) {
         return;
