@@ -11,8 +11,8 @@
 #include <chrono>
 #include <condition_variable>
 #include <limits>
-#include <map>
 #include <memory>
+
 #include <mutex>
 #include <stdexcept>
 #include <string_view>
@@ -272,12 +272,6 @@ int APS5_VABI sceHttpSetAuthInfoCallback(int id, HttpAuthInfoCallback callback, 
 int APS5_VABI sceHttpSetCookieEnabled(int id, int enable) {
     (void)id;
     if (static_cast<uint32_t>(enable) > 1) return ERROR_INVALID_VALUE;
-    if (enable != 0) NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceHttpSetAutoRedirect(int id, int enable) {
-    (void)id;
     (void)enable;
     return 0;
 }
