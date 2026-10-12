@@ -16,6 +16,40 @@ class RegistrationTests(unittest.TestCase):
             (build / "CTestTestfile.cmake").write_text(content, encoding="utf-8")
             return check_test_registration.registered(build)
 
+    def test_bracket_comments_do_not_register_tests(self):
+        for equals in ("", "=", "==="):
+            with self.subTest(equals=equals):
+                names = self.registered(
+                    f'#[{equals}[\nadd_test("fake" "/build/tests/missing_tests")\n]{equals}]\n'
+                    'add_test("real" "/build/tests/buffer_bounds_tests")\n')
+                self.assertNotIn("missing_tests", names)
+                self.assertIn("buffer_bounds_tests", names)
+
+    def test_bracket_comment_inside_command_is_not_an_argument(self):
+        names = self.registered(
+            'add_test("bounds" #[=[\n"/build/tests/missing_tests"\n]=]\n'
+            '"/build/tests/buffer_bounds_tests")\n')
+        self.assertNotIn("missing_tests", names)
+        self.assertIn("buffer_bounds_tests", names)
+
+    def test_bracket_comment_does_not_disable_a_real_test(self):
+        names = self.registered(
+            'add_test("bounds" "/build/tests/buffer_bounds_tests")\n'
+            '#[[\nset_tests_properties("bounds" PROPERTIES DISABLED TRUE)\n]]\n')
+        self.assertIn("buffer_bounds_tests", names)
+
+    def test_comment_markers_inside_arguments_are_preserved(self):
+        for argument in ('"/build/tests/a#[[b]]_tests"', '[=[/build/tests/a#[[b]]_tests]=]'):
+            with self.subTest(argument=argument):
+                names = self.registered(f'add_test("bounds" {argument})\n')
+                self.assertIn("a#[[b]]_tests", names)
+
+    def test_line_comment_with_brackets_does_not_hide_the_next_command(self):
+        names = self.registered(
+            '# ordinary comment [[\nadd_test("bounds" "/build/tests/buffer_bounds_tests")\n')
+        self.assertIn("buffer_bounds_tests", names)
+
+
     def test_test_name_does_not_register_executable(self):
         names = self.registered('add_test("missing_tests" "/usr/bin/python3" "unrelated.py")\n')
         self.assertNotIn("missing_tests", names)
@@ -79,6 +113,7 @@ class RegistrationTests(unittest.TestCase):
     def test_windows_escaped_path_is_decoded(self):
         names = self.registered(r'add_test("bounds" "C:\\build\\tests\\buffer_bounds_tests.exe")' + '\n')
         self.assertIn("buffer_bounds_tests", names)
+
 
 
 if __name__ == "__main__":

@@ -6,6 +6,9 @@ from pathlib import Path
 TEST_OUTPUT = r"tests[\\/]"
 COMMAND = re.compile(r"^\s*(add_test|set_tests_properties)\s*\(", re.M | re.I)
 ARGUMENT = re.compile(r'"(?:\\.|[^"\\])*"|\[(?P<equals>=*)\[.*?\](?P=equals)\]|[^\s()]+', re.S)
+COMMENT = re.compile(
+    r'(?P<comment>#\[(?P<equals>=*)\[.*?\](?P=equals)\]|#[^\n]*)'
+    r'|"(?:\\.|[^"\\])*"|\[(?P<argument_equals>=*)\[.*?\](?P=argument_equals)\]|\\.', re.S)
 
 KNOWN_UNRUN = set()
 
@@ -30,6 +33,8 @@ def built(build):
 
 
 def commands(content):
+    content = COMMENT.sub(lambda match: re.sub(r"[^\n]", " ", match.group())
+                          if match.group("comment") is not None else match.group(), content)
     parsed_until = 0
     for command in COMMAND.finditer(content):
         if command.start() < parsed_until:
@@ -43,11 +48,6 @@ def commands(content):
                 parsed_until = position + 1
                 yield command.group(1).lower(), arguments
                 break
-            if content[position] == "#":
-                position = content.find("\n", position)
-                if position < 0:
-                    break
-                continue
             token = ARGUMENT.match(content, position)
             if token is None:
                 raise ValueError(f"invalid CTest argument at position {position}")
