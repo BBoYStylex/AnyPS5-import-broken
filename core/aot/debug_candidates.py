@@ -90,6 +90,15 @@ def attribute(die, name):
     raise ValueError('missing debug attribute ' + name)
 
 
+def optional_attribute(die, name):
+    try:
+        return attribute(die, name)
+    except ValueError as error:
+        if str(error) != 'missing debug attribute ' + name:
+            raise
+        return None
+
+
 def scope_ranges(die, dwarf, parent):
     attrs = die.attributes
     if 'DW_AT_ranges' in attrs:
@@ -171,7 +180,8 @@ def recover_debug_dossier(source, companion):
                      'obligations': [], 'facts': {}, 'storage_candidates': [], 'value_locations': []}
             def obligation(stage, error, node=die):
                 entry['obligations'].append(str(error))
-                entry.setdefault('unresolved', []).append({'stage': stage, 'die_offset': node.offset,
+                entry.setdefault('unresolved', []).append({'stage': stage, 'die_offset': node.offset, 'function': name,
+                    'function_range': entry['facts'].get('boundary'),
                     'reason': str(error), 'requires': 'Independent qualification of ' + stage})
             try:
                 matching = [symbol for symbol in symbols if symbol['symbol'] == name]
@@ -191,15 +201,16 @@ def recover_debug_dossier(source, companion):
                 result.append(entry)
                 continue
             try:
-                convention = die.attributes.get('DW_AT_calling_convention')
-                require(convention is None or convention.value == 1, 'nonstandard debug calling convention')
+                convention = optional_attribute(die, 'DW_AT_calling_convention')
+                require(convention is None or convention[1].value == 1, 'nonstandard debug calling convention')
                 _, prototype = attribute(die, 'DW_AT_prototyped')
                 require(prototype.value, 'unprototyped debug function')
                 children = list(die.iter_children())
                 require(not any(child.tag == 'DW_TAG_unspecified_parameters' for child in children), 'variadic debug ABI')
                 parameters = [scalar(attribute(child, 'DW_AT_type')[0].get_DIE_from_attribute('DW_AT_type'))
                               for child in children if child.tag == 'DW_TAG_formal_parameter']
-                result_type = scalar(die.get_DIE_from_attribute('DW_AT_type')) if 'DW_AT_type' in die.attributes else 'void'
+                return_type = optional_attribute(die, 'DW_AT_type')
+                result_type = scalar(return_type[0].get_DIE_from_attribute('DW_AT_type')) if return_type else 'void'
                 entry['facts']['source_abi'] = {'parameters': parameters, 'result': result_type}
             except (ValueError, KeyError) as error:
                 obligation('source ABI', error)

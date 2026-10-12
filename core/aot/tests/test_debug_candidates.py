@@ -119,6 +119,12 @@ class DebugCandidateTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, '0 image matches'):
             recover_debug_dossier(image, companion)
 
+    def test_concrete_out_of_line_function_inherits_abstract_return_type(self):
+        image, companion = self.build('static int helper(int a) { return a + 1; } int (*expose(void))(int) { return helper; } int sample(int a) { return helper(a); }', ['-O2'])
+        rows = {r['symbol']: r for r in recover_debug_dossier(image, companion)['functions']}
+        self.assertEqual(rows['helper']['facts']['source_abi'], {'parameters': ['i32'], 'result': 'i32'})
+        self.assertEqual(rows['expose']['facts']['source_abi'], {'parameters': [], 'result': 'ptr'})
+
 
 if __name__ == '__main__':
     unittest.main()
