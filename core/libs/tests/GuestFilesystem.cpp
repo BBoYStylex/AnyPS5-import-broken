@@ -239,6 +239,8 @@ int main() {
     int descriptors[2] = {-1, -1};
     Require(pipe_nid_postfix(descriptors) == 0 && descriptors[0] >= 0 && descriptors[1] >= 0);
     const char payload[] = {'A', '\0', '\r', '\n', '\x1a', 'Z'};
+    Require(write_nid_postfix(descriptors[1], payload, static_cast<std::size_t>(-1)) == -1 && *__error_nid_postfix() == 22);
+    Require(write_nid_postfix(-1, payload, static_cast<std::size_t>(INT64_MAX) + 1) == -1 && *__error_nid_postfix() == 22);
     Require(write_nid_postfix(descriptors[1], payload, sizeof(payload)) == sizeof(payload));
     Require(close_nid_postfix(descriptors[1]) == 0);
     char received[sizeof(payload)]{};

@@ -760,9 +760,7 @@ std::int64_t APS5_VABI _read_nid_postfix(int descriptor, void* buffer, std::size
 }
 
 int64_t APS5_VABI write_nid_postfix(int d, const char* str, int64_t size) {
-    if (size < 0) {
-        APS5_INVALID_ARG_EX;
-    }
+    if (size < 0) return PosixFailure(GUEST_EINVAL);
     if (GuestSockets::IsOpen(d)) return GuestSockets::Write(d, str, static_cast<std::size_t>(size));
     if (str == nullptr && size != 0) return PosixFailure(GUEST_EFAULT);
     const char emptyBuffer = 0;
