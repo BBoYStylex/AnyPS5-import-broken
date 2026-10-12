@@ -25,6 +25,8 @@ constexpr std::uint32_t MoveV5Two = 0x7e0a02f4u;
 constexpr std::uint32_t MoveV6Four = 0x7e0c02f6u;
 constexpr std::uint32_t MovrelsV1V4 = 0x7e028704u;
 constexpr std::uint32_t MovreldV4V0 = 0x7e088500u;
+constexpr std::uint32_t MovreldV4V1 = 0x7e088501u;
+constexpr std::uint32_t MoveV1V4 = 0x7e020304u;
 constexpr std::uint32_t MoveV1V5 = 0x7e020305u;
 constexpr std::uint32_t EndProgram = 0xbf810000u;
 
@@ -269,6 +271,24 @@ int main(int argc, char** argv) {
         const std::array<std::uint32_t, 7> code{MoveV4One, MoveV5Two, MoveV6Four, MoveV1V5, 0xe0700000u, 0x80000100u, EndProgram};
         const auto shape = Scan(RecompileProgram(code));
         return shape.functionArrays == 0 && shape.accessChains == 0;
+    });
+
+    passed &= run("stores to vector window registers forward to subsequent intra-block loads without redundant access chains", [] {
+        const std::array<std::uint32_t, 7> code{MoveM0Two, MoveV4One, MoveV5Two, MovrelsV1V4, MoveV1V5, MoveV1V4, EndProgram};
+        const auto shape = Scan(RecompileProgram(code));
+        if (shape.functionArrays != 1 || shape.arrayLength != 2 || shape.accessChains != 2) {
+            std::fprintf(stderr, "  forwarding shape: arrays %zu length %u access chains %zu selects %zu\n", shape.functionArrays, shape.arrayLength, shape.accessChains, shape.selects);
+        }
+        return shape.functionArrays == 1 && shape.arrayLength == 2 && shape.accessChains == 2;
+    });
+
+    passed &= run("dynamic vector window stores invalidate intra-block forwarding", [] {
+        const std::array<std::uint32_t, 6> code{MoveM0Two, MoveV4One, MoveV5Two, MovreldV4V1, MoveV1V5, EndProgram};
+        const auto shape = Scan(RecompileProgram(code));
+        if (shape.functionArrays != 1 || shape.arrayLength != 2 || shape.accessChains != 4) {
+            std::fprintf(stderr, "  invalidation shape: arrays %zu length %u access chains %zu selects %zu\n", shape.functionArrays, shape.arrayLength, shape.accessChains, shape.selects);
+        }
+        return shape.functionArrays == 1 && shape.arrayLength == 2 && shape.accessChains == 4;
     });
 
     if (passed) std::puts("Vector window shape and SSA control tests passed");

@@ -206,6 +206,29 @@ IrProgram PrepareResourceProgram(const RecompileRequest& request, ShaderPreparat
         ssaBuilder.Rewrite(program);
         dumpIr("ssa");
 
+        if (program.Metadata().vectorWindowSize != 0u) {
+            for (const auto& block : program.Blocks()) {
+                std::unordered_map<std::uint32_t, IrValue*> storeMap;
+                for (IrValue* inst : block->Instructions()) {
+                    if (inst->Opcode() == IrOpcode::StoreVectorWindow) {
+                        IrValue* index = inst->Argument(0)->Resolve();
+                        if (index->HasImmediate() && index->Type() == IrType::U32) {
+                            storeMap[index->ImmediateU32()] = inst->Argument(1)->Resolve();
+                        } else {
+                            storeMap.clear();
+                        }
+                    } else if (inst->Opcode() == IrOpcode::LoadVectorWindow) {
+                        IrValue* index = inst->Argument(0)->Resolve();
+                        if (index->HasImmediate() && index->Type() == IrType::U32) {
+                            if (auto it = storeMap.find(index->ImmediateU32()); it != storeMap.end()) {
+                                inst->ReplaceUsesWith(it->second, true);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         constantFolder.Fold(program);
         ResolveControlFlowIdentities(program);
         deadCodeEliminator.RemoveIdentities(program);
