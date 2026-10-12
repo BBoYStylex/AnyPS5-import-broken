@@ -115,9 +115,20 @@ def symbol_candidates(elf, mappings=None, origin='image'):
     return result
 
 
-def indexed_fde_candidates(raw):
+def relocation_bindings(elf, view):
+    if not any(segment['type'] == unwind_index.PT_DYNAMIC for segment in view.segments):
+        return {}
     try:
-        index = unwind_index.read_unwind_index(unwind_index.LoadView(raw))
+        parsed = dynamic.parse_dynamic(elf, view.read)
+    except dynamic.DynamicError:
+        return {}
+    return {relocation['slot']: relocation for relocation in parsed['relocations']}
+
+
+def indexed_fde_candidates(elf, raw):
+    try:
+        view = unwind_index.LoadView(raw)
+        index = unwind_index.read_unwind_index(view, relocation_bindings(elf, view))
     except unwind_index.UnwindError as error:
         raise RecoveryError(f'unwind index rejected: {error}') from error
     candidates = [{'address': fde['begin'], 'size': fde['size'], 'symbol': None,
@@ -131,7 +142,7 @@ def indexed_fde_candidates(raw):
 
 def fde_candidates(elf, raw):
     if any(segment['p_type'] == 'PT_GNU_EH_FRAME' for segment in elf.iter_segments()):
-        return indexed_fde_candidates(raw)
+        return indexed_fde_candidates(elf, raw)
     if elf.get_section_by_name('.eh_frame') is None:
         if elf.num_sections():
             return [], []

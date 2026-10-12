@@ -30,9 +30,12 @@ def padded(body):
     return body + bytes(-(len(body) + 4) % 4)
 
 
-def cie(augmentation=b'zR', return_column=16, personality=None):
+def cie(augmentation=b'zR', return_column=16, personality=None, personality_slot=None):
     data = bytearray()
-    if b'P' in augmentation:
+    if personality_slot is not None:
+        field = FRAME + 15 + len(augmentation)
+        data += bytes([0x9b]) + struct.pack('<i', personality_slot - field)
+    elif b'P' in augmentation:
         data += bytes([0x00]) + struct.pack('<Q', personality)
     data += bytes([0x1b])
     body = struct.pack('<IB', 0, 1) + augmentation + b'\0' + uleb(1) + bytes([0x78, return_column])
@@ -42,7 +45,7 @@ def cie(augmentation=b'zR', return_column=16, personality=None):
 
 
 class Image:
-    def __init__(self, ranges, code=b'', table=None, terminator=True, plt=None, cie_record=None):
+    def __init__(self, ranges, code=b'', table=None, terminator=True, plt=None, cie_record=None, extra_relocations=()):
         self.raw = bytearray(0x4000)
         self.ranges = list(ranges)
         self.fdes = []
@@ -67,10 +70,10 @@ class Image:
         self.segments = [(1, 4, 0, 0, 0x1000, 0x1000), (1, 5, CODE, CODE, 0x1000, 0x1000),
                          (0x6474e550, 4, HDR, HDR, self.header_size, self.header_size)]
         if plt is not None:
-            self.dynamic(*plt)
+            self.dynamic(*plt, extra=extra_relocations)
         self.write_headers()
 
-    def dynamic(self, symbol, slot_kind, pltgot):
+    def dynamic(self, symbol, slot_kind, pltgot, extra=()):
         strings = b'\0' + symbol + b'\0'
         symbols = bytes(24) + struct.pack('<IBBHQQ', 1, 0x12, 0, 0, 0, 0)
         tables = {'hash': DYNAMIC + 0x100, 'symbols': DYNAMIC + 0x140, 'strings': DYNAMIC + 0x180, 'plt': DYNAMIC + 0x1c0}
@@ -79,7 +82,12 @@ class Image:
         self.raw[tables['strings']:tables['strings'] + len(strings)] = strings
         slot = pltgot + 24
         self.raw[tables['plt']:tables['plt'] + 24] = struct.pack('<QQq', slot, (1 << 32) | slot_kind, 0)
+        rela = DYNAMIC + 0x200
+        for index, (address, kind, addend) in enumerate(extra):
+            struct.pack_into('<QQq', self.raw, rela + index * 24, address, kind, addend)
         relocation_tags = [(23, tables['plt']), (2, 24), (20, 7)] if slot_kind == 7 else [(7, tables['plt']), (8, 24), (9, 24)]
+        if extra:
+            relocation_tags += [(7, rela), (8, len(extra) * 24), (9, 24)]
         tags = [(4, tables['hash']), (5, tables['strings']), (10, len(strings)), (6, tables['symbols']), (11, 24),
                 *relocation_tags, (3, pltgot), (0, 0)]
         for index, tag in enumerate(tags):
@@ -338,6 +346,22 @@ class RecoverIntegrationTests(unittest.TestCase):
         self.assertEqual([u['obligation'] for u in recovered['unknowns']], ['overlapping-fde-ranges'])
         with self.assertRaisesRegex(RecoveryError, 'obligations remain unresolved'):
             materialize_contracts(recovered, {'schema': 1, 'sha256': recovered['sha256'], 'functions': [], 'imports': {}})
+
+    def test_indirect_personality_requires_relocated_slot(self):
+        slot = DYNAMIC + 0x900
+        record = cie(b'zPR', personality_slot=slot)
+        bound = Image([(0x1000, 0x10)], cie_record=record, plt=(b'imported', 7, DYNAMIC + 0x800),
+                      extra_relocations=[(slot, 8, 0x1100)])
+        path = self.directory / 'bound.elf'
+        path.write_bytes(bound.bytes())
+        recovered = recover_image(path)
+        self.assertEqual([(f['address'], f['size']) for f in recovered['functions']], [(0x1000, 0x10)])
+        self.assertEqual([u for u in recovered['unknowns'] if u['kind'] == 'unwind'], [])
+        unbound = Image([(0x1000, 0x10)], cie_record=record, plt=(b'imported', 7, DYNAMIC + 0x800))
+        path.write_bytes(unbound.bytes())
+        recovered = recover_image(path)
+        self.assertEqual(recovered['functions'], [])
+        self.assertEqual([u['detail'] for u in recovered['unknowns']], ['indirect personality slot has no relocation binding'])
 
     def test_sectionless_without_unwind_index_reports_obligation(self):
         image = Image([(0x1000, 0x10)])
