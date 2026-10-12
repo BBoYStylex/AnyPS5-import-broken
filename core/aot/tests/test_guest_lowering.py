@@ -312,6 +312,14 @@ done:
         with self.assertRaisesRegex(guest_lift.LiftError, 'unknown guest startup ABI'):
             self.program(PRELUDE + 'xor edi, edi\n' + EXIT, abi='unknown')
 
+    def test_x87_stack_faults_are_rejected(self):
+        for body in ('fldz\n' * 9, 'fstp tbyte ptr [rsp - 16]\n'):
+            with self.subTest(body=body):
+                binary, _ = self.program(PRELUDE + body + 'xor edi, edi\n' + EXIT)
+                result = self.run_binary(binary)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(b'unsupported guest operation', result.stderr)
+
     def test_variadic_provider_reads_registers_and_stack(self):
         binary, _ = self.program(PRELUDE + '''
     mov rdi, qword ptr [rip + stdout_slot]

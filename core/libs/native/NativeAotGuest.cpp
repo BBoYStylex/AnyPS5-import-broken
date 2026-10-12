@@ -183,7 +183,7 @@ std::uint64_t ProviderAddress(const char* name) {
 }
 
 std::uint64_t Load(const NativeAotGuestImage& image, Abi abi) {
-    if (image.Version != 3) Fail("unsupported guest image descriptor");
+    if (image.Version != 4) Fail("unsupported guest image descriptor");
     if (image.Abi != static_cast<std::uint64_t>(abi)) Fail("guest image startup ABI does not match the launcher");
     if (loaded != nullptr) Fail("only one guest image is supported per process");
     const auto span = (image.Span + PageSize - 1) & ~(PageSize - 1);

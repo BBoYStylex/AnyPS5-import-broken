@@ -9,6 +9,7 @@ STATE_FS = 384
 STATE_X87 = 400
 STATE_X87_TOP = 528
 STATE_X87_CONTROL = 536
+STATE_X87_VALID = 544
 ALIASES = {}
 for full, dword, word, low in zip(GPR[:8], ['eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi'],
                                   ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'],
@@ -1013,10 +1014,26 @@ class Integer(Emitter):
         self.write(source, old)
         self.write(destination, total)
 
-    def x87_slot(self, depth):
+    def x87_index(self, depth):
         top = self.v(f'load i64, ptr {self.v(f"getelementptr i8, ptr %s, i64 {STATE_X87_TOP}")}')
-        index = self.v(f'and i64 {self.v(f"add i64 {top}, {depth}")}, 7')
+        return self.v(f'and i64 {self.v(f"add i64 {top}, {depth}")}, 7')
+
+    def x87_slot(self, depth, reading=True):
+        index = self.x87_index(depth)
+        if reading:
+            tags = self.v(f'load i64, ptr {self.v(f"getelementptr i8, ptr %s, i64 {STATE_X87_VALID}")}')
+            bit = self.v(f'shl i64 1, {index}')
+            self.trap_if(self.v(f'icmp eq i64 {self.v(f"and i64 {tags}, {bit}")}, 0'), TRAP_UNSUPPORTED)
         return self.v(f'getelementptr i8, ptr %s, i64 {self.v(f"add i64 {STATE_X87}, {self.v(f"mul i64 {index}, 16")}")}')
+
+    def x87_tag(self, depth, valid, require_empty=False):
+        pointer = self.v(f'getelementptr i8, ptr %s, i64 {STATE_X87_VALID}')
+        tags = self.v(f'load i64, ptr {pointer}')
+        bit = self.v(f'shl i64 1, {self.x87_index(depth)}')
+        if require_empty:
+            self.trap_if(self.v(f'icmp ne i64 {self.v(f"and i64 {tags}, {bit}")}, 0'), TRAP_UNSUPPORTED)
+        value = self.v(f'or i64 {tags}, {bit}') if valid else self.v(f'and i64 {tags}, {self.v(f"xor i64 {bit}, -1")}')
+        self.emit(f'store i64 {value}, ptr {pointer}')
 
     def x87_move_top(self, delta):
         pointer = self.v(f'getelementptr i8, ptr %s, i64 {STATE_X87_TOP}')
@@ -1025,6 +1042,7 @@ class Integer(Emitter):
 
     def x87_push(self, value):
         self.x87_move_top(-1)
+        self.x87_tag(0, True, require_empty=True)
         self.emit(f'store i80 {value}, ptr {self.x87_slot(0)}, align 1')
 
     def x87_register(self, operand):
@@ -1088,7 +1106,10 @@ class Integer(Emitter):
                 self.unsupported('x87 store with format conversion')
             self.store(self.address(destination), value, 80)
         else:
-            self.emit(f'store i80 {value}, ptr {self.x87_slot(self.x87_register(destination))}, align 1')
+            depth = self.x87_register(destination)
+            self.x87_tag(depth, True)
+            self.emit(f'store i80 {value}, ptr {self.x87_slot(depth)}, align 1')
+        self.x87_tag(0, False)
         self.x87_move_top(1)
 
     def op_cpuid(self):

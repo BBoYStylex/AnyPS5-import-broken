@@ -14,6 +14,7 @@ struct alignas(16) NativeAotGuestState {
     std::uint64_t X87[8][2];
     std::uint64_t X87Top;
     std::uint64_t X87Control;
+    std::uint64_t X87Valid;
 };
 
 using NativeAotGuestFunction = std::uint64_t (*)(NativeAotGuestState*, std::uint64_t);
