@@ -23,6 +23,8 @@ double APS5_VABI drand48_nid_postfix();
 std::int64_t APS5_VABI lrand48_nid_postfix();
 std::int64_t APS5_VABI mrand48_nid_postfix();
 void APS5_VABI srand48_nid_postfix(std::int64_t);
+std::uint16_t* APS5_VABI seed48_nid_postfix(const std::uint16_t*);
+void APS5_VABI lcong48_nid_postfix(const std::uint16_t*);
 }
 
 static int failures = 0;
@@ -92,8 +94,65 @@ static void CheckRand48() {
 #endif
 }
 
+static void CheckRand48Parameters() {
+    srand48_nid_postfix(0x1234abcd);
+    const std::uint16_t seed[3]{0x1234, 0x5678, 0x9abc};
+    const auto original = std::array<std::uint16_t, 3>{seed[0], seed[1], seed[2]};
+    auto* previous = seed48_nid_postfix(seed);
+    Require(SeedIs(previous, 0x330e, 0xabcd, 0x1234), "seed48 returns the previous internal seed");
+    std::uint16_t external[3]{seed[0], seed[1], seed[2]};
+    Require(drand48_nid_postfix() == erand48_nid_postfix(external), "seed48 replaces all 48 seed bits");
+    Require(std::equal(original.begin(), original.end(), seed), "seed48 preserves its input");
+    auto* nextPrevious = seed48_nid_postfix(seed);
+    Require(nextPrevious == previous && SeedIs(previous, external[0], external[1], external[2]), "seed48 reuses its return storage and saves the advanced seed");
+
+    const std::uint16_t parameters[7]{0x1234, 0x5678, 0x9abc, 0x4321, 0x8765, 0xcba9, 0xfedc};
+    lcong48_nid_postfix(parameters);
+    Require(drand48_nid_postfix() == 0xec352cc2f390p-48, "lcong48 configures the internal floating sequence");
+    Require(lrand48_nid_postfix() == 1736337752, "lcong48 configures the internal nonnegative sequence");
+    Require(mrand48_nid_postfix() == 2057929672, "lcong48 configures the internal signed sequence");
+    lcong48_nid_postfix(parameters);
+    Require(mrand48_nid_postfix() == -332059454, "custom mrand48 sign extends bit 31");
+
+    lcong48_nid_postfix(parameters);
+    std::memcpy(external, seed, sizeof(external));
+    Require(erand48_nid_postfix(external) == 0xec352cc2f390p-48, "erand48 uses the lcong48 multiplier and addend");
+    Require(nrand48_nid_postfix(external) == 1736337752, "nrand48 uses the lcong48 multiplier and addend");
+    Require(jrand48_nid_postfix(external) == 2057929672, "jrand48 uses the lcong48 multiplier and addend");
+
+    const std::uint16_t wrap[7]{0xffff, 0xffff, 0xffff, 1, 0, 0, 7};
+    lcong48_nid_postfix(wrap);
+    Require(drand48_nid_postfix() == 0x6p-48, "lcong48 recurrence wraps at 48 bits");
+    lcong48_nid_postfix(parameters);
+    seed48_nid_postfix(seed);
+    std::memcpy(external, seed, sizeof(external));
+    Require(drand48_nid_postfix() == 0x495e916a782fp-48, "seed48 restores the default recurrence");
+    Require(erand48_nid_postfix(external) == 0x495e916a782fp-48, "seed48 restores the external-seed recurrence");
+    lcong48_nid_postfix(parameters);
+    srand48_nid_postfix(0x1234abcd);
+    Require(drand48_nid_postfix() == 0x657eb7255101p-48, "srand48 restores the default recurrence");
+
+#ifndef _WIN32
+    ::lcong48(const_cast<unsigned short*>(parameters));
+    lcong48_nid_postfix(parameters);
+    unsigned short host[3]{0xabcd, 0x1234, 0x9876};
+    std::uint16_t guest[3]{0xabcd, 0x1234, 0x9876};
+    for (int round = 0; round < 64; ++round) {
+        Require(drand48_nid_postfix() == ::drand48(), "custom drand48 matches the host");
+        Require(lrand48_nid_postfix() == ::lrand48(), "custom lrand48 matches the host");
+        Require(mrand48_nid_postfix() == ::mrand48(), "custom mrand48 matches the host");
+        Require(erand48_nid_postfix(guest) == ::erand48(host), "custom erand48 matches the host");
+        Require(nrand48_nid_postfix(guest) == ::nrand48(host), "custom nrand48 matches the host");
+        Require(jrand48_nid_postfix(guest) == ::jrand48(host), "custom jrand48 matches the host");
+    }
+    ::srand48(0x1234abcd);
+#endif
+    srand48_nid_postfix(0x1234abcd);
+}
+
 int main() {
     CheckRand48();
+    CheckRand48Parameters();
     constexpr Sequence seedOne {1408992891, 1638182910, 83848093, 145962118, 627851256};
     constexpr Sequence seed12345 {1052984060, 1639322404, 1971525204, 2097956667, 2012147915};
     constexpr std::array<Sequence, 5> seed42ByType {{
