@@ -1,6 +1,8 @@
 #include "SceTypes.hpp"
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include "prx/libc/include/GuestTime.hpp"
+#include <cerrno>
+#include <climits>
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>
@@ -159,9 +161,14 @@ static void CheckSwprintf() {
     Require(buffer == std::u16string(u"\U0001f600"), "swprintf surrogate pair output");
     Require(swprintf_nid_postfix(buffer, 8, u"") == 0 && buffer[0] == 0, "swprintf empty format");
     for (auto& unit : buffer) unit = u'x';
-    Require(swprintf_nid_postfix(buffer, 3, u"%ls", u"abcd") < 0, "swprintf truncation result");
+    errno = 0;
+    Require(swprintf_nid_postfix(buffer, 3, u"%ls", u"abcd") < 0 && errno == 84, "swprintf truncation result");
     Require(buffer == std::u16string(u"ab") && buffer[3] == u'x', "swprintf truncation output");
-    Require(swprintf_nid_postfix(buffer, 3, u"abc") < 0, "swprintf terminator does not fit");
+    errno = 0;
+    Require(swprintf_nid_postfix(buffer, 3, u"abc") < 0 && errno == 84, "swprintf terminator does not fit");
+    buffer[0] = u'x';
+    errno = 0;
+    Require(swprintf_nid_postfix(buffer, static_cast<std::size_t>(INT_MAX) + 2, u"a") < 0 && errno == 84 && buffer[0] == 0, "swprintf size above INT_MAX");
     buffer[0] = u'x';
     Require(swprintf_nid_postfix(buffer, 0, u"a") < 0 && buffer[0] == u'x', "swprintf zero size");
     Require(swprintf_nid_postfix(nullptr, 8, u"a") < 0, "swprintf null buffer");

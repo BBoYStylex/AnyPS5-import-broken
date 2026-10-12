@@ -218,12 +218,21 @@ extern "C" {
 
 int APS5_VABI vswprintf_nid_postfix(char16_t* buffer, std::size_t size, const char16_t* format, VaList* args) {
     if (buffer == nullptr || size == 0) { errno = 22; return -1; }
+    if (size - 1 > static_cast<std::size_t>(INT_MAX)) {
+        buffer[0] = 0;
+        errno = 84;
+        return -1;
+    }
     try {
         const std::u16string text = FormatWide(format, args);
         const std::size_t copied = text.size() < size - 1 ? text.size() : size - 1;
         std::memcpy(buffer, text.data(), copied * sizeof(char16_t));
         buffer[copied] = 0;
-        return copied == text.size() ? static_cast<int>(copied) : -1;
+        if (copied != text.size()) {
+            errno = 84;
+            return -1;
+        }
+        return static_cast<int>(copied);
     } catch (const std::exception&) {
         buffer[0] = 0;
         errno = 22;
