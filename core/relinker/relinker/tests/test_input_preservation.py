@@ -142,6 +142,31 @@ def check_registry_after_failed_patch(relinker, work):
     assert not (case / "app0").exists()
 
 
+def check_diagnostics_after_failed_patch(relinker, work):
+    for name, options, error in (("icon", [], "Invalid Windows icon PNG"),
+                                 ("rpath", ["--rpath", "${ORIGIN}/libs"], "Unsupported variable in Windows run path")):
+        case = work / f"diagnostics-failed-patch-{name}"
+        case.mkdir()
+        if name == "icon":
+            (case / "sce_sys").mkdir()
+            (case / "sce_sys" / "icon0.png").write_bytes(b"\x89PNG\r\n\x1a\n" + bytes(40))
+        source = case / "input.elf"
+        source.write_bytes(main_fixture())
+        output = case / "output.exe"
+        previous_output = b"previous executable"
+        output.write_bytes(previous_output)
+        diagnostics = case / "windows-diagnostics-imports.txt"
+        previous_diagnostics = b"previous diagnostics"
+        diagnostics.write_bytes(previous_diagnostics)
+        result = subprocess.run([str(relinker), "--windows", "--windows-diagnostics", "--skip-sce-module", *options,
+                                 str(source), str(output)], cwd=case,
+                                capture_output=True, text=True, timeout=20)
+        assert result.returncode == 2 and error in result.stderr, (result.stdout, result.stderr)
+        assert "Wrote Windows import diagnostics" not in result.stdout, result.stdout
+        assert output.read_bytes() == previous_output
+        assert diagnostics.read_bytes() == previous_diagnostics
+
+
 def check_desktop_inputs(relinker, work):
     for desktop in (False, True):
         for bundled in (False, True):
@@ -204,6 +229,7 @@ def main():
         check_diagnostic_inputs(relinker, work)
         check_desktop_inputs(relinker, work)
         check_registry_after_failed_patch(relinker, work)
+        check_diagnostics_after_failed_patch(relinker, work)
         for windows in (False, True):
             options = ["--windows"] if windows else []
             check_registry_inputs(relinker, work, windows)
