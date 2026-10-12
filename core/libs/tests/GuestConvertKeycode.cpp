@@ -50,8 +50,8 @@ int main() {
     Require(Character(0x27, RightShift) == ')', "shift 0");
     Require(Character(0x1E, CapsLock) == '1', "caps lock changes a digit");
 
-    Require(Character(0x28, 0) == '\r', "enter");
-    Require(Character(0x29, 0) == 0x1B, "escape");
+    Require(Character(0x28, 0) == '\n', "enter");
+    Require(Character(0x29, 0) == 0, "escape");
     Require(Character(0x2A, 0) == '\b', "backspace");
     Require(Character(0x2B, 0) == '\t', "tab");
     Require(Character(0x2C, LeftShift) == ' ', "space");
@@ -61,7 +61,7 @@ int main() {
     Require(Character(0x34, LeftShift) == '"', "shift quote");
     Require(Character(0x35, LeftShift) == '~', "shift grave");
     Require(Character(0x38, LeftShift) == '?', "shift slash");
-    Require(Character(0x4C, 0) == 0x7F, "delete");
+    Require(Character(0x4C, 0) == 0, "delete");
 
     Require(Character(0x3A, 0) == 0, "F1");
     Require(Character(0x4F, 0) == 0, "right arrow");
@@ -69,7 +69,7 @@ int main() {
 
     Require(Character(0x54, 0) == '/', "keypad slash");
     Require(Character(0x57, 0) == '+', "keypad plus");
-    Require(Character(0x58, 0) == '\r', "keypad enter");
+    Require(Character(0x58, 0) == '\n', "keypad enter");
     Require(Character(0x59, NumLock) == '1', "keypad 1");
     Require(Character(0x62, NumLock) == '0', "keypad 0");
     Require(Character(0x63, NumLock) == '.', "keypad point");
