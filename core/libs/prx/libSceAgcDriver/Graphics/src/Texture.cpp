@@ -1744,7 +1744,7 @@ bool StorageTexture::Refresh() {
     // stamped); an untracked unit is stored whole by that write-back, and a unit pending in both
     // images takes the old order (store, then this image re-uploads it).
     auto alias = pendingAlias();
-    if (alias != nullptr && !(ProvedClearKeys(descriptor, guestBytes, keyProof) == DccKeys::Uncompressed && StorageImportFor(context, descriptor.baseAddress, static_cast<std::size_t>(guestBytes)) != nullptr)) alias = nullptr;
+    if (alias != nullptr && !(ProvedClearKeys(descriptor, guestBytes, keyProof) == DccKeys::Uncompressed && HostImportFor(context, descriptor.baseAddress, static_cast<std::size_t>(guestBytes)) != nullptr)) alias = nullptr;
     if (alias != nullptr) {
         std::vector<std::uint8_t> aliasStamped(trackedLayers);
         if (!GuestMemory::ChangedBlocks(descriptor.baseAddress, static_cast<std::size_t>(guestBytes), alias->layerGeneration, aliasStamped)) alias = nullptr;
@@ -1859,7 +1859,7 @@ bool StorageTexture::Refresh() {
         }
         // Only the direct path uploads the selected layers alone (see upload); the others replace
         // the whole image, so every pending layer's results are stored first.
-        direct = keys == DccKeys::Uncompressed && StorageImportFor(context, descriptor.baseAddress, static_cast<std::size_t>(guestBytes)) != nullptr;
+        direct = keys == DccKeys::Uncompressed && (alias != nullptr ? HostImportFor(context, descriptor.baseAddress, static_cast<std::size_t>(guestBytes)) : StorageImportFor(context, descriptor.baseAddress, static_cast<std::size_t>(guestBytes))) != nullptr;
         if (alias != nullptr && direct) {
             // The alias's pending units that nothing stamped since its generation (a CPU store or a
             // driver store there wins over its results, as at its own write-back) are taken from
@@ -3519,6 +3519,19 @@ bool StorageTexture::StoreAtLabelRequested(const char* value) {
     throw std::runtime_error(std::string("APS5_STORE_AT_LABEL=") + value + ": expected 1");
 }
 
+void StorageTexture::NoteRangeUnwatched(std::uint64_t address, std::size_t bytes) {
+    std::vector<std::shared_ptr<StorageTexture>> capturing;
+    {
+        auto& live = Live();
+        std::lock_guard lock(live.mutex);
+        for (auto* texture : live.textures) {
+            if (texture->released || !texture->overlaps(address, bytes) || texture->GuestSnapshotValid()) continue;
+            if (auto kept = texture->weak_from_this().lock()) capturing.push_back(std::move(kept));
+        }
+    }
+    for (const auto& texture : capturing) texture->captureGuestBytes(nullptr);
+}
+
 std::shared_ptr<StorageTexture> StorageTexture::FindPending(std::uint64_t address, std::uint64_t bytes) {
     auto& pending = Pending();
     std::lock_guard lock(pending.mutex);
@@ -4216,7 +4229,7 @@ bool StorageTexture::CopyFrom(StorageTexture& source, const char*& refusal) {
         refusal = "released";
         return false;
     }
-    if (StorageImportFor(context, descriptor.baseAddress, static_cast<std::size_t>(guestBytes)) == nullptr) {
+    if (HostImportFor(context, descriptor.baseAddress, static_cast<std::size_t>(guestBytes)) == nullptr) {
         refusal = "not imported";
         return false;
     }

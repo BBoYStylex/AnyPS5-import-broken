@@ -38,6 +38,7 @@ struct HostImport {
     bool unwatched = false;
     bool dmaBuf = false;
     bool joined = false;
+    mutable std::uint64_t lastUseFrame = 0;
     std::shared_ptr<void> chunk;
     mutable std::uint64_t lastUse = 0;
 };
@@ -66,14 +67,10 @@ void SetImportWatch(const Context& context, ImportWatch watch);
 // (alignment and budget permitting), or null. Bytes at `address` are at `address - import->base` in
 // the import's buffer.
 const HostImport* HostImportFor(const Context& context, std::uint64_t address, std::size_t bytes);
-// The import serving the range if one exists and the registry has not changed since; never makes one.
 const HostImport* ExistingHostImport(const Context& context, std::uint64_t address, std::size_t bytes);
-// Whether a host import on this device resolves the guest write watch of its range (the device's probe).
 bool HostImportsUnwatch(const Context& context);
-// The import for a storage surface's own guest bytes: on a device whose imports unwatch their range,
-// a range the watch still covers is not imported for the surface (an existing import is used), since
-// the unwatched range would make every later refresh compare the whole surface with its guest copy.
 const HostImport* StorageImportFor(const Context& context, std::uint64_t address, std::size_t bytes);
+std::size_t RetireIdleImports(const Context& context);
 void SetHostImportWindow(std::uint64_t bytes);
 // Tests: the window of one large registered range (64 MiB) and the import budget (0: the configured one).
 void SetHostImportRangeWindow(std::uint64_t bytes);
