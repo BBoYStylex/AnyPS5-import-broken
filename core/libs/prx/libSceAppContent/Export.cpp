@@ -163,12 +163,20 @@ int APS5_VABI sceAppContentTemporaryDataUnmount(const AppContentMountPoint* moun
 }
 
 
-int APS5_VABI sceAppContentAddcontEnqueueDownload(void) {
+struct AppContentAddcontDownloadProgress {
+    uint64_t bytes_downloaded;
+    uint64_t total_bytes;
+    uint32_t status;
+};
+
+int APS5_VABI sceAppContentAddcontEnqueueDownload(uint32_t service_label, const NpUnifiedEntitlementLabel* entitlement_label) {
+    if (!entitlement_label) APS5_INVALID_ARG_EX;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceAppContentGetAddcontDownloadProgress(void) {
+int APS5_VABI sceAppContentGetAddcontDownloadProgress(uint32_t service_label, const NpUnifiedEntitlementLabel* entitlement_label, AppContentAddcontDownloadProgress* progress) {
+    if (!entitlement_label || !progress) APS5_INVALID_ARG_EX;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }

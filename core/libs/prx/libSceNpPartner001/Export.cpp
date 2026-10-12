@@ -9,9 +9,11 @@ std::atomic<bool> g_initialized{false};
 
 extern "C" {
 
-int APS5_VABI sceNpEAAccessInitialize(void) {
+int APS5_VABI sceNpEAAccessInitialize(const void* param) {
+    (void)param;
     bool expected = false;
     if (!g_initialized.compare_exchange_strong(expected, true)) throw std::logic_error(std::string(__func__) + ": already initialized");
+    NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
