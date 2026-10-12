@@ -23,13 +23,11 @@ int APS5_VABI sceConvertKeycodeGetVirtualKeycode(std::uint64_t a0, std::uint64_t
 }
 
 int APS5_VABI sceConvertKeycodeGetCharacterFromKeyboardData(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    throw std::runtime_error(std::string(__func__) + ": signature unknown");
 }
 
 int APS5_VABI sceConvertKeycodeGetCharacter(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    throw std::runtime_error(std::string(__func__) + ": signature unknown");
 }
 
 }

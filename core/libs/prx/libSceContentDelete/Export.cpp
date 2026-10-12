@@ -20,13 +20,11 @@ int APS5_VABI sceContentDeleteInitialize(const ContentDeleteInitParam* init_para
 }
 
 int APS5_VABI sceContentDeleteByPath(void) {
- NotImplemented_nid_no_patch(__func__);
- return 0;
+    throw std::runtime_error(std::string(__func__) + ": the host has no PS5 content catalog to delete from");
 }
 
 int APS5_VABI sceContentDeleteById(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    throw std::runtime_error(std::string(__func__) + ": the host has no PS5 content catalog to delete from");
 }
 
 int APS5_VABI sceContentDeleteTerminate(void) {

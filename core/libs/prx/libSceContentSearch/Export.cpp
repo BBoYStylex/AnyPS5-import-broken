@@ -20,48 +20,39 @@ int APS5_VABI sceContentSearchInit(const ContentSearchInitParam* init_param) {
 }
 
 int APS5_VABI sceContentSearchCloseMetadata(void) {
- NotImplemented_nid_no_patch(__func__);
- return 0;
+    throw std::runtime_error(std::string(__func__) + ": signature unknown");
 }
 
 int APS5_VABI sceContentSearchGetMetadataFieldInfo(void) {
- NotImplemented_nid_no_patch(__func__);
- return 0;
+    throw std::runtime_error(std::string(__func__) + ": signature unknown");
 }
 
 int APS5_VABI sceContentSearchGetMetadataValue(void) {
- NotImplemented_nid_no_patch(__func__);
- return 0;
+    throw std::runtime_error(std::string(__func__) + ": signature unknown");
 }
 
 int APS5_VABI sceContentSearchOpenMetadata(void) {
- NotImplemented_nid_no_patch(__func__);
- return 0;
+    throw std::runtime_error(std::string(__func__) + ": signature unknown");
 }
 
 int APS5_VABI sceContentSearchSearchContent(void) {
- NotImplemented_nid_no_patch(__func__);
- return 0;
+    throw std::runtime_error(std::string(__func__) + ": signature unknown");
 }
 
 int APS5_VABI sceContentSearchGetContentLastUpdateId(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    throw std::runtime_error(std::string(__func__) + ": signature unknown");
 }
 
 int APS5_VABI sceContentSearchOpenMetadataByContentId(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    throw std::runtime_error(std::string(__func__) + ": signature unknown");
 }
 
 int APS5_VABI sceContentSearchGetTotalContentSize(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    throw std::runtime_error(std::string(__func__) + ": signature unknown");
 }
 
 int APS5_VABI sceContentSearchGetNumOfContent(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    throw std::runtime_error(std::string(__func__) + ": signature unknown");
 }
 
 int APS5_VABI sceContentSearchTerm(void) {

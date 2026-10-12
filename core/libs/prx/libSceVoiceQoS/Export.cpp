@@ -1,6 +1,8 @@
 #include <cstdint>
 #include <cstddef>
 #include <mutex>
+#include <stdexcept>
+#include <string>
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
 
@@ -35,59 +37,48 @@ int APS5_VABI sceVoiceQoSEnd() {
     return 0;
 }
 
-int APS5_VABI sceVoiceQoSCreateLocalEndpoint() {
- NotImplemented_nid_no_patch(__func__);
- return 0;
+int APS5_VABI sceVoiceQoSCreateLocalEndpoint(void) {
+    throw std::runtime_error(std::string(__func__) + ": signature unknown");
 }
 
-int APS5_VABI sceVoiceQoSDeleteLocalEndpoint() {
- NotImplemented_nid_no_patch(__func__);
- return 0;
+int APS5_VABI sceVoiceQoSDeleteLocalEndpoint(void) {
+    throw std::runtime_error(std::string(__func__) + ": signature unknown");
 }
 
-int APS5_VABI sceVoiceQoSCreateRemoteEndpoint() {
- NotImplemented_nid_no_patch(__func__);
- return 0;
+int APS5_VABI sceVoiceQoSCreateRemoteEndpoint(void) {
+    throw std::runtime_error(std::string(__func__) + ": signature unknown");
 }
 
-int APS5_VABI sceVoiceQoSDeleteRemoteEndpoint() {
- NotImplemented_nid_no_patch(__func__);
- return 0;
+int APS5_VABI sceVoiceQoSDeleteRemoteEndpoint(void) {
+    throw std::runtime_error(std::string(__func__) + ": signature unknown");
 }
 
-int APS5_VABI sceVoiceQoSConnect() {
- NotImplemented_nid_no_patch(__func__);
- return 0;
+int APS5_VABI sceVoiceQoSConnect(void) {
+    throw std::runtime_error(std::string(__func__) + ": signature unknown");
 }
 
-int APS5_VABI sceVoiceQoSDisconnect() {
- NotImplemented_nid_no_patch(__func__);
- return 0;
+int APS5_VABI sceVoiceQoSDisconnect(void) {
+    throw std::runtime_error(std::string(__func__) + ": signature unknown");
 }
 
-int APS5_VABI sceVoiceQoSSetLocalEndpointAttribute() {
- NotImplemented_nid_no_patch(__func__);
- return 0;
+int APS5_VABI sceVoiceQoSSetLocalEndpointAttribute(void) {
+    throw std::runtime_error(std::string(__func__) + ": signature unknown");
 }
 
-int APS5_VABI sceVoiceQoSSetRemoteEndpointAttribute() {
- NotImplemented_nid_no_patch(__func__);
- return 0;
+int APS5_VABI sceVoiceQoSSetRemoteEndpointAttribute(void) {
+    throw std::runtime_error(std::string(__func__) + ": signature unknown");
 }
 
-int APS5_VABI sceVoiceQoSReadPacket() {
- NotImplemented_nid_no_patch(__func__);
- return 0;
+int APS5_VABI sceVoiceQoSReadPacket(void) {
+    throw std::runtime_error(std::string(__func__) + ": signature unknown");
 }
 
-int APS5_VABI sceVoiceQoSWritePacket() {
- NotImplemented_nid_no_patch(__func__);
- return 0;
+int APS5_VABI sceVoiceQoSWritePacket(void) {
+    throw std::runtime_error(std::string(__func__) + ": signature unknown");
 }
 
-int APS5_VABI sceVoiceQoSGetLocalEndpointAttribute() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+int APS5_VABI sceVoiceQoSGetLocalEndpointAttribute(void) {
+    throw std::runtime_error(std::string(__func__) + ": signature unknown");
 }
 
 }
