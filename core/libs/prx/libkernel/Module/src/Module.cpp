@@ -248,4 +248,64 @@ std::int32_t APS5_VABI sceKernelInternalMemoryGetModuleSegmentInfo_nid_postfix(v
     return 0;
 }
 
+int APS5_VABI sceKernelGetLibkernelTextLocation_nid_postfix(std::uint64_t* address, std::uint64_t* size) {
+    if (address == nullptr || size == nullptr) {
+        return SCE_KERNEL_ERROR_EFAULT;
+    }
+#ifdef _WIN32
+    HMODULE module = GetModuleHandleW(L"libkernel.dll");
+    if (module == nullptr) {
+        module = GetModuleHandleW(nullptr);
+    }
+    if (module == nullptr) {
+        return SCE_KERNEL_ERROR_ESRCH;
+    }
+    MEMORY_BASIC_INFORMATION mbi{};
+    if (VirtualQuery(module, &mbi, sizeof(mbi)) == 0) {
+        return SCE_KERNEL_ERROR_ESRCH;
+    }
+    const auto* base = static_cast<const std::uint8_t*>(mbi.AllocationBase);
+    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE) {
+        return SCE_KERNEL_ERROR_ESRCH;
+    }
+    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(base + dos->e_lfanew);
+    if (nt->Signature != IMAGE_NT_SIGNATURE) {
+        return SCE_KERNEL_ERROR_ESRCH;
+    }
+    *address = reinterpret_cast<std::uint64_t>(base);
+    *size = nt->OptionalHeader.SizeOfImage;
+    return 0;
+#else
+    Dl_info info{};
+    if (dladdr(reinterpret_cast<const void*>(sceKernelGetLibkernelTextLocation_nid_postfix), &info) == 0) {
+        return SCE_KERNEL_ERROR_ESRCH;
+    }
+    struct Query {
+        std::uintptr_t base;
+        std::uint64_t addr;
+        std::uint64_t size;
+        bool found;
+    } q{reinterpret_cast<std::uintptr_t>(info.dli_fbase), 0, 0, false};
+    dl_iterate_phdr([](dl_phdr_info* phdrInfo, std::size_t, void* data) {
+        auto* qptr = static_cast<Query*>(data);
+        if (phdrInfo->dlpi_addr != qptr->base) return 0;
+        for (std::uint16_t i = 0; i < phdrInfo->dlpi_phnum; ++i) {
+            const Elf64_Phdr& hdr = phdrInfo->dlpi_phdr[i];
+            if (hdr.p_type == PT_LOAD && (hdr.p_flags & PF_X)) {
+                qptr->addr = phdrInfo->dlpi_addr + hdr.p_vaddr;
+                qptr->size = hdr.p_memsz;
+                qptr->found = true;
+                return 1;
+            }
+        }
+        return 0;
+    }, &q);
+    if (!q.found) return SCE_KERNEL_ERROR_ESRCH;
+    *address = q.addr;
+    *size = q.size;
+    return 0;
+#endif
+}
+
 }
