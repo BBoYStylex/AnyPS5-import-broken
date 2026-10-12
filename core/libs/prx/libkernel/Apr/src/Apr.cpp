@@ -158,16 +158,26 @@ void _readFile(const Apr::ReadFileCommand& command) {
     if (trace) std::fprintf(stderr, "[apr] read %s offset=0x%llx size=0x%llx -> 0x%llx\n", file.path.string().c_str(), static_cast<unsigned long long>(command.offset), static_cast<unsigned long long>(command.size), static_cast<unsigned long long>(command.destination));
     std::ifstream stream(file.path, std::ios::binary);
     if (!stream) throw std::runtime_error("APR: cannot open " + file.path.string());
-    stream.seekg(static_cast<std::streamoff>(command.offset));
-    const GuestArena::HostWrite destination(reinterpret_cast<void*>(command.destination), command.size);
-    if (!destination.Open()) throw std::runtime_error("APR: the read destination of " + file.path.string() + " is not writable guest memory");
     std::vector<char> staging(static_cast<std::size_t>(command.size));
-    stream.read(staging.data(), static_cast<std::streamsize>(command.size));
-    const auto read = static_cast<std::uint64_t>(stream.gcount());
-    if (stream.bad()) {
-        throw std::runtime_error("APR: read failed for " + file.path.string() + " at offset " + std::to_string(command.offset) + " requested " + std::to_string(command.size) + " bytes, received " + std::to_string(read));
+    std::uint64_t read = 0;
+    for (unsigned attempt = 0; read != command.size && attempt < 3; ++attempt) {
+        if (stream.bad()) {
+            stream.close();
+            stream.clear();
+            stream.open(file.path, std::ios::binary);
+            if (!stream) break;
+        } else {
+            stream.clear();
+        }
+        stream.seekg(static_cast<std::streamoff>(command.offset + read));
+        if (!stream) throw std::runtime_error("APR: seek failed for " + file.path.string() + " at offset " + std::to_string(command.offset + read));
+        const auto remaining = command.size - read;
+        stream.read(staging.data() + static_cast<std::size_t>(read), static_cast<std::streamsize>(remaining));
+        read += static_cast<std::uint64_t>(stream.gcount());
     }
     if (read != command.size) throw std::runtime_error("APR: read of " + file.path.string() + " at offset " + std::to_string(command.offset) + " returned " + std::to_string(read) + " of " + std::to_string(command.size) + " bytes");
+    const GuestArena::HostWrite destination(reinterpret_cast<void*>(command.destination), command.size);
+    if (!destination.Open()) throw std::runtime_error("APR: the read destination of " + file.path.string() + " is not writable guest memory");
     if (read != 0) std::memcpy(reinterpret_cast<void*>(command.destination), staging.data(), static_cast<std::size_t>(read));
 }
 
