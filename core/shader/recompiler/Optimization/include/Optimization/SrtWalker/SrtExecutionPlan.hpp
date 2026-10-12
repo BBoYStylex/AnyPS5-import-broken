@@ -25,7 +25,7 @@ struct SrtExecutionPlan {
     std::vector<std::uint32_t> flat;
     std::vector<std::uint8_t> active;
 
-    bool Evaluate(const SrtRuntime& runtime, std::vector<DescriptorValue>& results, std::vector<std::uint32_t>& flattened, std::vector<std::uint8_t>& activeSources) const;
+    bool Evaluate(const SrtRuntime& runtime, std::vector<DescriptorValue>& results, std::vector<std::uint32_t>& flattened, std::vector<std::uint8_t>& activeSources, std::vector<SrtReadPoison>* poison, std::uint32_t* nullRootReads) const;
 };
 
 std::shared_ptr<const SrtExecutionPlan> CompileSrtExecutionPlan(const IrResourcePlan& program);

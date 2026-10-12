@@ -17,7 +17,7 @@ public:
     explicit Compiler(const IrResourcePlan& program) : program(program) {}
 
     std::shared_ptr<const SrtExecutionPlan> Run() {
-        if (!program.srtPlanComplete || program.requiresSpecializationMemory || std::ranges::any_of(program.cleanFlatSlots, [](auto value) { return value != 0; })) return nullptr;
+        if (!program.guardedSrtSlots.empty() || !program.srtPlanComplete || program.requiresSpecializationMemory || std::ranges::any_of(program.cleanFlatSlots, [](auto value) { return value != 0; })) return nullptr;
         result.active.assign(program.descriptorSources.size(), 1);
         if (!program.controlFlow.empty()) {
             for (const auto& block : program.controlFlow) {
@@ -128,7 +128,7 @@ private:
                 if (!IsRawRead(program, value) || value.ArgumentCount() != IrOpcodeOperandCount(operation.opcode)) return {};
                 const auto* handle = value.Argument(0)->Resolve();
                 const bool buffer = operation.opcode == IrOpcode::ReadConstBuffer;
-                if (handle->Opcode() == IrOpcode::Void || handle->ArgumentCount() < 2 || (buffer && handle->ArgumentCount() != 4)) return {};
+                if (LoadedFromMemory(*handle) || handle->Opcode() == IrOpcode::Void || handle->ArgumentCount() < 2 || (buffer && handle->ArgumentCount() != 4)) return {};
                 for (std::size_t i = 0; i < 2; ++i) {
                     const auto index = compile(handle->Argument(i));
                     if (!index) return {};
@@ -200,7 +200,8 @@ std::shared_ptr<const SrtExecutionPlan> CompileSrtExecutionPlan(const IrResource
     return Compiler(program).Run();
 }
 
-bool SrtExecutionPlan::Evaluate(const SrtRuntime& runtime, std::vector<DescriptorValue>& results, std::vector<std::uint32_t>& flattened, std::vector<std::uint8_t>& activeSources) const {
+bool SrtExecutionPlan::Evaluate(const SrtRuntime& runtime, std::vector<DescriptorValue>& results, std::vector<std::uint32_t>& flattened, std::vector<std::uint8_t>& activeSources, std::vector<SrtReadPoison>* poison, std::uint32_t* nullRootReads) const {
+    std::uint32_t nullRoots = 0;
     std::array<std::uint64_t, 256> local;
     std::vector<std::uint64_t> overflow;
     if (operations.size() > local.size()) overflow.resize(operations.size());
@@ -247,9 +248,17 @@ bool SrtExecutionPlan::Evaluate(const SrtRuntime& runtime, std::vector<Descripto
                     const auto aligned = byteOffset & ~std::uint64_t{3};
                     const auto stride = (u32(1) >> 16u) & 0x3fffu;
                     const auto size = stride == 0 ? std::uint64_t{u32(3)} : std::uint64_t{stride} * u32(3);
-                    if (aligned > size || size - aligned < 4) return false;
+                    if (aligned > size || size - aligned < 4) {
+                        out = 0;
+                        break;
+                    }
                     address = ((base & ~std::uint64_t{3}) + byteOffset) & ~std::uint64_t{3};
                 } else if (!AddSignedAddress(base & ~std::uint64_t{3}, (immediate & ~std::int64_t{3}) + (u32(2) & ~3u), address)) return false;
+                if (poison != nullptr && nullRootReads != nullptr && base == 0) {
+                    ++nullRoots;
+                    out = 0;
+                    break;
+                }
                 if (auto* trace = runtime.readTrace; trace != nullptr) {
                     if (operation.leafSlot != ~0u) trace->leaves.emplace_back(operation.leafSlot, address);
                     else trace->otherReads.push_back(address);
@@ -273,6 +282,8 @@ bool SrtExecutionPlan::Evaluate(const SrtRuntime& runtime, std::vector<Descripto
     flattened.resize(flat.size());
     for (std::size_t i = 0; i < flat.size(); ++i) flattened[i] = static_cast<std::uint32_t>(values[flat[i]]);
     activeSources = active;
+    if (poison != nullptr) poison->clear();
+    if (nullRootReads != nullptr) *nullRootReads = nullRoots;
     return true;
 }
 
