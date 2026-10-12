@@ -80,20 +80,29 @@ int main() {
     Require(getgroups_nid_postfix(static_cast<int>(groups.size()), groups.data()) == 1 && groups[0] == 0);
     Require(groups[0] == static_cast<std::uint32_t>(getegid_nid_postfix()));
 
-    const std::array<std::uint32_t, 3> wanted{0, 5, 7};
+    const std::array<std::uint32_t, 3> wanted{0, 7, 5};
     Require(setgroups_nid_postfix(static_cast<int>(wanted.size()), wanted.data()) == 0);
     Require(getgroups_nid_postfix(0, nullptr) == 3);
     RequireFailure(getgroups_nid_postfix(2, groups.data()), GuestEinval);
     RequireFailure(getgroups_nid_postfix(3, nullptr), GuestEfault);
     Require(getgroups_nid_postfix(static_cast<int>(groups.size()), groups.data()) == 3);
     Require(groups[0] == 0 && groups[1] == 5 && groups[2] == 7);
+    groups = {};
+    Require(getgroups_nid_postfix(-1, groups.data()) == 3);
+    Require(groups[0] == 0 && groups[1] == 5 && groups[2] == 7);
+    RequireFailure(getgroups_nid_postfix(-1, nullptr), GuestEfault);
 
     Require(setgroups_nid_postfix(0, nullptr) == 0);
     Require(getgroups_nid_postfix(static_cast<int>(groups.size()), groups.data()) == 1 && groups[0] == 0);
 
     RequireFailure(setgroups_nid_postfix(-1, wanted.data()), GuestEinval);
-    RequireFailure(setgroups_nid_postfix(1024, wanted.data()), GuestEinval);
     RequireFailure(setgroups_nid_postfix(1, nullptr), GuestEfault);
     Require(getgroups_nid_postfix(0, nullptr) == 1);
+
+    const std::array<std::uint32_t, 1025> most{};
+    Require(setgroups_nid_postfix(1024, most.data()) == 0);
+    Require(getgroups_nid_postfix(0, nullptr) == 1024);
+    RequireFailure(setgroups_nid_postfix(1025, most.data()), GuestEinval);
+    Require(getgroups_nid_postfix(0, nullptr) == 1024);
     return 0;
 }
