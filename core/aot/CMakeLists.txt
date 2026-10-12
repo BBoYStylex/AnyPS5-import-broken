@@ -78,7 +78,8 @@ if(BUILD_TESTING)
         set(testSources "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_portable.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_contract_recipe.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_provider_catalog.py"
-            "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_debug_candidates.py")
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_debug_candidates.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_load_facts.py")
     endif()
     foreach(testSource IN LISTS testSources)
         get_filename_component(suite "${testSource}" NAME_WE)

@@ -147,6 +147,19 @@ def parse_dynamic(elf, read_mapped_address, include_exports=False):
         hash_words = words[buckets:]
         require(hash_words[0] == 0, 'invalid null SysV hash chain')
         counts.append(chains)
+    if 0x6ffffef5 in values:
+        address = values[0x6ffffef5]
+        buckets, offset, bloom, _ = struct.unpack('<IIII', read_mapped(address, 16))
+        require(buckets > 0 and bloom > 0 and offset > 0, 'invalid GNU hash dimensions')
+        buckets_at = address + 16 + bloom * 8
+        words = struct.unpack(f'<{buckets}I', read_mapped(buckets_at, buckets * 4))
+        require(all(word == 0 or word >= offset for word in words), 'GNU hash bucket below symbol offset')
+        index = max(words)
+        if index:
+            chain = buckets_at + buckets * 4
+            while not struct.unpack('<I', read_mapped(chain + (index - offset) * 4, 4))[0] & 1:
+                index += 1
+        counts.append(index + 1 if index else offset)
     if not counts:
         require(elf['e_shnum'] > 0 and elf['e_shentsize'] == 64,
                 'missing bounded dynamic symbol count')
