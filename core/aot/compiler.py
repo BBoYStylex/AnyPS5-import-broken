@@ -80,6 +80,9 @@ class Image:
         self.target = target
         self.target_spec = target_spec(target)
         self.contracts = contracts
+        self.namespace = contracts.get('native_namespace', '')
+        require(isinstance(self.namespace, str) and (not self.namespace or re.fullmatch(r'[A-Za-z_][A-Za-z_0-9]*_', self.namespace)), 'invalid native namespace')
+        require(type(contracts.get('module_image', False)) is bool, 'module_image must be boolean')
         self.bytes = Path(path).read_bytes()
         require(contracts.get('schema') == 1, 'unsupported contract schema')
         require(type(contracts.get('guard_diagnostics', False)) is bool, 'guard_diagnostics must be a boolean')
@@ -122,7 +125,7 @@ class Image:
         ordered = sorted(self.functions.values(), key=lambda f: f['address'])
         for left, right in zip(ordered, ordered[1:]):
             require(left['address'] + left['size'] <= right['address'], 'overlapping function contracts')
-        require(self.elf['e_entry'] in self.functions, 'entry function has no contract')
+        require(self.elf['e_entry'] in self.functions or (contracts.get('module_image') and self.elf['e_entry'] == 0), 'entry function has no contract')
         self.imports = contracts['imports']
         for contract in self.imports.values():
             signature(contract)
@@ -139,6 +142,10 @@ class Image:
             require(spec['address'] == seg['p_vaddr'] and spec['size'] == seg['p_memsz'], 'data contract must cover the complete segment')
             self.data.append(spec)
         self.import_slots = {}
+        self.data_import_slots = {}
+        self.data_imports = contracts.get('data_imports', {})
+        require(isinstance(self.data_imports, dict), 'data_imports must be a mapping')
+        referenced_data = set()
         self.relocations = []
         try:
             self.dynamic = parse_dynamic(self.elf, self.read)
@@ -164,6 +171,29 @@ class Image:
             if kind in (6, 7):
                 require(addend == 0, 'function import relocation has a nonzero addend')
                 symbol = self.dynamic['symbols'][index]
+                if contracts.get('module_image') and symbol['section'] != 0 and symbol['info'] & 15 == 1:
+                    require(symbol['info'] >> 4 == 1 and symbol['other'] in (0, 2, 3) and symbol['size'] > 0,
+                            'local data relocation needs a strong bounded object')
+                    self.pointer(symbol['value'], symbol['size'])
+                    self.relocations.append((slot, symbol['value']))
+                    continue
+                if contracts.get('module_image') and symbol['section'] != 0 and symbol['info'] & 15 == 2:
+                    require(symbol['info'] >> 4 == 1 and symbol['other'] in (0, 2, 3), 'local function binding must be strong')
+                    require(symbol['value'] in self.functions, 'local function relocation lacks a qualified ABI')
+                    self.import_slots[slot] = self.functions[symbol['value']]
+                    continue
+                if symbol['info'] & 15 == 1:
+                    name = symbol['name']
+                    require(name in self.data_imports, 'data import requires a separate native binding')
+                    binding = self.data_imports[name]
+                    require(set(binding) == {'name', 'size', 'evidence'} and re.fullmatch(r'[A-Za-z_][A-Za-z_0-9]*', binding['name'])
+                            and type(binding['size']) is int and 0 < binding['size'] <= 64 * 1024 * 1024
+                            and isinstance(binding['evidence'], str) and binding['evidence'].strip(), 'invalid native data binding')
+                    require(symbol['info'] >> 4 == 1 and symbol['other'] == 0, 'data binding requires a strong default-visible symbol')
+                    require(symbol['size'] in (0, binding['size']), 'data binding size differs from ELF symbol')
+                    self.data_import_slots[slot] = binding
+                    referenced_data.add(name)
+                    continue
                 require(symbol['info'] & 15 in (0, 2), 'data or TLS import requires a separate native binding')
                 name = symbol['name']
                 require(name in self.imports, f'missing import ABI: {name}')
@@ -175,6 +205,7 @@ class Image:
         expected = {tuple(pair) for pair in contracts['pointer_relocations']}
         require(set(self.relocations) == expected and len(expected) == len(self.relocations), 'pointer relocation contracts do not match the image')
         require(referenced_imports == set(self.imports), 'unused import contracts')
+        require(referenced_data == set(self.data_imports), 'unused data import contracts')
         self.decoder = Cs(CS_ARCH_X86, CS_MODE_64)
         self.decoder.detail = True
         try:
@@ -203,13 +234,13 @@ class Image:
         return self.bytes[begin:begin + available] + bytes(size - available)
 
     def pointer(self, address, size=1):
-        if address in self.jump_labels and size == 1:
+        if address in getattr(self, 'jump_labels', {}) and size == 1:
             return f'blockaddress(@{self.jump_labels[address]}, %b{address:x})'
         if address in self.functions and size == 1:
             return '@' + self.functions[address]['name']
         for spec in self.data:
             if spec['address'] <= address and address + size <= spec['address'] + spec['size']:
-                return f"getelementptr (i8, ptr @data_{spec['address']:x}, i64 {address - spec['address']})"
+                return f"getelementptr (i8, ptr @{self.namespace}data_{spec['address']:x}, i64 {address - spec['address']})"
         raise Rejected(f'no native pointer contract for 0x{address:x}')
 
     def callee(self, address):
@@ -857,7 +888,7 @@ class Function:
                    'native_pointers': {'rsp'} | set(pointers),
                    'stack_pointers': {loc['offset'] for loc in self.argument_locations if loc['kind'] == 'stack' and loc['type'] == 'ptr'},
                    'stack_origins': {loc['offset']: ('parameter', index, 0) for index, loc in enumerate(self.argument_locations) if loc['kind'] == 'stack' and loc['type'] == 'ptr'},
-                   'image_pointers': set(self.image.import_slots) | {slot for slot, _ in self.image.relocations},
+                   'image_pointers': set(self.image.import_slots) | set(self.image.data_import_slots) | {slot for slot, _ in self.image.relocations},
                    'register_aliases': frozenset(), 'stack_values': {}, 'pending_outputs': frozenset(), 'parameter_pointers': {}, 'zero_vectors': set(),
                    'import_bindings': set(self.image.import_slots), 'callback_memory_unmodified': True}
         entry = self.contract['address']
@@ -1238,7 +1269,8 @@ class Function:
 
 def compile_image(image):
     functions = [Function(image, spec) for spec in image.functions.values()]
-    effects.analyze(functions)
+    if functions:
+        effects.analyze(functions)
     try:
         descriptor = native_image.describe(image) if image.contracts.get('native_runtime_registration') else None
     except ValueError as error:
@@ -1255,6 +1287,10 @@ def compile_image(image):
         names.add(contract['name'])
         suffix = ' noreturn' if contract.get('noreturn') else ''
         lines.append(f"declare {abi.result_type(result)} @{contract['name']}({', '.join(abi.parameter_type(t) for t in parameters)}){suffix}")
+    for binding in image.data_imports.values():
+        require(binding['name'] not in names, 'duplicate native data symbol')
+        names.add(binding['name'])
+        lines.append(f"@{binding['name']} = external global [{binding['size']} x i8]")
     for spec in image.data:
         if spec['address'] in image.immutable_initializers:
             lines.append(immutable_data.declaration(image, spec))
@@ -1262,12 +1298,12 @@ def compile_image(image):
         raw = image.read(spec['address'], spec['size'])
         value = ''.join(f'\\{byte:02X}' for byte in raw)
         writable = image.segment(spec['address'])['p_flags'] & 2 or any(spec['address'] <= slot < spec['address'] + spec['size'] for slot in [*image.import_slots, *(slot for slot, _ in image.relocations)])
-        lines.append(f"@data_{spec['address']:x} = {'global' if writable else 'constant'} [{len(raw)} x i8] c\"{value}\", align 16")
+        lines.append(f"@{image.namespace}data_{spec['address']:x} = {'global' if writable else 'constant'} [{len(raw)} x i8] c\"{value}\", align 16")
     if descriptor is not None:
         lines.extend(native_image.declarations(image, descriptor))
     if image.immutable_regions:
         lines.extend(immutable_data.declarations(image))
-    if image.relocations or image.import_slots or descriptor is not None or image.immutable_regions:
+    if image.relocations or image.import_slots or image.data_import_slots or descriptor is not None or image.immutable_regions:
         lines.extend(['@llvm.global_ctors = appending global [1 x { i32, ptr, ptr }] [{ i32, ptr, ptr } { i32 101, ptr @native_image_init, ptr null }]',
                       'define internal void @native_image_init() {'])
         for slot, target in image.relocations:
@@ -1278,6 +1314,9 @@ def compile_image(image):
             if slot in image.immutable_cells:
                 continue
             lines.append(f"  store ptr @{contract['name']}, ptr {image.pointer(slot, 8)}, align 1")
+        for slot, binding in image.data_import_slots.items():
+            if slot not in image.immutable_cells:
+                lines.append(f"  store ptr @{binding['name']}, ptr {image.pointer(slot, 8)}, align 1")
         if image.immutable_regions:
             lines.append(f'  call void @NativeAotRequireReadOnly_nid_no_patch(ptr @__aps5_aot_readonly_ranges, i64 {len(image.immutable_regions)})')
         if descriptor is not None:

@@ -24,6 +24,7 @@ def configure(image):
     require(len(specs) == len(image.data), 'immutable data requires unique data segments')
     regions = [(address, address + specs[address]['size']) for address in selected]
     entries = [(slot, '@' + contract['name']) for slot, contract in image.import_slots.items()]
+    entries.extend((slot, '@' + binding['name']) for slot, binding in image.data_import_slots.items())
     entries.extend((slot, image.pointer(target)) for slot, target in image.relocations)
     initializers = {}
     for begin, end in regions:
@@ -66,10 +67,10 @@ def declaration(image, spec):
         cursor = slot + 8
     raw(cursor, end)
     typ, value = '<{ ' + ', '.join(types) + ' }>', '<{ ' + ', '.join(values) + ' }>'
-    return f'@data_{begin:x} = constant {typ} {value}, section "{image.target_spec["readonly_section"]}", align 16'
+    return f'@{image.namespace}data_{begin:x} = constant {typ} {value}, section "{image.target_spec["readonly_section"]}", align 16'
 
 
 def declarations(image):
-    values = ', '.join(f'{{ ptr, i64 }} {{ ptr @data_{begin:x}, i64 {end - begin} }}' for begin, end in image.immutable_regions)
+    values = ', '.join(f'{{ ptr, i64 }} {{ ptr @{image.namespace}data_{begin:x}, i64 {end - begin} }}' for begin, end in image.immutable_regions)
     return [f'@__aps5_aot_readonly_ranges = private constant [{len(image.immutable_regions)} x {{ ptr, i64 }}] [{values}], align 8',
             'declare void @NativeAotRequireReadOnly_nid_no_patch(ptr, i64)']

@@ -75,6 +75,18 @@ class DynamicTests(unittest.TestCase):
         self.assertEqual([row['kind'] for row in result['relocations']], [6, 6, 8, 7])
         self.assertEqual([row['plt'] for row in result['relocations']], [False, False, False, True])
 
+    def test_opt_in_sce_export_identity_tables(self):
+        fixture = Fixture(sce=True)
+        fixture.tags.extend([(0x61000047, 13 | (2 << 32) | (4 << 48)), (0x61000043, 17 | (3 << 32) | (5 << 48))])
+        elf = fixture.elf()
+        read = lambda address, size: bytes(fixture.raw[address - BASE:address - BASE + size])
+        result = parse_dynamic(elf, read, include_exports=True)
+        self.assertEqual(result['identities']['export_libraries'][4], {'name': 'foo', 'version': 2})
+        self.assertEqual(result['identities']['export_modules'][5], {'name': 'bar', 'version': 3})
+        fixture.tags.append((0x6100000d, 17 | (4 << 32) | (5 << 48)))
+        with self.assertRaisesRegex(DynamicError, 'duplicate'):
+            parse_dynamic(fixture.elf(), read, include_exports=True)
+
     def test_object_import_type_is_preserved(self):
         result = Fixture().parse()
         self.assertEqual(result['symbols'][1]['info'] & 15, 2)

@@ -29,7 +29,7 @@ def range_fits(offset, size, limit):
     return 0 <= offset <= limit and 0 <= size <= limit - offset
 
 
-def parse_dynamic(elf, read_mapped_address):
+def parse_dynamic(elf, read_mapped_address, include_exports=False):
     require(elf.elfclass == 64 and elf.little_endian and elf['e_machine'] == 'EM_X86_64',
             'dynamic parsing requires little-endian x86-64 ELF')
     stream = elf.stream
@@ -225,10 +225,13 @@ def parse_dynamic(elf, read_mapped_address):
     needed = [string(value) for tag, value in raw_tags if tag == 1]
     require(all(needed), 'empty needed module name')
     identities = {}
-    for label, identity_tag in (('libraries', 0x61000049), ('modules', 0x61000045)):
+    identity_tags = [('libraries', (0x61000049,)), ('modules', (0x61000045,))]
+    if include_exports:
+        identity_tags += [('export_libraries', (0x61000013, 0x61000047)), ('export_modules', (0x6100000d, 0x61000043))]
+    for label, selected_tags in identity_tags:
         records = {}
         for tag, value in raw_tags:
-            if tag != identity_tag:
+            if tag not in selected_tags:
                 continue
             index = value >> 48
             require(index not in records, f'duplicate imported {label} identity')
@@ -237,4 +240,4 @@ def parse_dynamic(elf, read_mapped_address):
             records[index] = {'name': name, 'version': (value >> 32) & 0xffff}
         identities[label] = records
     return {'tags': tags, 'raw_tags': raw_tags, 'symbols': symbols, 'relocations': relocations,
-            'needed': needed, 'identities': identities}
+            'needed': needed, 'identities': identities, 'soname': string(values[14]) if 14 in values else None}
