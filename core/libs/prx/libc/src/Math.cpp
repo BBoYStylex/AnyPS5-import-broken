@@ -36,7 +36,12 @@ std::lldiv_t APS5_VABI ldiv_nid_postfix(std::int64_t numerator, std::int64_t den
     return std::lldiv(numerator, denominator);
 }
 
-float APS5_VABI fmodf_nid_postfix(float x, float y) { return std::fmod(x, y); }
+float APS5_VABI fmodf_nid_postfix(float x, float y) {
+    int saved_errno = errno;
+    float result = std::fmod(x, y);
+    errno = saved_errno;
+    return result;
+}
 float APS5_VABI asinf_nid_postfix(float x) {
     const int saved_errno = errno;
     const float result = std::asin(x);

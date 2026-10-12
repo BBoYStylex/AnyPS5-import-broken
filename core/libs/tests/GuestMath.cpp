@@ -182,6 +182,9 @@ static void CheckFmodErrno() {
     (void)fmod_nid_postfix(1.0, 0.0);
     Require(errno == 0);
     Require(fmod_nid_postfix(1e300, 3.0) == std::fmod(1e300, 3.0));
+    (void)fmodf_nid_postfix(1.0f, 0.0f);
+    Require(errno == 0);
+    Require(fmodf_nid_postfix(1e30f, 3.0f) == std::fmod(1e30f, 3.0f));
 }
 
 static void CheckIntegerConversions() {
