@@ -1316,7 +1316,14 @@ void DepthStencilTests() {
     queue.context[0x3b8] = 0x0a000003;
     queue.context[0x31b] = 2u | (2u << 13u);
     const auto volume = AgcDriver::Graphics::DecodeState(queue);
-    Require(volume.color.address == sliced && volume.color.depth == 4u && volume.color.depthSlice == 2u, "a color view of one 3D depth slice did not keep the surface address and select the slice");
+    Require(volume.color.address == sliced && volume.color.depth == 4u && volume.color.depthSlice == 2u && volume.color.layerCount == 1u, "a color view of one 3D depth slice did not keep the surface address and select the slice");
+    queue.context[0x31b] = 1u | (3u << 13u);
+    const auto layered = AgcDriver::Graphics::DecodeState(queue);
+    Require(layered.color.depthSlice == 1u && layered.color.layerCount == 3u, "a color view of several 3D depth slices did not keep the slice range");
+    queue.context[0x31b] = 1u | (4u << 13u);
+    Require(AgcDriver::Graphics::DecodeState(queue).color.layerCount == 3u, "a color view past the last 3D depth slice was not clamped to the surface");
+    queue.context[0x31b] = 2u | (1u << 13u);
+    expectFailure([&] { AgcDriver::Graphics::DecodeState(queue); }, "last slice is before its first");
     queue.context[0x31b] = 4u | (4u << 13u);
     expectFailure([&] { AgcDriver::Graphics::DecodeState(queue); }, "beyond the 3D surface");
     queue.context[0x31b] = 0;
