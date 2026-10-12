@@ -11,6 +11,7 @@ int APS5_VABI sceAudioOut2Set3DLatency(int, std::uint32_t);
 int APS5_VABI sceAudioOut2MasteringInit(std::uint32_t);
 int APS5_VABI sceAudioOut2MasteringTerm();
 int APS5_VABI sceAudioOut2MasteringSetParam(const void*, std::uint32_t, std::uint32_t);
+int APS5_VABI sceAudioOut2MasteringGetState(void*, std::uint32_t, std::uint32_t);
 }
 
 static void Require(bool value, const char* message) {
@@ -60,6 +61,12 @@ void TestMasteringSetParam() {
     Require(ThrowsRuntimeError([] { sceAudioOut2MasteringSetParam(nullptr, 0, 0); }), "null mastering parameters must throw");
 }
 
+void TestMasteringGetState() {
+    std::uint32_t state[4] = {1u, 0u, 0u, 0u};
+    Require(sceAudioOut2MasteringGetState(state, 0, 0) == 0, "mastering state must be accepted");
+    Require(ThrowsRuntimeError([] { sceAudioOut2MasteringGetState(nullptr, 0, 0); }), "null mastering state must throw");
+}
+
 }
 
 int main() {
@@ -68,5 +75,6 @@ int main() {
     TestMasteringInit();
     TestMasteringTerm();
     TestMasteringSetParam();
+    TestMasteringGetState();
     return 0;
 }
