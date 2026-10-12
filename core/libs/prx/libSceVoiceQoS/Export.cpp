@@ -16,6 +16,13 @@ constexpr int SCE_VOICE_ERROR_LIBVOICEQOS_INITIALIZED = static_cast<int>(0x804E0
 std::mutex g_mutex;
 bool g_initialized = false;
 
+int checkInit(const char* func) {
+    std::lock_guard lock(g_mutex);
+    if (!g_initialized) return SCE_VOICE_ERROR_LIBVOICEQOS_NOT_INIT;
+    NotImplemented_nid_no_patch(func);
+    return 0;
+}
+
 }
 
 extern "C" {
@@ -36,58 +43,47 @@ int APS5_VABI sceVoiceQoSEnd() {
 }
 
 int APS5_VABI sceVoiceQoSCreateLocalEndpoint() {
- NotImplemented_nid_no_patch(__func__);
- return 0;
+    return checkInit(__func__);
 }
 
 int APS5_VABI sceVoiceQoSDeleteLocalEndpoint() {
- NotImplemented_nid_no_patch(__func__);
- return 0;
+    return checkInit(__func__);
 }
 
 int APS5_VABI sceVoiceQoSCreateRemoteEndpoint() {
- NotImplemented_nid_no_patch(__func__);
- return 0;
+    return checkInit(__func__);
 }
 
 int APS5_VABI sceVoiceQoSDeleteRemoteEndpoint() {
- NotImplemented_nid_no_patch(__func__);
- return 0;
+    return checkInit(__func__);
 }
 
 int APS5_VABI sceVoiceQoSConnect() {
- NotImplemented_nid_no_patch(__func__);
- return 0;
+    return checkInit(__func__);
 }
 
 int APS5_VABI sceVoiceQoSDisconnect() {
- NotImplemented_nid_no_patch(__func__);
- return 0;
+    return checkInit(__func__);
 }
 
 int APS5_VABI sceVoiceQoSSetLocalEndpointAttribute() {
- NotImplemented_nid_no_patch(__func__);
- return 0;
+    return checkInit(__func__);
 }
 
 int APS5_VABI sceVoiceQoSSetRemoteEndpointAttribute() {
- NotImplemented_nid_no_patch(__func__);
- return 0;
+    return checkInit(__func__);
 }
 
 int APS5_VABI sceVoiceQoSReadPacket() {
- NotImplemented_nid_no_patch(__func__);
- return 0;
+    return checkInit(__func__);
 }
 
 int APS5_VABI sceVoiceQoSWritePacket() {
- NotImplemented_nid_no_patch(__func__);
- return 0;
+    return checkInit(__func__);
 }
 
 int APS5_VABI sceVoiceQoSGetLocalEndpointAttribute() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return checkInit(__func__);
 }
 
 }
