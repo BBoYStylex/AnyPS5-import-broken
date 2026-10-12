@@ -139,12 +139,12 @@ class GuestProgramTests(unittest.TestCase):
         self.directory = Path(self.temporary.name)
         self.addCleanup(self.temporary.cleanup)
 
-    def program(self, source, imports=('exit',), data_imports=(), relative=(), strict=True, unwind=(), tls=None, concurrent=False):
+    def program(self, source, imports=('exit',), data_imports=(), relative=(), strict=True, unwind=(), tls=None, concurrent=False, abi="glibc", launcher=None):
         slots = ''.join(f'.p2align 3\n{name}_slot: .quad 0\n' for name in [*imports, *data_imports])
         code, labels = guest_lab.assemble_program(source + slots, self.directory)
         raw = guest_lab.program_image(code, labels, [(name, f'{name}_slot') for name in imports],
                                       [(name, f'{name}_slot') for name in data_imports], relative=relative, unwind=unwind, tls=tls)
-        return guest_lab.build_program(raw, self.directory, strict=strict, concurrent=concurrent)
+        return guest_lab.build_program(raw, self.directory, strict=strict, concurrent=concurrent, abi=abi, launcher=launcher)
 
     def run_binary(self, binary):
         return subprocess.run([str(binary)], capture_output=True, timeout=20)
@@ -264,6 +264,53 @@ counter: .quad 0
         result = self.run_binary(binary)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn(b'misaligned aligned vector access', result.stderr)
+
+    def test_sce_startup_argument_block_and_entry_stack(self):
+        launcher = """
+#include "native/NativeAotGuest.hpp"
+#include <cstdlib>
+extern "C" const NativeAotGuestImage __aps5_guest_image;
+void Exit(NativeAotGuestState& state) { std::_Exit(static_cast<int>(NativeAotGuest::Argument(state, 0))); }
+int main(int argc, char** argv) {
+    const NativeAotGuest::ProviderBinding bindings[] = {{"exit", Exit, nullptr}};
+    NativeAotGuest::RegisterProviders(bindings, 1);
+    NativeAotGuest::StartSceApplication(__aps5_guest_image, argc, argv);
+}
+"""
+        binary, _ = self.program("""
+.globl _start
+_start:
+    cmp qword ptr [rdi], 1
+    jne bad
+    cmp qword ptr [rdi + 16], 0
+    jne bad
+    mov rax, qword ptr [rdi + 8]
+    cmp byte ptr [rax], 0
+    je bad
+    test rsi, rsi
+    jnz bad
+    mov rax, rsp
+    and eax, 15
+    cmp eax, 8
+    jne bad
+    xor edi, edi
+    jmp done
+bad:
+    mov edi, 94
+done:
+""" + EXIT, abi='sce-app', launcher=launcher)
+        result = self.run_binary(binary)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_sce_image_rejects_glibc_launcher(self):
+        binary, _ = self.program(PRELUDE + 'xor edi, edi\n' + EXIT, abi='sce-app')
+        result = self.run_binary(binary)
+        self.assertEqual(result.returncode, 127)
+        self.assertIn(b'startup ABI does not match', result.stderr)
+
+    def test_unknown_startup_abi_rejects(self):
+        with self.assertRaisesRegex(guest_lift.LiftError, 'unknown guest startup ABI'):
+            self.program(PRELUDE + 'xor edi, edi\n' + EXIT, abi='unknown')
 
     def test_variadic_provider_reads_registers_and_stack(self):
         binary, _ = self.program(PRELUDE + '''

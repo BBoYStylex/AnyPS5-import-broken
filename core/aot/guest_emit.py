@@ -294,7 +294,7 @@ def describe_image(program, units):
     tls_fields = (tls['vaddr'], tls['filesz'], tls['memsz'], max(tls['align'], 1)) if tls else (0, 0, 0, 1)
     return {'blob': bytes(blob), 'segments': segments, 'symbols': symbols, 'flags': flags, 'relocations': relocations,
             'span': span, 'relro': (relro_address, relro_size), 'entry': view.entry,
-            'entries': sorted(units), 'tls': tls_fields, 'exports': exports}
+            'entries': sorted(units), 'tls': tls_fields, 'exports': exports, 'abi': program.abi}
 
 
 def string_constant(name, text):
@@ -329,11 +329,11 @@ def descriptor_module(image, concurrent=False):
         lines.append(string_constant(f'@__aps5_guest_export_{number}', name))
     lines.append(f'@__aps5_guest_exports = private constant [{max(len(exports), 1)} x {{ ptr, i64 }}] [' +
                  (', '.join(f'{{ ptr, i64 }} {{ ptr @__aps5_guest_export_{number}, i64 {address} }}' for number, (_, address) in enumerate(exports)) or '{ ptr, i64 } zeroinitializer') + ']')
-    fields = ['i64 2', 'ptr @__aps5_guest_bytes', f'i64 {len(blob)}', 'ptr @__aps5_guest_segments', f'i64 {len(image["segments"])}',
+    fields = ['i64 3', 'ptr @__aps5_guest_bytes', f'i64 {len(blob)}', 'ptr @__aps5_guest_segments', f'i64 {len(image["segments"])}',
               'ptr @__aps5_guest_relocations', f'i64 {len(image["relocations"])}', 'ptr @__aps5_guest_symbols',
               'ptr @__aps5_guest_symbol_flags', f'i64 {symbol_count}', 'ptr @__aps5_guest_entries', f'i64 {len(image["entries"])}',
               f'i64 {image["entry"]}', f'i64 {image["span"]}', f'i64 {image["relro"][0]}', f'i64 {image["relro"][1]}',
-              'ptr @__aps5_guest_base', *[f'i64 {value}' for value in image['tls']], 'ptr @__aps5_guest_exports', f'i64 {len(exports)}', f'i64 {int(concurrent)}']
+              'ptr @__aps5_guest_base', *[f'i64 {value}' for value in image['tls']], 'ptr @__aps5_guest_exports', f'i64 {len(exports)}', f'i64 {int(concurrent)}', f'i64 {int(image.get("abi", "glibc") == "sce-app")}']
     types = ', '.join(field.split(' ')[0] for field in fields)
     lines.append(f'@__aps5_guest_image = constant {{ {types} }} {{ {", ".join(fields)} }}')
     return '\n'.join(lines) + '\n'
@@ -352,8 +352,8 @@ def callees(unit, units):
 
 
 def lower_shard(arguments):
-    raw, starts, output, extra, trace, concurrent = arguments
-    program = guest_lift.Program(raw)
+    raw, starts, output, extra, trace, concurrent, abi = arguments
+    program = guest_lift.Program(raw, abi=abi)
     units, _, _ = guest_lift.discover(program, extra)
     texts, declarations, errors, called = [], set(), [], set()
     for start in starts:
@@ -368,10 +368,10 @@ def lower_shard(arguments):
     return errors
 
 
-def build(input_path, output_dir, shards=16, jobs=8, extra=(), strict=True, trace=False, concurrent=False):
+def build(input_path, output_dir, shards=16, jobs=8, extra=(), strict=True, trace=False, concurrent=False, abi="glibc"):
     started = time.monotonic()
     raw = Path(input_path).read_bytes()
-    program = guest_lift.Program(raw)
+    program = guest_lift.Program(raw, abi=abi)
     units, failures, obligations = guest_lift.discover(program, extra)
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
@@ -384,13 +384,14 @@ def build(input_path, output_dir, shards=16, jobs=8, extra=(), strict=True, trac
         smallest = sizes.index(min(sizes))
         buckets[smallest].append(start)
         sizes[smallest] += len(units[start].instructions)
-    work = [(raw, sorted(bucket), str(output / f'shard{number:02}.ll'), tuple(extra), trace, concurrent) for number, bucket in enumerate(buckets) if bucket]
+    work = [(raw, sorted(bucket), str(output / f'shard{number:02}.ll'), tuple(extra), trace, concurrent, abi) for number, bucket in enumerate(buckets) if bucket]
     if jobs == 1:
         errors = [error for item in work for error in lower_shard(item)]
     else:
         with ProcessPoolExecutor(jobs) as pool:
             errors = [error for result in pool.map(lower_shard, work) for error in result]
     report = {'schema': 'anyps5.aot.guest-lowering.v1', 'input_sha256': program.sha256, 'units': len(units),
+              'startup_abi': abi,
               'memory_profile': 'ordered-normal-memory' if concurrent else 'single-thread',
               'instructions': sum(len(unit.instructions) for unit in units.values()),
               'jump_tables': {status: sum(1 for unit in units.values() for table in unit.tables.values() if table['status'] == status)
@@ -411,8 +412,9 @@ def main():
     parser.add_argument('--inventory', action='store_true')
     parser.add_argument('--trace', action='store_true')
     parser.add_argument('--concurrent', action='store_true')
+    parser.add_argument('--abi', choices=('glibc', 'sce-app'), default='glibc')
     args = parser.parse_args()
-    report = build(args.input, args.output, args.shards, strict=not args.inventory, trace=args.trace, concurrent=args.concurrent)
+    report = build(args.input, args.output, args.shards, strict=not args.inventory, trace=args.trace, concurrent=args.concurrent, abi=args.abi)
     print(json.dumps({key: report[key] for key in ('units', 'instructions', 'jump_tables', 'seconds')}))
     print(f'{len(report["unsupported"])} unsupported instruction sites')
 

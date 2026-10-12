@@ -18,6 +18,7 @@ add_library(libkernel SHARED EXCLUDE_FROM_ALL
         ${CMAKE_CURRENT_SOURCE_DIR}/SyncOnAddress/src/SyncOnAddress.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/DirectMemory/Export.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/DirectMemory/DirectMemory.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/DirectMemory/Jit.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/DirectMemory/PosixMemory.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/DirectMemory/MemoryPool.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/DirectMemory/MemoryPoolExport.cpp
@@ -627,6 +628,15 @@ if(BUILD_TESTING)
         set_tests_properties(guest_sigtimedwait PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libkernel>")
     endif()
+    add_test_executable(guest_itimer_tests ${LIBS_INCLUDE_DIR}/tests/GuestItimer.cpp)
+    target_include_directories(guest_itimer_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_itimer_tests PRIVATE libkernel libc)
+    configure_windows_unwind(guest_itimer_tests)
+    add_test(NAME guest_itimer COMMAND guest_itimer_tests)
+    if(WIN32)
+        set_tests_properties(guest_itimer PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libkernel>")
+    endif()
     add_test_executable(guest_parent_process_tests ${LIBS_INCLUDE_DIR}/tests/GuestParentProcess.cpp)
     target_include_directories(guest_parent_process_tests PRIVATE ${LIBS_INCLUDE_DIR})
     target_link_libraries(guest_parent_process_tests PRIVATE libkernel libc)
@@ -911,6 +921,15 @@ if(BUILD_TESTING)
         set_tests_properties(guest_shm_open PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libkernel>")
     endif()
+    add_test_executable(guest_jit_shared_memory_tests ${LIBS_INCLUDE_DIR}/tests/GuestJitSharedMemory.cpp)
+    target_include_directories(guest_jit_shared_memory_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_jit_shared_memory_tests PRIVATE libkernel libc)
+    configure_windows_unwind(guest_jit_shared_memory_tests)
+    add_test(NAME guest_jit_shared_memory COMMAND guest_jit_shared_memory_tests)
+    if(WIN32)
+        set_tests_properties(guest_jit_shared_memory PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libkernel>")
+    endif()
     add_test_executable(guest_system_configuration_tests ${LIBS_INCLUDE_DIR}/tests/GuestSystemConfiguration.cpp)
     target_include_directories(guest_system_configuration_tests PRIVATE ${LIBS_INCLUDE_DIR})
     target_link_libraries(guest_system_configuration_tests PRIVATE libkernel libc)
@@ -1180,6 +1199,16 @@ if(BUILD_TESTING)
     set_tests_properties(guest_pthread_rename PROPERTIES TIMEOUT 20)
     if(WIN32)
         set_tests_properties(guest_pthread_rename PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libkernel>")
+    endif()
+    add_test_executable(guest_coredump_attach_tests ${LIBS_INCLUDE_DIR}/tests/GuestCoredumpAttach.cpp)
+    target_include_directories(guest_coredump_attach_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_coredump_attach_tests PRIVATE libkernel libc)
+    configure_windows_unwind(guest_coredump_attach_tests)
+    add_test(NAME guest_coredump_attach COMMAND guest_coredump_attach_tests)
+    set_tests_properties(guest_coredump_attach PROPERTIES TIMEOUT 20)
+    if(WIN32)
+        set_tests_properties(guest_coredump_attach PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libkernel>")
     endif()
 endif()

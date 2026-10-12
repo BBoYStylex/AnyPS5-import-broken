@@ -32,7 +32,7 @@ def require(condition, message):
 
 
 class Program:
-    def __init__(self, raw):
+    def __init__(self, raw, abi="glibc"):
         self.raw = bytes(raw)
         self.sha256 = hashlib.sha256(self.raw).hexdigest()
         try:
@@ -41,7 +41,10 @@ class Program:
             self.dynamic = dynamic.parse_dynamic(ELFFile(io.BytesIO(self.raw)), self.view.read)
         except (UnwindError, dynamic.DynamicError) as error:
             raise LiftError(str(error)) from error
-        require(self.view.type == 3, 'guest-state lowering requires a position-independent image')
+        require(abi in ('glibc', 'sce-app'), 'unknown guest startup ABI')
+        self.abi = abi
+        allowed = (3,) if abi == 'glibc' else (3, 0xfe10)
+        require(self.view.type in allowed, f'{abi} lowering requires a compatible position-independent image')
         self.decoder = Cs(CS_ARCH_X86, CS_MODE_64)
         self.decoder.detail = True
         self.decoded = {}
