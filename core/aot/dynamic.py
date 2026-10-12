@@ -224,4 +224,17 @@ def parse_dynamic(elf, read_mapped_address):
             tags[TAG_NAMES[standard]] = values[sce]
     needed = [string(value) for tag, value in raw_tags if tag == 1]
     require(all(needed), 'empty needed module name')
-    return {'tags': tags, 'raw_tags': raw_tags, 'symbols': symbols, 'relocations': relocations, 'needed': needed}
+    identities = {}
+    for label, identity_tag in (('libraries', 0x61000049), ('modules', 0x61000045)):
+        records = {}
+        for tag, value in raw_tags:
+            if tag != identity_tag:
+                continue
+            index = value >> 48
+            require(index not in records, f'duplicate imported {label} identity')
+            name = string(value & 0xffffffff)
+            require(bool(name), f'empty imported {label} name')
+            records[index] = {'name': name, 'version': (value >> 32) & 0xffff}
+        identities[label] = records
+    return {'tags': tags, 'raw_tags': raw_tags, 'symbols': symbols, 'relocations': relocations,
+            'needed': needed, 'identities': identities}
