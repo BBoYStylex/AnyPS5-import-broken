@@ -18,6 +18,7 @@ std::size_t APS5_VABI fwrite_nid_postfix(const void* buffer, std::size_t size, s
 int APS5_VABI fseek_nid_postfix(FileStream* stream, std::int64_t offset, int origin);
 std::int64_t APS5_VABI ftell_nid_postfix(FileStream* stream);
 int APS5_VABI fputs_nid_postfix(const char* str, FileStream* stream);
+int APS5_VABI puts_nid_postfix(const char* s);
 int APS5_VABI fflush_nid_postfix(FileStream* stream);
 int APS5_VABI remove_nid_postfix(const char* path);
 int APS5_VABI rename_nid_postfix(const char* from, const char* to);
@@ -45,6 +46,8 @@ int main(int argc, char** argv) {
     Require(_Stderr_nid_postfix.GetHandle() == stderr);
     Require(fputs_nid_postfix("stdout object works\n", &_Stdout_nid_postfix) >= 0);
     Require(fputs_nid_postfix("stderr object works\n", &_Stderr_nid_postfix) >= 0);
+    Require(puts_nid_postfix("puts works") == '\n');
+    Require(puts_nid_postfix("") == '\n');
     Require(fflush_nid_postfix(nullptr) == 0);
     auto* stream = fopen_nid_postfix(argv[1], "w+b");
     constexpr char payload[] = "stream round trip";

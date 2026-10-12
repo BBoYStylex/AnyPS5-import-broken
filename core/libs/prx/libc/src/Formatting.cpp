@@ -541,7 +541,7 @@ int APS5_VABI printf_s_nid_postfix(const char* format, ...) {
 #endif
 
 int APS5_VABI puts_nid_postfix(const char* s) {
-    return std::puts(s);
+    return std::puts(s) == EOF ? EOF : '\n';
 }
 
 }
