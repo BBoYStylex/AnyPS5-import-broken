@@ -31,6 +31,7 @@ jobs:
           marker='<!-- pr-overlap -->'
           for file in "$out"/*.md; do
             pr=$(basename "$file" .md)
+            [ -f "$file" ] || continue
             comment=$(gh api "repos/$GH_REPO/issues/$pr/comments" --paginate \
               --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$marker\"))) | [.id, .body] | @json" | head -n1)
             id=$(jq -r '.[0] // empty' <<< "${comment:-null}")

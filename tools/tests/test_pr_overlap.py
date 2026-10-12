@@ -1,4 +1,9 @@
 import json
+import os
+import shutil
+import subprocess
+import tempfile
+import textwrap
 import sys
 import unittest
 from pathlib import Path
@@ -68,6 +73,49 @@ class FetchTests(unittest.TestCase):
             "fetch", "--no-tags", "-q", "https://github.com/owner/project.git",
             "+refs/heads/main:refs/pr/base", f"+{'a' * 40}:refs/pr/7", f"+{'b' * 40}:refs/pr/9",
         )
+
+
+class OverlapWorkflowTests(unittest.TestCase):
+    def run_reports(self, reports):
+        bash = shutil.which("bash")
+        if bash is None and os.name == "nt":
+            candidate = Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "Git/bin/bash.exe"
+            if candidate.is_file():
+                bash = str(candidate)
+        if bash is None:
+            self.skipTest("Bash is required to exercise the workflow")
+        workflow = Path(__file__).resolve().parents[2] / ".github/workflows/pr-overlap.yml"
+        text = workflow.read_text(encoding="utf-8")
+        start = text.index("          marker=")
+        script = textwrap.dedent(text[start:])
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "reports").mkdir()
+            for name, content in reports.items():
+                (root / "reports" / name).write_text(content, encoding="utf-8")
+            setup = """set -euo pipefail
+out=reports
+GH_REPO=owner/project
+gh() { printf '%s\n' "$*" >> calls; }
+jq() { printf ''; }
+"""
+            (root / "run.sh").write_text(setup + script, encoding="utf-8", newline="\n")
+            result = subprocess.run([bash, "run.sh"], cwd=root, capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            calls = root / "calls"
+            return calls.read_text(encoding="utf-8").splitlines() if calls.exists() else []
+
+    def test_empty_report_directory_makes_no_github_requests(self):
+        self.assertEqual(self.run_reports({}), [])
+
+    def test_non_markdown_files_do_not_become_pull_request_numbers(self):
+        self.assertEqual(self.run_reports({"metadata.json": "{}"}), [])
+
+    def test_real_report_still_reads_and_creates_its_comment(self):
+        calls = self.run_reports({"42.md": "overlap report\n"})
+        self.assertEqual(len(calls), 2)
+        self.assertIn("repos/owner/project/issues/42/comments", calls[0])
+        self.assertEqual(calls[1], "pr comment 42 --body-file reports/42.md")
 
 
 if __name__ == "__main__":
