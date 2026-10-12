@@ -25,6 +25,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <chrono>
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
@@ -4527,6 +4528,57 @@ void parallelCompareTests() {
     CompareSpansFrom({}, none, 0);
 }
 
+void resourceMetadataTests(bool benchmark) {
+    using namespace AgcDriver::Graphics;
+    mock = MockVulkan{};
+    {
+        auto context = mockContext();
+        context.limits.maxPerStageDescriptorStorageBuffers = 64;
+        context.limits.maxDescriptorSetStorageBuffers = 64;
+        context.limits.maxMemoryAllocationCount = 4096;
+        const auto buffers = GetBufferPool(context);
+        DescriptorCache descriptors(context);
+        context.descriptorCache = &descriptors;
+        std::uint64_t checksum = 0;
+        for (const unsigned count : {0u, 1u, 8u, 32u}) {
+            ShaderRecompiler::RecompileResult program;
+            for (unsigned i = 0; i < count; ++i) program.bindings.push_back(makeBinding(Role::FlattenedSrt, i, 1, std::vector<std::uint32_t>(64, i + 1)));
+            const CompiledShader shader{ShaderRecompiler::ShaderStage::Compute, &program, 0};
+            {
+                ShaderResources abandoned(context, shader, {}, true);
+                Require(!abandoned.Completed(), "deferred metadata build completed early");
+            }
+            {
+                mock.writes.clear();
+                auto resources = std::make_shared<ShaderResources>(context, shader, std::span<const GuestMemorySnapshot>{}, true);
+                const auto retained = resources;
+                resources.reset();
+                retained->Complete();
+                Require(retained->Completed() && retained->LayoutBindings().size() == count, "retained metadata build lost its bindings");
+                for (unsigned i = 0; i < count; ++i) {
+                    const auto& descriptor = findWrite(i).buffers.at(0);
+                    const auto& words = program.bindings[i].guestDescriptor;
+                    Require(descriptor.range == words.size() * sizeof(std::uint32_t) && sameBytes(mockBufferMemory(descriptor.buffer).subspan(descriptor.offset), words.data(), descriptor.range), "retained metadata build lost its data");
+                }
+            }
+            if (!benchmark) continue;
+            std::vector<double> samples;
+            for (unsigned pass = 0; pass < 10; ++pass) {
+                const auto start = std::chrono::steady_clock::now();
+                for (unsigned call = 0; call < 512; ++call) {
+                    mock.writes.clear();
+                    ShaderResources resources(context, shader);
+                    checksum += resources.DataWordsHash();
+                }
+                if (pass != 0) samples.push_back(std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - start).count() / 512);
+            }
+            std::sort(samples.begin(), samples.end());
+            std::cout << "Resource metadata " << count << " bindings: " << samples[4] << " us/build+destroy, checksum " << checksum << '\n';
+        }
+    }
+    Require(mock.live == 0, "metadata or deferred resource destruction leaked Vulkan objects");
+}
+
 int main(int argc, char** argv) {
 #ifdef _WIN32
     _putenv_s("APS5_PIN_WAIT_MS", "200");
@@ -4536,6 +4588,10 @@ int main(int argc, char** argv) {
     setenv("APS5_HEAP_MIRROR_MIB", "4", 1);
 #endif
     try {
+        if (argc == 2 && (std::string_view(argv[1]) == "--metadata-lifetime" || std::string_view(argv[1]) == "--benchmark-resource-metadata")) {
+            resourceMetadataTests(std::string_view(argv[1]) == "--benchmark-resource-metadata");
+            return 0;
+        }
         if (argc == 2 && std::string_view(argv[1]) == "--descriptor-layout-flags") {
             descriptorLayoutFlagTests();
             std::cout << "Descriptor layout native and captured binding flags passed\n";
@@ -4576,6 +4632,7 @@ int main(int argc, char** argv) {
             unrestricted.depthRangeUnrestricted = true;
             AgcDriver::Graphics::ValidateDepthBounds(unrestricted, bounded);
         }
+        resourceMetadataTests(false);
         RunGuestLeaseWaitTests();
         stateTests();
         hdrComponentSwapTests();
