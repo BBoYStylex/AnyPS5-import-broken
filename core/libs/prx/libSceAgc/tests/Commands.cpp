@@ -38,6 +38,8 @@ extern "C" std::uint32_t* APS5_VABI sceAgcDcbSetBaseIndirectArgs(CommandBuffer* 
 extern "C" std::uint32_t* APS5_VABI sceAgcSetNop(CommandBuffer* buf, std::uint32_t sizeDw);
 extern "C" int APS5_VABI sceAgcDebugRaiseException(std::uint32_t exceptionId);
 extern "C" std::uint32_t* APS5_VABI sceAgcAcbAtomicGds_0900(CommandBuffer* buf, std::uint32_t control, std::uint32_t mode, std::uint32_t gdsOp, std::uint32_t src, std::uint16_t offset, std::uint16_t index, std::uint32_t mask, std::uint32_t data, std::uint64_t compareData, std::uint64_t extraData);
+extern "C" std::uint32_t* APS5_VABI sceAgcDcbSetIndexIndirectArgs(CommandBuffer* buf, std::uint64_t attributeBase, std::uint32_t attributeIndex);
+extern "C" std::uint32_t APS5_VABI sceAgcDcbSetIndexIndirectArgsGetSize();
 
 namespace {
 
@@ -500,6 +502,39 @@ void testAtomicGds() {
     }
 }
 
+void testIndexIndirectArgs() {
+    check(sceAgcDcbSetIndexIndirectArgsGetSize() == 16, "index indirect arguments size mismatch");
+    struct Case {
+        std::uint64_t attributeBase;
+        std::uint32_t attributeIndex;
+        std::array<std::uint32_t, 4> expected;
+    };
+    const std::array<Case, 3> cases{{
+        {0x11111111u, 0x22222222u, {0xc0029100u, 0x11111110u, 0, 0x2222u}},
+        {1, 2, {0xc0029100u, 0, 0, 2}},
+        {0x1111111122222222ull, 0x44444444u, {0xc0029100u, 0x22222220u, 0x11111111u, 0x4444u}}}};
+    for (const auto& entry : cases) {
+        Storage storage;
+        storage.words.fill(0xdeadbeefu);
+        storage.buffer.cursor_up += 2;
+        auto* packet = sceAgcDcbSetIndexIndirectArgs(&storage.buffer, entry.attributeBase, entry.attributeIndex);
+        check(packet == storage.words.data() + 2, "index indirect arguments returned the wrong packet address");
+        check(std::equal(entry.expected.begin(), entry.expected.end(), packet), "index indirect arguments packet mismatch");
+        check(storage.buffer.cursor_up == packet + 4, "index indirect arguments did not advance by four words");
+        check(storage.words[0] == 0xdeadbeefu && storage.words[1] == 0xdeadbeefu &&
+            std::all_of(storage.words.begin() + 6, storage.words.end(), [](auto word) { return word == 0xdeadbeefu; }),
+            "index indirect arguments wrote outside its packet");
+    }
+
+    Storage exhausted;
+    exhausted.buffer.cursor_down = exhausted.words.data() + 3;
+    const auto before = exhausted.words;
+    expectFailure([&] { sceAgcDcbSetIndexIndirectArgs(&exhausted.buffer, 0x1000, 0); });
+    check(exhausted.words == before && exhausted.buffer.cursor_up == exhausted.words.data(),
+        "failed index indirect arguments allocation modified the buffer");
+    expectFailure([] { sceAgcDcbSetIndexIndirectArgs(nullptr, 0x1000, 0); });
+}
+
 void testDebugRaiseException() {
     int result = -1;
     try {
@@ -556,6 +591,7 @@ int main(int argc, char** argv) {
         testPacketPayloadAddress();
         testMemory();
         testAtomicGds();
+        testIndexIndirectArgs();
         testDebugRaiseException();
         testDefaults();
         LibcRunShutdown_nid_postfix();
