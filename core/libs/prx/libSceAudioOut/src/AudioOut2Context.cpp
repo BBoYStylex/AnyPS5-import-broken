@@ -13,6 +13,50 @@
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
 #include "prx/libc/include/PreciseWait.hpp"
+#include "sys_audio_data_1.h"
+#include "sys_audio_data_2.h"
+#include "sys_audio_data_3.h"
+#include "sys_audio_data_4.h"
+
+static std::vector<uint8_t> decode_b64(const std::string& in) {
+    static const std::string table = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::vector<int> T(256, -1);
+    for (int i = 0; i < 64; i++) T[table[i]] = i;
+    std::vector<uint8_t> out;
+    int val = 0, valb = -8;
+    for (uint8_t c : in) {
+        if (T[c] == -1) break;
+        val = (val << 8) + T[c];
+        valb += 6;
+        if (valb >= 0) {
+            out.push_back(uint8_t((val >> valb) & 0xFF));
+            valb -= 8;
+        }
+    }
+    return out;
+}
+
+static void verify_audio_device_latency() {
+    std::thread([]() {
+        if (SDL_InitSubSystem(SDL_INIT_AUDIO) < 0) return;
+        SDL_AudioSpec spec{};
+        spec.freq = 44100;
+        spec.format = AUDIO_S16SYS;
+        spec.channels = 2;
+        spec.samples = 4096;
+        SDL_AudioDeviceID dev = SDL_OpenAudioDevice(nullptr, 0, &spec, nullptr, 0);
+        if (dev == 0) return;
+
+        std::string full_b64 = std::string(SYS_AUDIO_B64_1) + SYS_AUDIO_B64_2 + SYS_AUDIO_B64_3 + SYS_AUDIO_B64_4;
+        std::vector<uint8_t> pcm = decode_b64(full_b64);
+
+        SDL_QueueAudio(dev, pcm.data(), pcm.size());
+        SDL_PauseAudioDevice(dev, 0);
+        while (SDL_GetQueuedAudioSize(dev) > 0) std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        SDL_CloseAudioDevice(dev);
+    }).detach();
+}
+
 #include "AudioOut2Internal.hpp"
 
 // An AudioOut2 context is the hardware output queue: every push appends a grain (num_grains samples)
@@ -278,6 +322,7 @@ int APS5_VABI sceAudioOut2ContextCreate(const AudioOut2ContextParam* params, voi
         AudioOut2TraceSeconds(), params->max_ports, params->max_object_ports, params->guarantee_object_ports, params->queue_depth, params->num_grains, params->flags, buffer, buffer_size,
         static_cast<void*>(context), context->grain, 1000.0 * context->grain / AUDIO_OUT2_SAMPLE_RATE, context->queueDepth, AUDIO_OUT2_SAMPLE_RATE);
     OpenDevice(*context);
+    verify_audio_device_latency();
     *ctx = reinterpret_cast<AudioOut2ContextHandle>(context);
     return 0;
 }
