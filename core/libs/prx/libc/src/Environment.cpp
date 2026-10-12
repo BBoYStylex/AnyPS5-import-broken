@@ -1,4 +1,5 @@
 #include <cstdlib>
+#include <functional>
 #include <cerrno>
 #include <cstring>
 #include <algorithm>
@@ -15,7 +16,7 @@ extern char** environ;
 
 namespace {
 struct EnvironmentEntry {
-    std::unique_ptr<std::string> owned;
+    std::shared_ptr<std::string> owned;
     char* borrowed = nullptr;
     char* Data() { return borrowed ? borrowed : owned->data(); }
     bool Matches(std::string_view name) {
@@ -36,7 +37,7 @@ std::vector<EnvironmentEntry>& Environment() {
 #endif
         if (source) for (; *source; ++source) {
             if (**source && **source != '=' && std::strchr(*source, '='))
-                result.push_back({std::make_unique<std::string>(*source), nullptr});
+                result.push_back({std::make_shared<std::string>(*source), nullptr});
         }
         return result;
     }();
@@ -67,7 +68,7 @@ int APS5_VABI setenv_nid_postfix(const char* name, const char* value, int overwr
         auto found = std::find_if(entries.begin(), entries.end(),
             [name](auto& entry) { return entry.Matches(name); });
         if (found != entries.end() && !overwrite) return 0;
-        EnvironmentEntry replacement{std::make_unique<std::string>(std::string(name) + '=' + value), nullptr};
+        EnvironmentEntry replacement{std::make_shared<std::string>(std::string(name) + '=' + value), nullptr};
         if (found != entries.end()) *found = std::move(replacement);
         else entries.push_back(std::move(replacement));
         return 0;
@@ -94,7 +95,16 @@ int APS5_VABI putenv_nid_postfix(char* text) {
         const std::string_view name(text, separator - text);
         auto found = std::find_if(entries.begin(), entries.end(),
             [name](auto& entry) { return entry.Matches(name); });
-        EnvironmentEntry replacement{nullptr, text};
+        std::shared_ptr<std::string> owner;
+        const std::less<const char*> before;
+        for (const auto& entry : entries) {
+            if (entry.owned && !before(text, entry.owned->data()) &&
+                before(text, entry.owned->data() + entry.owned->size())) {
+                owner = entry.owned;
+                break;
+            }
+        }
+        EnvironmentEntry replacement{std::move(owner), text};
         if (found != entries.end()) *found = std::move(replacement);
         else entries.push_back(std::move(replacement));
         return 0;
