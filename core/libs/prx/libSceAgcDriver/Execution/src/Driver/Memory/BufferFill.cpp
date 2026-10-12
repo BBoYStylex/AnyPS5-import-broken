@@ -6,6 +6,7 @@
 #include "prx/libSceAgcDriver/Execution/include/GuestMemory.hpp"
 #include <algorithm>
 #include "prx/libSceAgcDriver/Graphics/include/DepthSurface.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/MultisampleTarget.hpp"
 #include <bit>
 #include <cstdlib>
 #include <optional>
@@ -48,8 +49,9 @@ std::optional<DwordPatternFill> MatchDwordPatternFill(std::span<const std::uint3
     const bool swizzled = ((userData[1] >> 31u) & 1u) != 0;
     const bool addTid = ((userData[3] >> 23u) & 1u) != 0;
     const auto type = userData[3] >> 30u;
+    const auto format = (userData[3] >> 12u) & 0x7fu;
     const auto period = userData[9];
-    if (type != 0 || stride != 4 || swizzled || addTid || (period != 1u && period != 2u && period != 4u) || (packet[4] & 0x20u) != 0 || packet[2] != 1 || packet[3] != 1) return std::nullopt;
+    if (type != 0 || stride != 4 || swizzled || addTid || format < 20u || format > 22u || (period != 1u && period != 2u && period != 4u) || (packet[4] & 0x20u) != 0 || packet[2] != 1 || packet[3] != 1) return std::nullopt;
     const auto dwords = std::min<std::uint64_t>({static_cast<std::uint64_t>(packet[1]) * 64u, userData[8], userData[2]});
     const auto base = userData[0] | (static_cast<std::uint64_t>(userData[1] & 0xffffu) << 32u);
     if (dwords == 0 || dwords % 4u != 0 || base % 16u != 0) return std::nullopt;
@@ -265,7 +267,10 @@ bool Driver::fillBuffer(QueueState& queue, std::uint32_t queueId, std::span<cons
             for (std::size_t done = 0; done < bytes; done += chunk) GuestMemory::Write(base + done, std::span<const std::byte>(block).first(std::min(chunk, bytes - done)), 16);
             phase(FillCpu);
         }
-        if (pattern[0] == pattern[1] && pattern[1] == pattern[2] && pattern[2] == pattern[3]) Graphics::NoteDepthMetadataFill(base, bytes, pattern[0]);
+        if (pattern[0] == pattern[1] && pattern[1] == pattern[2] && pattern[2] == pattern[3]) {
+            Graphics::NoteDepthMetadataFill(base, bytes, pattern[0]);
+            Graphics::NoteColorMetadataFill(base, bytes, pattern[0]);
+        }
         if (profile) {
             const auto now = std::chrono::steady_clock::now();
             const auto cover = static_cast<std::size_t>(coverage.cover);
