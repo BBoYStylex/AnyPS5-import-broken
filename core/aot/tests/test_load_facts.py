@@ -136,6 +136,14 @@ class UnwindIndexTests(unittest.TestCase):
         self.assertEqual(result['fdes'], [])
         self.assertEqual([item['kind'] for item in result['obligations']], ['unwind-index-missing'])
 
+    def test_unloaded_index_is_an_obligation(self):
+        image = Image([(0x1000, 0x10)])
+        image.segments[2] = (0x6474e550, 4, 0x3f00, 0, 4, 4)
+        image.write_headers()
+        result = unwind(image.bytes())
+        self.assertEqual(result['fdes'], [])
+        self.assertEqual([item['kind'] for item in result['obligations']], ['unwind-index-not-loaded'])
+
     def test_truncated_header_rejected(self):
         image = Image([(0x1000, 0x10)])
         image.segments[2] = (0x6474e550, 4, HDR, HDR, 3, 3)
@@ -362,6 +370,16 @@ class RecoverIntegrationTests(unittest.TestCase):
         recovered = recover_image(path)
         self.assertEqual(recovered['functions'], [])
         self.assertEqual([u['detail'] for u in recovered['unknowns']], ['indirect personality slot has no relocation binding'])
+
+    def test_unloaded_index_does_not_reject_recovery(self):
+        image = Image([(0x1000, 0x10)])
+        image.segments[2] = (0x6474e550, 4, 0x3f00, 0, 4, 4)
+        image.write_headers()
+        path = self.directory / 'placeholder.elf'
+        path.write_bytes(image.bytes())
+        recovered = recover_image(path)
+        self.assertEqual(recovered['functions'], [])
+        self.assertEqual([u['obligation'] for u in recovered['unknowns']], ['unwind-index-not-loaded'])
 
     def test_sectionless_without_unwind_index_reports_obligation(self):
         image = Image([(0x1000, 0x10)])
