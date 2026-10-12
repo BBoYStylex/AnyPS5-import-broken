@@ -19,6 +19,7 @@ int APS5_VABI sceAudioInAsyncOpen(int, std::uint32_t, std::uint32_t, std::uint32
 int APS5_VABI sceAudioInInput(int, void*);
 int APS5_VABI sceAudioInGetSilentState(int);
 int APS5_VABI sceAudioInClose(int);
+int APS5_VABI sceAudioInIsPadEmbeddedMic(int);
 }
 
 static void Require(bool value) { if (!value) std::abort(); }
@@ -114,6 +115,9 @@ void TestNoDevice() {
     Require(handle > 0 && sceAudioInGetSilentState(handle) == 1);
     Require(sceAudioInGetSilentState(handle + 1) == invalidHandle);
     Require(sceAudioInInput(handle + 1, nullptr) == invalidHandle);
+    Require(sceAudioInIsPadEmbeddedMic(0) == invalidHandle);
+    Require(sceAudioInIsPadEmbeddedMic(handle + 1) == invalidHandle);
+    Require(ReportsNotImplemented("sceAudioInIsPadEmbeddedMic", [handle] { sceAudioInIsPadEmbeddedMic(handle); }));
     std::vector<std::uint8_t> buffer(256 * 8 + 1, 0xCC);
     const auto start = std::chrono::steady_clock::now();
     for (int block = 0; block < 5; ++block) Require(sceAudioInInput(handle, buffer.data()) == 256);
@@ -148,6 +152,7 @@ void TestNoDevice() {
     Require(sceAudioInHqOpen(user, 1, 0, 128, 48000, 0x12) == async);
     Require(sceAudioInClose(handle) == 0);
     Require(sceAudioInClose(handle) == invalidHandle);
+    Require(sceAudioInIsPadEmbeddedMic(handle) == invalidHandle);
     Require(sceAudioInInput(handle, buffer.data()) == invalidHandle);
     Require(sceAudioInOpen(user, 1, 0, 128, 48000, 0x11) == handle);
 }
