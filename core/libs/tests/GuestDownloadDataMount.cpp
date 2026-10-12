@@ -10,6 +10,7 @@ static void Require(bool value) { if (!value) std::abort(); }
 int main(int argc, char** argv) {
     Require(argc == 2);
     const std::string_view mode = argv[1];
+    Require(std::filesystem::is_directory("data"));
     Require(std::filesystem::is_directory("download0") == (mode == "declared"));
     if (mode == "invalid") {
         bool rejected = false;
@@ -22,5 +23,6 @@ int main(int argc, char** argv) {
         return 0;
     }
     Require(std::strcmp(GetAppTitleId_nid_postfix().value, "PPSA00000") == 0);
+    std::filesystem::remove_all("data");
     std::filesystem::remove_all("download0");
 }

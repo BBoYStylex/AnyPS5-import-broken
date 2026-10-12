@@ -47,6 +47,7 @@ void ensureTitleLoaded() {
 const bool g_downloadDataMounted = [] {
     try {
         const auto run = std::filesystem::current_path();
+        std::filesystem::create_directories(run / "data");
         const auto paramJson = run / "app0" / "sce_sys" / "param.json";
         if (!std::filesystem::exists(paramJson) || parseParamJson(paramJson).downloadDataSizeMiB == 0) return false;
         std::filesystem::create_directories(run / "download0");
