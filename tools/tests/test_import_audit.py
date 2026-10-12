@@ -2,6 +2,8 @@ import contextlib
 import io
 import json
 import struct
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -20,7 +22,7 @@ MESSAGE_NID = "wTpfglkmv34"
 MESSAGE_NAME = "sceMsgDialogProgressBarSetValue"
 
 
-def build_elf(symbols):
+def build_elf(symbols, needed=()):
     strings = b"\0"
     entries = [struct.pack("<IBBHQQ", 0, 0, 0, 0, 0, 0)]
     for name, index, info in symbols:
@@ -29,19 +31,77 @@ def build_elf(symbols):
     table = b"".join(entries)
     table_offset = 64 + len(strings)
     table_offset += -table_offset % 8
-    sections_offset = table_offset + len(table)
+    dynamic_offset = table_offset + len(table)
+    dynamic_offset += -dynamic_offset % 8
+    dynamic = b""
+    if needed:
+        for library in needed:
+            dynamic += struct.pack("<qQ", 1, len(strings))
+            strings += library.encode() + b"\0"
+        dynamic += bytes(16)
+        table_offset = 64 + len(strings)
+        table_offset += -table_offset % 8
+        dynamic_offset = table_offset + len(table)
+        dynamic_offset += -dynamic_offset % 8
+    sections_offset = dynamic_offset + len(dynamic)
     sections_offset += -sections_offset % 8
-    image = bytearray(sections_offset + 3 * 64)
+    count = 4 if dynamic else 3
+    image = bytearray(sections_offset + count * 64)
     image[64:64 + len(strings)] = strings
     image[table_offset:table_offset + len(table)] = table
+    if dynamic:
+        image[dynamic_offset:dynamic_offset + len(dynamic)] = dynamic
+        image[sections_offset + 192:sections_offset + 256] = struct.pack("<IIQQQQIIQQ", 0, 6, 2, 0, dynamic_offset, len(dynamic), 2, 0, 8, 16)
     image[sections_offset + 64:sections_offset + 128] = struct.pack("<IIQQQQIIQQ", 0, 11, 2, 0, table_offset, len(table), 2, 1, 8, 24)
     image[sections_offset + 128:sections_offset + 192] = struct.pack("<IIQQQQIIQQ", 0, 3, 2, 0, 64, len(strings), 0, 0, 1, 0)
-    image[:64] = struct.pack("<16sHHIQQQIHHHHHH", b"\x7fELF\x02\x01\x01" + bytes(9), 3, 0x3e, 1, 0, 0, sections_offset, 0, 64, 0, 0, 64, 3, 0)
+    image[:64] = struct.pack("<16sHHIQQQIHHHHHH", b"\x7fELF\x02\x01\x01" + bytes(9), 3, 0x3e, 1, 0, 0, sections_offset, 0, 64, 0, 0, 64, count, 0)
     return bytes(image)
 
 
 def exporting(*names):
     return build_elf([(name, 1, GLOBAL_FUNCTION) for name in names])
+
+
+def build_segment_module(symbols, needed=(), mode="sce", hash_style="sysv"):
+    strings = b"\0"
+    table = bytes(24)
+    for name, index, info in symbols:
+        table += struct.pack("<IBBHQQ", len(strings), info, 0, index, 0, 0)
+        strings += name.encode() + b"\0"
+    needed_tags = []
+    for name in needed:
+        needed_tags.append((1, len(strings)))
+        strings += name.encode() + b"\0"
+    if mode == "standard":
+        tags = [(5, 0x10200), (10, len(strings)), (6, 0x10280), (11, 24)]
+        tags.append((4 if hash_style == "sysv" else 0x6ffffef5, 0x10360))
+    else:
+        base = 0x200 if mode == "sce" else 0
+        tags = [(0x61000035, 0x200 - base), (0x61000037, len(strings)),
+                (0x61000039, 0x280 - base), (0x6100003b, 24), (0x6100003f, len(table))]
+    dynamic = b"".join(struct.pack("<qQ", *pair) for pair in tags + needed_tags + [(0, 0)])
+    image = bytearray(0x400)
+    count = 3 if mode == "sce" else 2
+    image[:64] = struct.pack("<16sHHIQQQIHHHHHH", b"\x7fELF\x02\x01\x01" + bytes(9), 3, 0x3e, 1, 0, 64, 0, 0, 64, 56, count, 0, 0, 0)
+    image[64:120] = struct.pack("<IIQQQQQQ", 1, 4, 0, 0x10000, 0, len(image), len(image), 0x1000)
+    image[120:176] = struct.pack("<IIQQQQQQ", 2, 4, 0x100, 0x10100, 0, len(dynamic), len(dynamic), 8)
+    if mode == "sce":
+        image[176:232] = struct.pack("<IIQQQQQQ", 0x61000000, 4, 0x200, 0, 0, 0x200, 0x200, 8)
+    image[0x100:0x100 + len(dynamic)] = dynamic
+    image[0x200:0x200 + len(strings)] = strings
+    image[0x280:0x280 + len(table)] = table
+    n = len(table) // 24
+    if hash_style == "sysv":
+        image[0x360:0x360 + 8 + 4 * (n + 1)] = struct.pack("<II", 1, n) + bytes(4 * (n + 1))
+    else:
+        hashed = max(0, n - 2)
+        chain = [0] * hashed
+        if chain:
+            chain[-1] = 1
+        h = struct.pack("<IIIIQI", 1, n if not hashed else 2, 1, 0, 0, 2 if hashed else 0)
+        h += b"".join(struct.pack("<I", value) for value in chain)
+        image[0x360:0x360 + len(h)] = h
+    return bytes(image)
 
 
 def build_pe(names):
@@ -111,7 +171,7 @@ class ImportAuditTests(unittest.TestCase):
             (MESSAGE_NID, 1, GLOBAL_FUNCTION), ("AAAAAAAAAAA", 1, GLOBAL_FUNCTION), ("BBBBBBBBBBB", 1, GLOBAL_FUNCTION),
             ("UNDEFINED11", 0, GLOBAL_FUNCTION), ("LOCALLOCAL1", 1, LOCAL_FUNCTION)]))
         (work.libs / "libc.prx").write_bytes(exporting("CCCCCCCCCCC"))
-        (work.modules / "libSceNpCppWebApi.prx").write_bytes(b"\x7fELF")
+        (work.modules / "libSceNpCppWebApi.prx").write_bytes(exporting())
         write_source(work.source, "libSceMsgDialog", STUB_SOURCE.format(name=MESSAGE_NAME) + 'APS5_EXPORT("BBBBBBBBBBB", sceFooUnknown_B);\n' + STUB_SOURCE.format(name="sceFooUnknown_B"))
         registry = work.root / "game.registry.json"
         write_registry(registry, [
@@ -151,6 +211,108 @@ class ImportAuditTests(unittest.TestCase):
         data = json.loads(result.read_text())
         self.assertEqual((code, data["references"], data["unique_imports"], data["imports"]), (0, 0, 0, []))
         self.assertIn("0 references, 0 unique imports", out)
+
+    def test_module_imports_include_sectionless_ps4_and_ps5_tables(self):
+        stub = nid_names.compute_nid("sceModuleStub")
+        for mode in ("sections", "sce", "ps5", "standard"):
+            with self.subTest(mode=mode):
+                work = self.work
+                (work.libs / "libA.prx").write_bytes(exporting("AAAAAAAAAAA", stub))
+                write_source(work.source, "libA", STUB_SOURCE.format(name="sceModuleStub"))
+                (work.modules / "sibling.prx").write_bytes(build_segment_module([("BBBBBBBBBBB#A#B", 1, GLOBAL_FUNCTION)]))
+                symbols = [("AAAAAAAAAAA#A#B", 0, GLOBAL_FUNCTION), ("BBBBBBBBBBB#A#B", 0, GLOBAL_FUNCTION),
+                           (stub, 0, GLOBAL_FUNCTION), ("EEEEEEEEEEE#A#B", 0, GLOBAL_FUNCTION)]
+                module = build_elf(symbols, ["libA.prx", "sibling.prx"]) if mode == "sections" else build_segment_module(symbols, ["libA.prx", "sibling.prx"], mode)
+                (work.modules / "main.prx").write_bytes(module)
+                registry, report = work.root / "registry.json", work.root / "report.json"
+                write_registry(registry, [])
+                code, out, err = work.run(registry, "--json", str(report))
+                self.assertEqual((code, err), (1, ""))
+                result = json.loads(report.read_text())
+                self.assertEqual(result["references"], 4)
+                self.assertEqual(result["unique_by_class"], {"implemented": 2, "stub": 1, "absent": 1, "module": 0})
+                self.assertEqual(result["missing_libraries"], {})
+                self.assertIn("EEEEEEEEEEE  (imported by main.prx)", out)
+                records = {record["nid"]: record for record in result["imports"]}
+                self.assertEqual(records["BBBBBBBBBBB"]["providers"], ["sibling.prx"])
+                self.assertEqual(records[stub]["name"], "sceModuleStub")
+
+    def test_module_missing_needed_library_and_duplicate_names(self):
+        work = self.work
+        (work.libs / "libA.prx").write_bytes(exporting())
+        (work.modules / "main.prx").write_bytes(build_segment_module([], ["absent.prx"]))
+        registry, report = work.root / "registry.json", work.root / "report.json"
+        write_registry(registry, [])
+        self.assertEqual(work.run(registry, "--json", str(report))[0], 1)
+        self.assertEqual(json.loads(report.read_text())["missing_libraries"], {"absent.prx": 1})
+        sibling = work.root / "other"
+        sibling.mkdir()
+        (sibling / "main.prx").write_bytes((work.modules / "main.prx").read_bytes())
+        self.assertEqual(work.run(registry, "--modules", str(sibling))[0], 1)
+        (sibling / "main.prx").write_bytes(exporting())
+        code, out, err = work.run(registry, "--modules", str(sibling))
+        self.assertEqual((code, out), (2, ""))
+        self.assertIn("ambiguous guest module main.prx", err)
+
+    def test_sectionless_gnu_hash_counts_undefined_and_exported_symbols(self):
+        symbols = [("AAAAAAAAAAA", 0, GLOBAL_FUNCTION), ("BBBBBBBBBBB", 1, GLOBAL_FUNCTION), ("CCCCCCCCCCC", 1, GLOBAL_FUNCTION)]
+        for count in (0, 1, 2, 3):
+            image = build_segment_module(symbols[:count], mode="standard", hash_style="gnu")
+            imports, needed, exports = import_audit.elf_module_symbols(Path("module.prx"), image)
+            self.assertEqual(imports, ["AAAAAAAAAAA"] if count else [])
+            self.assertEqual(exports, {symbol[0] for symbol in symbols[1:count]})
+            self.assertEqual(needed, [])
+
+    def test_module_bad_tables_fail_without_writing_a_report(self):
+        work = self.work
+        (work.libs / "libA.prx").write_bytes(exporting())
+        module, registry, report = work.modules / "bad.prx", work.root / "registry.json", work.root / "report.json"
+        write_registry(registry, [])
+        image = build_segment_module([("AAAAAAAAAAA", 0, GLOBAL_FUNCTION)])
+        broken = [image[:12], image[:0x220]]
+        for offset, value in ((0x108, 0x201), (0x138, 25), (0x148, 49), (0x150, 1)):
+            changed = bytearray(image)
+            struct.pack_into("<Q", changed, offset, value)
+            broken.append(changed)
+        for data in broken:
+            module.write_bytes(data)
+            code, out, err = work.run(registry, "--json", str(report))
+            self.assertEqual((code, out), (2, ""))
+            self.assertIn("bad.prx", err)
+            self.assertFalse(report.exists())
+
+    @unittest.skipUnless(shutil.which("gcc"), "needs gcc")
+    def test_compiled_module_import_is_found_after_removing_section_headers(self):
+        work = self.work
+        source, module = work.root / "module.c", work.modules / "compiled.prx"
+        source.write_text("extern int AAAAAAAAAAA(void); int BBBBBBBBBBB(void) { return AAAAAAAAAAA(); }\n")
+        (work.libs / "libA.prx").write_bytes(exporting())
+        registry, report = work.root / "registry.json", work.root / "report.json"
+        write_registry(registry, [])
+        for style in ("sysv", "gnu", "both"):
+            subprocess.run(["gcc", "-shared", "-fPIC", "-nostdlib", "-Wl,--hash-style=" + style, str(source), "-o", str(module)], check=True, capture_output=True)
+            original = module.read_bytes()
+            expected = import_audit.elf_module_symbols(module, original)
+            stripped = bytearray(original)
+            struct.pack_into("<Q", stripped, 40, 0)
+            struct.pack_into("<HHH", stripped, 58, 0, 0, 0)
+            module.write_bytes(stripped)
+            self.assertEqual(import_audit.elf_module_symbols(module, stripped), expected)
+            code, out, err = work.run(registry, "--json", str(report))
+            self.assertEqual((code, err), (1, ""))
+            self.assertIn("AAAAAAAAAAA  (imported by compiled.prx)", out)
+            self.assertEqual(json.loads(report.read_text())["unique_by_class"]["absent"], 1)
+
+    def test_module_output_is_protected(self):
+        work = self.work
+        (work.libs / "libA.prx").write_bytes(exporting())
+        module = work.modules / "main.prx"
+        image = build_segment_module([("AAAAAAAAAAA", 0, GLOBAL_FUNCTION)])
+        module.write_bytes(image)
+        registry = work.root / "registry.json"
+        write_registry(registry, [])
+        self.assertEqual(work.run(registry, "--json", str(module))[0], 2)
+        self.assertEqual(module.read_bytes(), image)
 
     def test_removing_an_export_flips_the_class(self):
         work = self.work

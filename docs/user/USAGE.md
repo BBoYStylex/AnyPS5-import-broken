@@ -168,6 +168,8 @@ python3 tools/import_audit.py app.registry.json app.libc.prx.guest.prx.registry.
 | `absent` | No built library exports the NID: the loader fails. |
 | `module` | The import names a file found in `--modules` (the title's own library); its exports are not checked. |
 
+Each ELF file in `--modules` is also audited for its own undefined dynamic symbols and needed libraries. Module imports name their source file in the report and resolve against built libraries and sibling module exports. The reader supports section tables, sectionless SCE dynamic tables (including `PT_SCE_DYNLIBDATA` offsets), and sectionless SysV/GNU hash tables. It strips `#lib#mod` symbol suffixes; undefined weak symbols are checked conservatively like other imports. Malformed or unsupported modules fail explicitly instead of being silently skipped. This does not replace the module registry audit: relocation-specific library attribution still comes from the converted module’s registry.
+
 The report also lists needed libraries that have no file in `--libs` or `--modules`, and imports exported only by a library other than the one they name; those resolve on Linux and can fail on Windows.
 
 | Option | Effect |
