@@ -41,6 +41,7 @@ bool ThrowsRuntimeError(TFunction function) {
 constexpr std::uint16_t kFiberModuleId = 0x0006;
 constexpr std::uint16_t kUltModuleId = 0x0007;
 constexpr int kInvalidValue = static_cast<int>(0x805A1000);
+constexpr std::uint16_t kAcmModuleId = 0x010b;
 constexpr int kModuleUnloaded = static_cast<int>(0x805A1001);
 constexpr std::uint32_t kInternalFlag = 0x80000000u;
 constexpr std::uint16_t kTrophy2ModuleId = 0x0110;
@@ -147,6 +148,12 @@ int main() {
     Require(sceSysmoduleUnloadModuleInternal(kAgcModuleId) == 0);
     Require(sceSysmoduleUnloadModuleInternal(kAgcModuleId) == 0);
     Require(sceSysmoduleUnloadModuleInternal(kAgcModuleId) == kModuleUnloaded);
+
+    Require(sceSysmoduleIsLoaded(kAcmModuleId) == kModuleUnloaded);
+    Require(sceSysmoduleLoadModule(kAcmModuleId) == 0);
+    Require(sceSysmoduleIsLoaded(kAcmModuleId) == 0);
+    Require(sceSysmoduleUnloadModule(kAcmModuleId) == 0);
+    Require(sceSysmoduleIsLoaded(kAcmModuleId) == kModuleUnloaded);
 #ifdef __linux__
     CheckUnwindInfo();
 #endif
