@@ -262,6 +262,12 @@ def read_unwind_index(view, relocations=None):
                                  'needed': 'function range evidence from another qualified source',
                                  'detail': 'no PT_GNU_EH_FRAME; unindexed .eh_frame bytes are not located without a section table'}]}
     require(len(frames) == 1, 'multiple PT_GNU_EH_FRAME headers')
+    loaded = view.segment(frames[0]['vaddr'], max(frames[0]['filesz'], 1))
+    if loaded is None or loaded['offset'] + frames[0]['vaddr'] - loaded['vaddr'] != frames[0]['offset']:
+        return {'rule': RULE, 'version': RULE_VERSION, 'header': None, 'cies': [], 'fdes': [], 'stream': None,
+                'obligations': [{'kind': 'unwind-index-not-loaded', 'subject': {'address': frames[0]['vaddr']},
+                                 'needed': 'function range evidence from another qualified source',
+                                 'detail': 'PT_GNU_EH_FRAME file offset is not the loaded file offset of its address'}]}
     index = header(view, frames[0])
     cies = {}
     records, stream = walk_stream(view, index['eh_frame'], cies)
