@@ -4,7 +4,6 @@
 #include "prx/libSceAgcDriver/Graphics/include/VertexInput.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Pipeline.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/PipelineLibrary.hpp"
-#include "prx/libSceAgcDriver/Graphics/include/DepthSurface.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Recorder.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Draw.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/DccMetadata.hpp"
@@ -18,7 +17,8 @@
 #include "prx/libSceAgcDriver/Graphics/include/TextureCache.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/TextureDetiler.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/TextureFormat.hpp"
-#include "prx/libSceAgcDriver/Graphics/include/TextureSwizzleEquations.hpp"#include "prx/libSceAgcDriver/Graphics/include/UnitShadow.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/TextureSwizzleEquations.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/UnitShadow.hpp"
 #include "prx/libSceAgcDriver/Execution/include/BdaFeatures.hpp"
 #include "prx/libSceAgcDriver/Execution/include/GuestMemory.hpp"
 #include "prx/libSceAgcDriver/Execution/include/ShaderMemory.hpp"
@@ -42,7 +42,6 @@
 #else
 #include <sys/mman.h>
 #endif
-#include <functional>
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -4993,6 +4992,7 @@ void depthArrayTests(const Device& device, Recorder& recorder, bool failBeforeSy
             if (stencil) slice.stencilAddress += layer * stencilStride;
             slice.clearDepth = (layer + 1) / 8.0f;
             slice.clearStencil = static_cast<std::uint8_t>(11 + layer);
+            slice.htileAddress = reservedAddress + 0xb00000u + layer * 0x10000u;
             RunDepthClearPass(context, {slice, VK_IMAGE_ASPECT_DEPTH_BIT | (stencil ? VK_IMAGE_ASPECT_STENCIL_BIT : 0u)});
         }
         GuestTextureResource resource{};
@@ -5138,15 +5138,21 @@ void depthArrayTests(const Device& device, Recorder& recorder, bool failBeforeSy
             static_cast<void>(sample(stencilResource));
             Require(operations.copies == stencilCopies + 3, "a stencil-writing state did not refresh its slice");
         }
+        targets[2].clearDepth = 0.375f;
+        static_cast<void>(DepthSurfaceView(context, targets[2]));
+        const auto beforeFastClear = operations.copies;
+        NoteDepthMetadataFill(targets[2].htileAddress, HtileMetadataBytes(targets[2].extent), 0);
+        Require(sample(resource) == texture, "HTILE clear replaced the sampled array view");
+        expectRed(arrayProgram.Red(texture->View(), texture->Layout(), 0, 2), 0.375f, "HTILE clear did not refresh the sampled array");
+        Require(operations.copies == beforeFastClear + 1, "HTILE clear copied unchanged array layers");
         auto missing = resource;
         missing.depthOrLastArray = 4;
-        bool refused = false;
-        try { static_cast<void>(sample(missing)); } catch (const std::runtime_error&) { refused = true; }
-        Require(refused, "depth array with an unbacked slice was silently sampled");
+        const auto missingTexture = sample(missing);
+        expectRed(arrayProgram.Red(missingTexture->View(), missingTexture->Layout(), 0, 4), 0.0f, "uncommitted depth slice did not read as zero");
         shifted.baseArray = 0;
-        refused = false;
-        try { static_cast<void>(sample(shifted)); } catch (const std::runtime_error&) { refused = true; }
-        Require(refused, "depth array with a missing first slice ignored its resident later layers");
+        const auto missingFirst = sample(shifted);
+        expectRed(arrayProgram.Red(missingFirst->View(), missingFirst->Layout(), 0, 0), 0.0f, "uncommitted first depth slice did not read as zero");
+        expectRed(arrayProgram.Red(missingFirst->View(), missingFirst->Layout(), 0, 1), targets[0].clearDepth, "uncommitted first slice hid a resident depth slice");
     }
     recorder.Sync();
 }
@@ -5254,6 +5260,87 @@ void depthArrayGuestTests(const Device& device, Recorder& recorder) {
         expectRed(depthProgram.Red(texture->View(), texture->Layout(), 0, 2), 0.125f, "a surviving depth array view lost its backing");
         expectRed(depthProgram.Red(alphaTexture->View(), alphaTexture->Layout(), 0, 1), 0.875f, "a surviving component view lost its backing");
         expectRed(depthProgram.Red(subview->View(), subview->Layout(), 0), 0.125f, "a surviving single-layer array view lost its backing");
+    }
+}
+
+void depthArrayShapeTests(const Device& device, Recorder& recorder) {
+    auto context = device.GetContext();
+    TextureDetiler detiler(context);
+    context.detiler = &detiler;
+    SampleProgram depthProgram(context, recorder, SAMPLE_Depth_ARRAY_SPV);
+    SampleProgram stencilProgram(context, recorder, SAMPLE_Stencil_ARRAY_SPV, true);
+    struct Shape { VkExtent2D extent; VkFormat format; std::uint32_t layers; bool sparse; };
+    const Shape shapes[]{{{2048, 2048}, VK_FORMAT_D16_UNORM, 4, false}, {{2560, 1440}, VK_FORMAT_D32_SFLOAT_S8_UINT, 1, false}, {{128, 128}, VK_FORMAT_D32_SFLOAT, 80, true}};
+    for (const auto& shape : shapes) {
+        const bool stencil = shape.format == VK_FORMAT_D32_SFLOAT_S8_UINT;
+        const auto stride = DepthSliceBytes(shape.extent, shape.format == VK_FORMAT_D16_UNORM ? 2u : 4u);
+        const auto bytes = shape.layers * stride + (stencil ? DepthSliceBytes(shape.extent, 1) : 0) + 65536u;
+#ifdef _WIN32
+        void* reserved = VirtualAlloc(nullptr, bytes, MEM_RESERVE, PAGE_NOACCESS);
+        Require(reserved != nullptr, "cannot reserve depth shape addresses");
+#else
+        void* reserved = mmap(nullptr, bytes, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        Require(reserved != MAP_FAILED, "cannot reserve depth shape addresses");
+#endif
+        struct Release {
+            const Context& context;
+            Recorder& recorder;
+            void* reserved;
+            std::size_t bytes;
+            ~Release() {
+                recorder.Sync();
+                ClearDepthSurfaces(context.device);
+#ifdef _WIN32
+                VirtualFree(reserved, 0, MEM_RELEASE);
+#else
+                munmap(reserved, bytes);
+#endif
+            }
+        } release{context, recorder, reserved, bytes};
+        const auto address = (reinterpret_cast<std::uint64_t>(reserved) + 65535u) & ~std::uint64_t{65535};
+        const auto stencilAddress = stencil ? address + shape.layers * stride : 0;
+        for (std::uint32_t layer = 0; layer < (shape.sparse ? 1u : shape.layers); ++layer) {
+            DepthTarget target{address + layer * stride, stencilAddress, shape.extent, shape.format, (layer + 1) / 8.0f, 37};
+            RunDepthClearPass(context, {target, VK_IMAGE_ASPECT_DEPTH_BIT | (stencil ? VK_IMAGE_ASPECT_STENCIL_BIT : 0u)});
+        }
+        const auto baseAddress = stencil ? stencilAddress : address;
+        const auto format = stencil ? 5u : shape.format == VK_FORMAT_D16_UNORM ? 7u : 22u;
+        const std::array<std::uint32_t, 8> words{
+            static_cast<std::uint32_t>(baseAddress >> 8),
+            static_cast<std::uint32_t>(baseAddress >> 40) | (format << 20) | (((shape.extent.width - 1) & 3u) << 30),
+            ((shape.extent.width - 1) >> 2) | ((shape.extent.height - 1) << 14),
+            0xd1800fac, shape.layers - 1, 0, 0, 0};
+        auto resource = DecodeTextureResource(words);
+        const VkComponentMapping mapping{VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY};
+        const auto sample = [&] { return DepthSurfaceTexture(context, words, resource, mapping); };
+        auto texture = sample();
+        Require(texture != nullptr, "depth shape descriptor was not recognized");
+        if (stencil) {
+            expectRed(stencilProgram.Red(texture->View(), texture->Layout(), 0, 0), 37.0f, "single-layer stencil array shape");
+        } else if (!shape.sparse) {
+            for (std::uint32_t layer = 0; layer < shape.layers; ++layer) expectRed(depthProgram.Red(texture->View(), texture->Layout(), 0, layer), (layer + 1) / 8.0f, "four-layer D16 array shape");
+        } else {
+            expectRed(depthProgram.Red(texture->View(), texture->Layout(), 0, 0), 0.125f, "sparse depth atlas resident slice");
+            expectRed(depthProgram.Red(texture->View(), texture->Layout(), 0, 17), 0.0f, "sparse depth atlas uncommitted slice");
+            auto* layer = reinterpret_cast<void*>(address + 17 * stride);
+#ifdef _WIN32
+            Require(VirtualAlloc(layer, stride, MEM_COMMIT, PAGE_READWRITE) == layer, "cannot commit depth atlas layer");
+#else
+            Require(mprotect(layer, stride, PROT_READ | PROT_WRITE) == 0, "cannot commit depth atlas layer");
+#endif
+            std::fill_n(static_cast<float*>(layer), stride / sizeof(float), 0.625f);
+            Require(sample() == texture, "committing a sparse layer replaced its array view");
+            expectRed(depthProgram.Red(texture->View(), texture->Layout(), 0, 17), 0.625f, "sparse depth atlas ignored newly committed data");
+            expectRed(depthProgram.Red(texture->View(), texture->Layout(), 0, 18), 0.0f, "committing a sparse layer changed another layer");
+#ifdef _WIN32
+            Require(VirtualFree(layer, stride, MEM_DECOMMIT) != 0, "cannot decommit depth atlas layer");
+#else
+            Require(mprotect(layer, stride, PROT_NONE) == 0, "cannot decommit depth atlas layer");
+#endif
+            Require(sample() == texture, "decommitting a sparse layer replaced its array view");
+            expectRed(depthProgram.Red(texture->View(), texture->Layout(), 0, 17), 0.0f, "sparse depth atlas retained decommitted data");
+        }
+        recorder.Sync();
     }
 }
 
@@ -5905,7 +5992,8 @@ int main(int argc, char** argv) {
             depthArrayTests(device, recorder);
             std::cout << "Depth array failure cleanup and subsequent sampling tests passed\n";
             return 0;
-        }        if (argc == 2 && std::string_view(argv[1]) == "--depth-array-only") {
+        }
+        if (argc == 2 && std::string_view(argv[1]) == "--depth-array-only") {
             depthArrayTests(device, recorder);
             depthArrayGuestTests(device, recorder);
             std::cout << "Depth/stencil array sampling, subviews and refresh tests passed\n";
@@ -5914,6 +6002,11 @@ int main(int argc, char** argv) {
         if (argc == 2 && std::string_view(argv[1]) == "--depth-clear-only") {
             depthClearPassTests(device, recorder);
             std::cout << "Resident depth clear sampling and aspect preservation tests passed\n";
+            return 0;
+        }
+        if (argc == 2 && std::string_view(argv[1]) == "--depth-array-shapes-only") {
+            depthArrayShapeTests(device, recorder);
+            std::cout << "Depth array descriptor shapes and sparse residency tests passed\n";
             return 0;
         }
         readTrackingTests(device, recorder);
@@ -5973,6 +6066,7 @@ int main(int argc, char** argv) {
         depthClearPassTests(device, recorder);
         depthArrayTests(device, recorder);
         depthArrayGuestTests(device, recorder);
+        depthArrayShapeTests(device, recorder);
         pendingKeyStoreTests(device, recorder);
         sampleDumpTests(device, recorder);
         gpu.unlock();

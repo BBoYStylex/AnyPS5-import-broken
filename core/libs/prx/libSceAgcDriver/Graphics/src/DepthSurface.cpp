@@ -108,6 +108,7 @@ public:
         const VkClearDepthStencilValue clear{clearDepth, clearStencil};
         context.Function<PFN_vkCmdClearDepthStencilImage>("vkCmdClearDepthStencilImage")(commands, image, VK_IMAGE_LAYOUT_GENERAL, &clear, 1, &range);
         RecordMemoryBarrier(context, commands, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, access);
+        NoteWrite(aspects);
         if (batch) batch->SubmitAndWait();
         else Recorder::CountBarriers(Recorder::CommandClass::Draw, 2);
     }
@@ -207,7 +208,7 @@ public:
                 continue;
             }
             pending[i].bytes.resize(stride);
-            GuestMemory::Read(address, pending[i].bytes);
+            GuestMemory::ReadCommitted(address, pending[i].bytes);
             pending[i].generation = generation;
             changed[i] = true;
         }
@@ -518,7 +519,7 @@ std::shared_ptr<Texture> DepthSurfaceTexture(const Context& context, std::span<c
     for (auto layer = resource.baseArray; layer <= last; ++layer) {
         const auto address = resource.baseAddress + layer * stride;
         auto* slice = find(address);
-        if (slice != nullptr && (slice->target.format != base->target.format || slice->target.extent.width != resource.width || slice->target.extent.height != resource.height || (stencil ? slice->target.stencilAddress : slice->target.address) != address)) {
+        if (slice != nullptr && (slice->target.samples != 1 || slice->target.format != base->target.format || slice->target.extent.width != resource.width || slice->target.extent.height != resource.height || (stencil ? slice->target.stencilAddress : slice->target.address) != address)) {
             char text[192];
             std::snprintf(text, sizeof(text), "AGC graphics: depth array 0x%llx layer %u at 0x%llx has no matching resident %s surface", static_cast<unsigned long long>(resource.baseAddress), layer, static_cast<unsigned long long>(address), stencil ? "stencil" : "depth");
             throw std::runtime_error(text);
