@@ -48,7 +48,6 @@ int APS5_VABI ferror_nid_postfix(FileStream*);
 int APS5_VABI fileno_nid_postfix(FileStream*);
 void APS5_VABI clearerr_nid_postfix(FileStream*);
 void APS5_VABI rewind_nid_postfix(FileStream*);
-int APS5_VABI ferror_nid_postfix(FileStream*);
 int APS5_VABI setvbuf_nid_postfix(FileStream*, char*, int, std::size_t);
 void APS5_VABI setbuf_nid_postfix(FileStream*, char*);
 FileStream* APS5_VABI fdopen_nid_postfix(int, const char*);
