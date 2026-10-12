@@ -39,6 +39,22 @@ def object_size(die, seen=()):
     require(die.offset not in seen and len(seen) < 32, 'recursive or excessively nested debug layout')
     seen = (*seen, die.offset)
     die = underlying(die)
+    if die.tag == 'DW_TAG_structure_type':
+        size = die.attributes.get('DW_AT_byte_size')
+        require(size is not None and describe_form_class(size.form) == 'constant' and 0 < size.value <= 1048576,
+                'missing or invalid structure extent')
+        ranges = []
+        for member in die.iter_children():
+            require(member.tag == 'DW_TAG_member' and not any(k in member.attributes for k in
+                    ('DW_AT_bit_size', 'DW_AT_bit_offset', 'DW_AT_data_bit_offset')), 'nonplain structure layout')
+            offset = member.attributes.get('DW_AT_data_member_location')
+            require(offset is not None and describe_form_class(offset.form) == 'constant', 'dynamic member location')
+            end = offset.value + object_size(member.get_DIE_from_attribute('DW_AT_type'), seen)
+            require(0 <= offset.value < end <= size.value, 'member outside structure')
+            ranges.append((offset.value, end))
+        ranges.sort()
+        require(ranges and all(a[1] <= b[0] for a, b in zip(ranges, ranges[1:])), 'overlapping structure members')
+        return size.value
     if die.tag != 'DW_TAG_array_type':
         kind = scalar(die)
         return 8 if kind == 'ptr' else int(kind[1:]) // 8
