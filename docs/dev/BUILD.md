@@ -261,3 +261,16 @@ To run the platform regressions, build the default native targets with `cmake --
 After configuring the native graphics runtime, build and run `cmake --build build --target native_pad_input_check`. This rebuilds the unchanged public `ps5link-sdk` `pad_input` source as an x86-64 ELF, recovers matching DWARF 4 scalar ABI and frame candidates, checks the reusable provider catalog, and compiles its seven functions to Apple ARM64. The qualification profile uses O0, fixed frame pointers and pinned source; it is not stripped-binary recovery. The unsigned divisions in `append_uint` remain explicitly qualified from the constant divisor and source arithmetic.
 
 The check compares six deterministic input/error scenarios against the same C source compiled independently for ARM64. Its test-only adapters publish input through the shared Pad provider, count sleeps, and inject user/initialization errors. Read/open errors call the real provider with invalid arguments. A separate production-provider run preserves the original 625 sleeps of 16 ms. Reports record binary/object/runtime hashes, notifications, input counts, teardown and remaining manual facts. These are simulated-input and source-translation checks, not physical-controller or console validation.
+
+For the independent-source transfer probe, obtain `samples/hello_world/main.c` from `ps5-payload-dev/sdk` revision `f5d40f02770e9b0001dd9e18056eca70b3da8b40`, retaining its GPLv3-or-later notice. After `native_pad_input_check`, run from the repository root (replace `build` with the configured native graphics build directory):
+
+```sh
+PYTHONPATH=core/aot:3rdparty/pyelftools:3rdparty/capstone/bindings/python \
+LIBCAPSTONE_PATH=build/core/aot/capstone \
+python3 core/aot/examples/notification_transfer.py --source /path/to/main.c \
+  --sdk 3rdparty/ps5link-sdk --linker build/core/libs/native/native_pad_linker \
+  --runtime build/core/libs/native/libanyps5_native_graphics.a \
+  --image-runtime build/core/aot/libanyps5_native_image.a --output-parent build/transfer-runs
+```
+
+The script checks the source hash and compares AOT against the source independently compiled for ARM64. Three catalog bindings transfer. The unprototyped `main()` is rejected by generic recovery and qualified explicitly in this source profile; its request storage is checked against matching DWARF. The probe supplies declaration-only cross headers and uses the verified ps5link CRT. It does not reproduce the original payload SDK loader. Startup, the C entry signature and host string bindings remain explicit facts.
