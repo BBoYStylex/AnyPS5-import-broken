@@ -32,7 +32,7 @@ foreach(agcTarget IN ITEMS libSceAgcDriver agc_driver_visual_test agc_driver_gra
 endforeach()
 
 if(TARGET agc_driver_bda_device_tests)
-    target_sources(agc_driver_bda_device_tests PRIVATE tests/ColorTransferTests.cpp Graphics/src/ColorTargetLayout.cpp Execution/src/GuestMemory.cpp)
+    target_sources(agc_driver_bda_device_tests PRIVATE tests/ColorTransferTests.cpp Graphics/src/ColorTargetLayout.cpp Graphics/src/TextureTiling.cpp Graphics/src/TextureFormat.cpp Execution/src/GuestMemory.cpp)
     target_include_directories(agc_driver_bda_device_tests PRIVATE ${agcTextureDetileGeneratedRoot})
 endif()
 
