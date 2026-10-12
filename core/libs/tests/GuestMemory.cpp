@@ -1819,7 +1819,7 @@ int main() {
         GuestAllocations::Mutation mutation;
         Require(mutation.Find(memory).writable);
     }
-    for (int advice = 0; advice <= 9; ++advice) Require(madvise_nid_postfix(memory, page * 3, advice) == 0);
+    for (int advice = 0; advice <= 10; ++advice) Require(madvise_nid_postfix(memory, page * 3, advice) == 0);
     Require(memory[0] == 42 && memory[page * 2] == 73);
     Require(madvise_nid_postfix(memory + 1, 0, 4) == 0);
     Require(madvise_nid_postfix(memory, page, 11) == -1 && *__error_nid_postfix() == 22);
