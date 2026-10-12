@@ -423,6 +423,50 @@ def main():
                 run = subprocess.run([str(output)], capture_output=True, text=True, timeout=30)
                 assert run.returncode == 11 and 'unused.prx' not in run.stderr, (symbol, module_name, run.returncode, run.stdout, run.stderr)
 
+        def executable_with_extra_symbol(owner, extra_symbol_bytes, rel_type=6, addend=0):
+            image = main_fixture()
+            struct.pack_into('<I', image, 68, 7)
+            symbol = 'shared#A#B'
+            strings = b'\0' + symbol.encode() + b'\0' + owner.encode() + b'\0'
+            owner_offset = len(symbol) + 2
+            module_offset = owner_offset
+            image[0x4800:0x4800 + len(strings)] = strings
+            tags = [(5, 0x4800), (10, len(strings)), (6, 0x4880), (11, 24),
+                    (4, 0x4840), (7, 0x4900), (8, 48), (9, 24),
+                    (1, owner_offset), (0x61000045, (1 << 48) | module_offset)]
+            dynamic(image, 0x4600, 120, tags)
+            struct.pack_into('<IIIIII', image, 0x4840, 1, 3, 1, 0, 0, 0)
+            struct.pack_into('<IBBHQQ', image, 0x4898, 1, 0x12, 0, 0, 0, 0)
+            image[0x48b0:0x48b0 + 24] = extra_symbol_bytes
+            struct.pack_into('<QQq', image, 0x4900, 0x4a20, (1 << 32) | 6, 0)
+            struct.pack_into('<QQq', image, 0x4918, 0x4a28, (2 << 32) | rel_type, addend)
+            image[0x4000:0x4007] = b'\xff\x15' + struct.pack('<i', 0x4a20 - 0x4006) + b'\xc3'
+            return image
+
+        case = work / 'all-zero-dynamic-symbol'
+        modules = case / 'prx'
+        modules.mkdir(parents=True)
+        (modules / 'a.prx').write_bytes(provider(11))
+        source = case / 'input.elf'
+        source.write_bytes(executable_with_extra_symbol('a.prx', b'\0' * 24))
+        output = case / 'output.exe'
+        result = subprocess.run([str(relinker), '--windows', str(source), str(output)], capture_output=True, text=True, timeout=30)
+        assert result.returncode == 0, (result.stdout, result.stderr)
+        if os.name == 'nt':
+            run = subprocess.run([str(output)], capture_output=True, text=True, timeout=30)
+            assert run.returncode == 11, (run.returncode, run.stdout, run.stderr)
+
+        case = work / 'nonzero-empty-symbol'
+        modules = case / 'prx'
+        modules.mkdir(parents=True)
+        (modules / 'a.prx').write_bytes(provider(11))
+        source = case / 'input.elf'
+        source.write_bytes(executable_with_extra_symbol('a.prx', struct.pack('<IBBHQQ', 0, 0x12, 0, 0, 0, 0)))
+        output = case / 'output.exe'
+        result = subprocess.run([str(relinker), '--windows', str(source), str(output)], capture_output=True, text=True, timeout=30)
+        assert result.returncode == 2 and 'Empty import symbol name' in result.stderr, result.stderr
+        assert not output.exists()
+
     print('Windows module-scoped import tests passed')
 
 

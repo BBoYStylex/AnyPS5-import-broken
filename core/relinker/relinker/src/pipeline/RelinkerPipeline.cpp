@@ -258,7 +258,8 @@ RelinkResult RelinkerPipeline::Relink(const std::vector<std::uint8_t>& sourceElf
             std::memcpy(&nameOff, raw.data() + symOff, 4);
 
             const auto name = readCStr(nameOff);
-            nidRefs.push_back({name, Domain::ImportModule(name, importModules, neededLibraries), relType, pos, rOffset, rAddend});
+            const bool isAllZero = (symEntSize >= 24) && (raw.size() - symOff >= 24) && std::all_of(raw.data() + symOff, raw.data() + symOff + 24, [](const std::uint8_t b) { return b == 0; });
+            nidRefs.push_back({name, Domain::ImportModule(name, importModules, neededLibraries), relType, pos, rOffset, rAddend, isAllZero});
         }
     };
 

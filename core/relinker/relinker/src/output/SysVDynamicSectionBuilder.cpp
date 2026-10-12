@@ -131,9 +131,13 @@ SysVDynamicSection SysVDynamicSectionBuilder::BuildDynamicSection(
                 "PLT thunks cannot be filtered without patching their hard-coded reloc index");
 
         const NidReference& ref = *slot;
-        const std::uint32_t nameOff = _appendStr(result.DynStrData, stripHashSuffix(ref.Nid));
-        const auto info = static_cast<std::uint8_t>((STB_GLOBAL << 4) | STT_FUNC);
-        _appendElfSym(result.DynSymData, nameOff, info, STV_DEFAULT, 0, 0, 0);
+        if (ref.SymbolAllZero) {
+            _appendElfSym(result.DynSymData, 0, 0, 0, 0, 0, 0);
+        } else {
+            const std::uint32_t nameOff = _appendStr(result.DynStrData, stripHashSuffix(ref.Nid));
+            const auto info = static_cast<std::uint8_t>((STB_GLOBAL << 4) | STT_FUNC);
+            _appendElfSym(result.DynSymData, nameOff, info, STV_DEFAULT, 0, 0, 0);
+        }
 
         const std::uint64_t relaInfo = (static_cast<std::uint64_t>(symIdx) << 32) | R_X86_64_JUMP_SLOT;
         _appendRela(result.RelaPltData, ref.RelocationAddress, relaInfo, ref.Addend);
@@ -142,9 +146,13 @@ SysVDynamicSection SysVDynamicSectionBuilder::BuildDynamicSection(
 
     for (const NidReference* slotPtr : nonPltRefs) {
         const NidReference& ref = *slotPtr;
-        const std::uint32_t nameOff = _appendStr(result.DynStrData, stripHashSuffix(ref.Nid));
-        const auto info = static_cast<std::uint8_t>((STB_GLOBAL << 4) | STT_FUNC);
-        _appendElfSym(result.DynSymData, nameOff, info, STV_DEFAULT, 0, 0, 0);
+        if (ref.SymbolAllZero) {
+            _appendElfSym(result.DynSymData, 0, 0, 0, 0, 0, 0);
+        } else {
+            const std::uint32_t nameOff = _appendStr(result.DynStrData, stripHashSuffix(ref.Nid));
+            const auto info = static_cast<std::uint8_t>((STB_GLOBAL << 4) | STT_FUNC);
+            _appendElfSym(result.DynSymData, nameOff, info, STV_DEFAULT, 0, 0, 0);
+        }
 
         const std::uint64_t relaInfo = (static_cast<std::uint64_t>(symIdx) << 32) | ref.RelocationTypeValue;
         _appendRela(result.RelaData, ref.RelocationAddress, relaInfo, ref.Addend);

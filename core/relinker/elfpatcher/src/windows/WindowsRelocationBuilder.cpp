@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <elfpatcher/windows/WindowsRelocationBuilder.hpp>
 #include <io/BufferUtils.hpp>
 #include <map>
@@ -38,8 +39,19 @@ PeRelocations WindowsRelocationBuilder::Apply(WindowsLoadImage& image, const Dom
             if (Io::ReadU16(dynamicSection.DynSymData, symbolOffset + 6) != 0)
                 throw Domain::RelinkerException("Defined symbols require explicit relocation support", target);
             const auto name = ReadString(dynamicSection.DynStrData, Io::ReadU32(dynamicSection.DynSymData, symbolOffset));
-            if (name.empty())
+            if (name.empty()) {
+                const auto isAllZero = std::all_of(dynamicSection.DynSymData.begin() + symbolOffset, dynamicSection.DynSymData.begin() + symbolOffset + 24, [](const std::uint8_t b) {
+                    return b == 0;
+                });
+                if (isAllZero) {
+                    if (type != 1 && addend != 0)
+                        throw Domain::RelinkerException("GLOB_DAT/JUMP_SLOT relocation has a nonzero addend", target);
+                    image.RequireWritable(target, 8);
+                    image.WritePointer(target, addend);
+                    continue;
+                }
                 throw Domain::RelinkerException("Empty import symbol name", target);
+            }
             if (type != 1 && addend != 0)
                 throw Domain::RelinkerException("GLOB_DAT/JUMP_SLOT relocation has a nonzero addend", target);
             image.RequireWritable(target, 8);
