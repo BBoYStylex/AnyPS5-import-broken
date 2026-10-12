@@ -17,7 +17,6 @@
 #include <array>
 #include <atomic>
 #include <chrono>
-#include <cerrno>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -162,10 +161,14 @@ void _readFile(const Apr::ReadFileCommand& command) {
     stream.seekg(static_cast<std::streamoff>(command.offset));
     const GuestArena::HostWrite destination(reinterpret_cast<void*>(command.destination), command.size);
     if (!destination.Open()) throw std::runtime_error("APR: the read destination of " + file.path.string() + " is not writable guest memory");
-    stream.read(reinterpret_cast<char*>(command.destination), static_cast<std::streamsize>(command.size));
-    if (stream.bad()) throw std::runtime_error("APR: read failed for " + file.path.string());
+    std::vector<char> staging(static_cast<std::size_t>(command.size));
+    stream.read(staging.data(), static_cast<std::streamsize>(command.size));
     const auto read = static_cast<std::uint64_t>(stream.gcount());
+    if (stream.bad()) {
+        throw std::runtime_error("APR: read failed for " + file.path.string() + " at offset " + std::to_string(command.offset) + " requested " + std::to_string(command.size) + " bytes, received " + std::to_string(read));
+    }
     if (read != command.size) throw std::runtime_error("APR: read of " + file.path.string() + " at offset " + std::to_string(command.offset) + " returned " + std::to_string(read) + " of " + std::to_string(command.size) + " bytes");
+    if (read != 0) std::memcpy(reinterpret_cast<void*>(command.destination), staging.data(), static_cast<std::size_t>(read));
 }
 
 void _writeAddress(const Apr::WriteAddressCommand& command) {

@@ -616,6 +616,33 @@ void TestZeroFilledBuffer() {
     std::remove(path);
 }
 
+void TestReadFileFailureDoesNotModifyDestination() {
+    const char* path = "ampr_short_read.bin";
+    {
+        std::ofstream file(path, std::ios::binary);
+        file << "short";
+    }
+
+    std::uint32_t fileId = 0;
+    std::uint32_t failed = 0;
+    Require(sceKernelAprResolveFilepathsToIds(&path, 1, &fileId, &failed) == 0);
+
+    std::array<std::uint8_t, 16> data;
+    data.fill(0xA5);
+    Recorder recorder;
+    Require(sceAmprAprCommandBufferReadFile(&recorder.buffer, &recorder.gatherState, &recorder.scatterState, fileId, data.data(), data.size(), 0) == 0);
+
+    bool rejected = false;
+    try {
+        sceKernelAprSubmitCommandBuffer(&recorder.buffer, 0);
+    } catch (const std::runtime_error& error) {
+        rejected = std::string(error.what()).find("returned 5 of 16 bytes") != std::string::npos;
+    }
+    Require(rejected);
+    for (const auto byte : data) Require(byte == 0xA5);
+    std::remove(path);
+}
+
 void TestResolveFailures() {
     const char* paths[]{"ampr_resolve_existing.bin", "ampr_resolve_missing.bin"};
     { std::ofstream file(paths[0], std::ios::binary); file << "data"; }
@@ -1228,6 +1255,7 @@ int main() {
     TestClearBuffer();
     TestConstructed();
     TestZeroFilledBuffer();
+    TestReadFileFailureDoesNotModifyDestination();
     TestResolveFailures();
     TestMalformedCommandSizes();
     TestGatherScatter();
