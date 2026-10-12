@@ -4122,6 +4122,25 @@ void pendingKeyStoreTests(const Device& device, Recorder& recorder) {
     Require(CurrentDccKeys(address, displayBytes, displayKeys) == DccKeys::Uncompressed && !recorder.PendingWriteOverlaps(address + 40000, 1), "a later writer of key 40000 over a pending 1920x1080 store was not waited for");
     Require(std::all_of(keys, keys + consoleKeys, [](std::uint8_t key) { return key == 0xff; }), "the uncompressed key store over a 1920x1080 surface did not land on all 49152 keys");
     recorder.Sync();
+    std::memset(keys, 0x00, keyCount);
+    const auto* import = HostImportFor(context, address, bytes);
+    Require(import != nullptr, "the pending key store block lost its host import");
+    const auto commands = recorder.Commands();
+    RecordMemoryBarrier(context, commands, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT | VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_HOST_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
+    context.Function<PFN_vkCmdFillBuffer>("vkCmdFillBuffer")(commands, import->buffer, address - import->base, keyCount, 0x40404040u);
+    RecordMemoryBarrier(context, commands, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_HOST_READ_BIT);
+    recorder.NotePendingWrite(address, keyCount);
+    GuestTextureResource sampled{};
+    sampled.baseAddress = address + keyCount;
+    sampled.width = 128;
+    sampled.height = 128;
+    sampled.mipCount = 1;
+    sampled.tileMode = TextureTileMode::kLinear;
+    sampled.dimension = TextureDimension::k2D;
+    sampled.format = 56;
+    sampled.dccAddress = address;
+    Require(TextureClearKeys(sampled, surfaceBytes) == DccKeys::Clear0001 && !recorder.PendingWriteOverlaps(address, keyCount), "a sampled texture read its DCC keys before the recorded GPU write over them landed");
+    recorder.Sync();
 }
 
 void sampleDumpTests(const Device& device, Recorder& recorder) {
@@ -5531,6 +5550,11 @@ int main(int argc, char** argv) {
         if (argc == 2 && std::string_view(argv[1]) == "--draw-snapshot-cap-only") {
             drawSnapshotCapTests(device, recorder);
             std::cout << "Draw snapshot cap tests passed\n";
+            return 0;
+        }
+        if (argc == 2 && std::string_view(argv[1]) == "--pending-key-stores-only") {
+            pendingKeyStoreTests(device, recorder);
+            std::cout << "Pending DCC key store tests passed\n";
             return 0;
         }
 

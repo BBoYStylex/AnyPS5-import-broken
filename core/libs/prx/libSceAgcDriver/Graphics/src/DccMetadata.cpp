@@ -445,10 +445,12 @@ DccKeys readDccKeys(std::uint64_t metaAddress, std::size_t count, bool& memoized
     return uniform ? ByteKeys(first) : DccKeys::Mixed;
 }
 
+DccKeys currentDccKeys(std::uint64_t metaAddress, std::size_t count, bool& memoized);
+
 DccKeys textureClearKeys(const GuestTextureResource& resource, std::uint64_t guestBytes, bool& memoized) {
     memoized = false;
     if (resource.dccAddress == 0) return DccKeys::Uncompressed;
-    const auto keys = readDccKeys(resource.dccAddress, DccKeyBytes(guestBytes), memoized);
+    const auto keys = currentDccKeys(resource.dccAddress, DccKeyBytes(guestBytes), memoized);
     if (keys == DccKeys::Uncompressed) return keys;
     if (IsConvertedTextureFormat(resource.format) && (keys == DccKeys::Clear0001 || keys == DccKeys::Clear1110)) throw std::runtime_error(std::string("AGC graphics: DCC clear code ") + DccKeysName(keys) + " of converted texture format " + std::to_string(resource.format) + " is not implemented");
     std::byte probe[16]{};
