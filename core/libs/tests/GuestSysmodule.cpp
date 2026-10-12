@@ -203,4 +203,14 @@ int main() {
     Require(sceSysmoduleUnloadModule(kAudioPropagationModuleId) == 0);
     Require(sceSysmoduleIsLoaded(kAudioPropagationModuleId) == kModuleUnloaded);
     Require(sceSysmoduleGetModuleHandleInternal(kAudioPropagationModuleId, &audioPropagationHandle) == kModuleUnloaded);
+
+    constexpr std::uint16_t kVoiceQoSModuleId = 0x001b;
+    std::int32_t voiceQoSHandle = -1;
+    Require(sceSysmoduleLoadModule(kVoiceQoSModuleId) == 0);
+    Require(sceSysmoduleGetModuleHandleInternal(kVoiceQoSModuleId, &voiceQoSHandle) == 0);
+    Require(voiceQoSHandle >= 0);
+    void* voiceQoSSymbol = nullptr;
+    Require(sceKernelDlsym(voiceQoSHandle, "sceVoiceQoSInit", &voiceQoSSymbol) == 0);
+    Require(voiceQoSSymbol != nullptr);
+    Require(sceSysmoduleUnloadModule(kVoiceQoSModuleId) == 0);
 }

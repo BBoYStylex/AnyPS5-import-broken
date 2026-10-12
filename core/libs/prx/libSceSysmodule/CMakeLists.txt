@@ -14,9 +14,11 @@ if(BUILD_TESTING)
             "$<TARGET_FILE:libSceFiber>" "${guestSysmoduleRun}/libs/libSceFiber.prx"
             COMMAND "${CMAKE_COMMAND}" -E copy_if_different
             "$<TARGET_FILE:libSceAudioPropagation>" "${guestSysmoduleRun}/libs/libSceAudioPropagation.prx"
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "$<TARGET_FILE:libSceVoiceQoS>" "${guestSysmoduleRun}/libs/libSceVoiceQoS.prx"
             VERBATIM
     )
-    add_dependencies(guest_sysmodule_runtime libSceFiber libSceAudioPropagation)
+    add_dependencies(guest_sysmodule_runtime libSceFiber libSceAudioPropagation libSceVoiceQoS)
     add_dependencies(guest_sysmodule_tests guest_sysmodule_runtime)
     add_test(NAME guest_sysmodule COMMAND guest_sysmodule_tests)
     set_tests_properties(guest_sysmodule PROPERTIES WORKING_DIRECTORY ${guestSysmoduleRun})

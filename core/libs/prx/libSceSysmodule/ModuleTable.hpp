@@ -13,7 +13,7 @@ inline const std::unordered_map<std::uint32_t, const char*> kModuleTable = {
     {0x00000017, "libSceXml"},
     {0x00000019, "libSceNpUtility"},
     {0x0000001a, "libSceVoice"},
-    {0x0000001b, "libSceVoiceQos"},
+    {0x0000001b, "libSceVoiceQoS"},
     {0x0000001c, "libSceNpMatching2"},
     {0x0000001e, "libSceNpScoreRanking"},
     {0x00000021, "libSceRudp"},
