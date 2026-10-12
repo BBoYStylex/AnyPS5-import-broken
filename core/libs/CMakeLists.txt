@@ -144,6 +144,13 @@ endforeach()
 add_custom_target(libs DEPENDS ${PATCHED_OUTPUTS})
 
 if(BUILD_TESTING)
+    add_test_executable(guest_vsh_web_app_launcher_tests
+        tests/GuestVshWebAppLauncher.cpp
+        prx/libReactNative.Modules.Vsh.WebAppLauncher/Export.cpp)
+    target_include_directories(guest_vsh_web_app_launcher_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    configure_windows_unwind(guest_vsh_web_app_launcher_tests)
+    add_test(NAME guest_vsh_web_app_launcher COMMAND guest_vsh_web_app_launcher_tests)
+
     add_test_executable(guest_posix_scalar_io_tests tests/GuestPosixScalarIo.cpp)
     target_include_directories(guest_posix_scalar_io_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_link_libraries(guest_posix_scalar_io_tests PRIVATE libkernel libc)
