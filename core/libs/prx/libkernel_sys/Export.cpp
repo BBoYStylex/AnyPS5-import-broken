@@ -40,6 +40,7 @@ constexpr int GuestEio = 5;
 constexpr int GuestEfault = 14;
 constexpr int GuestEinval = 22;
 constexpr int GuestEexist = 17;
+constexpr int GuestEnotdir = 20;
 constexpr int GuestExdev = 18;
 constexpr int GuestEdeadlk = 11;
 constexpr int GuestEagain = 35;
@@ -79,6 +80,15 @@ constexpr int PcAclNfs4 = 64;
 std::int64_t Fail(int error) {
     *__error_nid_postfix() = error;
     return -1;
+}
+
+bool HasNonDirectoryAncestor(const std::filesystem::path& native) {
+    std::error_code error;
+    for (auto prefix = native.parent_path(); prefix.has_relative_path(); prefix = prefix.parent_path()) {
+        const auto status = std::filesystem::status(prefix, error);
+        if (std::filesystem::exists(status)) return !std::filesystem::is_directory(status);
+    }
+    return false;
 }
 
 int GuestError(const std::error_code& error) {
@@ -304,7 +314,7 @@ int APS5_VABI symlink_nid_postfix(const char* target, const char* created) {
 #else
     if (std::filesystem::exists(std::filesystem::symlink_status(native, error))) return static_cast<int>(Fail(GuestEexist));
 #endif
-    if (!std::filesystem::is_directory(native.parent_path(), error)) return static_cast<int>(Fail(GuestEnoent));
+    if (!std::filesystem::is_directory(native.parent_path(), error)) return static_cast<int>(Fail(HasNonDirectoryAncestor(native) ? GuestEnotdir : GuestEnoent));
     const std::filesystem::path contents(target);
     const bool directory = std::filesystem::is_directory(native.parent_path() / contents, error);
 #ifdef _WIN32

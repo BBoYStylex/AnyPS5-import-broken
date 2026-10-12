@@ -129,6 +129,9 @@ int main() {
         Require(symlink_nid_postfix("file.txt", created.c_str()) == -1 && Error() == expected);
         Require(std::filesystem::hard_link_count(file) == 1 && !std::filesystem::exists(root / "new.txt"));
     }
+    Require(symlink_nid_postfix("file.txt", (std::filesystem::path(file) / "new.txt").string().c_str()) == -1 && Error() == 20);
+    Require(symlink_nid_postfix("file.txt", (std::filesystem::path(file) / "deeper" / "new.txt").string().c_str()) == -1 && Error() == 20);
+    Require(symlink_nid_postfix("file.txt", (root / "missing" / "new.txt").string().c_str()) == -1 && Error() == 2);
     Require(readlink_nid_postfix(file.c_str(), buffer, sizeof(buffer)) == -1 && Error() == 22);
     Require(readlink_nid_postfix(root.string().c_str(), buffer, sizeof(buffer)) == -1 && Error() == 22);
     Require(readlink_nid_postfix((root / "missing").string().c_str(), buffer, sizeof(buffer)) == -1 && Error() == 2);
