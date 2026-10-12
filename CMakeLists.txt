@@ -101,6 +101,8 @@ if(BUILD_TESTING)
             add_test(NAME package_macos_app COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_package_macos_app.py)
         endif()
+        add_test(NAME debt_split COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_debt_split.py)
         add_test(NAME hardware_oracle COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/hw-oracle/test_hw_oracle.py)
         add_test(NAME pr_overlap_exports COMMAND ${Python3_EXECUTABLE}
@@ -111,6 +113,9 @@ if(BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_nid_names.py)
         add_test(NAME release_package COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_package_release.py)
+        add_test(NAME pad_input COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_pad_input.py)
+        set_tests_properties(pad_input PROPERTIES TIMEOUT 20)
     endif()
 endif()
 
