@@ -6,6 +6,7 @@
 #include <cstring>
 #include <filesystem>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 
@@ -52,6 +53,16 @@ int main(int argc, char** argv) {
     Require(fwrite_nid_postfix(payload, 1, sizeof(payload), stream) == sizeof(payload));
     const auto expectedSize = sizeof(payload) * 2 - 1;
     Require(ftell_nid_postfix(stream) == static_cast<long>(expectedSize));
+    constexpr auto overflowingCount = std::numeric_limits<std::size_t>::max() / 2 + 2;
+    errno = 0;
+    Require(fwrite_nid_postfix(payload, 2, overflowingCount, stream) == 0);
+    Require(errno == EINVAL && ferror_nid_postfix(stream) != 0 && ftell_nid_postfix(stream) == static_cast<long>(expectedSize));
+    clearerr_nid_postfix(stream);
+    char overflowTarget[2] = {};
+    errno = 0;
+    Require(fread_nid_postfix(overflowTarget, 2, overflowingCount, stream) == 0);
+    Require(errno == EINVAL && ferror_nid_postfix(stream) != 0 && ftell_nid_postfix(stream) == static_cast<long>(expectedSize));
+    clearerr_nid_postfix(stream);
     Require(fflush_nid_postfix(stream) == 0);
     Require(fseek_nid_postfix(stream, 0, SEEK_SET) == 0);
     std::array<char, sizeof(payload)> buffer{};
