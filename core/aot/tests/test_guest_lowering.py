@@ -111,15 +111,125 @@ class GuestProgramTests(unittest.TestCase):
         self.directory = Path(self.temporary.name)
         self.addCleanup(self.temporary.cleanup)
 
-    def program(self, source, imports=('exit',), data_imports=(), relative=(), strict=True, unwind=(), tls=None):
+    def program(self, source, imports=('exit',), data_imports=(), relative=(), strict=True, unwind=(), tls=None, concurrent=False):
         slots = ''.join(f'.p2align 3\n{name}_slot: .quad 0\n' for name in [*imports, *data_imports])
         code, labels = guest_lab.assemble_program(source + slots, self.directory)
         raw = guest_lab.program_image(code, labels, [(name, f'{name}_slot') for name in imports],
                                       [(name, f'{name}_slot') for name in data_imports], relative=relative, unwind=unwind, tls=tls)
-        return guest_lab.build_program(raw, self.directory, strict=strict)
+        return guest_lab.build_program(raw, self.directory, strict=strict, concurrent=concurrent)
 
     def run_binary(self, binary):
         return subprocess.run([str(binary)], capture_output=True, timeout=20)
+
+    def threaded_program(self, concurrent):
+        return self.program(PRELUDE + """
+    sub rsp, 64
+    mov r12, rsp
+    mov qword ptr [r12 + 24], 0
+    mov qword ptr [r12 + 32], 41
+    mov qword ptr [r12 + 48], 73
+    lea rax, [r12 + 24]
+    mov qword ptr [r12 + 40], rax
+    mov qword ptr [r12 + 56], rax
+    lea rdi, [r12]
+    xor esi, esi
+    lea rdx, [rip + worker]
+    lea rcx, [r12 + 32]
+    call qword ptr [rip + pthread_create_slot]
+    test eax, eax
+    jnz failed
+    lea rdi, [r12 + 8]
+    xor esi, esi
+    lea rdx, [rip + worker]
+    lea rcx, [r12 + 48]
+    call qword ptr [rip + pthread_create_slot]
+    test eax, eax
+    jnz failed
+    mov rdi, qword ptr [r12 + 0]
+    lea rsi, [r12 + 16]
+    call qword ptr [rip + pthread_join_slot]
+    test eax, eax
+    jnz failed
+    cmp qword ptr [r12 + 16], 41
+    jne failed
+    mov rdi, qword ptr [r12 + 8]
+    lea rsi, [r12 + 16]
+    call qword ptr [rip + pthread_join_slot]
+    test eax, eax
+    jnz failed
+    cmp qword ptr [r12 + 16], 73
+    jne failed
+    cmp qword ptr [r12 + 24], 20000
+    jne failed
+    mov rdi, qword ptr [r12 + 0]
+    xor esi, esi
+    call qword ptr [rip + pthread_join_slot]
+    cmp eax, 3
+    jne failed
+    xor edi, edi
+    jmp finish
+failed:
+    mov edi, 91
+finish:
+""" + EXIT + """
+worker:
+    mov rax, qword ptr [rdi]
+    mov qword ptr fs:[0x80], rax
+    mov rdx, qword ptr [rdi + 8]
+    mov ecx, 10000
+again:
+    lock inc qword ptr [rdx]
+    dec ecx
+    jnz again
+    mov rax, qword ptr fs:[0x80]
+    ret
+.p2align 3
+first: .quad 0
+second: .quad 0
+result: .quad 0
+counter: .quad 0
+""", imports=('exit', 'pthread_create', 'pthread_join'), concurrent=concurrent)
+
+    def test_guest_threads_join_tls_and_atomic_contention(self):
+        binary, _ = self.threaded_program(True)
+        result = self.run_binary(binary)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_guest_threads_reject_unordered_image(self):
+        binary, _ = self.threaded_program(False)
+        result = self.run_binary(binary)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(b'ordered memory profile', result.stderr)
+
+    def test_ordered_shared_memory_litmus(self):
+        writers = ["mov qword ptr [rdi], 1\nmov qword ptr [rdi + 8], 1\nxor eax, eax\nret",
+                   "spin:\nmov rax, qword ptr [rdi + 8]\ntest rax, rax\njz spin\nmov rax, qword ptr [rdi]\nmov qword ptr [rdi + 16], rax\nret"]
+        self.litmus(writers, "cmp qword ptr [r12 + 16], 1\njne bad")
+
+    def test_ordered_store_buffering_with_fences(self):
+        workers = ["mov qword ptr [rdi], 1\nmfence\nmov rax, qword ptr [rdi + 8]\nmov qword ptr [rdi + 16], rax\nret",
+                   "mov qword ptr [rdi + 8], 1\nmfence\nmov rax, qword ptr [rdi]\nmov qword ptr [rdi + 24], rax\nret"]
+        self.litmus(workers, "mov rax, qword ptr [r12 + 16]\nor rax, qword ptr [r12 + 24]\njz bad")
+
+    def test_ordered_independent_reads_of_independent_writes(self):
+        workers = ["mov qword ptr [rdi], 1\nret", "mov qword ptr [rdi + 8], 1\nret",
+                   "mov rax, qword ptr [rdi]\nmov qword ptr [rdi + 16], rax\nmov rax, qword ptr [rdi + 8]\nmov qword ptr [rdi + 24], rax\nret",
+                   "mov rax, qword ptr [rdi + 8]\nmov qword ptr [rdi + 32], rax\nmov rax, qword ptr [rdi]\nmov qword ptr [rdi + 40], rax\nret"]
+        check = "cmp qword ptr [r12 + 16], 1\njne good\ncmp qword ptr [r12 + 24], 0\njne good\ncmp qword ptr [r12 + 32], 1\njne good\ncmp qword ptr [r12 + 40], 0\nje bad\ngood:"
+        self.litmus(workers, check)
+
+    def litmus(self, workers, check):
+        source = PRELUDE + "sub rsp, 128\nmov r12, rsp\nmov r13d, 128\nround:\n"
+        source += ''.join(f"mov qword ptr [r12 + {offset}], 0\n" for offset in range(0, 64, 8))
+        for index in range(len(workers)):
+            source += f"lea rdi, [r12 + {64 + index * 8}]\nxor esi, esi\nlea rdx, [rip + worker{index}]\nmov rcx, r12\ncall qword ptr [rip + pthread_create_slot]\ntest eax, eax\njnz bad\n"
+        for index in range(len(workers)):
+            source += f"mov rdi, qword ptr [r12 + {64 + index * 8}]\nxor esi, esi\ncall qword ptr [rip + pthread_join_slot]\ntest eax, eax\njnz bad\n"
+        source += check + "\ndec r13d\njnz round\nxor edi, edi\njmp done\nbad:\nmov edi, 93\ndone:\n" + EXIT
+        source += ''.join(f"worker{index}:\n{body}\n" for index, body in enumerate(workers))
+        binary, _ = self.program(source, imports=('exit', 'pthread_create', 'pthread_join'), concurrent=True)
+        result = self.run_binary(binary)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_variadic_provider_reads_registers_and_stack(self):
         binary, _ = self.program(PRELUDE + '''

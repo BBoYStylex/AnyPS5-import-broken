@@ -183,7 +183,7 @@ std::uint64_t ProviderAddress(const char* name) {
 }
 
 std::uint64_t Load(const NativeAotGuestImage& image) {
-    if (image.Version != 1) Fail("unsupported guest image descriptor");
+    if (image.Version != 2) Fail("unsupported guest image descriptor");
     if (loaded != nullptr) Fail("only one guest image is supported per process");
     const auto span = (image.Span + PageSize - 1) & ~(PageSize - 1);
     auto* memory = mmap(nullptr, span, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
@@ -327,7 +327,24 @@ std::uint64_t CreateThreadArea() {
     std::memcpy(reinterpret_cast<void*>(pointer + 0x10), &pointer, 8);
     std::memcpy(reinterpret_cast<void*>(pointer + 0x28), &guard[0], 8);
     std::memcpy(reinterpret_cast<void*>(pointer + 0x30), &guard[1], 8);
+    std::memcpy(reinterpret_cast<void*>(pointer + 0xf0), &memory, sizeof(memory));
     return pointer;
+}
+
+void FreeThreadArea(std::uint64_t pointer) {
+    void* memory;
+    std::memcpy(&memory, reinterpret_cast<const void*>(pointer + 0xf0), sizeof(memory));
+    std::free(memory);
+}
+
+bool ConcurrentMemory() {
+    return loaded != nullptr && loaded->Concurrent == 1;
+}
+
+void FreeStack(std::uint64_t top, std::size_t bytes) {
+    const auto size = (bytes + PageSize - 1) & ~(PageSize - 1);
+    if (munmap(reinterpret_cast<void*>(top - size - PageSize), size + PageSize) != 0)
+        Fail("cannot release guest stack");
 }
 
 std::uint64_t AllocateStack(std::size_t bytes) {

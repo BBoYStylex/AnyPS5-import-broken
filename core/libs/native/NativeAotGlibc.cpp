@@ -5,6 +5,7 @@
 #include <atomic>
 #include <cctype>
 #include <cerrno>
+#include <atomic>
 #include <condition_variable>
 #include <cwchar>
 #include <csignal>
@@ -1126,8 +1127,9 @@ void Syscall(State& state) {
     }
     if (operation != 0 || Argument(state, 4) != 0) Unsupported("unsupported futex operation");
     std::unique_lock<std::mutex> lock(futexLock);
-    std::int32_t current;
-    std::memcpy(&current, reinterpret_cast<const void*>(address), 4);
+    if (address % std::atomic_ref<std::int32_t>::required_alignment != 0) Unsupported("misaligned futex word");
+    std::atomic_ref<std::int32_t> word(*reinterpret_cast<std::int32_t*>(address));
+    const auto current = word.load(std::memory_order_acquire);
     if (current != Integer(state, 3)) {
         SetGuestErrno(11);
         ReturnInteger(state, -1);

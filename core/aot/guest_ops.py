@@ -466,6 +466,12 @@ class Integer(Emitter):
 
     op_endbr64 = op_nop
     op_pause = op_nop
+
+    def op_mfence(self):
+        self.emit('fence seq_cst')
+
+    op_lfence = op_mfence
+    op_sfence = op_mfence
     op_prefetcht0 = op_nop
     op_prefetcht1 = op_nop
     op_prefetcht2 = op_nop
@@ -959,10 +965,13 @@ class Integer(Emitter):
             old = self.v(f'extractvalue {{ i{bits}, i1 }} {pair}, 0')
             success = self.v(f'extractvalue {{ i{bits}, i1 }} {pair}, 1')
         else:
-            old = self.v(f'load volatile i{bits}, ptr {pointer}, align 1')
+            old = self.load(self.v(f'ptrtoint ptr {pointer} to i64'), bits) if getattr(self, 'concurrent', False) else self.v(f'load volatile i{bits}, ptr {pointer}, align 1')
             success = self.v(f'icmp eq i{bits} {expected}, {old}')
             stored = self.v(f'select i1 {success}, i{bits} {replacement}, i{bits} {old}')
-            self.emit(f'store volatile i{bits} {stored}, ptr {pointer}, align 1')
+            if getattr(self, 'concurrent', False):
+                self.store(self.v(f'ptrtoint ptr {pointer} to i64'), stored, bits)
+            else:
+                self.emit(f'store volatile i{bits} {stored}, ptr {pointer}, align 1')
         self.sub_flags(expected, old, self.v(f'sub i{bits} {expected}, {old}'), bits)
         failed, done = self.label(), self.label()
         self.emit(f'br i1 {success}, label %{done}, label %{failed}')

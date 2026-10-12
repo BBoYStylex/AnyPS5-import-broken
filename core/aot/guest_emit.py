@@ -22,6 +22,33 @@ def symbol(address):
 
 
 class Lowering(Vector):
+    def load(self, address, bits):
+        if not self.concurrent:
+            return super().load(address, bits)
+        if bits > 64:
+            low = self.load(address, 64)
+            high = self.load(self.v(f'add i64 {address}, 8'), bits - 64)
+            wide = self.v(f'zext i64 {low} to i{bits}')
+            shifted = self.v(f'shl i{bits} {self.v(f"zext i{bits - 64} {high} to i{bits}")}, 64')
+            return self.v(f'or i{bits} {wide}, {shifted}')
+        opcode = {8: 'ldrb', 16: 'ldrh', 32: 'ldr', 64: 'ldr'}[bits]
+        width = 'x' if bits == 64 else 'w'
+        value = self.v(f'call i64 asm sideeffect "dmb ish\\0A{opcode} ${{0:{width}}}, [$1]\\0Admb ish", "=r,r,~{{memory}}"(i64 {address})')
+        return value if bits == 64 else self.v(f'trunc i64 {value} to i{bits}')
+
+    def store(self, address, value, bits):
+        if not self.concurrent:
+            return super().store(address, value, bits)
+        if bits > 64:
+            self.store(address, self.v(f'trunc i{bits} {value} to i64'), 64)
+            high = self.v(f'lshr i{bits} {value}, 64')
+            self.store(self.v(f'add i64 {address}, 8'), self.v(f'trunc i{bits} {high} to i{bits - 64}'), bits - 64)
+            return
+        opcode = {8: 'strb', 16: 'strh', 32: 'str', 64: 'str'}[bits]
+        width = 'x' if bits == 64 else 'w'
+        extended = value if bits == 64 else self.v(f'zext i{bits} {value} to i64')
+        self.emit(f'call void asm sideeffect "dmb ish\\0A{opcode} ${{0:{width}}}, [$1]\\0Admb ish", "r,r,~{{memory}}"(i64 {extended}, i64 {address})')
+
     def flush(self):
         for index in range(16):
             pointer = self.v(f'getelementptr i8, ptr %s, i64 {8 * index}')
@@ -207,10 +234,11 @@ class Lowering(Vector):
             self.trap(TRAP_FALLTHROUGH)
 
 
-def lower_unit(unit, units, trace=False):
+def lower_unit(unit, units, trace=False, concurrent=False):
     lowering = Lowering(unit, symbol(unit.start))
     lowering.units = units
     lowering.trace = trace
+    lowering.concurrent = concurrent
     lowering.prologue()
     if trace:
         lowering.emit(f'call void @NativeAotGuestTraceEnter(ptr %s, i64 {unit.start})')
@@ -275,7 +303,7 @@ def string_constant(name, text):
     return f'{name} = private unnamed_addr constant [{len(data)} x i8] c"{escaped}"'
 
 
-def descriptor_module(image):
+def descriptor_module(image, concurrent=False):
     lines = [f'target triple = "{TRIPLE}"', '@__aps5_guest_base = hidden global i64 0']
     for address in image['entries']:
         lines.append(f'declare i64 {symbol(address)}(ptr, i64)')
@@ -301,11 +329,11 @@ def descriptor_module(image):
         lines.append(string_constant(f'@__aps5_guest_export_{number}', name))
     lines.append(f'@__aps5_guest_exports = private constant [{max(len(exports), 1)} x {{ ptr, i64 }}] [' +
                  (', '.join(f'{{ ptr, i64 }} {{ ptr @__aps5_guest_export_{number}, i64 {address} }}' for number, (_, address) in enumerate(exports)) or '{ ptr, i64 } zeroinitializer') + ']')
-    fields = ['i64 1', 'ptr @__aps5_guest_bytes', f'i64 {len(blob)}', 'ptr @__aps5_guest_segments', f'i64 {len(image["segments"])}',
+    fields = ['i64 2', 'ptr @__aps5_guest_bytes', f'i64 {len(blob)}', 'ptr @__aps5_guest_segments', f'i64 {len(image["segments"])}',
               'ptr @__aps5_guest_relocations', f'i64 {len(image["relocations"])}', 'ptr @__aps5_guest_symbols',
               'ptr @__aps5_guest_symbol_flags', f'i64 {symbol_count}', 'ptr @__aps5_guest_entries', f'i64 {len(image["entries"])}',
               f'i64 {image["entry"]}', f'i64 {image["span"]}', f'i64 {image["relro"][0]}', f'i64 {image["relro"][1]}',
-              'ptr @__aps5_guest_base', *[f'i64 {value}' for value in image['tls']], 'ptr @__aps5_guest_exports', f'i64 {len(exports)}']
+              'ptr @__aps5_guest_base', *[f'i64 {value}' for value in image['tls']], 'ptr @__aps5_guest_exports', f'i64 {len(exports)}', f'i64 {int(concurrent)}']
     types = ', '.join(field.split(' ')[0] for field in fields)
     lines.append(f'@__aps5_guest_image = constant {{ {types} }} {{ {", ".join(fields)} }}')
     return '\n'.join(lines) + '\n'
@@ -324,12 +352,12 @@ def callees(unit, units):
 
 
 def lower_shard(arguments):
-    raw, starts, output, extra, trace = arguments
+    raw, starts, output, extra, trace, concurrent = arguments
     program = guest_lift.Program(raw)
     units, _, _ = guest_lift.discover(program, extra)
     texts, declarations, errors, called = [], set(), [], set()
     for start in starts:
-        text, declared, failures = lower_unit(units[start], units, trace)
+        text, declared, failures = lower_unit(units[start], units, trace, concurrent)
         texts.append(text)
         declarations |= declared
         errors.extend(failures)
@@ -340,7 +368,7 @@ def lower_shard(arguments):
     return errors
 
 
-def build(input_path, output_dir, shards=16, jobs=8, extra=(), strict=True, trace=False):
+def build(input_path, output_dir, shards=16, jobs=8, extra=(), strict=True, trace=False, concurrent=False):
     started = time.monotonic()
     raw = Path(input_path).read_bytes()
     program = guest_lift.Program(raw)
@@ -348,7 +376,7 @@ def build(input_path, output_dir, shards=16, jobs=8, extra=(), strict=True, trac
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
     image = describe_image(program, units)
-    (output / 'image.ll').write_text(descriptor_module(image))
+    (output / 'image.ll').write_text(descriptor_module(image, concurrent))
     ordered = sorted(units, key=lambda start: -len(units[start].instructions))
     buckets = [[] for _ in range(shards)]
     sizes = [0] * shards
@@ -356,13 +384,14 @@ def build(input_path, output_dir, shards=16, jobs=8, extra=(), strict=True, trac
         smallest = sizes.index(min(sizes))
         buckets[smallest].append(start)
         sizes[smallest] += len(units[start].instructions)
-    work = [(raw, sorted(bucket), str(output / f'shard{number:02}.ll'), tuple(extra), trace) for number, bucket in enumerate(buckets) if bucket]
+    work = [(raw, sorted(bucket), str(output / f'shard{number:02}.ll'), tuple(extra), trace, concurrent) for number, bucket in enumerate(buckets) if bucket]
     if jobs == 1:
         errors = [error for item in work for error in lower_shard(item)]
     else:
         with ProcessPoolExecutor(jobs) as pool:
             errors = [error for result in pool.map(lower_shard, work) for error in result]
     report = {'schema': 'anyps5.aot.guest-lowering.v1', 'input_sha256': program.sha256, 'units': len(units),
+              'memory_profile': 'ordered-normal-memory' if concurrent else 'single-thread',
               'instructions': sum(len(unit.instructions) for unit in units.values()),
               'jump_tables': {status: sum(1 for unit in units.values() for table in unit.tables.values() if table['status'] == status)
                               for status in ('qualified', 'candidate')},
@@ -381,8 +410,9 @@ def main():
     parser.add_argument('--shards', type=int, default=16)
     parser.add_argument('--inventory', action='store_true')
     parser.add_argument('--trace', action='store_true')
+    parser.add_argument('--concurrent', action='store_true')
     args = parser.parse_args()
-    report = build(args.input, args.output, args.shards, strict=not args.inventory, trace=args.trace)
+    report = build(args.input, args.output, args.shards, strict=not args.inventory, trace=args.trace, concurrent=args.concurrent)
     print(json.dumps({key: report[key] for key in ('units', 'instructions', 'jump_tables', 'seconds')}))
     print(f'{len(report["unsupported"])} unsupported instruction sites')
 

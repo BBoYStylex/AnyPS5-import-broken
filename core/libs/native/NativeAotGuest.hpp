@@ -67,6 +67,7 @@ struct NativeAotGuestImage {
     std::uint64_t TlsAlignment;
     const NativeAotGuestExport* Exports;
     std::uint64_t ExportCount;
+    std::uint64_t Concurrent;
 };
 
 [[noreturn]] void NativeAotGuestTrap(std::uint64_t kind, std::uint64_t address, std::uint64_t detail);
@@ -122,6 +123,9 @@ std::uint64_t Push(NativeAotGuestState& state, std::uint64_t value);
 std::uint64_t ProviderAddress(const char* name);
 std::uint64_t AllocateStack(std::size_t bytes);
 std::uint64_t CreateThreadArea();
+void FreeThreadArea(std::uint64_t pointer);
+void FreeStack(std::uint64_t top, std::size_t bytes);
+bool ConcurrentMemory();
 [[noreturn]] void Start(const NativeAotGuestImage& image, int argc, char** argv, char** envp);
 
 }
