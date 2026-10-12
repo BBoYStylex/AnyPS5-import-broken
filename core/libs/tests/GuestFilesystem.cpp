@@ -18,6 +18,7 @@
 #include <io.h>
 #include <windows.h>
 #else
+#include <sys/stat.h>
 #include <unistd.h>
 #endif
 extern "C" {
@@ -713,6 +714,22 @@ int main() {
     const auto longLeaf = rootName + "/" + std::string(300, 'n');
     Require(sceKernelMkdir(longLeaf.c_str(), 0700) == static_cast<int>(0x8002003fu));
     Require(mkdir_nid_postfix(longLeaf.c_str(), 0700) == -1 && *__error_nid_postfix() == 63);
+    const auto modeDirectory = root / "mkdir-mode";
+    const auto savedMask = ::umask(0);
+    for (const mode_t mask : {0000, 0022, 0077}) {
+        ::umask(mask);
+        for (const unsigned short mode : {0700, 0750, 0777}) {
+            for (const char* suffix : {"", "/"}) {
+                const auto name = modeDirectory.string() + suffix;
+                Require(sceKernelMkdir(name.c_str(), mode) == 0);
+                struct stat status{};
+                Require(::stat(modeDirectory.c_str(), &status) == 0);
+                Require((status.st_mode & 0777) == (mode & ~mask));
+                Require(sceKernelRmdir(modeDirectory.c_str()) == 0);
+            }
+        }
+    }
+    ::umask(savedMask);
 #endif
     const auto invalidNameUnderFile = presentName + "/a:b/x";
     Require(mkdir_nid_postfix(invalidNameUnderFile.c_str(), 0700) == -1 && *__error_nid_postfix() == 20);

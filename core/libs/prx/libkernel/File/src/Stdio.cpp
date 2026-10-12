@@ -906,7 +906,6 @@ int APS5_VABI getdents_nid_postfix(int fd, char* buf, int nbytes) {
 }
 
 int APS5_VABI sceKernelMkdir(const char* path, uint16_t mode) {
-    (void)mode;
     if (path == nullptr) throw std::invalid_argument("sceKernelMkdir: path is null");
     if (!*path) return SceErrorFromErrno(GUEST_ENOENT);
     std::filesystem::path native;
@@ -917,7 +916,7 @@ int APS5_VABI sceKernelMkdir(const char* path, uint16_t mode) {
     if (!std::filesystem::is_directory(WithoutTrailingSeparator(native).parent_path(), error)) {
         return SceErrorFromErrno(HasNonDirectoryPrefix(native) ? GUEST_ENOTDIR : GUEST_ENOENT);
     }
-    if (!std::filesystem::create_directory(native, error)) return SceErrorFromErrno(error.value() ? error.value() : GUEST_EIO);
+    if (NativeMkdir(native, mode) != 0) return SceErrorFromErrno(errno);
     RecordWrittenPath_nid_no_patch(native);
     return 0;
 }
