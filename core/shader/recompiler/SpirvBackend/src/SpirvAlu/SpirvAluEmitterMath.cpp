@@ -561,6 +561,7 @@ std::optional<std::uint32_t> EmitHalfWaveReduction(SpirvValueEmitContext& ctx, c
         if (lane < 32u || state.hostSubgroupSize > 32u) return std::nullopt;
         return ConstantU32(state, scan->reduction->identity);
     }
+    if (HostSubgroupSingleLane(state)) return lane >= 32u ? ConstantU32(state, scan->reduction->identity) : ctx.Def(scan->source);
     const auto read = "v_readlane_b32 of lane " + std::to_string(lane) + " of a wave64 half-wave reduction scan";
     const auto& capabilities = state.supportedCapabilities;
     if (std::find(capabilities.begin(), capabilities.end(), static_cast<std::uint32_t>(spv::CapabilityGroupNonUniformArithmetic)) == capabilities.end()) {
