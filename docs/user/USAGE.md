@@ -148,6 +148,10 @@ Do not disable Dozen if it is the only Vulkan driver available; the application 
 
 GPU results in storage images and render targets stay on the GPU until something reads their memory. A title that frees such an image after waiting for its GPU work and reuses the memory can have its new data overwritten when the results are stored later ([TechnicalDebt](../dev/TechnicalDebt.md)). `APS5_STORE_AT_FLIP=1` stores every pending result when a display buffer is flipped, at the cost of one write-back per pending image and frame. Any other value stops the title at its first flip.
 
+### Fiber guard pages
+
+Fiber contexts that a title packs back to back have no guard page between them, so a fiber that overflows its stack corrupts the next context and the title fails much later. On Windows, `APS5_FIBER_GUARD=1` makes the lowest 4 KiB page of each fiber context inaccessible from `sceFiberInitialize` to `sceFiberFinalize`, so the overflow faults at the instruction that causes it. The guard takes these 4 KiB from the usable stack of each context, so a fiber that legitimately uses its lowest page also faults with the variable set. Contexts that do not start on a 4 KiB page or are smaller than 8 KiB are left without a guard; only the first one is named on stderr. Contexts that a title takes from a general allocator such as `malloc` are usually aligned to 16 bytes only, so in such titles most contexts may get no guard. On Linux the variable is not implemented and stops the title at its first `sceFiberInitialize`, as does any value other than `1`. Limits are listed in the [technical debt](../dev/debt/libSceFiber.md).
+
 ## Exit codes
 
 `0`: conversion succeeded. `1`: invalid arguments. `2`: conversion failed; the error is printed to stderr. With `--autorun`, successful conversion returns the launched application's exit code.

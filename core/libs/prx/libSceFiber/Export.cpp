@@ -29,6 +29,7 @@ static constexpr std::size_t FIBER_OBJECT_SIZE = 0x100;
 static constexpr std::size_t FIBER_OPT_PARAM_SIZE = 0x80;
 static constexpr std::size_t FIBER_MIN_CONTEXT_SIZE = 512;
 static constexpr std::uint64_t FIBER_CONTEXT_FILL = 0xdeadbeefdeadbeefull;
+static constexpr std::uint64_t FIBER_GUARD_BYTES = 0x1000;
 
 using GuestFiberEntry = void (APS5_VABI*)(std::uint64_t argOnInitialize, std::uint64_t argOnRun);
 
@@ -53,6 +54,8 @@ struct Fiber {
     void* savedStack;
     char name[FIBER_MAX_NAME_LENGTH + 1];
     bool contextSizeCheck;
+    std::uint8_t* guard;
+    std::uint64_t guardTicket;
 };
 static_assert(sizeof(Fiber) <= FIBER_OBJECT_SIZE, "guest reserves 0x100 bytes for SceFiber");
 
@@ -195,6 +198,14 @@ static void UnpinStack(const void* context, std::uint64_t bytes) {
     GuestArena::GuestArenaUnpinWritable_nid_postfix(context, static_cast<std::size_t>(bytes));
 }
 
+static std::uint64_t GuardPage(const void* page) {
+    return GuestArena::GuestArenaGuard_nid_no_patch(page, FIBER_GUARD_BYTES);
+}
+
+static void UnguardPage(const void* page, std::uint64_t ticket) {
+    GuestArena::GuestArenaUnguard_nid_no_patch(page, FIBER_GUARD_BYTES, ticket);
+}
+
 #else
 
 extern "C" void Aps5FiberSwitchStack_nid_no_patch(void** save, void* load);
@@ -257,7 +268,49 @@ static void PinStack(const void*, std::uint64_t) {}
 
 static void UnpinStack(const void*, std::uint64_t) {}
 
+static std::uint64_t GuardPage(const void*) {
+    NotImplemented_nid_no_patch("APS5_FIBER_GUARD guard pages on Linux");
+    return 0;
+}
+
+static void UnguardPage(const void*, std::uint64_t) {
+    NotImplemented_nid_no_patch("APS5_FIBER_GUARD guard pages on Linux");
+}
+
 #endif
+
+static bool FiberGuardRequested() {
+    static const bool requested = [] {
+        const char* value = std::getenv("APS5_FIBER_GUARD");
+        if (value == nullptr) return false;
+        if (std::strcmp(value, "1") != 0) throw std::runtime_error(std::string("APS5_FIBER_GUARD=") + value + ": expected 1");
+#ifndef _WIN32
+        NotImplemented_nid_no_patch("APS5_FIBER_GUARD guard pages on Linux");
+#endif
+        return true;
+    }();
+    return requested;
+}
+
+static void GuardContext(Fiber* fiber) {
+    if (!FiberGuardRequested()) return;
+    if ((reinterpret_cast<std::uintptr_t>(fiber->context) & (FIBER_GUARD_BYTES - 1)) != 0 || fiber->contextSize < 2 * FIBER_GUARD_BYTES) {
+        static std::atomic<bool> reported{false};
+        if (!reported.exchange(true)) {
+            std::fprintf(stderr, "[fiber] APS5_FIBER_GUARD: context %p+0x%llx does not start on a page or is smaller than two pages; such contexts get no guard page and later ones are not reported\n", static_cast<void*>(fiber->context), static_cast<unsigned long long>(fiber->contextSize));
+        }
+        return;
+    }
+    fiber->guardTicket = GuardPage(fiber->context);
+    fiber->guard = fiber->context;
+}
+
+static void ReleaseGuard(Fiber* fiber) {
+    if (!fiber->guard) return;
+    UnguardPage(fiber->guard, fiber->guardTicket);
+    fiber->guard = nullptr;
+    fiber->guardTicket = 0;
+}
 
 static StackBounds FiberBounds(const Fiber* fiber) {
     return {fiber->context + fiber->contextSize, fiber->context, fiber->context};
@@ -330,7 +383,10 @@ int32_t APS5_VABI _sceFiberInitializeImpl_nid_postfix(FiberObject* object, const
     if (addr_context == nullptr) return SCE_FIBER_ERROR_INVALID;
     if (size_context < FIBER_MIN_CONTEXT_SIZE) return SCE_FIBER_ERROR_RANGE;
     auto* fiber = reinterpret_cast<Fiber*>(object);
-    if (fiber->magic == FIBER_MAGIC) UnpinStack(fiber->context, fiber->contextSize);
+    if (fiber->magic == FIBER_MAGIC) {
+        ReleaseGuard(fiber);
+        UnpinStack(fiber->context, fiber->contextSize);
+    }
     std::memset(object, 0, FIBER_OBJECT_SIZE);
     fiber->magic = FIBER_MAGIC;
     fiber->state.store(FiberState::Idle, std::memory_order_relaxed);
@@ -340,11 +396,18 @@ int32_t APS5_VABI _sceFiberInitializeImpl_nid_postfix(FiberObject* object, const
     fiber->contextSize = size_context;
     std::strncpy(fiber->name, name, FIBER_MAX_NAME_LENGTH);
     fiber->contextSizeCheck = g_contextSizeCheck.load(std::memory_order_relaxed);
-    if (fiber->contextSizeCheck) {
-        auto* words = static_cast<std::uint64_t*>(addr_context);
-        std::fill(words, words + size_context / sizeof(std::uint64_t), FIBER_CONTEXT_FILL);
-    }
     PinStack(addr_context, size_context);
+    try {
+        GuardContext(fiber);
+    } catch (...) {
+        UnpinStack(addr_context, size_context);
+        fiber->magic = 0;
+        throw;
+    }
+    if (fiber->contextSizeCheck) {
+        auto* words = reinterpret_cast<std::uint64_t*>(fiber->guard ? fiber->context + FIBER_GUARD_BYTES : fiber->context);
+        std::fill(words, reinterpret_cast<std::uint64_t*>(fiber->context + size_context), FIBER_CONTEXT_FILL);
+    }
     if (TraceFibers()) std::fprintf(stderr, "[fiber] init %s object=%p context=%p+0x%llx entry=%p\n", fiber->name, static_cast<void*>(object), addr_context, static_cast<unsigned long long>(size_context), reinterpret_cast<void*>(entry));
     return SCE_OK;
 }
@@ -354,6 +417,7 @@ int32_t APS5_VABI sceFiberFinalize(FiberObject* object) {
     if (!fiber) return object ? SCE_FIBER_ERROR_INVALID : SCE_FIBER_ERROR_NULL;
     const auto state = fiber->state.load(std::memory_order_acquire);
     if (state == FiberState::Running || state == FiberState::Suspending) return SCE_FIBER_ERROR_STATE;
+    ReleaseGuard(fiber);
     fiber->magic = 0;
     UnpinStack(fiber->context, fiber->contextSize);
     return SCE_OK;
@@ -432,7 +496,8 @@ int32_t APS5_VABI sceFiberGetInfo(FiberObject* object, FiberInfo* fiber_info) {
     if (fiber->contextSizeCheck) {
         const auto* words = reinterpret_cast<const std::uint64_t*>(fiber->context);
         const auto* end = words + fiber->contextSize / sizeof(std::uint64_t);
-        fiber_info->size_context_margin = static_cast<uint64_t>(std::find_if(words, end, [](std::uint64_t word) { return word != FIBER_CONTEXT_FILL; }) - words) * sizeof(std::uint64_t);
+        const auto* first = fiber->guard ? words + FIBER_GUARD_BYTES / sizeof(std::uint64_t) : words;
+        fiber_info->size_context_margin = static_cast<uint64_t>(std::find_if(first, end, [](std::uint64_t word) { return word != FIBER_CONTEXT_FILL; }) - words) * sizeof(std::uint64_t);
     }
     return SCE_OK;
 }

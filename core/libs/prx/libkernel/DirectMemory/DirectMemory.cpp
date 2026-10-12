@@ -106,14 +106,13 @@ static void* mmap(void* addr, size_t len, int prot, int flags, int, int) {
 static int munmap(void* addr, size_t len) {
     auto& arena = KernelArena::Get();
     if (arena.Contains(addr, len)) GuestArena::GuestArenaReset_nid_postfix(addr, len);
-    else if (!VirtualFree(addr, len, MEM_DECOMMIT)) throw std::system_error(static_cast<int>(GetLastError()), std::system_category(), "VirtualFree decommit failed");
+    else GuestArena::GuestArenaDecommit_nid_no_patch(addr, len);
     if (arena.Contains(addr, len)) arena.Release(addr, len);
     return 0;
 }
 
 static int munmap_release(void* addr) {
-    if (!VirtualFree(addr, 0, MEM_RELEASE))
-        throw std::system_error(static_cast<int>(GetLastError()), std::system_category(), "VirtualFree release failed");
+    GuestArena::GuestArenaReleaseAllocation_nid_no_patch(addr);
     return 0;
 }
 
@@ -128,9 +127,7 @@ static int mprotect(void* addr, size_t len, int prot) {
             throw std::system_error(static_cast<int>(GetLastError()), std::system_category(), "VirtualQuery failed");
         const auto regionEnd = std::min(end, reinterpret_cast<std::uintptr_t>(memory.BaseAddress) + memory.RegionSize);
         if (memory.State == MEM_COMMIT) {
-            DWORD old;
-            if (!VirtualProtect(reinterpret_cast<void*>(cursor), regionEnd - cursor, WinProtFromPosix(prot), &old))
-                throw std::system_error(static_cast<int>(GetLastError()), std::system_category(), "VirtualProtect failed");
+            GuestArena::GuestArenaProtect_nid_no_patch(reinterpret_cast<void*>(cursor), regionEnd - cursor, WinProtFromPosix(prot));
         } else if (prot != PROT_NONE) {
             throw std::runtime_error("mprotect of uncommitted memory outside the guest arena");
         }

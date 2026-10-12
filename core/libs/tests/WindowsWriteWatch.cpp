@@ -186,6 +186,49 @@ void CheckConcurrentWrites() {
     region.Collect(Collection::Armed);
     Require(region.Collect(Collection::Armed).empty(), "concurrent writes did not settle");
 }
+void CheckFreshAroundGuard() {
+    auto& mappings = Mappings::Get();
+    {
+        Region region;
+        const auto address = reinterpret_cast<std::uintptr_t>(region.first);
+        region.Write(1, 1);
+        const auto ticket = mappings.Guard(address + Small, Small);
+        Require(region.Protection(1) == PAGE_NOACCESS, "guard was not set");
+        auto expected = Pages(0, 16);
+        expected.erase(1);
+        Require(region.Collect(Collection::Fresh) == expected, "fresh collection reported a guarded page or lost a fresh one");
+        Require(region.Protection(1) == PAGE_NOACCESS && region.Protection(0) == PAGE_READONLY && region.Protection(2) == PAGE_READONLY, "fresh activation opened the guard or left its neighbors unarmed");
+        Require(region.Collect(Collection::Fresh).empty(), "guarded page was counted as fresh");
+        Require(region.Collect(Collection::Armed).empty(), "guarded page was activated");
+        const auto before = faults.load();
+        region.Write(0, 2);
+        Require(faults == before + 1 && region.Collect(Collection::Armed) == Pages(0, 1), "write beside the guard was missed");
+        Require(region.Protection(1) == PAGE_NOACCESS && region.Protection(0) == PAGE_READONLY, "re-arming beside the guard opened it");
+        mappings.Unguard(address + Small, Small, ticket);
+        Require(region.Protection(1) == PAGE_READWRITE, "unguard did not restore the page");
+        Require(region.Collect(Collection::Armed).empty(), "unguarded page was activated before fresh collection");
+        Require(region.Collect(Collection::Fresh) == Pages(1, 2), "unguarded page was not reported as fresh");
+        Require(region.Protection(1) == PAGE_READONLY, "unguarded page was not activated");
+        Require(region.Collect(Collection::Fresh).empty() && region.Collect(Collection::All).empty(), "unguarded page was reported twice");
+        region.Write(1, 3);
+        Require(region.Collect(Collection::Armed) == Pages(1, 2), "write to the former guard page was missed");
+    }
+    {
+        Region region;
+        const auto address = reinterpret_cast<std::uintptr_t>(region.first);
+        const auto ticket = mappings.Guard(address + Small, Small);
+        Require(region.Collect(Collection::Fresh, 0, 4) == std::set<std::size_t>({0, 2, 3}), "fresh collection around the guard failed");
+        mappings.SetProtection(address, 16384, PAGE_NOACCESS);
+        mappings.Protect(address, 16384, PAGE_NOACCESS);
+        std::array<void*, 32> pages{};
+        auto count = pages.size();
+        Require(mappings.Collect(address, 16384, pages.data(), &count, true, Collection::Fresh) && count == 0, "guarded page made an inaccessible view fresh");
+        mappings.Unguard(address + Small, Small, ticket);
+        Require(region.Protection(1) == PAGE_NOACCESS, "unguard did not keep the guest protection");
+        count = pages.size();
+        Require(!mappings.Collect(address, 16384, pages.data(), &count, true, Collection::Fresh), "unguarded page of an inaccessible view was not fresh");
+    }
+}
 }
 
 int main() {
@@ -199,6 +242,7 @@ int main() {
         CheckFailureAndHoles();
         CheckPrivate();
         CheckConcurrentWrites();
+        CheckFreshAroundGuard();
         std::cout << "Windows deferred write-watch tests passed\n";
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

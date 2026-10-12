@@ -330,6 +330,26 @@ void GuestArenaUnpinWritable_nid_postfix(const void* pointer, std::size_t bytes)
     WindowsMappings::Get().Unpin(reinterpret_cast<std::uintptr_t>(pointer), bytes);
 }
 
+std::uint64_t GuestArenaGuard_nid_no_patch(const void* pointer, std::size_t bytes) {
+    return WindowsMappings::Get().Guard(reinterpret_cast<std::uintptr_t>(pointer), bytes);
+}
+
+void GuestArenaUnguard_nid_no_patch(const void* pointer, std::size_t bytes, std::uint64_t ticket) {
+    WindowsMappings::Get().Unguard(reinterpret_cast<std::uintptr_t>(pointer), bytes, ticket);
+}
+
+void GuestArenaProtect_nid_no_patch(const void* pointer, std::size_t bytes, std::uint32_t protection) {
+    WindowsMappings::Get().Protect(reinterpret_cast<std::uintptr_t>(pointer), bytes, protection);
+}
+
+void GuestArenaDecommit_nid_no_patch(void* pointer, std::size_t bytes) {
+    WindowsMappings::Get().Decommit(reinterpret_cast<std::uintptr_t>(pointer), bytes);
+}
+
+void GuestArenaReleaseAllocation_nid_no_patch(void* allocation) {
+    WindowsMappings::Get().Release(reinterpret_cast<std::uintptr_t>(allocation));
+}
+
 bool GuestArenaProtection_nid_postfix(std::uintptr_t address, std::uint32_t* protection) {
     return WindowsMappings::Get().Protection(address, protection);
 }

@@ -11,6 +11,7 @@
 #include <mutex>
 #include <map>
 #include <memory>
+#include <set>
 #include <vector>
 #include <stdexcept>
 #include <string>
@@ -61,8 +62,7 @@ public:
                     mapped->second.armed = 0;
                     invalidate(*mapped->second.page);
                 }
-                DWORD previous;
-                if (!VirtualProtect(reinterpret_cast<void*>(cursor), stop - cursor, protection, &previous)) fail("protect guest memory");
+                if (!protect(cursor, stop - cursor, protection)) fail("protect guest memory");
                 cursor = stop;
             }
         }
@@ -139,6 +139,7 @@ public:
 
     bool HandleWrite(std::uintptr_t address) {
         std::lock_guard lock(mutex);
+        if (guarded(address)) return false;
         const auto base = address & ~(pageBytes - 1);
         const auto found = views.find(base);
         if (found == views.end() || !writable(found->second.protection)) return false;
@@ -215,6 +216,80 @@ public:
         if (!unmap(GetCurrentProcess(), reinterpret_cast<void*>(base), 0)) fail("unmap shared guest alias");
     }
 
+    std::uint64_t Guard(std::uintptr_t address, std::size_t bytes) {
+        std::lock_guard lock(mutex);
+        if (bytes == 0 || ((address | bytes) & (subpageBytes - 1)) != 0) {
+            char text[128];
+            std::snprintf(text, sizeof(text), "guard page 0x%llx+0x%zx is not made of whole 4 KiB pages", static_cast<unsigned long long>(address), bytes);
+            throw std::logic_error(text);
+        }
+        const auto end = address + bytes;
+        const auto ticket = nextGuardTicket++;
+        const auto overlap = firstGuard(address);
+        if (overlap != guards.end() && overlap->first == address && overlap->second.end == end) {
+            requireGuardIntact(address, bytes);
+            overlap->second.owners.push_back(ticket);
+            return ticket;
+        }
+        if (overlap != guards.end() && overlap->first < end) {
+            char text[128];
+            std::snprintf(text, sizeof(text), "guard page 0x%llx+0x%zx overlaps another guard page", static_cast<unsigned long long>(address), bytes);
+            throw std::runtime_error(text);
+        }
+        DWORD previous;
+        if (!VirtualProtect(reinterpret_cast<void*>(address), bytes, PAGE_NOACCESS, &previous)) fail("guard page");
+        guards.emplace(address, Guarded{end, previous, {ticket}});
+        forget(freshRanges, address, end);
+        return ticket;
+    }
+
+    void Protect(std::uintptr_t address, std::size_t bytes, DWORD protection) {
+        std::lock_guard lock(mutex);
+        if (!protect(address, bytes, protection)) fail("protect guest memory");
+    }
+
+    void Decommit(std::uintptr_t address, std::size_t bytes) {
+        std::lock_guard lock(mutex);
+        if (!VirtualFree(reinterpret_cast<void*>(address), bytes, MEM_DECOMMIT)) fail("VirtualFree decommit failed");
+        dropGuards(address, address + bytes);
+    }
+
+    void Release(std::uintptr_t allocation) {
+        std::lock_guard lock(mutex);
+        auto end = allocation;
+        for (auto memory = query(end); memory.State != MEM_FREE && reinterpret_cast<std::uintptr_t>(memory.AllocationBase) == allocation; memory = query(end)) {
+            end = reinterpret_cast<std::uintptr_t>(memory.BaseAddress) + memory.RegionSize;
+        }
+        if (!VirtualFree(reinterpret_cast<void*>(allocation), 0, MEM_RELEASE)) fail("VirtualFree release failed");
+        dropGuards(allocation, end);
+    }
+
+    void Unguard(std::uintptr_t address, std::size_t bytes, std::uint64_t ticket) {
+        std::lock_guard lock(mutex);
+        if (const auto found = guards.find(address); found != guards.end()) {
+            auto& owners = found->second.owners;
+            if (const auto owner = std::find(owners.begin(), owners.end(), ticket); owner != owners.end()) {
+                if (found->second.end != address + bytes) {
+                    char text[128];
+                    std::snprintf(text, sizeof(text), "guard page 0x%llx+0x%zx has another size", static_cast<unsigned long long>(address), bytes);
+                    throw std::logic_error(text);
+                }
+                if (owners.size() == 1) requireGuardIntact(address, bytes);
+                owners.erase(owner);
+                if (!owners.empty()) return;
+                DWORD previous;
+                if (!VirtualProtect(reinterpret_cast<void*>(address), bytes, found->second.protection, &previous)) fail("remove guard page");
+                guards.erase(found);
+                refresh(address, address + bytes);
+                return;
+            }
+        }
+        if (droppedGuards.erase(ticket) != 0) return;
+        char text[160];
+        std::snprintf(text, sizeof(text), "guard page 0x%llx+0x%zx with ticket %llu is not registered", static_cast<unsigned long long>(address), bytes, static_cast<unsigned long long>(ticket));
+        throw std::logic_error(text);
+    }
+
     bool Protection(std::uintptr_t address, std::uint32_t* protection) {
         std::lock_guard lock(mutex);
         const auto found = views.find(address & ~(pageBytes - 1));
@@ -233,8 +308,10 @@ public:
             if ((fresh == freshRanges.begin() || std::prev(fresh)->second <= address) && (fresh == freshRanges.end() || fresh->first >= end)) return true;
             for (auto it = views.lower_bound(address & ~(pageBytes - 1)); it != views.end() && it->first < end; ++it) {
                 if (it->second.protection != PAGE_NOACCESS) continue;
+                const auto guardedHere = guardedSubpages(it->first);
                 for (auto at = std::max(address, it->first); at < std::min(end, it->first + pageBytes); at += 4096) {
-                    if ((it->second.collected & (1u << ((at - it->first) / 4096))) == 0) return false;
+                    const auto bit = 1u << ((at - it->first) / 4096);
+                    if ((it->second.collected & bit) == 0 && (guardedHere & bit) == 0) return false;
                 }
             }
         } else if (clear && !collectable(address, end)) return false;
@@ -252,10 +329,12 @@ public:
             if (found != views.end()) {
                 auto& view = found->second;
                 auto stop = std::min(std::min(end, base + pageBytes), nextClean == cleanRanges.end() ? end : nextClean->first);
+                const auto guardedHere = guardedSubpages(base);
                 if (collection != Collection::All) {
                     const auto selected = [&](std::uintptr_t at) {
-                        const bool collected = (view.collected & (1u << ((at - base) / 4096))) != 0;
-                        return collection == Collection::Armed ? collected : !collected;
+                        const auto bit = 1u << ((at - base) / 4096);
+                        const bool collected = (view.collected & bit) != 0;
+                        return collection == Collection::Armed ? collected : !collected && (guardedHere & bit) == 0;
                     };
                     while (cursor < stop && !selected(cursor)) cursor = std::min(stop, cursor + 4096);
                     if (cursor == stop) continue;
@@ -274,7 +353,7 @@ public:
                 for (std::size_t sub = 0; sub < subpages; ++sub) {
                     const auto from = std::max(cursor, base + sub * subpageBytes);
                     const auto to = std::min(stop, base + (sub + 1) * subpageBytes);
-                    if (from >= to) continue;
+                    if (from >= to || (guardedHere & (1u << sub)) != 0) continue;
                     if (collection == Collection::Fresh || pinned || view.seen[sub] != view.page->generation[sub]) {
                         if (*count == capacity) {
                             full = true;
@@ -362,6 +441,65 @@ private:
         return true;
     }
 
+    struct Guarded {
+        std::uintptr_t end;
+        DWORD protection;
+        std::vector<std::uint64_t> owners;
+    };
+
+    std::map<std::uintptr_t, Guarded>::iterator firstGuard(std::uintptr_t address) {
+        auto it = guards.upper_bound(address);
+        if (it != guards.begin() && std::prev(it)->second.end > address) --it;
+        return it;
+    }
+
+    static void requireGuardIntact(std::uintptr_t address, std::size_t bytes) {
+        const auto memory = query(address);
+        if (memory.State == MEM_COMMIT && memory.Protect == PAGE_NOACCESS && reinterpret_cast<std::uintptr_t>(memory.BaseAddress) + memory.RegionSize >= address + bytes) return;
+        char text[192];
+        std::snprintf(text, sizeof(text), "guard page 0x%llx+0x%zx was changed outside the guard registry (state 0x%lx, protection 0x%lx)", static_cast<unsigned long long>(address), bytes, static_cast<unsigned long>(memory.State), static_cast<unsigned long>(memory.Protect));
+        throw std::runtime_error(text);
+    }
+
+    void dropGuards(std::uintptr_t address, std::uintptr_t end) {
+        for (auto it = firstGuard(address); it != guards.end() && it->first < end;) {
+            droppedGuards.insert(it->second.owners.begin(), it->second.owners.end());
+            const auto first = it->first;
+            const auto last = it->second.end;
+            it = guards.erase(it);
+            refresh(first, last);
+        }
+    }
+
+    void refresh(std::uintptr_t address, std::uintptr_t end) {
+        for (auto it = views.lower_bound(address & ~(pageBytes - 1)); it != views.end() && it->first < end; ++it) {
+            const auto guardedHere = guardedSubpages(it->first);
+            for (std::size_t sub = 0; sub < subpages; ++sub) {
+                const auto from = std::max(address, it->first + sub * subpageBytes);
+                const auto to = std::min(end, it->first + (sub + 1) * subpageBytes);
+                const auto bit = static_cast<std::uint8_t>(1u << sub);
+                if (from < to && (it->second.collected & bit) == 0 && (guardedHere & bit) == 0) remember(freshRanges, from, to);
+            }
+        }
+    }
+
+    bool guarded(std::uintptr_t address) {
+        const auto it = firstGuard(address);
+        return it != guards.end() && it->first <= address;
+    }
+
+    bool protect(std::uintptr_t address, std::size_t bytes, DWORD protection) {
+        const auto end = address + bytes;
+        auto cursor = address;
+        DWORD previous;
+        for (auto it = firstGuard(address); it != guards.end() && it->first < end; ++it) {
+            it->second.protection = protection;
+            if (cursor < it->first && !VirtualProtect(reinterpret_cast<void*>(cursor), it->first - cursor, protection, &previous)) return false;
+            cursor = std::max(cursor, it->second.end);
+        }
+        return cursor >= end || VirtualProtect(reinterpret_cast<void*>(cursor), end - cursor, protection, &previous);
+    }
+
     static constexpr std::size_t pageBytes = 0x4000;
     static constexpr std::size_t subpageBytes = 0x1000;
     static_assert(subpageBytes == 4096, "Collect reports one page per subpage");
@@ -443,7 +581,7 @@ private:
         return static_cast<std::uint8_t>(((1u << (last + 1)) - 1) & ~((1u << first) - 1));
     }
 
-    static void protectSubpages(std::uintptr_t base, std::uint8_t mask, DWORD protection, const char* operation) {
+    void protectSubpages(std::uintptr_t base, std::uint8_t mask, DWORD protection, const char* operation) {
         for (std::size_t sub = 0; sub < subpages;) {
             if ((mask & (1u << sub)) == 0) {
                 ++sub;
@@ -451,10 +589,15 @@ private:
             }
             auto stop = sub;
             while (stop < subpages && (mask & (1u << stop)) != 0) ++stop;
-            DWORD previous;
-            if (!VirtualProtect(reinterpret_cast<void*>(base + sub * subpageBytes), (stop - sub) * subpageBytes, protection, &previous)) fail(operation);
+            if (!protect(base + sub * subpageBytes, (stop - sub) * subpageBytes, protection)) fail(operation);
             sub = stop;
         }
+    }
+
+    std::uint8_t guardedSubpages(std::uintptr_t base) {
+        std::uint8_t mask = 0;
+        for (auto it = firstGuard(base); it != guards.end() && it->first < base + pageBytes; ++it) mask |= subpagesOf(base, it->first, it->second.end);
+        return mask;
     }
 
     bool sameSection(HANDLE first, HANDLE second) const {
@@ -505,6 +648,7 @@ private:
     void reset(std::uintptr_t address, std::size_t bytes) {
         const auto end = address + bytes;
         forgetClean(address, end);
+        dropGuards(address, end);
         for (auto cursor = address; cursor < end;) {
             const auto memory = query(cursor);
             if (memory.State == MEM_RESERVE) {
@@ -544,6 +688,9 @@ private:
 
     Ranges cleanRanges;
     Ranges freshRanges;
+    std::map<std::uintptr_t, Guarded> guards;
+    std::set<std::uint64_t> droppedGuards;
+    std::uint64_t nextGuardTicket = 1;
     std::map<std::uintptr_t, View> views;
     std::map<std::pair<std::uintptr_t, std::uint64_t>, std::weak_ptr<SharedPage>> physical;
     std::mutex mutex;

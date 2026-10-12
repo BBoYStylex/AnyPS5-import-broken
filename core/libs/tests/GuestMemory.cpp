@@ -1333,6 +1333,59 @@ static void CheckSharedWritesDuringHostWrite() {
 #endif
 }
 
+static void CheckSharedWritesAroundGuard() {
+#ifdef _WIN32
+    constexpr std::size_t page = 0x4000;
+    constexpr std::size_t small = 0x1000;
+    std::int64_t phys = 0;
+    Require(sceKernelAllocateDirectMemory(0, 0x7fffffffffll, page, 0, 0, &phys) == 0);
+    void* mapped = nullptr;
+    Require(sceKernelMapDirectMemory(&mapped, page, 3, 0, phys, 0) == 0);
+    auto* bytes = static_cast<volatile unsigned char*>(mapped);
+    const auto base = reinterpret_cast<std::uintptr_t>(mapped);
+    const auto collect = [&] {
+        std::array<void*, 32> pages{};
+        std::size_t count = pages.size();
+        Require(GuestArena::GuestArenaCollectWrites_nid_postfix(base, page, pages.data(), &count, true));
+        std::vector<std::size_t> offsets;
+        for (std::size_t i = 0; i < count; ++i) offsets.push_back(reinterpret_cast<std::uintptr_t>(pages[i]) - base);
+        return offsets;
+    };
+    const auto protection = [&](std::size_t offset) {
+        MEMORY_BASIC_INFORMATION info{};
+        Require(VirtualQuery(reinterpret_cast<void*>(base + offset), &info, sizeof(info)) == sizeof(info));
+        return info.Protect;
+    };
+    const std::vector<std::size_t> written{small, small * 2, small * 3};
+    const auto ticket = GuestArena::GuestArenaGuard_nid_no_patch(mapped, small);
+    Require(protection(0) == PAGE_NOACCESS && protection(small) == PAGE_READWRITE);
+    Require(!GuestArena::GuestArenaHandleWrite_nid_postfix(base + 8));
+    for (const auto offset : written) bytes[offset + 8] = static_cast<unsigned char>(offset >> 12);
+    Require(collect() == written);
+    Require(protection(0) == PAGE_NOACCESS && protection(small) == PAGE_READONLY && protection(small * 2) == PAGE_READONLY && protection(small * 3) == PAGE_READONLY);
+    Require(collect().empty());
+    for (const auto offset : written) bytes[offset + 16] = 1;
+    Require(protection(0) == PAGE_NOACCESS && protection(small) == PAGE_READWRITE && protection(small * 3) == PAGE_READWRITE);
+    Require(collect() == written);
+    Require(protection(0) == PAGE_NOACCESS && protection(small) == PAGE_READONLY && protection(small * 3) == PAGE_READONLY);
+    GuestArena::GuestArenaUnguard_nid_no_patch(mapped, small, ticket);
+    Require(protection(0) == PAGE_READWRITE);
+    Require(collect() == std::vector<std::size_t>{0});
+    Require(protection(0) == PAGE_READONLY && collect().empty());
+    bytes[8] = 9;
+    Require(collect() == std::vector<std::size_t>{0});
+    const auto armedTicket = GuestArena::GuestArenaGuard_nid_no_patch(mapped, small);
+    GuestArena::GuestArenaPinWritable_nid_postfix(mapped, page);
+    Require(protection(0) == PAGE_NOACCESS && protection(small) == PAGE_READWRITE && protection(small * 3) == PAGE_READWRITE);
+    GuestArena::GuestArenaUnpinWritable_nid_postfix(mapped, page);
+    Require(collect() == written && protection(0) == PAGE_NOACCESS);
+    GuestArena::GuestArenaUnguard_nid_no_patch(mapped, small, armedTicket);
+    Require(protection(0) == PAGE_READWRITE && collect() == std::vector<std::size_t>{0});
+    Require(sceKernelMunmap(mapped, page) == 0);
+    Require(sceKernelReleaseDirectMemory(phys, page) == 0);
+#endif
+}
+
 static void CheckFailedCollectKeepsWrites() {
 #ifdef _WIN32
     constexpr std::size_t page = 0x4000;
@@ -2059,6 +2112,7 @@ int main() {
     CheckSharedWriteTracking();
     CheckSharedWritePages();
     CheckSharedWritesDuringHostWrite();
+    CheckSharedWritesAroundGuard();
     CheckReadsIntoSharedWriteTracking();
     CheckPinnedSharedPages();
     CheckFailedCollectKeepsWrites();
