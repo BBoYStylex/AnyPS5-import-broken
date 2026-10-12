@@ -694,6 +694,27 @@ add_custom_command(
         VERBATIM
 )
 
+foreach(agcSampleAspect IN ITEMS Depth Stencil)
+    set(agcSampleArrayDefines)
+    if(agcSampleAspect STREQUAL "Stencil")
+        set(agcSampleArrayDefines -DSTENCIL=1)
+    endif()
+    set(agcSampleArraySource ${CMAKE_CURRENT_SOURCE_DIR}/tests/shaders/SampleArray.comp)
+    set(agcSampleArraySpv ${agcTestShaderGeneratedRoot}/Sample${agcSampleAspect}Array.spv)
+    set(agcSampleArrayHeader ${agcTestShaderGeneratedRoot}/Sample${agcSampleAspect}Array_spv.h)
+    add_custom_command(
+            OUTPUT "${agcSampleArrayHeader}"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${agcTestShaderGeneratedRoot}"
+            COMMAND "$<TARGET_FILE:glslang-standalone>" -V --target-env vulkan1.1 ${agcSampleArrayDefines} -o "${agcSampleArraySpv}" "${agcSampleArraySource}"
+            COMMAND ${CMAKE_COMMAND} -DINPUT=${agcSampleArraySpv} -DOUTPUT=${agcSampleArrayHeader}
+            -DSYMBOL=SAMPLE_${agcSampleAspect}_ARRAY_SPV -P "${CMAKE_CURRENT_SOURCE_DIR}/embed_spirv.cmake"
+            DEPENDS "${agcSampleArraySource}" glslang-standalone
+            VERBATIM
+    )
+    list(APPEND agcSampleArrayHeaders "${agcSampleArrayHeader}")
+endforeach()
+
+
 foreach(agcTriangleStage IN ITEMS vert frag)
     set(agcTriangleSource ${CMAKE_CURRENT_SOURCE_DIR}/tests/shaders/Triangle.${agcTriangleStage})
     set(agcTriangleSpv ${agcTestShaderGeneratedRoot}/Triangle_${agcTriangleStage}.spv)
@@ -753,6 +774,7 @@ add_test_executable(agc_driver_recorder_tests EXCLUDE_FROM_ALL
         ${agcTriangleHeaders}
         ${agcSampleLodShaderHeader}
         ${agcSampleArrayShaderHeader}
+        ${agcSampleArrayHeaders}
         ${agcCoverShaderHeaders}
 )
 
@@ -821,8 +843,13 @@ if(BUILD_TESTING)
     set_tests_properties(agc_multisample_guest_access PROPERTIES SKIP_RETURN_CODE 77)
     add_test(NAME agc_draw_inputs_in_place COMMAND agc_driver_recorder_tests --draw-inputs-in-place-only)
     set_tests_properties(agc_draw_inputs_in_place PROPERTIES SKIP_RETURN_CODE 77)
+    add_test(NAME agc_depth_array COMMAND agc_driver_recorder_tests --depth-array-only)
+    add_test(NAME agc_depth_array_shapes COMMAND agc_driver_recorder_tests --depth-array-shapes-only)
+    add_test(NAME agc_depth_array_failure COMMAND agc_driver_recorder_tests --depth-array-failure-only)
+    add_test(NAME agc_depth_clear COMMAND agc_driver_recorder_tests --depth-clear-only)
+    set_tests_properties(agc_depth_array agc_depth_array_shapes agc_depth_array_failure agc_depth_clear PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 30)
     if(WIN32)
-        set_tests_properties(agc_host_import_unmap agc_unit_shadow agc_descriptor_pool_recycling agc_draw_snapshot_cap agc_multisample_guest_access agc_draw_inputs_in_place PROPERTIES ENVIRONMENT_MODIFICATION
+        set_tests_properties(agc_host_import_unmap agc_unit_shadow agc_descriptor_pool_recycling agc_draw_snapshot_cap agc_multisample_guest_access agc_draw_inputs_in_place agc_depth_array agc_depth_array_shapes agc_depth_array_failure agc_depth_clear PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
     endif()
 endif()
