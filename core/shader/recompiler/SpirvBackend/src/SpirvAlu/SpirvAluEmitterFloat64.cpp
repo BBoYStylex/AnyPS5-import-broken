@@ -272,14 +272,9 @@ std::uint32_t FlushDenormal32(SpirvEmitterState& state, std::uint32_t value, boo
     return Unary(state, spv::OpBitcast, TypeF32(state), Select(state, u32, denormal, Binary(state, spv::OpBitwiseAnd, u32, bits, ConstantU32(state, 0x80000000u)), bits));
 }
 
-std::uint32_t Interpolate(SpirvEmitterState& state, std::uint32_t delta, std::uint32_t coordinate, std::uint32_t base, bool halfResult, std::uint32_t mode) {
+std::uint32_t InterpolateExact(SpirvEmitterState& state, std::uint32_t delta, std::uint32_t coordinate, std::uint32_t base, bool halfResult, std::uint32_t mode) {
     const auto u32 = TypeU32(state);
     const bool quietNans = halfResult || (mode & InterpolationQuiet) != 0u;
-    const bool flush32 = (mode & InterpolationFlush32) != 0u;
-    const bool flush16 = (mode & InterpolationFlush16) != 0u;
-    delta = FlushDenormal32(state, delta, flush16, 0x38800000u);
-    coordinate = FlushDenormal32(state, coordinate, flush32, 0x00800000u);
-    base = halfResult ? FlushDenormal32(state, base, flush32, 0x00800000u) : FlushDenormal32(state, base, flush16, 0x38800000u);
     const auto product = Exact(state, spv::OpFMul, FromF32Exact(state, delta), FromF32Exact(state, coordinate));
     const auto sum = AddRoundToOdd(state, product, FromF32Exact(state, base));
     const std::uint32_t rounding16 = halfResult ? (mode >> InterpolationRound16Shift) & 3u : 0u;
@@ -322,8 +317,7 @@ std::uint32_t Interpolate(SpirvEmitterState& state, std::uint32_t delta, std::ui
     special = Select(state, u32, Binary(state, spv::OpLogicalAnd, TypeBool(state), Nan32(state, inputs[2]), Unary(state, spv::OpLogicalNot, TypeBool(state), invalidProduct)), quiet(inputs[2]), special);
     special = Select(state, u32, Nan32(state, inputs[1]), quiet(inputs[1]), special);
     special = Select(state, u32, Nan32(state, inputs[0]), quiet(inputs[0]), special);
-    const auto result = Unary(state, spv::OpBitcast, TypeF32(state), Select(state, u32, nonFinite, special, finite));
-    return halfResult ? FlushDenormal32(state, result, flush16, 0x38800000u) : FlushDenormal32(state, result, flush32, 0x00800000u);
+    return Unary(state, spv::OpBitcast, TypeF32(state), Select(state, u32, nonFinite, special, finite));
 }
 
 std::uint32_t FusedMultiplyAdd(SpirvEmitterState& state, std::uint32_t arg0, std::uint32_t arg1, std::uint32_t arg2, std::uint32_t scale) {
@@ -773,6 +767,106 @@ std::uint32_t Dot2F32F16Fast(SpirvEmitterState& state, std::uint32_t arg0, std::
     return result;
 }
 
+
+std::uint32_t InterpolateFast(SpirvEmitterState& state, std::uint32_t delta, std::uint32_t coordinate, std::uint32_t base, bool halfResult, std::uint32_t& fast) {
+    const auto u32 = TypeU32(state);
+    const auto f32 = TypeF32(state);
+    const auto boolean = TypeBool(state);
+    const auto op = [&](spv::Op opcode, std::uint32_t lhs, std::uint32_t value) { return Binary(state, opcode, u32, lhs, ConstantU32(state, value)); };
+    const auto test = [&](spv::Op opcode, std::uint32_t lhs, std::uint32_t value) { return Binary(state, opcode, boolean, lhs, ConstantU32(state, value)); };
+    const auto all = [&](std::uint32_t lhs, std::uint32_t rhs) { return Binary(state, spv::OpLogicalAnd, boolean, lhs, rhs); };
+    const auto any = [&](std::uint32_t lhs, std::uint32_t rhs) { return Binary(state, spv::OpLogicalOr, boolean, lhs, rhs); };
+    const auto bits = [&](std::uint32_t value) { return Unary(state, spv::OpBitcast, u32, value); };
+    const auto zeroOrWithin = [&](std::uint32_t value, std::uint32_t low, std::uint32_t high) {
+        const auto magnitude = op(spv::OpBitwiseAnd, bits(value), 0x7fffffffu);
+        return any(test(spv::OpIEqual, magnitude, 0u), all(test(spv::OpUGreaterThanEqual, magnitude, low), test(spv::OpULessThan, magnitude, high)));
+    };
+    const auto roundToOdd = [&](const std::array<std::uint32_t, 2>& parts) {
+        const auto nearestBits = bits(parts[0]);
+        const auto errorBits = bits(parts[1]);
+        const auto inexact = test(spv::OpINotEqual, op(spv::OpBitwiseAnd, errorBits, 0x7fffffffu), 0u);
+        const auto even = test(spv::OpIEqual, op(spv::OpBitwiseAnd, nearestBits, 1u), 0u);
+        const auto sameSign = test(spv::OpIEqual, op(spv::OpBitwiseAnd, Binary(state, spv::OpBitwiseXor, u32, nearestBits, errorBits), 0x80000000u), 0u);
+        const auto odd = Binary(state, spv::OpIAdd, u32, nearestBits, Select(state, u32, sameSign, ConstantU32(state, 1u), ConstantU32(state, 0xffffffffu)));
+        return Unary(state, spv::OpBitcast, f32, Select(state, u32, all(inexact, even), odd, nearestBits));
+    };
+    const auto narrowDelta = test(spv::OpIEqual, op(spv::OpBitwiseAnd, bits(delta), 0x1fffu), 0u);
+    const auto narrowCoordinate = test(spv::OpIEqual, op(spv::OpBitwiseAnd, bits(coordinate), 0x1fffu), 0u);
+    fast = all(any(narrowDelta, narrowCoordinate), all(zeroOrWithin(delta, 0x2b800000u, 0x5d800000u), zeroOrWithin(coordinate, 0x2b800000u, 0x5d800000u)));
+    fast = all(fast, zeroOrWithin(base, 0x0d800000u, 0x7f000000u));
+    const auto narrow = Select(state, f32, narrowDelta, delta, coordinate);
+    const auto wide = Select(state, f32, narrowDelta, coordinate, delta);
+    const auto scaled = ExactF32(state, spv::OpFMul, wide, ConstantF32(state, 0x45801000u));
+    const auto high = ExactF32(state, spv::OpFSub, scaled, ExactF32(state, spv::OpFSub, scaled, wide));
+    const auto low = ExactF32(state, spv::OpFSub, wide, high);
+    const auto upper = TwoSumF32(state, ExactF32(state, spv::OpFMul, narrow, high), base);
+    const auto total = TwoSumF32(state, ExactF32(state, spv::OpFMul, narrow, low), upper[0]);
+    const auto residual = roundToOdd(TwoSumF32(state, total[1], upper[1]));
+    const auto sum = halfResult ? roundToOdd(TwoSumF32(state, total[0], residual)) : ExactF32(state, spv::OpFAdd, total[0], residual);
+    const auto magnitude = op(spv::OpBitwiseAnd, bits(sum), 0x7fffffffu);
+    fast = all(fast, all(test(spv::OpUGreaterThanEqual, magnitude, 0x0d800000u), test(spv::OpULessThan, magnitude, 0x7f000000u)));
+    return halfResult ? EmitF16BitsToF32(state, EmitF32ToF16BitsRte(state, sum)) : sum;
+}
+
+bool InterpolateHasFastPath(bool halfResult, std::uint32_t mode) {
+    return !halfResult || ((mode >> InterpolationRound16Shift) & 3u) == 0u;
+}
+
+std::uint32_t InterpolateFunctionIndex(bool halfResult, std::uint32_t mode) {
+    return halfResult ? 2u : ((mode & InterpolationQuiet) != 0u ? 1u : 0u);
+}
+
+std::uint32_t Interpolate(SpirvEmitterState& state, std::uint32_t delta, std::uint32_t coordinate, std::uint32_t base, bool halfResult, std::uint32_t mode) {
+    const bool flush32 = (mode & InterpolationFlush32) != 0u;
+    const bool flush16 = (mode & InterpolationFlush16) != 0u;
+    delta = FlushDenormal32(state, delta, flush16, 0x38800000u);
+    coordinate = FlushDenormal32(state, coordinate, flush32, 0x00800000u);
+    base = halfResult ? FlushDenormal32(state, base, flush32, 0x00800000u) : FlushDenormal32(state, base, flush16, 0x38800000u);
+    std::uint32_t result = 0;
+    if (InterpolateHasFastPath(halfResult, mode)) {
+        const auto function = state.interpolateExactFunctions[InterpolateFunctionIndex(halfResult, mode)];
+        std::uint32_t fast = 0;
+        const auto fastResult = InterpolateFast(state, delta, coordinate, base, halfResult, fast);
+        result = EmitValueOrDefaultIfCondition(state, Unary(state, spv::OpLogicalNot, TypeBool(state), fast), TypeF32(state), fastResult, [&] {
+            if (function == 0u) return InterpolateExact(state, delta, coordinate, base, halfResult, mode);
+            const auto exact = state.module.AllocateId();
+            state.module.AddFunction(spv::OpFunctionCall, TypeF32(state), exact, function, delta, coordinate, base);
+            return exact;
+        });
+    } else {
+        result = InterpolateExact(state, delta, coordinate, base, halfResult, mode);
+    }
+    return halfResult ? FlushDenormal32(state, result, flush16, 0x38800000u) : FlushDenormal32(state, result, flush32, 0x00800000u);
+}
+}
+
+void DefineInterpolateFunctions(SpirvEmitterState& state) {
+    std::array<bool, 3> used{};
+    for (const IrBlock* block : state.program.BlockOrder()) {
+        for (const IrValue* inst : block->Instructions()) {
+            if (inst->Opcode() != IrOpcode::FPInterpolateF16 && inst->Opcode() != IrOpcode::FPInterpolateF32) continue;
+            const bool halfResult = inst->Opcode() == IrOpcode::FPInterpolateF16;
+            const auto mode = inst->Argument(3)->Resolve()->ImmediateU32();
+            if (InterpolateHasFastPath(halfResult, mode)) used[InterpolateFunctionIndex(halfResult, mode)] = true;
+        }
+    }
+    const auto f32 = TypeF32(state);
+    constexpr std::array<const char*, 3> names{"interpolate_f32_exact", "interpolate_f32_exact_quiet", "interpolate_f16_exact"};
+    for (std::uint32_t index = 0; index < used.size(); ++index) {
+        if (!used[index]) continue;
+        const auto function = state.module.AllocateId();
+        state.module.AddName(function, names[index]);
+        state.module.AddFunction(spv::OpFunction, f32, function, spv::FunctionControlDontInlineMask, state.module.Type(spv::OpTypeFunction, f32, f32, f32, f32));
+        std::array<std::uint32_t, 3> parameters{};
+        for (auto& parameter : parameters) {
+            parameter = state.module.AllocateId();
+            state.module.AddFunction(spv::OpFunctionParameter, f32, parameter);
+        }
+        EmitLabel(state, state.module.AllocateId());
+        state.module.AddFunction(spv::OpReturnValue, InterpolateExact(state, parameters[0], parameters[1], parameters[2], index == 2u, index == 1u ? InterpolationQuiet : 0u));
+        state.module.AddFunction(spv::OpFunctionEnd);
+        state.interpolateExactFunctions[index] = function;
+    }
 }
 
 void DefineDot2F32F16Function(SpirvEmitterState& state) {
