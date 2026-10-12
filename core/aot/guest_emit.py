@@ -22,6 +22,49 @@ def symbol(address):
 
 
 class Lowering(Vector):
+    def op_cpuid(self):
+        if self.concurrent:
+            self.emit('fence seq_cst')
+        super().op_cpuid()
+        if self.concurrent:
+            self.emit('fence seq_cst')
+
+    def ordered_scalar_load(self, address, bits, fallback):
+        pointer = self.pointer(address)
+        ordering = 'seq_cst'
+        instruction = f'load atomic volatile i{bits}, ptr {pointer} {ordering}, align {bits // 8}'
+        if bits == 8:
+            return self.zext(self.v(instruction), bits)
+        aligned, unaligned, done = self.label(), self.label(), self.label()
+        check = self.v(f'icmp eq i64 {self.v(f"and i64 {address}, {bits // 8 - 1}")}, 0')
+        self.emit(f'br i1 {check}, label %{aligned}, label %{unaligned}')
+        self.place(aligned)
+        fast = self.zext(self.v(instruction), bits)
+        self.emit(f'br label %{done}')
+        self.place(unaligned)
+        slow = self.v(fallback)
+        self.emit(f'br label %{done}')
+        self.place(done)
+        return self.v(f'phi i64 [ {fast}, %{aligned} ], [ {slow}, %{unaligned} ]')
+
+    def ordered_scalar_store(self, address, value, bits, fallback):
+        pointer = self.pointer(address)
+        ordering = 'seq_cst'
+        instruction = f'store atomic volatile i{bits} {self.trunc(value, bits)}, ptr {pointer} {ordering}, align {bits // 8}'
+        if bits == 8:
+            self.emit(instruction)
+            return
+        aligned, unaligned, done = self.label(), self.label(), self.label()
+        check = self.v(f'icmp eq i64 {self.v(f"and i64 {address}, {bits // 8 - 1}")}, 0')
+        self.emit(f'br i1 {check}, label %{aligned}, label %{unaligned}')
+        self.place(aligned)
+        self.emit(instruction)
+        self.emit(f'br label %{done}')
+        self.place(unaligned)
+        self.emit(fallback)
+        self.emit(f'br label %{done}')
+        self.place(done)
+
     def load(self, address, bits):
         if not self.concurrent:
             return super().load(address, bits)
@@ -33,7 +76,8 @@ class Lowering(Vector):
             return self.v(f'or i{bits} {wide}, {shifted}')
         opcode = {8: 'ldrb', 16: 'ldrh', 32: 'ldr', 64: 'ldr'}[bits]
         width = 'x' if bits == 64 else 'w'
-        value = self.v(f'call i64 asm sideeffect "dmb ish\\0A{opcode} ${{0:{width}}}, [$1]\\0Admb ish", "=r,r,~{{memory}}"(i64 {address})')
+        instruction = f'call i64 asm sideeffect "dmb ish\\0A{opcode} ${{0:{width}}}, [$1]\\0Admb ish", "=r,r,~{{memory}}"(i64 {address})'
+        value = self.ordered_scalar_load(address, bits, instruction) if self.ordered_access == 'atomic' else self.v(instruction)
         return value if bits == 64 else self.v(f'trunc i64 {value} to i{bits}')
 
     def store(self, address, value, bits):
@@ -47,7 +91,11 @@ class Lowering(Vector):
         opcode = {8: 'strb', 16: 'strh', 32: 'str', 64: 'str'}[bits]
         width = 'x' if bits == 64 else 'w'
         extended = value if bits == 64 else self.v(f'zext i{bits} {value} to i64')
-        self.emit(f'call void asm sideeffect "dmb ish\\0A{opcode} ${{0:{width}}}, [$1]\\0Admb ish", "r,r,~{{memory}}"(i64 {extended}, i64 {address})')
+        instruction = f'call void asm sideeffect "dmb ish\\0A{opcode} ${{0:{width}}}, [$1]\\0Admb ish", "r,r,~{{memory}}"(i64 {extended}, i64 {address})'
+        if self.ordered_access == 'atomic':
+            self.ordered_scalar_store(address, extended, bits, instruction)
+        else:
+            self.emit(instruction)
 
     def flush(self):
         for index in range(16):
@@ -234,11 +282,12 @@ class Lowering(Vector):
             self.trap(TRAP_FALLTHROUGH)
 
 
-def lower_unit(unit, units, trace=False, concurrent=False):
+def lower_unit(unit, units, trace=False, concurrent=False, ordered_access="fenced"):
     lowering = Lowering(unit, symbol(unit.start))
     lowering.units = units
     lowering.trace = trace
     lowering.concurrent = concurrent
+    lowering.ordered_access = ordered_access
     lowering.prologue()
     if trace:
         lowering.emit(f'call void @NativeAotGuestTraceEnter(ptr %s, i64 {unit.start})')
@@ -329,7 +378,7 @@ def descriptor_module(image, concurrent=False):
         lines.append(string_constant(f'@__aps5_guest_export_{number}', name))
     lines.append(f'@__aps5_guest_exports = private constant [{max(len(exports), 1)} x {{ ptr, i64 }}] [' +
                  (', '.join(f'{{ ptr, i64 }} {{ ptr @__aps5_guest_export_{number}, i64 {address} }}' for number, (_, address) in enumerate(exports)) or '{ ptr, i64 } zeroinitializer') + ']')
-    fields = ['i64 4', 'ptr @__aps5_guest_bytes', f'i64 {len(blob)}', 'ptr @__aps5_guest_segments', f'i64 {len(image["segments"])}',
+    fields = ['i64 5', 'ptr @__aps5_guest_bytes', f'i64 {len(blob)}', 'ptr @__aps5_guest_segments', f'i64 {len(image["segments"])}',
               'ptr @__aps5_guest_relocations', f'i64 {len(image["relocations"])}', 'ptr @__aps5_guest_symbols',
               'ptr @__aps5_guest_symbol_flags', f'i64 {symbol_count}', 'ptr @__aps5_guest_entries', f'i64 {len(image["entries"])}',
               f'i64 {image["entry"]}', f'i64 {image["span"]}', f'i64 {image["relro"][0]}', f'i64 {image["relro"][1]}',
@@ -352,12 +401,12 @@ def callees(unit, units):
 
 
 def lower_shard(arguments):
-    raw, starts, output, extra, trace, concurrent, abi = arguments
+    raw, starts, output, extra, trace, concurrent, abi, ordered_access = arguments
     program = guest_lift.Program(raw, abi=abi)
     units, _, _ = guest_lift.discover(program, extra)
     texts, declarations, errors, called = [], set(), [], set()
     for start in starts:
-        text, declared, failures = lower_unit(units[start], units, trace, concurrent)
+        text, declared, failures = lower_unit(units[start], units, trace, concurrent, ordered_access)
         texts.append(text)
         declarations |= declared
         errors.extend(failures)
@@ -368,7 +417,11 @@ def lower_shard(arguments):
     return errors
 
 
-def build(input_path, output_dir, shards=16, jobs=8, extra=(), strict=True, trace=False, concurrent=False, abi="glibc"):
+def build(input_path, output_dir, shards=16, jobs=8, extra=(), strict=True, trace=False, concurrent=False, abi="glibc", ordered_access=None):
+    if ordered_access is None:
+        ordered_access = 'atomic' if concurrent else 'fenced'
+    guest_lift.require(ordered_access in ('fenced', 'atomic'), 'unknown ordered access implementation')
+    guest_lift.require(concurrent or ordered_access == 'fenced', 'atomic access requires --concurrent')
     started = time.monotonic()
     raw = Path(input_path).read_bytes()
     program = guest_lift.Program(raw, abi=abi)
@@ -384,14 +437,14 @@ def build(input_path, output_dir, shards=16, jobs=8, extra=(), strict=True, trac
         smallest = sizes.index(min(sizes))
         buckets[smallest].append(start)
         sizes[smallest] += len(units[start].instructions)
-    work = [(raw, sorted(bucket), str(output / f'shard{number:02}.ll'), tuple(extra), trace, concurrent, abi) for number, bucket in enumerate(buckets) if bucket]
+    work = [(raw, sorted(bucket), str(output / f'shard{number:02}.ll'), tuple(extra), trace, concurrent, abi, ordered_access) for number, bucket in enumerate(buckets) if bucket]
     if jobs == 1:
         errors = [error for item in work for error in lower_shard(item)]
     else:
         with ProcessPoolExecutor(jobs) as pool:
             errors = [error for result in pool.map(lower_shard, work) for error in result]
     report = {'schema': 'anyps5.aot.guest-lowering.v1', 'input_sha256': program.sha256, 'units': len(units),
-              'startup_abi': abi,
+              'startup_abi': abi, 'ordered_access': ordered_access,
               'memory_profile': 'ordered-normal-memory' if concurrent else 'single-thread',
               'instructions': sum(len(unit.instructions) for unit in units.values()),
               'jump_tables': {status: sum(1 for unit in units.values() for table in unit.tables.values() if table['status'] == status)
@@ -412,9 +465,10 @@ def main():
     parser.add_argument('--inventory', action='store_true')
     parser.add_argument('--trace', action='store_true')
     parser.add_argument('--concurrent', action='store_true')
+    parser.add_argument('--ordered-access', choices=('fenced', 'atomic'))
     parser.add_argument('--abi', choices=('glibc', 'sce-app'), default='glibc')
     args = parser.parse_args()
-    report = build(args.input, args.output, args.shards, strict=not args.inventory, trace=args.trace, concurrent=args.concurrent, abi=args.abi)
+    report = build(args.input, args.output, args.shards, strict=not args.inventory, trace=args.trace, concurrent=args.concurrent, abi=args.abi, ordered_access=args.ordered_access)
     print(json.dumps({key: report[key] for key in ('units', 'instructions', 'jump_tables', 'seconds')}))
     print(f'{len(report["unsupported"])} unsupported instruction sites')
 

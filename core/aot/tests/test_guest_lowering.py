@@ -139,17 +139,17 @@ class GuestProgramTests(unittest.TestCase):
         self.directory = Path(self.temporary.name)
         self.addCleanup(self.temporary.cleanup)
 
-    def program(self, source, imports=('exit',), data_imports=(), relative=(), strict=True, unwind=(), tls=None, concurrent=False, abi="glibc", launcher=None):
+    def program(self, source, imports=('exit',), data_imports=(), relative=(), strict=True, unwind=(), tls=None, concurrent=False, abi="glibc", launcher=None, ordered_access=None):
         slots = ''.join(f'.p2align 3\n{name}_slot: .quad 0\n' for name in [*imports, *data_imports])
         code, labels = guest_lab.assemble_program(source + slots, self.directory)
         raw = guest_lab.program_image(code, labels, [(name, f'{name}_slot') for name in imports],
                                       [(name, f'{name}_slot') for name in data_imports], relative=relative, unwind=unwind, tls=tls)
-        return guest_lab.build_program(raw, self.directory, strict=strict, concurrent=concurrent, abi=abi, launcher=launcher)
+        return guest_lab.build_program(raw, self.directory, strict=strict, concurrent=concurrent, abi=abi, launcher=launcher, ordered_access=ordered_access)
 
     def run_binary(self, binary):
         return subprocess.run([str(binary)], capture_output=True, timeout=20)
 
-    def threaded_program(self, concurrent):
+    def threaded_program(self, concurrent, ordered_access=None):
         return self.program(PRELUDE + """
     sub rsp, 64
     mov r12, rsp
@@ -216,12 +216,37 @@ first: .quad 0
 second: .quad 0
 result: .quad 0
 counter: .quad 0
-""", imports=('exit', 'pthread_create', 'pthread_join'), concurrent=concurrent)
+""", imports=('exit', 'pthread_create', 'pthread_join'), concurrent=concurrent, ordered_access=ordered_access)
 
     def test_guest_threads_join_tls_and_atomic_contention(self):
         binary, _ = self.threaded_program(True)
         result = self.run_binary(binary)
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_atomic_guest_threads(self):
+        binary, _ = self.threaded_program(True, ordered_access='atomic')
+        result = self.run_binary(binary)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_atomic_unaligned_accesses(self):
+        source = PRELUDE + 'sub rsp, 128\n'
+        for offset in range(1, 17):
+            for size, left, right in (('byte', 'al', 'cl'), ('word', 'ax', 'cx'), ('dword', 'eax', 'ecx'), ('qword', 'rax', 'rcx')):
+                source += f'mov rax, 0xFEDCBA9876543210\nmov {size} ptr [rsp + {offset}], {left}\nmov {right}, {size} ptr [rsp + {offset}]\ncmp {left}, {right}\njne bad\n'
+        source += 'xor edi, edi\njmp done\nbad:\nmov edi, 97\ndone:\n' + EXIT
+        for implementation in ('fenced', 'atomic'):
+            with self.subTest(implementation=implementation):
+                binary, _ = self.program(source, concurrent=True, ordered_access=implementation)
+                result = self.run_binary(binary)
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_atomic_threads_and_cpuid_ordering(self):
+        binary, _ = self.threaded_program(True, ordered_access='atomic')
+        result = self.run_binary(binary)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        workers = ["mov qword ptr [rdi], 1\nxor eax, eax\ncpuid\nmov rax, qword ptr [rdi + 8]\nmov qword ptr [rdi + 16], rax\nret",
+                   "mov qword ptr [rdi + 8], 1\nxor eax, eax\ncpuid\nmov rax, qword ptr [rdi]\nmov qword ptr [rdi + 24], rax\nret"]
+        self.litmus(workers, "mov rax, qword ptr [r12 + 16]\nor rax, qword ptr [r12 + 24]\njz bad", implementations=('atomic',))
 
     def test_guest_threads_reject_unordered_image(self):
         binary, _ = self.threaded_program(False)
@@ -239,6 +264,16 @@ counter: .quad 0
                    "mov qword ptr [rdi + 8], 1\nmfence\nmov rax, qword ptr [rdi]\nmov qword ptr [rdi + 24], rax\nret"]
         self.litmus(workers, "mov rax, qword ptr [r12 + 16]\nor rax, qword ptr [r12 + 24]\njz bad")
 
+    def test_ordered_store_buffering_without_explicit_fence(self):
+        workers = ["mov qword ptr [rdi], 1\nmov rax, qword ptr [rdi + 8]\nmov qword ptr [rdi + 16], rax\nret",
+                   "mov qword ptr [rdi + 8], 1\nmov rax, qword ptr [rdi]\nmov qword ptr [rdi + 24], rax\nret"]
+        self.litmus(workers, "mov rax, qword ptr [r12 + 16]\nor rax, qword ptr [r12 + 24]\njz bad", implementations=("fenced", "atomic"))
+
+    def test_ordered_message_passing_with_atomic_publish(self):
+        workers = ["mov qword ptr [rdi], 1\nmov eax, 1\nxchg qword ptr [rdi + 8], rax\nret",
+                   "spin:\nmov rax, qword ptr [rdi + 8]\ntest rax, rax\njz spin\nmov rax, qword ptr [rdi]\nmov qword ptr [rdi + 16], rax\nret"]
+        self.litmus(workers, "cmp qword ptr [r12 + 16], 1\njne bad")
+
     def test_ordered_independent_reads_of_independent_writes(self):
         workers = ["mov qword ptr [rdi], 1\nret", "mov qword ptr [rdi + 8], 1\nret",
                    "mov rax, qword ptr [rdi]\nmov qword ptr [rdi + 16], rax\nmov rax, qword ptr [rdi + 8]\nmov qword ptr [rdi + 24], rax\nret",
@@ -246,18 +281,21 @@ counter: .quad 0
         check = "cmp qword ptr [r12 + 16], 1\njne good\ncmp qword ptr [r12 + 24], 0\njne good\ncmp qword ptr [r12 + 32], 1\njne good\ncmp qword ptr [r12 + 40], 0\nje bad\ngood:"
         self.litmus(workers, check)
 
-    def litmus(self, workers, check):
+    def litmus(self, workers, check, implementations=("fenced", "atomic")):
         source = PRELUDE + "sub rsp, 128\nmov r12, rsp\nmov r13d, 128\nround:\n"
         source += ''.join(f"mov qword ptr [r12 + {offset}], 0\n" for offset in range(0, 64, 8))
         for index in range(len(workers)):
             source += f"lea rdi, [r12 + {64 + index * 8}]\nxor esi, esi\nlea rdx, [rip + worker{index}]\nmov rcx, r12\ncall qword ptr [rip + pthread_create_slot]\ntest eax, eax\njnz bad\n"
+        source += 'mov qword ptr [r12 + 48], 1\n'
         for index in range(len(workers)):
             source += f"mov rdi, qword ptr [r12 + {64 + index * 8}]\nxor esi, esi\ncall qword ptr [rip + pthread_join_slot]\ntest eax, eax\njnz bad\n"
         source += check + "\ndec r13d\njnz round\nxor edi, edi\njmp done\nbad:\nmov edi, 93\ndone:\n" + EXIT
-        source += ''.join(f"worker{index}:\n{body}\n" for index, body in enumerate(workers))
-        binary, _ = self.program(source, imports=('exit', 'pthread_create', 'pthread_join'), concurrent=True)
-        result = self.run_binary(binary)
-        self.assertEqual(result.returncode, 0, result.stderr)
+        source += ''.join(f"worker{index}:\nwait_start{index}:\nmov rax, qword ptr [rdi + 48]\ntest rax, rax\njz wait_start{index}\n{body}\n" for index, body in enumerate(workers))
+        for implementation in implementations:
+            with self.subTest(implementation=implementation):
+                binary, _ = self.program(source, imports=('exit', 'pthread_create', 'pthread_join'), concurrent=True, ordered_access=implementation)
+                result = self.run_binary(binary)
+                self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_packed_truncation_rejects_misaligned_source(self):
         binary, _ = self.program(PRELUDE + 'sub rsp, 64\nlea rsi, [rsp + 1]\ncvttpd2dq xmm0, xmmword ptr [rsi]\nxor edi, edi\n' + EXIT)
@@ -319,6 +357,25 @@ done:
                 result = self.run_binary(binary)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn(b'unsupported guest operation', result.stderr)
+
+    def test_ordered_access_options_require_concurrency(self):
+        with self.assertRaisesRegex(guest_lift.LiftError, 'requires --concurrent'):
+            self.program(PRELUDE + 'xor edi, edi\n' + EXIT, ordered_access='atomic')
+
+    def test_unknown_memory_model_rejected_before_entry(self):
+        launcher = """
+#include "native/NativeAotGuest.hpp"
+extern "C" const NativeAotGuestImage __aps5_guest_image;
+int main() {
+    auto image = __aps5_guest_image;
+    image.Concurrent = 2;
+    NativeAotGuest::Load(image);
+}
+"""
+        binary, _ = self.program(PRELUDE + 'xor edi, edi\n' + EXIT, launcher=launcher)
+        result = self.run_binary(binary)
+        self.assertEqual(result.returncode, 127)
+        self.assertIn(b'unsupported guest memory model', result.stderr)
 
     def test_variadic_provider_reads_registers_and_stack(self):
         binary, _ = self.program(PRELUDE + '''

@@ -1,5 +1,6 @@
 #include "native/NativeAotGuest.hpp"
 #include <algorithm>
+#include <atomic>
 #include <cerrno>
 #include <csignal>
 #include <cstdio>
@@ -67,13 +68,20 @@ const NativeAotGuest::ProviderBinding* FindProvider(const char* name) {
     return nullptr;
 }
 
+void ProviderFence() {
+    if (loaded != nullptr && loaded->Concurrent != 0)
+        std::atomic_thread_fence(std::memory_order_seq_cst);
+}
+
 std::uint64_t ImportThunk(NativeAotGuestState* state, std::uint64_t address) {
     const auto index = (address - importRegion) / 16 - 1;
     if (index >= importProviders.size() || importProviders[index] == nullptr)
         NativeAotGuestTrap(NativeAotGuest::MissingImport, address, index);
     auto* previous = current;
     current = state;
+    ProviderFence();
     importProviders[index](*state);
+    ProviderFence();
     current = previous;
     const auto rsp = state->Gpr[Rsp];
     std::uint64_t target;
@@ -183,8 +191,9 @@ std::uint64_t ProviderAddress(const char* name) {
 }
 
 std::uint64_t Load(const NativeAotGuestImage& image, Abi abi) {
-    if (image.Version != 4) Fail("unsupported guest image descriptor");
+    if (image.Version != 5) Fail("unsupported guest image descriptor");
     if (image.Abi != static_cast<std::uint64_t>(abi)) Fail("guest image startup ABI does not match the launcher");
+    if (image.Concurrent > 1) Fail("unsupported guest memory model");
     if (loaded != nullptr) Fail("only one guest image is supported per process");
     const auto span = (image.Span + PageSize - 1) & ~(PageSize - 1);
     auto* memory = mmap(nullptr, span, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
@@ -280,7 +289,9 @@ std::uint64_t Invoke(NativeAotGuestState& state, std::uint64_t target) {
     Push(state, ReturnSentinel());
     auto* previous = current;
     current = &state;
+    ProviderFence();
     const auto result = NativeAotGuestLookup(target)(&state, target);
+    ProviderFence();
     current = previous;
     if (result != ReturnSentinel()) NativeAotGuestTrap(UnexpectedReturn, result, target);
     state.Gpr[Rsp] = saved;
@@ -339,7 +350,7 @@ void FreeThreadArea(std::uint64_t pointer) {
 }
 
 bool ConcurrentMemory() {
-    return loaded != nullptr && loaded->Concurrent == 1;
+    return loaded != nullptr && loaded->Concurrent != 0;
 }
 
 void FreeStack(std::uint64_t top, std::size_t bytes) {
@@ -403,7 +414,9 @@ void Start(const NativeAotGuestImage& image, int argc, char** argv, char** envp)
     state.FsBase = CreateThreadArea();
     current = &state;
     const auto entry = imageBase + image.EntryPoint;
+    ProviderFence();
     const auto result = NativeAotGuestLookup(entry)(&state, entry);
+    ProviderFence();
     NativeAotGuestTrap(UnexpectedReturn, result, entry);
 }
 
