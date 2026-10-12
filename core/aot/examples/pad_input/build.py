@@ -117,8 +117,13 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--sdk', type=Path, required=True)
     parser.add_argument('--linker', type=Path, required=True)
-    parser.add_argument('--output', type=Path, required=True)
+    outputs = parser.add_mutually_exclusive_group(required=True)
+    outputs.add_argument('--output', type=Path)
+    outputs.add_argument('--output-parent', type=Path)
     args = parser.parse_args()
+    if args.output_parent:
+        args.output_parent.mkdir(parents=True, exist_ok=True)
+        args.output = Path(tempfile.mkdtemp(prefix='build-', dir=args.output_parent))
     output = args.output.resolve()
     require(not output.exists() or (output.is_dir() and not output.is_symlink() and not any(output.iterdir())),
             'choose a fresh artifact directory')
