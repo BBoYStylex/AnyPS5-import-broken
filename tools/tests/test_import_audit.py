@@ -94,7 +94,8 @@ class Workspace:
 
     def run(self, registry, *extra):
         out, err = io.StringIO(), io.StringIO()
-        arguments = [str(registry), "--libs", str(self.libs), "--modules", str(self.modules), "--source", str(self.source), *extra]
+        registries = registry if isinstance(registry, (list, tuple)) else [registry]
+        arguments = [*(str(path) for path in registries), "--libs", str(self.libs), "--modules", str(self.modules), "--source", str(self.source), *extra]
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             code = import_audit.main(arguments)
         return code, out.getvalue(), err.getvalue()
@@ -111,7 +112,7 @@ class ImportAuditTests(unittest.TestCase):
             (MESSAGE_NID, 1, GLOBAL_FUNCTION), ("AAAAAAAAAAA", 1, GLOBAL_FUNCTION), ("BBBBBBBBBBB", 1, GLOBAL_FUNCTION),
             ("UNDEFINED11", 0, GLOBAL_FUNCTION), ("LOCALLOCAL1", 1, LOCAL_FUNCTION)]))
         (work.libs / "libc.prx").write_bytes(exporting("CCCCCCCCCCC"))
-        (work.modules / "libSceNpCppWebApi.prx").write_bytes(b"\x7fELF")
+        (work.modules / "libSceNpCppWebApi.prx").write_bytes(b"MODULE")
         write_source(work.source, "libSceMsgDialog", STUB_SOURCE.format(name=MESSAGE_NAME) + 'APS5_EXPORT("BBBBBBBBBBB", sceFooUnknown_B);\n' + STUB_SOURCE.format(name="sceFooUnknown_B"))
         registry = work.root / "game.registry.json"
         write_registry(registry, [
@@ -151,6 +152,46 @@ class ImportAuditTests(unittest.TestCase):
         data = json.loads(result.read_text())
         self.assertEqual((code, data["references"], data["unique_imports"], data["imports"]), (0, 0, 0, []))
         self.assertIn("0 references, 0 unique imports", out)
+
+    def test_module_import_registries_are_discovered_and_audited(self):
+        work = self.work
+        (work.libs / "libSceSystem.prx").write_bytes(exporting("AAAAAAAAAAA"))
+        (work.modules / "libSceTitle.prx").write_bytes(b"\x7fELF")
+        (work.modules / "libSceDependency.prx").write_bytes(b"MODULE")
+        registry = work.root / "game.registry.json"
+        write_registry(registry, [("CCCCCCCCCCC", "libSceTitle.prx")])
+        sidecar = work.root / "game.libSceTitle.prx.guest.prx.registry.json"
+        write_registry(sidecar, [
+            ("AAAAAAAAAAA", "libSceSystem.prx"),
+            ("BBBBBBBBBBB", "libSceSystem.prx"),
+            ("DDDDDDDDDDD", "libSceDependency.prx"),
+        ])
+        result = work.root / "audit.json"
+        code, out, err = work.run(registry, "--json", str(result))
+        self.assertEqual((code, err), (1, ""))
+        data = json.loads(result.read_text())
+        self.assertEqual(data["references"], 4)
+        self.assertEqual(data["unique_by_class"], {"implemented": 1, "stub": 0, "absent": 1, "module": 2})
+        self.assertEqual(data["registries"], [str(registry), str(sidecar)])
+        records = {(record["nid"], record["library"]): record["class"] for record in data["imports"]}
+        self.assertEqual(records[("AAAAAAAAAAA", "libSceSystem.prx")], "implemented")
+        self.assertEqual(records[("BBBBBBBBBBB", "libSceSystem.prx")], "absent")
+        self.assertEqual(records[("DDDDDDDDDDD", "libSceDependency.prx")], "module")
+        self.assertIn("BBBBBBBBBBB", out)
+
+        code, out, err = work.run([registry, sidecar])
+        self.assertEqual((code, err), (1, ""))
+        self.assertIn("4 references, 4 unique imports", out)
+
+    def test_elf_module_without_import_registry_is_an_error(self):
+        work = self.work
+        (work.modules / "libSceTitle.prx").write_bytes(b"\x7fELF")
+        registry = work.root / "game.registry.json"
+        write_registry(registry, [])
+        code, out, err = work.run(registry)
+        self.assertEqual((code, out), (2, ""))
+        self.assertIn("module import registry not found", err)
+        self.assertIn("rerun relinker with --registry", err)
 
     def test_removing_an_export_flips_the_class(self):
         work = self.work

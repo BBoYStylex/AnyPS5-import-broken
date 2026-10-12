@@ -167,10 +167,10 @@ GPU results in storage images and render targets stay on the GPU until something
 
 ```sh
 relinker --registry source/input.elf app.elf
-python3 tools/import_audit.py app.registry.json app.libc.prx.guest.prx.registry.json --libs build/core/libs/libs --modules source/sce_module
+python3 tools/import_audit.py app.registry.json --libs build/core/libs/libs --modules source/sce_module
 ```
 
-`--registry` writes `app.registry.json` for the executable and one `app.<module>.registry.json` for each converted bundled module; pass all of them. `--libs` is the directory the `libs` target fills ([build instructions](../dev/BUILD.md)); the exports are read from the built `.prx` files, so the result matches what the loader finds. Imports are counted once per NID and library, and every reference lands in exactly one class:
+`--registry` writes `app.registry.json` for the executable and one `app.<module>.guest.prx.registry.json` for each converted bundled module. With `--modules`, the audit discovers those module registries beside the executable registry; an ELF module without its sidecar is an error. Passing module registries explicitly is also supported. `--libs` is the directory the `libs` target fills ([build instructions](../dev/BUILD.md)); the exports are read from the built `.prx` files, so the result matches what the loader finds. Imports are counted once per NID and library, and every reference lands in exactly one class:
 
 | Class | Meaning |
 |-------|---------|
@@ -184,7 +184,7 @@ The report also lists needed libraries that have no file in `--libs` or `--modul
 | Option | Effect |
 |--------|--------|
 | `--libs <dir>` | Built `.prx` directory. Required; repeat for several. |
-| `--modules <dir>` | Directory of the title's own modules; repeat for several. |
+| `--modules <dir>` | Directory of the title's own modules; repeat for several. ELF modules' import registries are discovered beside each executable registry. |
 | `--source <dir>` | `core/libs/prx` tree that is searched for throwing stubs. Defaults to this repository's. |
 | `--names <file>` | NID and name per line, as in `aerolib.csv` from [`tools/nid_names.py`](../../tools/nid_names.py); names the absent imports. Never downloaded; a name that does not hash to its NID is marked. |
 | `--json <file>` | Full result, stamped with the repository's commit and whether its tree was modified. |

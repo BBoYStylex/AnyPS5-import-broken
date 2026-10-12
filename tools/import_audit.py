@@ -194,6 +194,29 @@ def module_files(directories):
     return {file.name for directory in directories for file in directory_files(directory, "*")}
 
 
+def module_import_registries(registries, directories):
+    files = [file for directory in directories for file in directory_files(directory, "*")]
+    elf_modules = []
+    for file in files:
+        with file.open("rb") as stream:
+            if stream.read(4) == b"\x7fELF":
+                elf_modules.append(file)
+    explicit = {path.resolve() for path in registries}
+    suffixes = tuple(f".{module.name}.guest.prx.registry.json" for module in files)
+    discovered = set()
+    for registry in registries:
+        if registry.name.endswith(suffixes):
+            continue
+        stem = registry.name.removesuffix(".registry.json") if registry.name.endswith(".registry.json") else registry.stem
+        for module in elf_modules:
+            sidecar = registry.parent / f"{stem}.{module.name}.guest.prx.registry.json"
+            if sidecar.resolve() not in explicit and not sidecar.is_file():
+                raise AuditError(f"{module}: module import registry not found at {sidecar}; rerun relinker with --registry")
+            if sidecar.is_file() and sidecar.resolve() not in explicit:
+                discovered.add(sidecar)
+    return sorted(discovered)
+
+
 def nid_of(name, aliases):
     if name in aliases:
         return aliases[name]
@@ -345,21 +368,22 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="classify the imports of a converted game against the built system libraries")
     parser.add_argument("registries", nargs="+", type=Path, help="JSON written by 'relinker --registry'")
     parser.add_argument("--libs", action="append", required=True, help="directory of built .prx files; repeat for several")
-    parser.add_argument("--modules", action="append", default=[], help="directory of the title's own modules; libraries named there are not checked")
+    parser.add_argument("--modules", action="append", default=[], help="directory of the title's own modules; their relinker import registries are discovered beside the executable registry")
     parser.add_argument("--source", default=str(PRX), help="core/libs/prx tree used to find throwing stubs (default: this repository's)")
     parser.add_argument("--names", help="aerolib.csv style file (NID, name per line) used to name absent imports")
     parser.add_argument("--json", type=Path, help="write the full result to this file")
     args = parser.parse_args(argv)
     try:
+        registries = list(dict.fromkeys([*args.registries, *module_import_registries(args.registries, args.modules)]))
         if args.json:
-            inputs = args.registries + ([Path(args.names)] if args.names else [])
+            inputs = registries + ([Path(args.names)] if args.names else [])
             inputs += [file for directory in args.libs for file in directory_files(directory, "*.prx")]
             inputs += [file for directory in args.modules for file in directory_files(directory, "*")]
             inputs += list(Path(args.source).rglob("*.cpp"))
             output = args.json.resolve()
             if any(output == path.resolve() or (args.json.exists() and args.json.samefile(path)) for path in inputs):
                 raise AuditError(f"{args.json}: JSON output would overwrite an input file")
-        imports = [entry for registry in args.registries for entry in read_registry(registry)]
+        imports = [entry for registry in registries for entry in read_registry(registry)]
         exports, libraries = built_libraries(args.libs)
         modules = module_files(args.modules)
         records, missing = audit(imports, exports, source_stubs(args.source), libraries, modules)
@@ -368,7 +392,7 @@ def main(argv=None):
         summary = summarize(records, len(imports), missing)
         if args.json:
             commit, dirty = git_stamp(Path(args.source))
-            result = {"source_commit": commit, "source_dirty": dirty, "registries": [str(path) for path in args.registries], **summary, "imports": records}
+            result = {"source_commit": commit, "source_dirty": dirty, "registries": [str(path) for path in registries], **summary, "imports": records}
             args.json.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     except AuditError as error:
         print(f"FAIL: {error}", file=sys.stderr)
