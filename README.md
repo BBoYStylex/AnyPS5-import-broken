@@ -1,6 +1,6 @@
 # About
 
-Tool for automatic executables porting to Linux and Windows.
+A tool for automatically porting PlayStation 5 executables to Linux and Windows.
 
 Includes a [relinker](core/relinker) that converts executable to the target system's native format and implementations of [system prx libraries](core/libs/prx) suitable for dynamic linking. No emulation or separate runtime process.
 
