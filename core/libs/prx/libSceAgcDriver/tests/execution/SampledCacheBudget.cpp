@@ -42,6 +42,8 @@ constexpr std::uint32_t Type2D = 9;
 constexpr std::size_t SurfaceBytes = std::size_t{Side} * Side * 4u;
 constexpr std::size_t Surfaces = 12;
 constexpr std::size_t BlockBytes = SurfaceBytes * Surfaces;
+constexpr std::size_t GuardBytes = 65536;
+constexpr std::size_t AllocationBytes = BlockBytes + GuardBytes;
 constexpr std::uint64_t Budget = 1ull << 20u;
 constexpr std::uint64_t Ceiling = Budget + Budget / 4u;
 
@@ -164,9 +166,9 @@ class Block {
 public:
     explicit Block(const Context& context) : context(context) {
 #ifdef _WIN32
-        memory = VirtualAlloc(nullptr, BlockBytes, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+        memory = VirtualAlloc(nullptr, AllocationBytes, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
 #else
-        memory = std::aligned_alloc(65536, BlockBytes);
+        memory = std::aligned_alloc(65536, AllocationBytes);
 #endif
         Require(memory != nullptr, "cannot allocate the texture block");
         std::memset(memory, 0x5a, BlockBytes);
