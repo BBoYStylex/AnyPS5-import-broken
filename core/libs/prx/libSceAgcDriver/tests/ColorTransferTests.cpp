@@ -75,7 +75,7 @@ std::uint32_t deviceLocalType(const Context& context, std::uint32_t bits) {
     return 0;
 }
 
-void checkHalfFloatDetile(const Context& context, std::uint32_t width, std::uint32_t height, bool redLow) {
+void checkHalfFloatDetile(const Context& context, std::uint32_t width, std::uint32_t height, bool redLow, bool exhaustive = false) {
     const ColorTargetLayout layout(width, height, ColorTileMode::RenderTarget, 8);
     std::vector<std::byte> storage(layout.Bytes() + layout.Alignment());
     void* aligned = storage.data();
@@ -88,10 +88,15 @@ void checkHalfFloatDetile(const Context& context, std::uint32_t width, std::uint
     std::uint32_t seed = redLow ? 0x2545f491u : 0x9e3779b9u;
     for (std::uint32_t y = 0; y < height; ++y) {
         for (std::uint32_t x = 0; x < width; ++x) {
-            std::array<std::uint16_t, 4> halves{};
-            for (auto& half : halves) {
-                seed = seed * 1664525u + 1013904223u;
-                half = static_cast<std::uint16_t>(seed >> 16u);
+            std::array<std::uint16_t, 4> halves;
+            if (exhaustive) {
+                const auto value = y * width + x;
+                halves = {static_cast<std::uint16_t>(value), static_cast<std::uint16_t>(value ^ 0x8000u), static_cast<std::uint16_t>(value + 1u), static_cast<std::uint16_t>(value ^ 0x3c00u)};
+            } else {
+                for (auto& half : halves) {
+                    seed = seed * 1664525u + 1013904223u;
+                    half = static_cast<std::uint16_t>(seed >> 16u);
+                }
             }
             const auto index = static_cast<std::size_t>(y) * width + x;
             std::memcpy(texels.data() + index * 8, halves.data(), sizeof(halves));
@@ -239,4 +244,6 @@ void RunColorTransferTests(const AgcDriver::Graphics::Context& context) {
     checkConversion(context, 192, 13, AgcDriver::Graphics::ColorTileMode::Linear, false);
     checkHalfFloatDetile(context, 300, 130, true);
     checkHalfFloatDetile(context, 129, 70, false);
+    checkHalfFloatDetile(context, 256, 256, true, true);
+    checkHalfFloatDetile(context, 256, 256, false, true);
 }

@@ -3,7 +3,7 @@
 #include "prx/libSceAgcDriver/Execution/include/GuestMemory.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/HalfFloatScanout.hpp"
 #include <array>
-#include <cstring>
+#include <mutex>
 
 namespace AgcDriver::Graphics {
 
@@ -52,17 +52,25 @@ GpuColorTransfer::GpuColorTransfer(const Context& context) : context(context) {
         allocation.descriptorSetCount = 1;
         allocation.pSetLayouts = &descriptorLayout;
         Check(context.Function<PFN_vkAllocateDescriptorSets>("vkAllocateDescriptorSets")(context.device, &allocation, &descriptorSet), "vkAllocateDescriptorSets color transfer");
-        const auto& table = HalfFloatScanoutThresholds();
-        thresholds = std::make_unique<Buffer>(context, sizeof(table), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
-        std::memcpy(thresholds->Bytes().data(), table.data(), sizeof(table));
-        const VkDescriptorBufferInfo thresholdInfo{thresholds->Handle(), 0, sizeof(table)};
-        VkWriteDescriptorSet thresholdWrite{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
-        thresholdWrite.dstSet = descriptorSet;
-        thresholdWrite.dstBinding = 2;
-        thresholdWrite.descriptorCount = 1;
-        thresholdWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        thresholdWrite.pBufferInfo = &thresholdInfo;
-        context.Function<PFN_vkUpdateDescriptorSets>("vkUpdateDescriptorSets")(context.device, 1, &thresholdWrite, 0, nullptr);
+        const auto& table = HalfFloatScanoutPackedCodes();
+        static_assert(sizeof(table) <= 65536u && sizeof(table) % 4u == 0u);
+        scanoutCodes = std::make_unique<DeviceBuffer>(context, sizeof(table), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+        {
+            std::unique_lock gpuLock(GuestMemory::GpuMutex(), std::defer_lock);
+            if (!GuestMemory::GpuMutex().HeldByThisThread()) gpuLock.lock();
+            CommandBatch batch(context);
+            context.Resolved(&DeviceFunctions::cmdUpdateBuffer, "vkCmdUpdateBuffer")(batch.Handle(), scanoutCodes->Handle(), 0, sizeof(table), table.data());
+            RecordMemoryBarrier(context, batch.Handle(), VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
+            batch.SubmitAndWait();
+        }
+        const VkDescriptorBufferInfo scanoutCodeInfo{scanoutCodes->Handle(), 0, sizeof(table)};
+        VkWriteDescriptorSet scanoutCodeWrite{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+        scanoutCodeWrite.dstSet = descriptorSet;
+        scanoutCodeWrite.dstBinding = 2;
+        scanoutCodeWrite.descriptorCount = 1;
+        scanoutCodeWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        scanoutCodeWrite.pBufferInfo = &scanoutCodeInfo;
+        context.Function<PFN_vkUpdateDescriptorSets>("vkUpdateDescriptorSets")(context.device, 1, &scanoutCodeWrite, 0, nullptr);
     } catch (...) {
         if (module) context.Function<PFN_vkDestroyShaderModule>("vkDestroyShaderModule")(context.device, module, nullptr);
         release();
