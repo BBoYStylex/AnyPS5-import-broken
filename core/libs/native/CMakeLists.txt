@@ -157,3 +157,71 @@ add_test_executable(native_direct_memory_alias_tests ../tests/NativeDirectMemory
 target_link_libraries(native_direct_memory_alias_tests PRIVATE anyps5_native_graphics)
 add_test(NAME native_direct_memory_aliases COMMAND native_direct_memory_alias_tests)
 set_tests_properties(native_direct_memory_aliases PROPERTIES TIMEOUT 30)
+set(padExample "${CMAKE_SOURCE_DIR}/core/aot/examples/pad_input")
+enable_language(C)
+set(padSdk "${CMAKE_SOURCE_DIR}/3rdparty/ps5link-sdk")
+add_executable(native_pad_linker EXCLUDE_FROM_ALL
+    "${padSdk}/linker/link_real.c" "${padSdk}/linker/elf_object.c"
+    "${padSdk}/linker/linker.c" "${padSdk}/linker/dynwriter.c"
+    "${padSdk}/linker/catalog.c" "${padSdk}/linker/catalog_extra.c"
+    "${padSdk}/linker/catalog_lookup.c" "${padSdk}/linker/nid.c" "${padSdk}/linker/sha1.c")
+file(GLOB padBuildInputs CONFIGURE_DEPENDS "${padExample}/*.py" "${CMAKE_SOURCE_DIR}/core/aot/*.py"
+    "${CMAKE_SOURCE_DIR}/core/aot/catalogs/*.json")
+set(padInputHashes "${CMAKE_C_COMPILER_ID}-${CMAKE_C_COMPILER_VERSION}")
+foreach(input IN LISTS padBuildInputs)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${input}")
+    file(SHA256 "${input}" inputHash)
+    string(APPEND padInputHashes "${inputHash}")
+endforeach()
+string(SHA256 padInputKey "${padInputHashes}")
+set(padArtifacts "${CMAKE_CURRENT_BINARY_DIR}/pad-input-${padInputKey}")
+add_custom_command(OUTPUT "${padArtifacts}/module.o" "${padArtifacts}/reference.o" "${padArtifacts}/build.json"
+    COMMAND ${CMAKE_COMMAND} -E env "PYTHONPATH=${cubePythonPath}" "LIBCAPSTONE_PATH=$<TARGET_FILE_DIR:capstone_shared>"
+        ${Python3_EXECUTABLE} "${padExample}/build.py" --sdk "${padSdk}" --linker $<TARGET_FILE:native_pad_linker>
+        --output "${padArtifacts}"
+    DEPENDS native_pad_linker capstone_shared ${padBuildInputs} VERBATIM)
+set_source_files_properties("${padArtifacts}/module.o" "${padArtifacts}/reference.o" PROPERTIES GENERATED TRUE EXTERNAL_OBJECT TRUE)
+add_executable(native_pad_input EXCLUDE_FROM_ALL "${padExample}/launcher.cpp" "${padArtifacts}/module.o"
+    "${LIBS_INCLUDE_DIR}/prx/libSceUserService/Export.cpp")
+target_link_libraries(native_pad_input PRIVATE anyps5_native_graphics)
+add_library(native_pad_test_providers STATIC EXCLUDE_FROM_ALL
+    "${LIBS_INCLUDE_DIR}/prx/libScePad/Export.cpp"
+    "${LIBS_INCLUDE_DIR}/prx/libSceUserService/Export.cpp"
+    "${LIBS_INCLUDE_DIR}/prx/libkernel/Time/Time.cpp")
+target_include_directories(native_pad_test_providers PRIVATE "${LIBS_INCLUDE_DIR}")
+target_compile_definitions(native_pad_test_providers PRIVATE
+    sceUserServiceGetInitialUser=PadInputProviderGetUser scePadInit_nid_postfix=PadInputProviderInit
+    scePadOpen_nid_postfix=PadInputProviderOpen scePadReadState=PadInputProviderRead
+    scePadClose_nid_postfix=PadInputProviderClose sceKernelUsleep_nid_postfix=PadInputProviderUsleep)
+foreach(mode IN ITEMS aot reference)
+    if(mode STREQUAL "aot")
+        set(padObject module.o)
+    else()
+        set(padObject reference.o)
+    endif()
+    add_executable(native_pad_${mode}_test EXCLUDE_FROM_ALL "${padExample}/launcher.cpp"
+        "${padExample}/input_test.cpp" "${padArtifacts}/${padObject}")
+    target_compile_definitions(native_pad_${mode}_test PRIVATE PAD_INPUT_TEST)
+    if(mode STREQUAL "reference")
+        target_compile_definitions(native_pad_${mode}_test PRIVATE PAD_INPUT_REFERENCE)
+    endif()
+    target_link_libraries(native_pad_${mode}_test PRIVATE native_pad_test_providers anyps5_native_graphics)
+    add_custom_command(TARGET native_pad_${mode}_test POST_BUILD
+        COMMAND ${Python3_EXECUTABLE} "${cubeExample}/artifact.py" --binary "$<TARGET_FILE:native_pad_${mode}_test>"
+            --object "${padArtifacts}/${padObject}" --build "${padArtifacts}/build.json"
+            --archive "$<TARGET_FILE:native_pad_test_providers>" --archive "$<TARGET_FILE:anyps5_native_graphics>"
+            --archive "$<TARGET_FILE:anyps5_native_image>" VERBATIM)
+endforeach()
+add_custom_command(TARGET native_pad_input POST_BUILD
+    COMMAND ${Python3_EXECUTABLE} "${cubeExample}/artifact.py" --binary "$<TARGET_FILE:native_pad_input>"
+        --object "${padArtifacts}/module.o" --build "${padArtifacts}/build.json"
+        --archive "$<TARGET_FILE:anyps5_native_graphics>" --archive "$<TARGET_FILE:anyps5_native_image>" VERBATIM)
+add_custom_target(native_pad_input_check
+    COMMAND ${Python3_EXECUTABLE} "${padExample}/verify.py" --aot $<TARGET_FILE:native_pad_aot_test>
+        --reference $<TARGET_FILE:native_pad_reference_test> --production $<TARGET_FILE:native_pad_input>
+        --build "${padArtifacts}/build.json" --output-parent "${CMAKE_CURRENT_BINARY_DIR}/pad-runs"
+    DEPENDS native_pad_input native_pad_aot_test native_pad_reference_test USES_TERMINAL VERBATIM)
+add_test(NAME native_pad_input COMMAND ${Python3_EXECUTABLE} "${padExample}/verify.py"
+    --aot $<TARGET_FILE:native_pad_aot_test> --reference $<TARGET_FILE:native_pad_reference_test>
+    --build "${padArtifacts}/build.json" --output-parent "${CMAKE_CURRENT_BINARY_DIR}/pad-runs")
+set_tests_properties(native_pad_input PROPERTIES TIMEOUT 30)
