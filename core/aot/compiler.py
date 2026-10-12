@@ -25,6 +25,7 @@ import pointer_outputs
 import parameter_pointers
 import frame_exclusion
 import checked_pointers
+import register_values
 import register_aliases
 from dynamic import parse_dynamic, DynamicError
 from calls import validate_indirect_calls, CallError
@@ -575,8 +576,9 @@ class Function:
         if op in ('mov', 'movabs', 'movzx', 'movsx', 'movsxd', 'lea'):
             if op == 'lea' and args[1].type != X86_OP_MEM:
                 self.fail(ins, 'invalid address expression')
-            self.read_operand(ins, state, args[1])
-            self.define(ins, state, args[0])
+            if not register_values.transport(self, ins, original, state):
+                self.read_operand(ins, state, args[1])
+                self.define(ins, state, args[0])
             if args[0].type == X86_OP_REG:
                 dest = self.reg(ins, args[0])[0]
                 if op in ('mov', 'movabs'):
