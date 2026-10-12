@@ -241,6 +241,20 @@ OpFunctionEnd
     }
 }
 
+void testOptimizedModuleValidationFailureKeepsValidatedInput() {
+    const auto input = assemble(moduleSource(Types.front(), false, ArithmeticSupport::StorageOnly));
+    const std::vector<std::uint32_t> optimized{1u, 2u, 3u};
+    spvtools::SpirvTools validator(SPV_ENV_VULKAN_1_1);
+    check(validator.Validate(input), "fallback test input is invalid");
+    check(!validator.Validate(optimized), "fallback test output is unexpectedly valid");
+    const auto result = ShaderRecompiler::detail::SelectValidatedSpirv(input, optimized, false);
+    check(result == input, "invalid optimized output did not preserve the validated input");
+
+    const auto validOptimized = input;
+    const auto optimizedResult = ShaderRecompiler::detail::SelectValidatedSpirv(input, validOptimized, true);
+    check(optimizedResult == validOptimized, "valid optimized output was not selected");
+}
+
 void testInvalidInputIsRejected() {
     const auto valid = assemble(moduleSource(Types.front(), false, ArithmeticSupport::StorageOnly));
     expectRejected(valid, 0x00400000u, Spirv13, "SPIR-V 1.3 with Vulkan 1.0");
@@ -285,6 +299,7 @@ int main() {
     testNarrowConversions(optimizationEnabled);
     testInvalidInputIsRejected();
     testSpecializedSelectionExit();
+    testOptimizedModuleValidationFailureKeepsValidatedInput();
     if (failures != 0) {
         std::fprintf(stderr, "%d optimizer check(s) failed\n", failures);
         return 1;

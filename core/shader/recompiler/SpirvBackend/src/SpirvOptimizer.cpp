@@ -2,6 +2,7 @@
 #include <spirv-tools/libspirv.hpp>
 #include <spirv-tools/optimizer.hpp>
 #include <spirv/unified1/spirv.hpp>
+#include <cstdio>
 #include <cstdlib>
 #include <stdexcept>
 #include <string>
@@ -166,10 +167,11 @@ std::vector<std::uint32_t> ValidateAndOptimizeSpirv(std::span<const std::uint32_
         throw std::runtime_error("SPIR-V optimization failed:\n" + diagnostics);
     }
     diagnostics.clear();
-    if (!tools.Validate(optimized.data(), optimized.size(), validatorOptions)) {
-        throw std::runtime_error("SPIR-V validation after optimization failed:\n" + diagnostics);
+    const bool optimizedValid = tools.Validate(optimized.data(), optimized.size(), validatorOptions);
+    if (!optimizedValid) {
+        std::fprintf(stderr, "SPIR-V validation after optimization failed; using validated input:\n%s\n", diagnostics.c_str());
     }
-    return optimized;
+    return detail::SelectValidatedSpirv(spirv, optimized, optimizedValid);
 }
 
 }
