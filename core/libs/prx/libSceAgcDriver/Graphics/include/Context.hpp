@@ -159,6 +159,7 @@ struct Context {
     bool geometryShader = false;
     bool sampleRateShading = false;
     bool shaderClipDistance = false;
+    bool shaderOutputLayer = false;
     bool nullDescriptors = false;
     bool bufferInt64Atomics = false;
     const PlaceholderImages* placeholderImages = nullptr;

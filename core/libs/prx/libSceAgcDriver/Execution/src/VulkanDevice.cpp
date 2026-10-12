@@ -265,6 +265,7 @@ struct VulkanDevice::State {
     bool geometryShader = false;
     bool sampleRateShading = false;
     bool shaderClipDistance = false;
+    bool shaderOutputLayer = false;
     bool shaderClock = false;
     bool narrowSubgroupClock = false;
     bool float64DenormPreserve = false;
@@ -1107,6 +1108,12 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window, bool compileOnly) :
         deviceExtensions.push_back(VK_EXT_SHADER_STENCIL_EXPORT_EXTENSION_NAME);
         state->capabilities.push_back(spv::CapabilityStencilExportEXT);
         state->spirvExtensions.push_back("SPV_EXT_shader_stencil_export");
+    }
+    if (hasExtension(VK_EXT_SHADER_VIEWPORT_INDEX_LAYER_EXTENSION_NAME)) {
+        deviceExtensions.push_back(VK_EXT_SHADER_VIEWPORT_INDEX_LAYER_EXTENSION_NAME);
+        state->shaderOutputLayer = true;
+        state->capabilities.push_back(spv::CapabilityShaderViewportIndexLayerEXT);
+        state->spirvExtensions.push_back("SPV_EXT_shader_viewport_index_layer");
     }
     if (state->shaderClock) {
         deviceExtensions.push_back(VK_KHR_SHADER_CLOCK_EXTENSION_NAME);
@@ -3070,6 +3077,7 @@ Graphics::Context VulkanDevice::buildContext() const {
     context.geometryShader = state->geometryShader;
     context.sampleRateShading = state->sampleRateShading;
     context.shaderClipDistance = state->shaderClipDistance;
+    context.shaderOutputLayer = state->shaderOutputLayer;
     context.nullDescriptors = state->shaderProfile != nullptr && state->shaderProfile->NullDescriptors();
     context.bufferInt64Atomics = state->bufferInt64Atomics;
     context.placeholderImages = state->placeholderImages.get();

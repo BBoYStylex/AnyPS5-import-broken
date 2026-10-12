@@ -166,6 +166,7 @@ ShaderStageInputInfo BuildShaderStageInputInfo(ShaderStageKind stage, const Gues
         vertexStorage.fetchExternal = false;
         vertexStorage.fetchAttribReg = static_cast<int>(vertex.fetchAttribReg);
         vertexStorage.fetchBufferReg = static_cast<int>(vertex.fetchBufferReg);
+        vertexStorage.paClVsOutCntl = vertex.paClVsOutCntl;
         vertexStorage.resourcesNum = static_cast<int>(vertex.resourcesNum);
         for (std::uint32_t i = 0; i < static_cast<std::uint32_t>(vertexStorage.resourcesNum); ++i) {
             vertexStorage.resources[i].fields = vertex.resources[i].fields;

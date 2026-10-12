@@ -21,6 +21,7 @@ public:
     Framebuffer& operator=(const Framebuffer&) = delete;
     VkFramebuffer Handle() const { return framebuffer; }
     std::span<const VkImageView> Views() const { return views; }
+    std::uint32_t Layers() const { return layers; }
     // Forgets the handle without destroying it (the device it belongs to is already gone).
     void Abandon() noexcept;
 
@@ -28,6 +29,7 @@ private:
     Context context;
     VkFramebuffer framebuffer = VK_NULL_HANDLE;
     std::vector<VkImageView> views;
+    std::uint32_t layers = 1;
 };
 
 // The shader modules, layout, render pass and VkPipeline of one draw configuration. Viewport,
@@ -124,7 +126,7 @@ bool ValidateSampleLocations(const Context& context, const State& state);
 void ValidateShaderPair(const ShaderRecompiler::RecompileResult& vertex, const ShaderRecompiler::RecompileResult& fragment);
 bool ShadersWriteMemory(std::span<const CompiledShader> shaders);
 // Returns the color attachment locations the pixel shader writes.
-std::set<std::uint32_t> ValidateShaders(std::span<const CompiledShader> shaders, const State& state, const VkPhysicalDeviceSubgroupProperties& subgroup, bool fragmentShaderBarycentric, bool descriptorIndexing = false, bool imageInt64Atomics = false, bool geometryShader = false, bool sampleRateShading = false, bool bufferInt64Atomics = false, bool shaderClipDistance = false);
+std::set<std::uint32_t> ValidateShaders(std::span<const CompiledShader> shaders, const State& state, const VkPhysicalDeviceSubgroupProperties& subgroup, bool fragmentShaderBarycentric, bool descriptorIndexing = false, bool imageInt64Atomics = false, bool geometryShader = false, bool sampleRateShading = false, bool bufferInt64Atomics = false, bool shaderClipDistance = false, bool shaderOutputLayer = false);
 
 }
 

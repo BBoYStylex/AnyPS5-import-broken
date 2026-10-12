@@ -106,16 +106,17 @@ void DefineModule(SpirvEmitterState& state) {
     if (state.cullDistanceVariable != 0) {
         state.module.EmitCapability(spv::CapabilityCullDistance);
     }
-    if (state.layerVariable != 0) {
-        state.module.RequireVersion(0x00010500u);
-        state.module.EmitCapability(spv::CapabilityShaderLayer);
+    if (state.layerVariable != 0 || state.viewportIndexVariable != 0) {
+        if (state.spirvVersion >= 0x00010500u) {
+            if (state.layerVariable != 0) state.module.EmitCapability(spv::CapabilityShaderLayer);
+            if (state.viewportIndexVariable != 0) state.module.EmitCapability(spv::CapabilityShaderViewportIndex);
+        } else {
+            state.module.EmitCapability(spv::CapabilityShaderViewportIndexLayerEXT);
+            state.module.EmitExtension("SPV_EXT_shader_viewport_index_layer");
+        }
     }
     if (InputVariableForKind(state, StageInputKind::Layer) != 0) {
         state.module.EmitCapability(spv::CapabilityGeometry);
-    }
-    if (state.viewportIndexVariable != 0) {
-        state.module.RequireVersion(0x00010500u);
-        state.module.EmitCapability(spv::CapabilityShaderViewportIndex);
     }
     if (InputVariableForKind(state, StageInputKind::SampleId) != 0) {
         state.module.EmitCapability(spv::CapabilitySampleRateShading);

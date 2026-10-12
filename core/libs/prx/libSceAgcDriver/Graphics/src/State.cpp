@@ -97,9 +97,8 @@ VkConservativeRasterizationModeEXT decodeConservativeRasterization(const QueueSt
 
 // The register rules DecodeState and DrawRejection share (the precheck must reject exactly what
 // DecodeState would): the masks whose set bits are unsupported, and the depth-control verdict.
-// Render target index, viewport index and the misc export vector that carries them are accepted but
-// not routed: color targets are single-layer, so layered draws land in layer 0.
-constexpr std::uint32_t LayerExports = (1u << 18u) | (1u << 19u) | (1u << 21u) | (1u << 24u);
+constexpr std::uint32_t ViewportIndexExport = 1u << 19u;
+constexpr std::uint32_t LayerExports = (1u << 18u) | ViewportIndexExport | (1u << 21u) | (1u << 24u);
 constexpr std::uint32_t DepthControlMask = ~0x007007f0u;
 // EXEC_ON_HIER_FAIL / EXEC_ON_NOOP / EXEC_IF_OVERLAPPED (bits 9, 10, 17) only force the pixel shader
 // to run, which it always does here.
@@ -691,11 +690,11 @@ State DecodeState(const QueueState& queue, bool vertexWorkgroup) {
     }
     APS5_LOG_OUT_DEBUG("Topology=%u", static_cast<unsigned>(result.topology));
     result.primitiveRestart = read(queue.userConfig, 0x24b, RegisterBank::UserConfig) != 0 && !result.rectList && result.topology != VK_PRIMITIVE_TOPOLOGY_PATCH_LIST;
-    if ((read(cx, 0x207) & LayerExports) != 0) {
+    if ((read(cx, 0x207) & ViewportIndexExport) != 0) {
         static bool reported = false;
         if (!reported) {
             reported = true;
-            std::fprintf(stderr, "[gpu] layer/viewport index vertex exports are ignored (PA_CL_VS_OUT_CNTL=0x%08x)\n", read(cx, 0x207));
+            std::fprintf(stderr, "[gpu] viewport index vertex exports are ignored (PA_CL_VS_OUT_CNTL=0x%08x)\n", read(cx, 0x207));
         }
     }
     zero(cx, 0x207, ~LayerExports, "clip distances, layer, viewport or auxiliary vertex exports");
@@ -968,6 +967,10 @@ std::uint32_t ColorWriteMask(const Registers& context) {
         if (info != context.end() && ((info->second >> 2u) & 0x1fu) == 0) mask &= ~channels;
     }
     return mask;
+}
+
+std::uint32_t VertexExportControl(const Registers& cx) {
+    return read(cx, 0x207) & ~ViewportIndexExport;
 }
 
 ColorTarget DecodeColorBuffer(const Registers& cx, std::uint32_t slot) {
