@@ -56,6 +56,20 @@ FontTextCharacter* APS5_VABI sceFontWritingRefersRenderStepCharacter(FontWriting
 const void* APS5_VABI sceFontSelectLibraryFt(int);
 const void* APS5_VABI sceFontSelectRendererFt(int);
 int APS5_VABI sceFontCharacterGetSyllableStringState(const FontTextCharacter*, int*);
+int APS5_VABI sceFontFtSupportTrueType(FontLibrary);
+int APS5_VABI sceFontFtSupportTrueTypeGx(FontLibrary);
+int APS5_VABI sceFontFtSupportOpenType(FontLibrary);
+int APS5_VABI sceFontFtSupportOpenTypeOtf(FontLibrary);
+int APS5_VABI sceFontFtSupportOpenTypeTtf(FontLibrary);
+int APS5_VABI sceFontFtSupportType1(FontLibrary);
+int APS5_VABI sceFontFtSupportType42(FontLibrary);
+int APS5_VABI sceFontFtSupportCid(FontLibrary);
+int APS5_VABI sceFontFtSupportPfr(FontLibrary);
+int APS5_VABI sceFontFtSupportWinFonts(FontLibrary);
+int APS5_VABI sceFontFtSupportPcf(FontLibrary);
+int APS5_VABI sceFontFtSupportBdf(FontLibrary);
+int APS5_VABI sceFontFtSupportSystemFonts(FontLibrary);
+int APS5_VABI sceFontFtSupportFontFormats(FontLibrary);
 }
 
 static void Check(bool value, int line) {
@@ -157,6 +171,17 @@ static bool KerningIs(const FontKerning& kerning, float offsetX) {
     return kerning.offsetX == offsetX && kerning.offsetY == 0.0f && kerning.positionX == 0.0f && kerning.positionY == 0.0f;
 }
 
+static void TestFtSupport(FontLibrary library) {
+    for (auto support : {sceFontFtSupportTrueType, sceFontFtSupportTrueTypeGx, sceFontFtSupportOpenType, sceFontFtSupportOpenTypeOtf,
+                         sceFontFtSupportOpenTypeTtf, sceFontFtSupportType1, sceFontFtSupportType42, sceFontFtSupportCid, sceFontFtSupportPfr,
+                         sceFontFtSupportWinFonts, sceFontFtSupportPcf, sceFontFtSupportBdf, sceFontFtSupportSystemFonts, sceFontFtSupportFontFormats}) {
+        Require(support(library) == SCE_FONT_OK);
+        Require(support(nullptr) == SCE_FONT_ERROR_INVALID_LIBRARY);
+        FontHandleOpaque notALibrary{};
+        Require(support(&notALibrary) == SCE_FONT_ERROR_INVALID_LIBRARY);
+    }
+}
+
 int main() {
     constexpr std::uint32_t SystemFontSet = 0x18070043u;
     const std::filesystem::path fontRoot = std::filesystem::temp_directory_path() / ("anyps5_guest_font-" + std::to_string(std::random_device{}()));
@@ -172,6 +197,7 @@ int main() {
     FontLibrary library = nullptr;
     Require(sceFontCreateLibrary(&memory, nullptr, &library) == SCE_FONT_ERROR_INVALID_PARAMETER && library == nullptr);
     Require(sceFontCreateLibrary(&memory, sceFontSelectLibraryFt(0), &library) == SCE_FONT_OK && library != nullptr);
+    TestFtSupport(library);
 
     std::uint32_t subPixelCount = 1;
     Require(sceFontGetPixelResolution(library, &subPixelCount) == SCE_FONT_OK && subPixelCount == 64);
