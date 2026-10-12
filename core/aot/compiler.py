@@ -18,6 +18,7 @@ import effects
 import loop_ranges
 import native_image
 import checked_stack
+import finite_tables
 import immutable_data
 import stack_values
 import pointer_outputs
@@ -175,6 +176,10 @@ class Image:
         require(referenced_imports == set(self.imports), 'unused import contracts')
         self.decoder = Cs(CS_ARCH_X86, CS_MODE_64)
         self.decoder.detail = True
+        try:
+            self.finite_tables, self.jump_labels = finite_tables.discover(self)
+        except ValueError as error:
+            raise Rejected(str(error)) from error
         self.call_contracts = {}
         self.memory_effects = {}
         self.pointer_output_summaries = {}
@@ -197,6 +202,8 @@ class Image:
         return self.bytes[begin:begin + available] + bytes(size - available)
 
     def pointer(self, address, size=1):
+        if address in self.jump_labels and size == 1:
+            return f'blockaddress(@{self.jump_labels[address]}, %b{address:x})'
         if address in self.functions and size == 1:
             return '@' + self.functions[address]['name']
         for spec in self.data:
@@ -220,6 +227,12 @@ class Image:
         if address not in self.call_contracts:
             try:
                 self.call_contracts[address] = validate_indirect_calls(self, owner)
+                for site, descriptor in self.finite_tables.items():
+                    if address <= site < address + owner['size'] and descriptor['kind'] == 'call':
+                        require(site not in self.call_contracts[address], 'derived finite call conflicts with a supplied annotation')
+                        self.call_contracts[address][site] = {'contract': descriptor['contract'], 'kind': 'operand',
+                            'targets': [self.functions[target]['name'] for target in descriptor['targets']],
+                            'target_addresses': descriptor['targets'], 'qualification': descriptor['qualification']}
             except CallError as error:
                 raise Rejected(str(error)) from error
         return self.call_contracts[address]
@@ -297,6 +310,8 @@ class Function:
             next_address = address + ins.size
             if ins.mnemonic in ('ret', 'ud2'):
                 successors = []
+            elif ins.mnemonic == 'jmp' and address in self.image.finite_tables:
+                successors = self.image.finite_tables[address]['targets']
             elif ins.mnemonic == 'jmp':
                 operand = ins.operands[0]
                 if operand.type == X86_OP_IMM and start <= operand.imm < end:
@@ -491,6 +506,9 @@ class Function:
                     state['pointers'][name] = saved[3]
                 state['rsp'] += 8
             return state
+        if op == 'jmp' and ins.address in self.image.finite_tables:
+            self.read_operand(ins, state, args[0])
+            return state
         if ins.address in self.tail_calls:
             self.check_tail_call(ins, state)
             return state
@@ -500,9 +518,11 @@ class Function:
                 self.fail(ins, 'native callee requires original provider bindings')
             if slot == 'operand':
                 self.read_operand(ins, state, args[0])
-                if (args[0].type == X86_OP_REG or self.memory_origin(ins, state, args[0]) is not None) and not self.pointer_operand(ins, state, args[0]):
+                if ins.address in self.image.finite_tables:
+                    pass
+                elif (args[0].type == X86_OP_REG or self.memory_origin(ins, state, args[0]) is not None) and not self.pointer_operand(ins, state, args[0]):
                     self.fail(ins, 'indirect call target has no proven native pointer origin')
-                if args[0].type == X86_OP_MEM and self.memory_origin(ins, state, args[0]) is None:
+                if ins.address not in self.image.finite_tables and args[0].type == X86_OP_MEM and self.memory_origin(ins, state, args[0]) is None:
                     base, index = ins.reg_name(args[0].mem.base), ins.reg_name(args[0].mem.index)
                     provenance = state['pointers'].get(base)
                     if not provenance or provenance[0] != 'parameter' or index in state['native_pointers']:
@@ -1155,7 +1175,12 @@ class Function:
                     arguments.append(f"{abi.parameter_type(loc['type'])} {value}")
                     native_arguments.append(value)
                 if slot == 'operand':
-                    target = self.emit(f'inttoptr i64 {self.read(ins, args[0], 64)} to ptr')
+                    if address in self.image.finite_tables:
+                        target = finite_tables.emit_target(self, ins, self.image.finite_tables[address])
+                    else:
+                        target = self.emit(f'inttoptr i64 {self.read(ins, args[0], 64)} to ptr')
+                    names = self.image.annotated_calls(self.contract)[address]['targets']
+                    finite_tables.emit_membership(self, ins, target, ['@' + name for name in names])
                 else:
                     target = '@' + callee['name'] if slot is None else self.emit(f'load ptr, ptr {self.image.pointer(slot, 8)}, align 1')
                 expression = f"call {abi.result_type(callee['result'])} {target}({', '.join(arguments)})"
@@ -1184,6 +1209,14 @@ class Function:
                     value = self.load(abi.return_register(result), abi.bits(result))
                     value = self.native_value(result, value)
                     self.lines.append(f'  ret {abi.llvm_type(result)} {value}')
+                terminal = True
+            elif op == 'jmp' and address in self.image.finite_tables:
+                descriptor = self.image.finite_tables[address]
+                target = finite_tables.emit_target(self, ins, descriptor)
+                targets = list(dict.fromkeys(descriptor['targets']))
+                finite_tables.emit_membership(self, ins, target, [self.image.pointer(value) for value in targets])
+                labels = ', '.join(f'label %b{value:x}' for value in targets)
+                self.lines.append(f'  indirectbr ptr {target}, [{labels}]')
                 terminal = True
             elif op.startswith('j'):
                 target = args[0].imm
@@ -1267,8 +1300,9 @@ def compile_image(image):
               'provider_pointer_outputs': {name: contract['pointer_outputs'] for name, contract in image.imports.items() if 'pointer_outputs' in contract},
               'provider_effect_contracts': {name: contract['memory_effects'] for name, contract in image.imports.items() if 'memory_effects' in contract},
               'imports': len(image.import_slots), 'pointer_relocations': len(image.relocations),
+              'finite_tables': list(image.finite_tables.values()),
               'indirect_calls': [site for sites in image.call_contracts.values() for site in sites.values()],
-              'limitations': ['declared function boundaries and ABIs', 'declared scalar, SSE and AVX instruction subsets', 'no guest exception, TLS or computed-jump target recovery', 'indirect call target sets are declared, not inferred',
+              'limitations': ['declared function boundaries and ABIs', 'declared scalar, SSE and AVX instruction subsets', 'no guest exception or TLS recovery', 'computed jumps limited to immutable absolute relocation tables', 'other indirect call target sets remain declared with runtime membership checks',
                               'no game compatibility or performance qualification']}
     return '\n\n'.join(lines) + '\n', report
 

@@ -8,10 +8,10 @@ BITWISE = {'xorps': 'xor', 'xorpd': 'xor', 'pxor': 'xor', 'andps': 'and', 'andpd
 FLOAT_OPS = {'addps': ('fadd', 128), 'mulps': ('fmul', 128), 'subps': ('fsub', 128),
              'addss': ('fadd', 32), 'mulss': ('fmul', 32), 'subss': ('fsub', 32)}
 SHUFFLES = {'shufps', 'pshufd', 'unpcklps', 'unpckhps', 'unpcklpd', 'unpckhpd',
-            'punpcklqdq', 'punpckhqdq', 'movlhps', 'movhlps'}
+            'punpcklbw', 'punpcklwd', 'punpcklqdq', 'punpckhqdq', 'movlhps', 'movhlps'}
 SUPPORTED = FULL_MOVES | set(BITWISE) | set(FLOAT_OPS) | SHUFFLES | {
     'movd', 'movq', 'movss', 'movsd', 'movlps', 'movlpd', 'psrld', 'paddd', 'pcmpgtd',
-    'packuswb', 'ucomiss', 'cvtsi2ss'}
+    'packuswb', 'ucomiss', 'cvtsi2ss', 'paddb', 'pmaxub', 'pcmpeqb', 'pcmpeqd', 'psrad', 'movmskps'}
 FP_POLICY = {'rounding': 'nearest-even', 'subnormals': 'preserve', 'exceptions': 'masked',
              'status_flags': 'unobserved', 'nan_payloads': 'unobserved'}
 MASK128 = (1 << 128) - 1
@@ -83,6 +83,10 @@ def _policy(function, ins):
 
 def _shuffle(ins):
     op, args = ins.mnemonic, ins.operands
+    if op in ('punpcklbw', 'punpcklwd'):
+        width = 8 if op == 'punpcklbw' else 16
+        count = 128 // width
+        return width, [value for i in range(count // 2) for value in (i, i + count)]
     if op == 'shufps':
         control = args[2].imm
         return 32, [control & 3, (control >> 2) & 3, 4 + ((control >> 4) & 3), 4 + ((control >> 6) & 3)]
@@ -133,6 +137,18 @@ def analyze(function, ins, state):
             source_mask = sources[1 if index >= count else 0]
             known |= ((source_mask >> ((index % count) * width)) & lane_mask) << (lane * width)
         _copy_mask(ins, state, args[0], known)
+    elif op == 'movmskps':
+        _check(function, ins, state, args[1], 128)
+        _define(function, ins, state, args[0], 32)
+    elif op == 'psrad':
+        known = _complete_lanes(_mask(function, ins, state, args[0]), 32)
+        if args[1].type != X86_OP_IMM:
+            _check(function, ins, state, args[1], 64)
+        _copy_mask(ins, state, args[0], known)
+    elif op in ('paddb', 'pmaxub', 'pcmpeqb', 'pcmpeqd'):
+        width = 32 if op == 'pcmpeqd' else 8
+        known = _mask(function, ins, state, args[0]) & _mask(function, ins, state, args[1])
+        _copy_mask(ins, state, args[0], _complete_lanes(known, width))
     elif op == 'psrld':
         known = _mask(function, ins, state, args[0])
         if args[1].type == X86_OP_IMM:
@@ -237,6 +253,39 @@ def lower(function, ins):
         right = left if op == 'pshufd' else _unpack(function, read(args[1]), width)
         indices = ', '.join(f'i32 {index}' for index in mask)
         result = function.emit(f'shufflevector <{count} x i{width}> {left}, <{count} x i{width}> {right}, <{count} x i32> <{indices}>')
+        _write(function, ins, args[0], _pack(function, result, width))
+    elif op == 'movmskps':
+        source = read(args[1])
+        value = '0'
+        for lane in range(4):
+            bit = function.emit(f'lshr i128 {source}, {lane * 32 + 31}')
+            bit = function.emit(f'trunc i128 {bit} to i32')
+            bit = function.emit(f'and i32 {bit}, 1')
+            bit = function.emit(f'shl i32 {bit}, {lane}')
+            value = function.emit(f'or i32 {value}, {bit}')
+        function.write(ins, args[0], value)
+    elif op == 'psrad':
+        left = _unpack(function, read(args[0]))
+        count = str(args[1].imm) if args[1].type == X86_OP_IMM else read(args[1], 64)
+        below = function.emit(f'icmp ult i64 {count}, 32')
+        limited = function.emit(f'select i1 {below}, i64 {count}, i64 31')
+        narrow = function.emit(f'trunc i64 {limited} to i32')
+        lane = function.emit(f'insertelement <4 x i32> zeroinitializer, i32 {narrow}, i32 0')
+        counts = function.emit(f'shufflevector <4 x i32> {lane}, <4 x i32> zeroinitializer, <4 x i32> zeroinitializer')
+        result = function.emit(f'ashr <4 x i32> {left}, {counts}')
+        _write(function, ins, args[0], _pack(function, result))
+    elif op in ('paddb', 'pmaxub', 'pcmpeqb', 'pcmpeqd'):
+        width = 32 if op == 'pcmpeqd' else 8
+        count = 128 // width
+        kind = f'<{count} x i{width}>'
+        left, right = (_unpack(function, read(operand), width) for operand in args[:2])
+        if op == 'paddb':
+            result = function.emit(f'add {kind} {left}, {right}')
+        else:
+            comparison = 'ugt' if op == 'pmaxub' else 'eq'
+            mask = function.emit(f'icmp {comparison} {kind} {left}, {right}')
+            result = (function.emit(f'select <{count} x i1> {mask}, {kind} {left}, {kind} {right}')
+                      if op == 'pmaxub' else function.emit(f'sext <{count} x i1> {mask} to {kind}'))
         _write(function, ins, args[0], _pack(function, result, width))
     elif op == 'psrld':
         left = _unpack(function, read(args[0]))
