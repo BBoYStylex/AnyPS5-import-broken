@@ -369,38 +369,18 @@
         "module_version": 257
       },
       "contract": {
+        "name": "sceKernelSendNotificationRequest",
         "result": "i32",
         "parameters": [
           "i32",
           "ptr",
-          "i32",
+          "u64",
           "i32"
         ],
-        "guest_calling_convention": "x86_64-sysv",
-        "source_declaration": "extern int sceKernelSendNotificationRequest(int device, void *request, int size, int flags);",
-        "host_bridge": {
-          "name": "sceKernelSendNotificationRequest",
-          "result": "i32",
-          "parameters": [
-            "i32",
-            "ptr",
-            "i64",
-            "i32"
-          ],
-          "conversion": "zero extend the guest size low 32 bits to host size_t, preserving x86 mov-edx behavior",
-          "evidence": [
-            {
-              "path": "core/libs/prx/libkernel/System/src/Notification.cpp",
-              "sha256": "a235753aa059b038cb827fcb877c1a7af3acded57027d53b0b3c1b379e6abdbf",
-              "excerpt": "sceKernelSendNotificationRequest(int device, const void* request, std::size_t size, int flags)"
-            }
-          ]
-        },
-        "name": "aot_bridge_sceKernelSendNotificationRequest",
         "memory_effects": {
           "writes": [],
           "callbacks": false,
-          "evidence": "Bridge widens the size then calls Notification.cpp, which only reads request bytes and writes host stderr/private state."
+          "evidence": "Notification.cpp reads request bytes and writes only private host state/stderr. Size is the native provider size_t ABI; caller register bits must satisfy it."
         }
       },
       "sources": [
@@ -410,17 +390,12 @@
           "excerpt": "sceKernelSendNotificationRequest(int device, const void* request, std::size_t size, int flags)"
         },
         {
-          "path": "core/libs/native/NativeCubeLauncher.cpp",
-          "sha256": "8913add073fc2f1182019cbe21309fd520a12390a9b81f626cab88249b61e4d7",
-          "excerpt": "int aot_bridge_sceKernelSendNotificationRequest("
-        },
-        {
           "path": "core/libs/prx/libc/include/general/VabiMacros.hpp",
           "sha256": "e5826fe2f933c746e13e0f6ac68d56194ac56a778f92539d15f0d02fd70ed636",
           "excerpt": "#define APS5_VABI"
         }
       ],
-      "facts_sha256": "977d1e15e0bef7a86ddee9f48983b48773a520c5a999288e388accfc6f2d5999"
+      "facts_sha256": "72375e4916640ddaef826ed5714440691810e4e06d3f60916e99f385f844e8a7"
     }
   ]
 }
