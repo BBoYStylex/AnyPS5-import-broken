@@ -48,6 +48,18 @@ class DebugCandidateTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, '0 image matches'):
             recover_debug_candidates(image, companion)
 
+    def test_plain_struct_local_is_storage_not_an_aggregate_abi(self):
+        image, companion = self.build('int sample(int x) { struct { char a[7]; int b; } p; p.b=x; return p.b; }')
+        item, = recover_debug_candidates(image, companion)['functions']
+        self.assertEqual(item['obligations'], [])
+        self.assertIn(12, [o['size'] for o in item['candidate']['stack_objects']])
+
+    def test_bitfield_storage_remains_unresolved(self):
+        image, companion = self.build('int sample(int x) { struct { unsigned a:3; } p; p.a=x; return p.a; }')
+        item, = recover_debug_candidates(image, companion)['functions']
+        self.assertNotIn('candidate', item)
+        self.assertIn('nonplain', item['obligations'][0])
+
     def test_variadic_and_aggregate_abis_are_unresolved(self):
         for source, message in [('int sample(int a, ...) { return a; }', 'variadic'),
                                 ('struct P {int a,b;}; int sample(struct P p) {return p.a;}', 'non-scalar')]:
