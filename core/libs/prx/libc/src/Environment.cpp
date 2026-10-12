@@ -25,7 +25,6 @@ struct EnvironmentEntry {
 };
 std::mutex environmentMutex;
 std::vector<EnvironmentEntry>& Environment() {
-    // Seed once from the host. Guest mutations remain local to the guest runtime.
     static std::vector<EnvironmentEntry> entries = [] {
         std::vector<EnvironmentEntry> result;
 #ifdef _WIN32
@@ -37,6 +36,7 @@ std::vector<EnvironmentEntry>& Environment() {
             if (**source && **source != '=' && std::strchr(*source, '='))
                 result.push_back({*source, nullptr});
         }
+        result.push_back({"ASOBI_ROOT=app0", nullptr});
         return result;
     }();
     return entries;
