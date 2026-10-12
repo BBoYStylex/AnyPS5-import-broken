@@ -35,6 +35,61 @@ class GuestSemanticsTests(unittest.TestCase):
     def test_forms_5(self):
         self.compare(CASES[5 * CHUNK:])
 
+    def test_cmpxchg_flags_and_partial_results_against_specification(self):
+        cases, layouts = [], []
+        for bits, size, dst, src in ((8, 'byte', 'dl', 'cl'), (16, 'word', 'dx', 'cx'),
+                                    (32, 'dword', 'edx', 'ecx'), (64, 'qword', 'rdx', 'rcx')):
+            for mode in ('register', 'memory', 'unaligned', 'locked'):
+                offset = 65 if mode == 'unaligned' else 64
+                operand = dst if mode == 'register' else f'{size} ptr [rsi + {offset}]'
+                prefix = 'lock ' if mode == 'locked' else ''
+                cases.append({'asm': [f'{prefix}cmpxchg {operand}, {src}']})
+                layouts.append((bits, mode))
+        with guest_lab.lab_directory() as directory:
+            lab = guest_lab.Lab(directory)
+            binary, roots = lab.lifted_binary(cases)
+            records, expected = [], []
+            for root, (bits, mode) in zip(roots, layouts):
+                offset = 65 if mode == 'unaligned' else 64
+                mask = (1 << bits) - 1
+                sign = 1 << (bits - 1)
+                edges = (0, 1, 15, 16, 127, 128, sign - 1, sign, mask)
+                for left in edges:
+                    for right in edges:
+                        gpr = [0] * 16
+                        gpr[0] = (0x123456789abc0000 & ~mask) | left
+                        gpr[1] = 0x23456789abcdef01
+                        gpr[2] = (0x3456789abcde0000 & ~mask) | right
+                        gpr[6] = guest_lab.BUFFER_MARK
+                        gpr[15] = guest_lab.SCRATCH_MARK
+                        memory = bytearray([0xa5] * guest_lab.BUFFER_SIZE)
+                        memory[offset:offset + bits // 8] = right.to_bytes(bits // 8, 'little')
+                        records.append((root - guest_lab.CODE, gpr, bytes(256), 2, bytes(memory)))
+                        result = (left - right) & mask
+                        flags = int(left < right) | ((int((result & 255).bit_count() % 2 == 0)) << 2)
+                        flags |= (int((left ^ right ^ result) & 16 != 0) << 4)
+                        flags |= (int(result == 0) << 6) | (int(result & sign != 0) << 7)
+                        flags |= (int((left ^ right) & (left ^ result) & sign != 0) << 11)
+                        accumulator, destination = gpr[0], gpr[2]
+                        if left == right:
+                            value = gpr[1] & mask
+                            if mode == 'register':
+                                destination = value if bits >= 32 else (destination & ~mask) | value
+                            else:
+                                memory[offset:offset + bits // 8] = value.to_bytes(bits // 8, 'little')
+                        else:
+                            accumulator = right if bits >= 32 else (accumulator & ~mask) | right
+                        expected.append((accumulator, destination, flags, bytes(memory)))
+            source, output = Path(directory) / 'spec-input.bin', Path(directory) / 'spec-output.bin'
+            lab.write_inputs(records, source)
+            guest_lab.run([str(binary), str(source), str(output)])
+            for index, (actual, wanted) in enumerate(zip(lab.read_outputs(output, len(records)), expected)):
+                with self.subTest(record=index):
+                    self.assertEqual(actual[0][0], wanted[0])
+                    self.assertEqual(actual[0][2], wanted[1])
+                    self.assertEqual(actual[2] & guest_lab.ALL_FLAGS, wanted[2])
+                    self.assertEqual(actual[3], wanted[3])
+
     def test_cases_cover_every_chunk(self):
         self.assertLessEqual(len(CASES), 6 * CHUNK + CHUNK)
 
@@ -304,6 +359,19 @@ bad:
 ''' + EXIT)
         result = self.run_binary(binary)
         self.assertIn(b'locked access crosses its natural alignment', result.stderr)
+
+    def test_implicit_atomic_alignment_is_checked(self):
+        for operation in ('xchg dword ptr [rdi], ecx', 'lock cmpxchg dword ptr [rdi], ecx'):
+            with self.subTest(operation=operation):
+                binary, _ = self.program(PRELUDE + f'''
+    lea rdi, [rsp - 13]
+    xor eax, eax
+    mov ecx, 1
+    {operation}
+    xor edi, edi
+''' + EXIT)
+                result = self.run_binary(binary)
+                self.assertIn(b'locked access crosses its natural alignment', result.stderr)
 
     def test_provider_conversions(self):
         binary = self.directory / 'provider_checks'

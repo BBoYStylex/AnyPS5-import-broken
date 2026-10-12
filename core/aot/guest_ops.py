@@ -506,7 +506,7 @@ class Integer(Emitter):
         bits = left.size * 8
         if left.type == X86_OP_MEM or right.type == X86_OP_MEM:
             memory, register = (left, right) if left.type == X86_OP_MEM else (right, left)
-            pointer = self.pointer(self.address(memory))
+            pointer = self.aligned_atomic_pointer(memory, bits)
             old = self.v(f'atomicrmw xchg ptr {pointer}, i{bits} {self.read(register)} seq_cst, align {memory.size}')
             self.write(register, old)
             return
@@ -898,6 +898,13 @@ class Integer(Emitter):
     def op_blsmsk(self):
         self.blsx('blsmsk')
 
+    def aligned_atomic_pointer(self, operand, bits):
+        address = self.address(operand)
+        if bits > 8:
+            misaligned = self.v(f'icmp ne i64 {self.v(f"and i64 {address}, {bits // 8 - 1}")}, 0')
+            self.trap_if(misaligned, TRAP_SPLIT_LOCK)
+        return self.pointer(address)
+
     def locked(self):
         mnemonic = base_mnemonic(self.ins)
         operands = self.operands()
@@ -907,11 +914,7 @@ class Integer(Emitter):
         bits = destination.size * 8
         if bits not in (8, 16, 32, 64):
             self.unsupported('locked operand width')
-        address = self.address(destination)
-        if bits > 8:
-            misaligned = self.v(f'icmp ne i64 {self.v(f"and i64 {address}, {bits // 8 - 1}")}, 0')
-            self.trap_if(misaligned, TRAP_SPLIT_LOCK)
-        pointer = self.pointer(address)
+        pointer = self.aligned_atomic_pointer(destination, bits)
         if mnemonic == 'xchg':
             self.write(operands[1], self.v(f'atomicrmw xchg ptr {pointer}, i{bits} {self.read(operands[1], bits)} seq_cst, align {bits // 8}'))
             return
@@ -947,13 +950,19 @@ class Integer(Emitter):
                 self.sub_flags(old, source, result, bits)
             self.set_flag('cf', carry)
 
-    def compare_exchange(self, pointer, bits, source):
+    def compare_exchange(self, pointer, bits, source, atomic=True):
         accumulator = self.accumulator(bits)[0]
         expected, _ = self.read_register(accumulator)
         replacement = self.read(source, bits)
-        pair = self.v(f'cmpxchg ptr {pointer}, i{bits} {expected}, i{bits} {replacement} seq_cst seq_cst, align {bits // 8}')
-        old = self.v(f'extractvalue {{ i{bits}, i1 }} {pair}, 0')
-        success = self.v(f'extractvalue {{ i{bits}, i1 }} {pair}, 1')
+        if atomic:
+            pair = self.v(f'cmpxchg ptr {pointer}, i{bits} {expected}, i{bits} {replacement} seq_cst seq_cst, align {bits // 8}')
+            old = self.v(f'extractvalue {{ i{bits}, i1 }} {pair}, 0')
+            success = self.v(f'extractvalue {{ i{bits}, i1 }} {pair}, 1')
+        else:
+            old = self.v(f'load volatile i{bits}, ptr {pointer}, align 1')
+            success = self.v(f'icmp eq i{bits} {expected}, {old}')
+            stored = self.v(f'select i1 {success}, i{bits} {replacement}, i{bits} {old}')
+            self.emit(f'store volatile i{bits} {stored}, ptr {pointer}, align 1')
         self.sub_flags(expected, old, self.v(f'sub i{bits} {expected}, {old}'), bits)
         failed, done = self.label(), self.label()
         self.emit(f'br i1 {success}, label %{done}, label %{failed}')
@@ -966,7 +975,7 @@ class Integer(Emitter):
         destination, source = self.operands()
         bits = destination.size * 8
         if destination.type == X86_OP_MEM:
-            self.compare_exchange(self.pointer(self.address(destination)), bits, source)
+            self.compare_exchange(self.pointer(self.address(destination)), bits, source, atomic=False)
             return
         accumulator = self.accumulator(bits)[0]
         expected, _ = self.read_register(accumulator)
