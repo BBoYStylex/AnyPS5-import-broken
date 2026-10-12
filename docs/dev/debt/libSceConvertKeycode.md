@@ -1,0 +1,5 @@
+# libSceConvertKeycode technical debt
+
+### Unknown function info
+
+- [sceConvertKeycodeGetCharacter](../../../core/libs/prx/libSceConvertKeycode/Export.cpp) (libSceConvertKeycode) - `(uint16 keycode, uint32 status, int32 layout, uint32* character)`, with the USB modifier byte at bits 8-15 and the lock keys (num, caps, scroll) at bits 16-18 of `status`, and layout 4 as English (US), follow [SharpProspero](https://github.com/SvenGDK/SharpProspero/blob/60977b29103452b9681ae10c7a9011d44965bf16/src/SharpProspero/Input/KeycodeConverter.cs). Only English (US) is converted; other layouts throw, including 0, which `sceConvertKeycodeGetImeKeyboardType` reports. Keys are USB HID usages mapped as on a US keyboard: shift and caps lock select capitals, num lock selects the keypad digits, control, alt and GUI do not change the character, Enter, Escape, Backspace, Tab and Delete give `\r`, 0x1B, `\b`, `\t` and 0x7F, and a key without a character gives 0 and success. Those choices and the error for a null character pointer are unverified
