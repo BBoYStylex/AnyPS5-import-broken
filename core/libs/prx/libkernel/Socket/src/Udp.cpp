@@ -17,6 +17,7 @@
 #include "prx/libc/include/HostThreadLocal.hpp"
 #include "prx/libkernel/Socket/include/SocketError.hpp"
 #include "prx/libkernel/Socket/include/SocketRuntime.hpp"
+#include "prx/libkernel/File/include/DescriptorControl.hpp"
 #include "prx/libkernel/Equeue/Equeue.hpp"
 #include "prx/libkernel/Time/include/TimedWait.hpp"
 #include "prx/libkernel/Socket/include/SocketPoll.hpp"
@@ -61,6 +62,14 @@ int NativeError() {
 #else
     return GuestSockets::GuestErrorFromHost(errno);
 #endif
+}
+int SendError(int type) {
+#ifdef _WIN32
+    if (type == 2 && WSAGetLastError() == WSAENOTCONN) return 39;
+#else
+    static_cast<void>(type);
+#endif
+    return NativeError();
 }
 struct Socket {
     NativeSocket value;
@@ -173,8 +182,9 @@ void GuestAddress(const sockaddr_storage& native, void* output, std::uint32_t* l
         std::memcpy(bytes + 8, &v6.sin6_addr, 16);
         std::memcpy(bytes + 24, &v6.sin6_scope_id, 4);
     }
-    std::memcpy(output, bytes, std::min<std::uint32_t>(*length, bytes[0]));
-    *length = bytes[0];
+    const auto copied = std::min<std::uint32_t>(*length, bytes[0]);
+    std::memcpy(output, bytes, copied);
+    *length = copied;
 }
 }
 
@@ -454,6 +464,26 @@ bool GuestSockets::Ready(int descriptor, bool write, std::int64_t* data, bool* e
 
 extern "C" {
 int APS5_VABI fcntl_nid_postfix(int descriptor, int command, ...) {
+    if (descriptor < GuestSockets::FirstDescriptor) {
+        const auto type = File::FcntlArgumentOf(command);
+        std::intptr_t argument = 0;
+        if (type != File::FcntlArgument::None) {
+#ifdef _WIN32
+            __builtin_sysv_va_list arguments;
+            __builtin_sysv_va_start(arguments, command);
+            argument = type == File::FcntlArgument::Int ? __builtin_va_arg(arguments, int)
+                                                        : reinterpret_cast<std::intptr_t>(__builtin_va_arg(arguments, void*));
+            __builtin_sysv_va_end(arguments);
+#else
+            std::va_list arguments;
+            va_start(arguments, command);
+            argument = type == File::FcntlArgument::Int ? va_arg(arguments, int)
+                                                        : reinterpret_cast<std::intptr_t>(va_arg(arguments, void*));
+            va_end(arguments);
+#endif
+        }
+        return File::Fcntl(descriptor, command, argument);
+    }
     const auto socket = Lookup(descriptor);
     if (!socket) return -1;
     std::lock_guard lock(socket->modeMutex);
@@ -624,7 +654,7 @@ std::int64_t APS5_VABI send_nid_postfix(int descriptor, const void* buffer, std:
     if (length > INT_MAX) return Fail(40);
     if (!buffer && length) return Fail(14);
     const auto result = ::send(socket->value, static_cast<const char*>(buffer), static_cast<int>(length), NativeSendFlags(flags));
-    return result < 0 ? Fail(NativeError()) : result;
+    return result < 0 ? Fail(SendError(socket->type)) : result;
 }
 std::int64_t APS5_VABI recv_nid_postfix(int descriptor, void* buffer, std::uint64_t length, int flags) {
     const auto socket = Lookup(descriptor);
@@ -632,6 +662,8 @@ std::int64_t APS5_VABI recv_nid_postfix(int descriptor, void* buffer, std::uint6
     if ((flags & ~2) != 0) return Fail(45);
     if (length > INT_MAX) return Fail(40);
     if (!buffer && length) return Fail(14);
+    const GuestArena::HostWrite destination(length == 0 ? nullptr : buffer, static_cast<std::size_t>(length));
+    if (!destination.Open()) return Fail(14);
     const auto result = ::recv(socket->value, static_cast<char*>(buffer), static_cast<int>(length),
         flags & 2 ? MSG_PEEK : 0);
 #ifdef _WIN32
@@ -676,6 +708,7 @@ int APS5_VABI getpeername_nid_postfix(int descriptor, void* address, std::uint32
     return 0;
 }
 int APS5_VABI ioctl_nid_postfix(int descriptor, std::uint64_t request, void* argument) {
+    if (descriptor < GuestSockets::FirstDescriptor) return File::Ioctl(descriptor, request, argument);
     const auto socket = Lookup(descriptor);
     if (!socket) return -1;
     if (!argument) return Fail(14);
@@ -725,7 +758,7 @@ std::int64_t APS5_VABI sendto_nid_postfix(int descriptor, const void* buffer, st
         result = static_cast<int>(::sendto(socket->value, static_cast<const char*>(buffer), static_cast<int>(length), NativeSendFlags(flags),
             reinterpret_cast<sockaddr*>(&native), size));
     }
-    return result < 0 ? Fail(NativeError()) : result;
+    return result < 0 ? Fail(SendError(socket->type)) : result;
 }
 std::int64_t APS5_VABI recvfrom_nid_postfix(int descriptor, void* buffer, std::uint64_t length,
     int flags, void* address, std::uint32_t* addressLength) {
@@ -734,6 +767,8 @@ std::int64_t APS5_VABI recvfrom_nid_postfix(int descriptor, void* buffer, std::u
     if ((flags & ~2) != 0) return Fail(45);
     if (length > INT_MAX) return Fail(40);
     if ((!buffer && length) || (address && !addressLength)) return Fail(14);
+    const GuestArena::HostWrite destination(length == 0 ? nullptr : buffer, static_cast<std::size_t>(length));
+    if (!destination.Open()) return Fail(14);
     sockaddr_storage native{};
     socklen_t size = sizeof(native);
     auto result = ::recvfrom(socket->value, static_cast<char*>(buffer), static_cast<int>(length),
