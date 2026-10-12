@@ -152,3 +152,8 @@ add_test_executable(native_constant_bit_tests ../prx/libSceAgcDriver/tests/Const
 target_link_libraries(native_constant_bit_tests PRIVATE anyps5_native_graphics)
 add_test(NAME native_constant_bit COMMAND native_constant_bit_tests)
 set_tests_properties(native_constant_bit PROPERTIES TIMEOUT 30)
+
+add_test_executable(native_direct_memory_alias_tests ../tests/NativeDirectMemoryAliases.cpp)
+target_link_libraries(native_direct_memory_alias_tests PRIVATE anyps5_native_graphics)
+add_test(NAME native_direct_memory_aliases COMMAND native_direct_memory_alias_tests)
+set_tests_properties(native_direct_memory_aliases PROPERTIES TIMEOUT 30)
