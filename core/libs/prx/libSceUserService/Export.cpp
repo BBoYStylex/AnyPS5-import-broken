@@ -186,11 +186,11 @@ int APS5_VABI sceUserServiceGetNpAccountId(int user_id, uint64_t* account_id) {
  return USER_SERVICE_OK;
 }
 int APS5_VABI sceUserServiceGetUserStatus(int user_id, int32_t* status) {
- if (status == nullptr) {
-  return USER_SERVICE_ERROR_INVALID_ARGUMENT;
- }
  if (user_id != USER_SERVICE_INITIAL_USER_ID) {
   return USER_SERVICE_ERROR_NOT_LOGGED_IN;
+ }
+ if (status == nullptr) {
+  return USER_SERVICE_ERROR_INVALID_ARGUMENT;
  }
  *status = USER_SERVICE_USER_STATUS_LOGGED_IN;
  return USER_SERVICE_OK;

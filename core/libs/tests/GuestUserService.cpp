@@ -64,6 +64,42 @@ int main() {
     Require(sceUserServiceGetAgeLevel(USER_SERVICE_INITIAL_USER_ID, &age_level) == USER_SERVICE_OK);
     Require(age_level == 0xffffffffu);
 
+    std::int32_t status = 0x5a5a5a5a;
+    Require(sceUserServiceGetUserStatus(USER_SERVICE_INITIAL_USER_ID, nullptr) == USER_SERVICE_ERROR_INVALID_ARGUMENT);
+    Require(sceUserServiceGetUserStatus(USER_SERVICE_INITIAL_USER_ID, &status) == USER_SERVICE_OK);
+    Require(status == USER_SERVICE_USER_STATUS_LOGGED_IN);
+    for (int user_id : absent_users) {
+        status = 0x5a5a5a5a;
+        Require(sceUserServiceGetUserStatus(user_id, &status) == USER_SERVICE_ERROR_NOT_LOGGED_IN);
+        Require(status == 0x5a5a5a5a);
+        Require(sceUserServiceGetUserStatus(user_id, nullptr) == USER_SERVICE_ERROR_NOT_LOGGED_IN);
+    }
+
+    int resolved = 0x5a5a5a5a;
+    Require(sceUserServiceGetUserIdByNpAccountId(0, nullptr) == USER_SERVICE_ERROR_INVALID_ARGUMENT);
+    Require(sceUserServiceGetUserIdByNpAccountId(1, nullptr) == USER_SERVICE_ERROR_INVALID_ARGUMENT);
+    Require(sceUserServiceGetUserIdByNpAccountId(0, &resolved) == USER_SERVICE_OK);
+    Require(resolved == USER_SERVICE_INITIAL_USER_ID);
+    const std::uint64_t unknown_accounts[] = {1, 0xdeadbeefu, 0x100000000ull};
+    for (std::uint64_t unknown_account : unknown_accounts) {
+        resolved = 0x5a5a5a5a;
+        Require(sceUserServiceGetUserIdByNpAccountId(unknown_account, &resolved) == USER_SERVICE_ERROR_UNKNOWN_USER);
+        Require(resolved == 0x5a5a5a5a);
+    }
+
+    resolved = 0x5a5a5a5a;
+    Require(sceUserServiceGetUserIdByUserName(nullptr, &resolved) == USER_SERVICE_ERROR_INVALID_ARGUMENT);
+    Require(sceUserServiceGetUserIdByUserName(USER_SERVICE_INITIAL_USER_NAME, nullptr) == USER_SERVICE_ERROR_INVALID_ARGUMENT);
+    Require(resolved == 0x5a5a5a5a);
+    Require(sceUserServiceGetUserIdByUserName(USER_SERVICE_INITIAL_USER_NAME, &resolved) == USER_SERVICE_OK);
+    Require(resolved == USER_SERVICE_INITIAL_USER_ID);
+    const char* unknown_names[] = {"", "Playe", "Player2"};
+    for (const char* unknown_name : unknown_names) {
+        resolved = 0x5a5a5a5a;
+        Require(sceUserServiceGetUserIdByUserName(unknown_name, &resolved) == USER_SERVICE_ERROR_UNKNOWN_USER);
+        Require(resolved == 0x5a5a5a5a);
+    }
+
     struct Setting {
         int (APS5_VABI *get)(int, std::int32_t*);
         std::int32_t value;
@@ -87,29 +123,4 @@ int main() {
         Require(setting.get(USER_SERVICE_INITIAL_USER_ID, &value) == USER_SERVICE_OK);
         Require(value == setting.value);
     }
-
-    std::int32_t status = -1;
-    Require(sceUserServiceGetUserStatus(USER_SERVICE_INITIAL_USER_ID, nullptr) == USER_SERVICE_ERROR_INVALID_ARGUMENT);
-    for (int user_id : absent_users) {
-        Require(sceUserServiceGetUserStatus(user_id, &status) == USER_SERVICE_ERROR_NOT_LOGGED_IN);
-        Require(status == -1);
-        Require(sceUserServiceGetUserStatus(user_id, nullptr) == USER_SERVICE_ERROR_INVALID_ARGUMENT);
-    }
-    Require(sceUserServiceGetUserStatus(USER_SERVICE_INITIAL_USER_ID, &status) == USER_SERVICE_OK);
-    Require(status == USER_SERVICE_USER_STATUS_LOGGED_IN);
-
-    int mapped_user = -1;
-    Require(sceUserServiceGetUserIdByNpAccountId(0, nullptr) == USER_SERVICE_ERROR_INVALID_ARGUMENT);
-    Require(sceUserServiceGetUserIdByNpAccountId(12345, &mapped_user) == USER_SERVICE_ERROR_UNKNOWN_USER);
-    Require(mapped_user == -1);
-    Require(sceUserServiceGetUserIdByNpAccountId(0, &mapped_user) == USER_SERVICE_OK);
-    Require(mapped_user == USER_SERVICE_INITIAL_USER_ID);
-
-    int named_user = -1;
-    Require(sceUserServiceGetUserIdByUserName(nullptr, &named_user) == USER_SERVICE_ERROR_INVALID_ARGUMENT);
-    Require(sceUserServiceGetUserIdByUserName(USER_SERVICE_INITIAL_USER_NAME, nullptr) == USER_SERVICE_ERROR_INVALID_ARGUMENT);
-    Require(sceUserServiceGetUserIdByUserName("NonExistent", &named_user) == USER_SERVICE_ERROR_UNKNOWN_USER);
-    Require(named_user == -1);
-    Require(sceUserServiceGetUserIdByUserName(USER_SERVICE_INITIAL_USER_NAME, &named_user) == USER_SERVICE_OK);
-    Require(named_user == USER_SERVICE_INITIAL_USER_ID);
 }
