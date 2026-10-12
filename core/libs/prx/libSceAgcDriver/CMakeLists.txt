@@ -779,6 +779,23 @@ foreach(agcTriangleStage IN ITEMS vert frag)
     list(APPEND agcTriangleHeaders "${agcTriangleHeader}")
 endforeach()
 
+add_test_executable(agc_driver_bounded_index_fetch_tests EXCLUDE_FROM_ALL
+        tests/BoundedIndexFetch.cpp ${agcTriangleHeaders})
+target_include_directories(agc_driver_bounded_index_fetch_tests PRIVATE
+        ${LIBS_INCLUDE_DIR} ${agcTestShaderGeneratedRoot}
+        ${CMAKE_SOURCE_DIR}/core/shader/recompiler ${ANYPS5_VULKAN_HEADERS_INCLUDE_DIR})
+target_link_libraries(agc_driver_bounded_index_fetch_tests PRIVATE libSceAgcDriver SDL2-static libc)
+set_target_properties(agc_driver_bounded_index_fetch_tests PROPERTIES CXX_EXTENSIONS OFF)
+configure_windows_unwind(agc_driver_bounded_index_fetch_tests)
+if(BUILD_TESTING)
+    set_target_properties(agc_driver_bounded_index_fetch_tests PROPERTIES EXCLUDE_FROM_ALL OFF)
+    add_test(NAME agc_driver_bounded_index_fetch COMMAND agc_driver_bounded_index_fetch_tests)
+    set_tests_properties(agc_driver_bounded_index_fetch PROPERTIES
+            SKIP_RETURN_CODE 77 ENVIRONMENT "ANYPS5_NO_SHADER_CACHE=1"
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}" TIMEOUT 60)
+endif()
+
+
 foreach(agcCoverStage IN ITEMS vert frag)
     string(TOUPPER "${agcCoverStage}" agcCoverSymbol)
     set(agcCoverShaderSpv ${agcTestShaderGeneratedRoot}/Cover_${agcCoverStage}.spv)
