@@ -241,6 +241,25 @@ int APS5_VABI sceVoiceSetVolume(std::uint32_t port_id, float volume) {
     return 0;
 }
 
+int APS5_VABI sceVoiceSetMuteFlag(std::uint32_t port_id, bool muted) {
+    std::lock_guard lock(g_lock);
+    if (!g_initialised) return SCE_VOICE_ERROR_NOT_INIT;
+    Port* port = find(port_id);
+    if (port == nullptr) return SCE_VOICE_ERROR_PORT_INVALID;
+    port->mute = muted ? 1 : 0;
+    return 0;
+}
+
+int APS5_VABI sceVoiceGetMuteFlag(std::uint32_t port_id, bool* muted) {
+    if (muted == nullptr) return SCE_VOICE_ERROR_ARGUMENT_INVALID;
+    std::lock_guard lock(g_lock);
+    if (!g_initialised) return SCE_VOICE_ERROR_NOT_INIT;
+    const Port* port = find(port_id);
+    if (port == nullptr) return SCE_VOICE_ERROR_PORT_INVALID;
+    *muted = port->mute != 0;
+    return 0;
+}
+
 int APS5_VABI sceVoiceGetBitRate(std::uint32_t port_id, std::uint32_t* bitrate) {
     if (bitrate == nullptr) return SCE_VOICE_ERROR_ARGUMENT_INVALID;
     std::lock_guard lock(g_lock);

@@ -140,6 +140,9 @@ public:
             split(cursor + done, pageBytes);
             void* page = reinterpret_cast<void*>(cursor + done);
             if (!map(section, GetCurrentProcess(), page, offset + done, pageBytes, MEM_REPLACE_PLACEHOLDER, PAGE_EXECUTE_READWRITE, nullptr, 0)) fail("map shared guest page");
+            MEMORY_BASIC_INFORMATION memory{};
+            if (VirtualQuery(page, &memory, sizeof(memory)) != sizeof(memory)) fail("query shared guest page");
+            if (memory.State == MEM_RESERVE && !VirtualAlloc(page, pageBytes, MEM_COMMIT, PAGE_EXECUTE_READWRITE)) fail("commit shared guest page");
             DWORD previous;
             if (!VirtualProtect(page, pageBytes, protection, &previous)) fail("protect shared guest page");
             const auto key = std::make_pair(reinterpret_cast<std::uintptr_t>(section), offset + done);
@@ -304,8 +307,8 @@ public:
         const auto end = address + bytes;
         if (clear && !collectable(address, end)) return false;
         for (auto cursor = address; cursor < end;) {
+            const auto nextClean = compareShared ? cleanRanges.end() : cleanRanges.upper_bound(cursor);
             if (!compareShared) {
-                const auto nextClean = cleanRanges.upper_bound(cursor);
                 if (nextClean != cleanRanges.begin()) {
                     const auto clean = std::prev(nextClean);
                     if (cursor < clean->second) {
@@ -318,7 +321,7 @@ public:
             const auto found = views.find(base);
             if (found != views.end()) {
                 auto& view = found->second;
-                const auto stop = std::min(end, base + pageBytes);
+                const auto stop = std::min(std::min(end, base + pageBytes), nextClean == cleanRanges.end() ? end : nextClean->first);
                 if (view.protection == PAGE_NOACCESS) return false;
                 const bool pinned = view.page->pins != 0;
                 if (subphaseOn && pinned) ++subphase.pinnedPages;
@@ -414,9 +417,9 @@ public:
                         other.armed = true;
                     }
                     flushRange(rangeStart, rangeBytes, currentProtection);
-                    view.seen = view.page->generation;
-                    rememberClean(base, base + pageBytes);
-                    if (subphaseOn) addSubphase(&CollectSubphase::armCalls, &CollectSubphase::armBytes, &CollectSubphase::armNanoseconds, pageBytes, armStart);
+                    if (cursor == base && stop == base + pageBytes) view.seen = view.page->generation;
+                    rememberClean(cursor, stop);
+                    if (subphaseOn) addSubphase(&CollectSubphase::armCalls, &CollectSubphase::armBytes, &CollectSubphase::armNanoseconds, stop - cursor, armStart);
                 }
                 cursor = stop;
             } else {

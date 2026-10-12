@@ -6,7 +6,9 @@
 #include "prx/libkernel/File/include/FileFlags.hpp"
 #include "prx/libkernel/KernelErrors.hpp"
 #include "prx/libkernel/DirectMemory/DirectMemory.hpp"
+#include <algorithm>
 #include <array>
+#include <atomic>
 #include "SceTypes.hpp"
 #include <chrono>
 #include <cstring>
@@ -19,6 +21,7 @@
 #include <cstdlib>
 #include <limits>
 #include <source_location>
+#include <stdexcept>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -31,6 +34,7 @@
 #include <fstream>
 #include <string>
 #include <sys/mman.h>
+#include <time.h>
 #include <unistd.h>
 #endif
 #ifdef _WIN32
@@ -54,15 +58,19 @@ int APS5_VABI sceKernelReleaseFlexibleMemory(void*, std::size_t);
 int APS5_VABI sceKernelMprotect(const void*, std::size_t, int);
 int APS5_VABI sceKernelMtypeprotect(const void*, std::size_t, int, int);
 int APS5_VABI sceKernelBatchMap2(KernelBatchMapEntry*, int, int*, int);
+int APS5_VABI sceKernelMemoryPoolBatch(const KernelMemoryPoolBatchEntry*, int, int*, int);
 int APS5_VABI sceKernelVirtualQuery(const void*, int, VirtualQueryInfo*, std::uint64_t);
 int APS5_VABI sceKernelSetVirtualRangeName(const void*, std::uint64_t, const char*);
 int APS5_VABI sceKernelClearVirtualRangeName(const void*, std::uint64_t);
 int APS5_VABI sceKernelAllocateDirectMemory(std::int64_t, std::int64_t, std::size_t, std::size_t, int, std::int64_t*);
 int APS5_VABI sceKernelMapDirectMemory(void**, std::size_t, int, int, std::int64_t, std::size_t);
+int APS5_VABI sceKernelEnableDmemAliasing();
 int APS5_VABI sceKernelReleaseDirectMemory(std::int64_t, std::size_t);
+int APS5_VABI sceKernelAvailableDirectMemorySize(std::int64_t, std::int64_t, std::size_t, std::int64_t*, std::size_t*);
 int APS5_VABI sceKernelCheckedReleaseDirectMemory(std::int64_t, std::size_t);
 int APS5_VABI sceKernelReserveVirtualRange(void**, std::size_t, int, std::size_t);
 int APS5_VABI sceKernelMemoryPoolReserve(void*, std::size_t, std::size_t, int, void**);
+int APS5_VABI sceKernelMemoryPoolCommit(void*, std::size_t, int, int, int);
 int APS5_VABI sceKernelOpen(const char*, int, std::uint16_t);
 int APS5_VABI sceKernelClose(int);
 std::int64_t APS5_VABI sceKernelRead(int, void*, std::size_t);
@@ -74,6 +82,9 @@ int APS5_VABI sceKernelAioDeleteRequest(std::int32_t, std::int32_t*);
 int APS5_VABI sceKernelMlock_nid_postfix(void*, std::uint64_t);
 int APS5_VABI sceKernelGetDirectMemoryType(std::int64_t, int*, std::int64_t*, std::int64_t*);
 int APS5_VABI sceKernelBatchMap2(KernelBatchMapEntry*, int, int*, int);
+void* APS5_VABI dlopen_nid_postfix(const char*, int);
+void* APS5_VABI dlsym_nid_postfix(void*, const char*);
+int APS5_VABI dlclose_nid_postfix(void*);
 }
 
 static void Require(bool condition, std::source_location location = std::source_location::current()) {
@@ -198,6 +209,21 @@ static void CheckInternalNamedFlexibleMapping() {
     Require(sceKernelAvailableFlexibleMemorySize(&available) == 0 && available == before);
 }
 
+static void CheckGuestModuleUsesFlexibleMemory() {
+    constexpr std::size_t moduleData = 0x10000;
+    const auto path = std::filesystem::relative(GUEST_MEMORY_MODULE).generic_string();
+    std::size_t before = 0;
+    std::size_t available = 0;
+    Require(sceKernelAvailableFlexibleMemorySize(&before) == 0);
+    void* module = dlopen_nid_postfix(path.c_str(), 2);
+    Require(module != nullptr);
+    Require(sceKernelAvailableFlexibleMemorySize(&available) == 0 && available + moduleData <= before);
+    void* mapped = nullptr;
+    Require(sceKernelMapFlexibleMemory(&mapped, before, 3, 0) == SCE_KERNEL_ERROR_ENOMEM && mapped == nullptr);
+    Require(dlclose_nid_postfix(module) == 0);
+    Require(sceKernelAvailableFlexibleMemorySize(&available) == 0 && available == before);
+}
+
 static void CheckBatchMapStopsAtInvalidEntry() {
     constexpr std::size_t page = 0x4000;
     constexpr int mapFlexible = 3;
@@ -255,6 +281,7 @@ static void CheckDirectMemoryFollowsPhysicalPages() {
     Require(sceKernelMapDirectMemory(&first, page * 2, 3, 0, phys, 0) == 0);
     static_cast<unsigned char*>(first)[0] = 11;
     static_cast<unsigned char*>(first)[page + 5] = 22;
+    Require(sceKernelEnableDmemAliasing() == 0);
     void* alias = nullptr;
     Require(sceKernelMapDirectMemory(&alias, page, 3, 0, phys + page, 0) == 0);
     Require(alias != first && static_cast<unsigned char*>(alias)[5] == 22);
@@ -321,6 +348,34 @@ static void CheckDirectReleaseErrors() {
     Require(sceKernelReleaseDirectMemory(-static_cast<std::int64_t>(page), page) == SCE_KERNEL_ERROR_EINVAL);
 }
 
+static void CheckSparseDirectMemoryBacking() {
+    constexpr std::size_t page = 0x4000;
+    constexpr std::size_t size = 256u * 1024u * 1024u;
+    std::int64_t physical = 0;
+    Require(sceKernelAllocateDirectMemory(0, 0x7fffffffffll, size, 0, 0, &physical) == 0);
+    void* first = nullptr;
+    void* last = nullptr;
+    Require(sceKernelMapDirectMemory(&first, page, 3, 0, physical, 0) == 0);
+    Require(sceKernelMapDirectMemory(&last, page, 3, 0, physical + size - page, 0) == 0);
+    auto* firstBytes = static_cast<unsigned char*>(first);
+    auto* lastBytes = static_cast<unsigned char*>(last);
+    Require(firstBytes[0] == 0 && firstBytes[page - 1] == 0 && lastBytes[0] == 0 && lastBytes[page - 1] == 0);
+    firstBytes[0] = 17;
+    lastBytes[page - 1] = 29;
+    void* alias = nullptr;
+    Require(sceKernelMapDirectMemory(&alias, page, 3, 0, physical + size - page, 0) == 0);
+    auto* aliasBytes = static_cast<unsigned char*>(alias);
+    Require(aliasBytes[page - 1] == 29 && aliasBytes[0] == 0);
+    aliasBytes[page - 1] = 41;
+    Require(lastBytes[page - 1] == 41 && firstBytes[0] == 17);
+    Require(sceKernelMunmap(last, page) == 0 && sceKernelMunmap(alias, page) == 0);
+    last = nullptr;
+    Require(sceKernelMapDirectMemory(&last, page, 3, 0, physical + size - page, 0) == 0);
+    Require(static_cast<unsigned char*>(last)[page - 1] == 41);
+    Require(sceKernelMunmap(first, page) == 0 && sceKernelMunmap(last, page) == 0);
+    Require(sceKernelReleaseDirectMemory(physical, size) == 0);
+}
+
 static void CheckReleaseDirectMemoryClearsMappings() {
     constexpr std::size_t page = 0x4000;
     std::int64_t phys = 0;
@@ -380,6 +435,26 @@ static void CheckFixedMappingReplacesPartialOverlap() {
     Require(static_cast<unsigned char*>(fixed)[page * 2 + 7] == 0x5c);
     Require(sceKernelMunmap(fixed, page * 3) == 0);
     Require(sceKernelReleaseDirectMemory(phys, page * 3) == 0);
+}
+
+static void CheckFixedMappingOverHoleInsideAllocation() {
+    constexpr std::size_t page = 0x4000;
+    std::int64_t phys = 0;
+    Require(sceKernelAllocateDirectMemory(0, 0x7fffffffffll, page * 4, 0, 0, &phys) == 0);
+    void* mapped = nullptr;
+    Require(sceKernelMapDirectMemory(&mapped, page * 4, 3, 0, phys, 0) == 0);
+    auto* bytes = static_cast<unsigned char*>(mapped);
+    bytes[7] = 0x11;
+    bytes[page * 3 + 7] = 0x44;
+    Require(sceKernelMunmap(bytes + page, page) == 0);
+    void* fixed = bytes + page;
+    Require(sceKernelMapDirectMemory(&fixed, page * 2, 3, 0x10, phys + static_cast<std::int64_t>(page), 0) == 0);
+    Require(fixed == bytes + page);
+    bytes[page * 2 + 7] = 0x33;
+    Require(bytes[7] == 0x11 && bytes[page * 2 + 7] == 0x33 && bytes[page * 3 + 7] == 0x44);
+    Require(sceKernelMunmap(bytes + page * 2, page * 2) == 0);
+    Require(sceKernelMunmap(mapped, page * 4) == 0);
+    Require(sceKernelReleaseDirectMemory(phys, page * 4) == 0);
 }
 
 static void CheckGetDirectMemoryType() {
@@ -448,6 +523,29 @@ static void CheckMtypeprotect() {
     check(0, 0, 3);
     check(1, 3, 1);
     check(2, 5, 3);
+    KernelMemoryPoolBatchEntry poolEntry{};
+    poolEntry.op = 4;
+    poolEntry.type_protect.addr = bytes + page * 2;
+    poolEntry.type_protect.len = page;
+    poolEntry.type_protect.prot = 1;
+    poolEntry.type_protect.type = 4;
+    processed = -1;
+    Require(sceKernelMemoryPoolBatch(&poolEntry, 1, &processed, 0) == 0 && processed == 1);
+    check(1, 3, 1);
+    check(2, 4, 1);
+    Require(sceKernelMemoryPoolCommit(bytes + page * 2, page, 6, 3, 0) == 0);
+    check(2, 6, 3);
+    check(1, 3, 1);
+    KernelMemoryPoolBatchEntry commitEntry{};
+    commitEntry.op = 1;
+    commitEntry.commit.addr = bytes + page * 2;
+    commitEntry.commit.len = page;
+    commitEntry.commit.prot = 1;
+    commitEntry.commit.type = 7;
+    processed = -1;
+    Require(sceKernelMemoryPoolBatch(&commitEntry, 1, &processed, 0) == 0 && processed == 1);
+    check(1, 3, 1);
+    check(2, 7, 1);
     Require(sceKernelMtypeprotect(bytes, page * 3, 2, 3) == 0);
     VirtualQueryInfo whole{};
     Require(sceKernelVirtualQuery(bytes, 0, &whole, sizeof(whole)) == 0);
@@ -470,6 +568,131 @@ static void CheckDirectMemoryGpuProtBits() {
     Require(static_cast<unsigned char*>(mapping)[0] == 11);
     Require(sceKernelMunmap(mapping, page) == 0);
     Require(sceKernelReleaseDirectMemory(phys, page) == 0);
+}
+
+static bool GpuMapped(const void* pointer) {
+    GuestAllocations::Mutation mutation;
+    return mutation.Find(pointer).gpu;
+}
+
+static void CheckGpuAccessFollowsProtection() {
+    constexpr std::size_t page = 0x4000;
+    std::int64_t phys = 0;
+    Require(sceKernelAllocateDirectMemory(0, 0x7fffffffffll, page * 2, 0, 0, &phys) == 0);
+    void* cpu = nullptr;
+    Require(sceKernelMapDirectMemory(&cpu, page, 3, 0, phys, 0) == 0);
+    Require(!GpuMapped(cpu));
+    void* gpu = nullptr;
+    Require(sceKernelMapDirectMemory(&gpu, page, 0x32, 0, phys + static_cast<std::int64_t>(page), 0) == 0);
+    Require(GpuMapped(gpu));
+    Require(sceKernelMprotect(cpu, page, 0x13) == 0);
+    Require(GpuMapped(cpu));
+    Require(sceKernelMprotect(gpu, page, 3) == 0);
+    Require(!GpuMapped(gpu));
+    static int imageProbe = 0;
+    const auto probe = reinterpret_cast<std::uintptr_t>(&imageProbe);
+    {
+        GuestAllocations::Mutation mutation;
+        mutation.RegisterMainImage();
+    }
+    {
+        const auto lease = GuestAllocations::GuestAllocationsAcquire_nid_postfix();
+        const auto image = std::find_if(lease.begin(), lease.end(), [&](const auto& range) { return probe >= range->address && probe - range->address < range->bytes; });
+        Require(image != lease.end() && !(*image)->releasable && !(*image)->gpu);
+    }
+    Require(sceKernelMunmap(cpu, page) == 0);
+    Require(sceKernelMunmap(gpu, page) == 0);
+    Require(sceKernelReleaseDirectMemory(phys, page * 2) == 0);
+    void* flexible = nullptr;
+    Require(sceKernelMapNamedFlexibleMemory(&flexible, page, 3, 0, "cpu") == 0);
+    Require(!GpuMapped(flexible));
+    Require(sceKernelMunmap(flexible, page) == 0);
+    Require(sceKernelMapNamedFlexibleMemory(&flexible, page, 0x33, 0, "gpu") == 0);
+    Require(GpuMapped(flexible));
+    Require(sceKernelMunmap(flexible, page) == 0);
+}
+
+static std::vector<std::pair<std::uintptr_t, std::size_t>> gpuMapped;
+
+static std::atomic<bool> observerEntered{false};
+static std::atomic<bool> observerDone{false};
+
+static void CheckClearingTheObserverWaitsForItsCalls() {
+    GuestAllocations::GuestAllocationsSetGpuMapObserver_nid_postfix([](const GuestAllocations::Mapped&, std::uint64_t) {
+        observerEntered = true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        observerDone = true;
+    });
+    constexpr std::size_t page = 0x4000;
+    std::int64_t phys = 0;
+    Require(sceKernelAllocateDirectMemory(0, 0x7fffffffffll, page, 0, 0, &phys) == 0);
+    void* gpu = nullptr;
+    std::thread mapper([&] { Require(sceKernelMapDirectMemory(&gpu, page, 0x32, 0, phys, 0) == 0); });
+    while (!observerEntered) std::this_thread::yield();
+    GuestAllocations::GuestAllocationsSetGpuMapObserver_nid_postfix(nullptr);
+    Require(observerDone);
+    mapper.join();
+    Require(sceKernelMunmap(gpu, page) == 0);
+    Require(sceKernelReleaseDirectMemory(phys, page) == 0);
+}
+
+static void CheckGpuMapsAreObserved() {
+    GuestAllocations::GuestAllocationsSetGpuMapObserver_nid_postfix([](const GuestAllocations::Mapped& mapped, std::uint64_t) {
+        const auto lease = GuestAllocations::GuestAllocationsAcquire_nid_postfix();
+        for (const auto& weak : mapped) {
+            const auto range = weak.lock();
+            if (range == nullptr) continue;
+            const bool registered = std::any_of(lease.begin(), lease.end(), [&](const auto& current) { return current == range; });
+            gpuMapped.emplace_back(registered && range->gpu ? range->address : 0, range->bytes);
+        }
+    });
+    constexpr std::size_t page = 0x4000;
+    void* heap = GuestHeap::GuestHeapAlign_nid_postfix(page, page);
+    Require(heap != nullptr && gpuMapped.empty());
+    GuestHeap::GuestHeapFree_nid_postfix(heap);
+    std::int64_t phys = 0;
+    Require(sceKernelAllocateDirectMemory(0, 0x7fffffffffll, page * 2, 0, 0, &phys) == 0);
+    void* cpu = nullptr;
+    Require(sceKernelMapDirectMemory(&cpu, page, 3, 0, phys, 0) == 0);
+    Require(gpuMapped.empty());
+    void* gpu = nullptr;
+    Require(sceKernelMapDirectMemory(&gpu, page, 0x32, 0, phys + static_cast<std::int64_t>(page), 0) == 0);
+    Require(gpuMapped.size() == 1 && gpuMapped.front().first == reinterpret_cast<std::uintptr_t>(gpu) && gpuMapped.front().second == page);
+    Require(sceKernelMprotect(cpu, page, 0x13) == 0);
+    Require(gpuMapped.size() == 1);
+    std::int64_t remapPhys = 0;
+    Require(sceKernelAllocateDirectMemory(0, 0x7fffffffffll, page * 2, 0, 0, &remapPhys) == 0);
+    void* reserved = nullptr;
+    Require(sceKernelReserveVirtualRange(&reserved, page * 2, 0, 0) == 0);
+    void* cpuRemap = reserved;
+    Require(sceKernelMapDirectMemory(&cpuRemap, page, 3, 0x10, remapPhys, 0) == 0 && cpuRemap == reserved);
+    Require(gpuMapped.size() == 1);
+    void* gpuRemap = static_cast<unsigned char*>(reserved) + page;
+    void* const gpuTarget = gpuRemap;
+    Require(sceKernelMapDirectMemory(&gpuRemap, page, 0x32, 0x10, remapPhys + static_cast<std::int64_t>(page), 0) == 0 && gpuRemap == gpuTarget);
+    Require(gpuMapped.size() == 2 && gpuMapped.back().first == reinterpret_cast<std::uintptr_t>(gpuTarget) && gpuMapped.back().second == page);
+    GuestAllocations::GuestAllocationsSetGpuMapObserver_nid_postfix(nullptr);
+    Require(sceKernelMunmap(reserved, page * 2) == 0);
+    Require(sceKernelReleaseDirectMemory(remapPhys, page * 2) == 0);
+    Require(sceKernelMunmap(cpu, page) == 0);
+    Require(sceKernelMunmap(gpu, page) == 0);
+    Require(sceKernelReleaseDirectMemory(phys, page * 2) == 0);
+}
+
+static void CheckHintedVirtualReservation() {
+    constexpr std::size_t page = 0x4000;
+    void* probe = nullptr;
+    Require(sceKernelReserveVirtualRange(&probe, page * 8, 0, 0) == 0);
+    Require(sceKernelMunmap(probe, page * 8) == 0);
+    void* const hint = static_cast<unsigned char*>(probe) + page * 2;
+    void* placed = hint;
+    Require(sceKernelReserveVirtualRange(&placed, page * 2, 0, 0) == 0);
+    Require(placed == hint);
+    void* above = hint;
+    Require(sceKernelReserveVirtualRange(&above, page * 2, 0, 0) == 0);
+    Require(above > hint);
+    Require(sceKernelMunmap(above, page * 2) == 0);
+    Require(sceKernelMunmap(placed, page * 2) == 0);
 }
 
 static void CheckFixedVirtualReservation() {
@@ -520,6 +743,37 @@ static void CheckFixedVirtualReservation() {
     Require(sceKernelMunmap(pooled, page * 2) == 0);
 }
 
+static void CheckHintInsideReservation() {
+    constexpr std::size_t page = 0x4000;
+    void* reserved = nullptr;
+    Require(sceKernelReserveVirtualRange(&reserved, page * 4, 0, 0) == 0);
+    auto* base = static_cast<unsigned char*>(reserved);
+    std::int64_t phys = 0;
+    Require(sceKernelAllocateDirectMemory(0, 0x7fffffffffll, page * 3, 0, 0, &phys) == 0);
+    void* direct = base + page;
+    Require(sceKernelMapDirectMemory(&direct, page, 3, 0, phys, 0) == 0);
+    Require(direct == base + page);
+    static_cast<unsigned char*>(direct)[0] = 21;
+    void* flexible = base + page * 2;
+    Require(sceKernelMapFlexibleMemory(&flexible, page, 3, 0) == 0);
+    Require(flexible == base + page * 2);
+    static_cast<unsigned char*>(flexible)[0] = 22;
+    VirtualQueryInfo info{};
+    Require(sceKernelVirtualQuery(direct, 0, &info, sizeof(info)) == 0);
+    Require(info.is_direct && info.offset == static_cast<std::uint64_t>(phys));
+    Require(sceKernelVirtualQuery(flexible, 0, &info, sizeof(info)) == 0);
+    Require(info.is_flexible);
+    Require(sceKernelVirtualQuery(base + page * 3, 0, &info, sizeof(info)) == 0);
+    Require(!info.is_committed && info.protection == 0);
+    void* overlapping = base + page;
+    Require(sceKernelMapDirectMemory(&overlapping, page * 2, 3, 0, phys + page, 0) == 0);
+    Require(overlapping != base + page);
+    Require(static_cast<unsigned char*>(direct)[0] == 21 && static_cast<unsigned char*>(flexible)[0] == 22);
+    Require(sceKernelMunmap(overlapping, page * 2) == 0);
+    Require(sceKernelMunmap(reserved, page * 4) == 0);
+    Require(sceKernelReleaseDirectMemory(phys, page * 3) == 0);
+}
+
 static void CheckReservedRangeIsNotCommitted() {
     constexpr std::size_t page = 0x4000;
     void* reserved = nullptr;
@@ -567,13 +821,18 @@ static void CheckNoOverwriteRefusesLiveMapping() {
 }
 
 #ifdef _WIN32
+constexpr std::uint32_t ReadWriteProtection = PAGE_READWRITE;
+#else
+constexpr std::uint32_t ReadWriteProtection = 0x04;
+#endif
+
 static void CheckNoOverwriteRejectsHostOccupiedMapping() {
     constexpr std::size_t page = 0x4000;
     void* reservation = nullptr;
     Require(sceKernelReserveVirtualRange(&reservation, page * 4, 0, 0) == 0);
     Require(sceKernelMunmap(reservation, page * 4) == 0);
     void* target = static_cast<unsigned char*>(reservation) + page;
-    GuestArena::GuestArenaCommit_nid_postfix(target, page, PAGE_READWRITE, page);
+    GuestArena::GuestArenaCommit_nid_postfix(target, page, ReadWriteProtection, page);
     std::int64_t phys = 0;
     Require(sceKernelAllocateDirectMemory(0, 0x7fffffffffll, page, 0, 0, &phys) == 0);
     void* fixed = target;
@@ -588,13 +847,186 @@ static void CheckNoOverwriteRejectsHostOccupiedMapping() {
     Require(sceKernelReleaseDirectMemory(phys, page) == 0);
 }
 
-static void CheckFixedMappingsReachTheApplicationAreaEnd() {
+#ifdef _WIN32
+static DWORD ImageProtection(const void* pointer) {
+    MEMORY_BASIC_INFORMATION memory{};
+    Require(VirtualQuery(pointer, &memory, sizeof(memory)) == sizeof(memory));
+    return memory.Protect & 0xffu;
+}
+
+static unsigned char* GuestModulePage(void* module, std::size_t page) {
+    auto* data = static_cast<unsigned char*>(dlsym_nid_postfix(module, "guestMemoryModuleData"));
+    Require(data != nullptr);
+    auto* target = reinterpret_cast<unsigned char*>((reinterpret_cast<std::uintptr_t>(data) + page - 1) & ~(page - 1));
+    Require(target + page <= data + 0x10000);
+    return target;
+}
+
+static bool RegisteredGuestRange(const void* pointer, std::size_t bytes) {
+    GuestAllocations::Mutation mutation;
+    return mutation.Overlaps(pointer, bytes);
+}
+
+static void CheckGuestModuleImageProtection() {
     constexpr std::size_t page = 0x4000;
-    constexpr std::uintptr_t applicationAreaEnd = 0xFC00000000ull;
+    const auto path = std::filesystem::relative(GUEST_MEMORY_MODULE).generic_string();
+    void* module = dlopen_nid_postfix(path.c_str(), 2);
+    Require(module != nullptr);
+    auto* target = GuestModulePage(module, page);
+    Require(!RegisteredGuestRange(target, page));
+    Require(sceKernelMprotect(target, page, 1) == 0);
+    Require(RegisteredGuestRange(target, page));
+    Require(ImageProtection(target) == PAGE_READONLY);
+    Require(sceKernelMprotect(target, page, 3) == 0);
+    Require(ImageProtection(target) == PAGE_READWRITE || ImageProtection(target) == PAGE_WRITECOPY);
+    target[1] = 7;
+    Require(target[1] == 7);
+    Require(sceKernelMprotect(target, page, 1) == 0);
+    Require(ImageProtection(target) == PAGE_READONLY);
+
+    {
+        auto held = GuestAllocations::GuestAllocationsAcquire_nid_postfix();
+        bool failed = false;
+        try {
+            dlclose_nid_postfix(module);
+        } catch (const std::runtime_error&) {
+            failed = true;
+        }
+        Require(failed);
+        Require(GuestModulePage(module, page) == target);
+        Require(RegisteredGuestRange(target, page));
+        Require(ImageProtection(target) == PAGE_READONLY);
+    }
+
+    auto lease = GuestAllocations::GuestAllocationsAcquire_nid_postfix();
+    std::atomic<bool> closed{false};
+    std::thread closer([&] {
+        Require(dlclose_nid_postfix(module) == 0);
+        closed = true;
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    Require(!closed);
+    Require(ImageProtection(target) == PAGE_READONLY);
+    lease.clear();
+    closer.join();
+    Require(!RegisteredGuestRange(target, page));
+    {
+        GuestAllocations::Mutation mutation;
+        mutation.Add(target, page, true, true, false);
+        mutation.Remove(target);
+    }
+
+    module = dlopen_nid_postfix(path.c_str(), 2);
+    Require(module != nullptr);
+    target = GuestModulePage(module, page);
+    Require(!RegisteredGuestRange(target, page));
+    Require(sceKernelMprotect(target, page, 1) == 0);
+    Require(ImageProtection(target) == PAGE_READONLY);
+    Require(RegisteredGuestRange(target, page));
+    Require(dlclose_nid_postfix(module) == 0);
+    Require(!RegisteredGuestRange(target, page));
+
+    bool rejected = false;
+    try {
+        sceKernelMprotect(GetModuleHandleA("kernel32.dll"), page, 1);
+    } catch (const std::invalid_argument&) {
+        rejected = true;
+    }
+    Require(rejected);
+}
+#endif
+
+static void CheckUnhintedKernelMappingsLandInTheWindow() {
+    constexpr std::size_t page = 0x4000;
+    std::uintptr_t windowStart = 0;
+    std::size_t windowSize = 0;
+    GuestArena::GuestArenaRange_nid_postfix(&windowStart, &windowSize);
+    const auto windowEnd = windowStart + windowSize;
+    std::int64_t phys = 0;
+    Require(sceKernelAllocateDirectMemory(0, 0x7fffffffffll, page, 0, 0, &phys) == 0);
+    void* direct = nullptr;
+    Require(sceKernelMapDirectMemory(&direct, page, 3, 0, phys, 0) == 0);
+    Require(direct != nullptr);
+    const auto directAddress = reinterpret_cast<std::uintptr_t>(direct);
+    Require(directAddress >= windowStart);
+    Require(directAddress + page <= windowEnd);
+    void* flexible = nullptr;
+    Require(sceKernelMapNamedFlexibleMemory(&flexible, page, 3, 0, "arena-window-test") == 0);
+    Require(flexible != nullptr);
+    const auto flexibleAddress = reinterpret_cast<std::uintptr_t>(flexible);
+    Require(flexibleAddress >= windowStart);
+    Require(flexibleAddress + page <= windowEnd);
+    Require(sceKernelMunmap(direct, page) == 0);
+    Require(sceKernelMunmap(flexible, page) == 0);
+    Require(sceKernelReleaseDirectMemory(phys, page) == 0);
+}
+
+#if defined(__linux__)
+static void CheckUnmappedArenaRangeStaysReserved() {
+    constexpr std::size_t page = 0x4000;
+    void* address = nullptr;
+    Require(sceKernelMapNamedFlexibleMemory(&address, page, 3, 0, "reserved-after-unmap") == 0);
+    Require(address != nullptr);
+    Require(sceKernelMunmap(address, page) == 0);
+    void* hostile = mmap(address, page, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+    Require(hostile == MAP_FAILED && errno == EEXIST);
+    void* again = nullptr;
+    Require(sceKernelMapNamedFlexibleMemory(&again, page, 3, 0, "reserved-after-unmap-2") == 0);
+    Require(again != nullptr);
+    Require(sceKernelMunmap(again, page) == 0);
+}
+#endif
+
+static void CheckArenaPlacesUnhintedMappingsInsideTheWindow() {
+    constexpr std::size_t page = 0x4000;
     std::uintptr_t base = 0;
     std::size_t size = 0;
     GuestArena::GuestArenaRange_nid_postfix(&base, &size);
-    Require(base == 0x200000000ull && base + size == applicationAreaEnd);
+    Require(size != 0);
+    auto* placed = GuestArena::GuestArenaAllocate_nid_postfix(page, page);
+    Require(placed != nullptr);
+    const auto address = reinterpret_cast<std::uintptr_t>(placed);
+    Require(address >= base);
+    Require(address + page <= base + size);
+    GuestArena::GuestArenaRelease_nid_postfix(placed, page);
+}
+
+static void CheckArenaReusesAFreedRange() {
+    constexpr std::size_t page = 0x4000;
+    auto* first = GuestArena::GuestArenaAllocate_nid_postfix(page, page);
+    Require(first != nullptr);
+    GuestArena::GuestArenaRelease_nid_postfix(first, page);
+    auto* second = GuestArena::GuestArenaAllocate_nid_postfix(page, page);
+    Require(second == first);
+    GuestArena::GuestArenaRelease_nid_postfix(second, page);
+}
+
+static void CheckArenaHonoursHintsWithoutGoingBelowThem() {
+    constexpr std::size_t page = 0x4000;
+    std::uintptr_t base = 0;
+    std::size_t size = 0;
+    GuestArena::GuestArenaRange_nid_postfix(&base, &size);
+    const auto hint = base + page;
+    auto* placed = GuestArena::GuestArenaAllocateAtOrAbove_nid_postfix(hint, page, page);
+    Require(placed != nullptr);
+    Require(reinterpret_cast<std::uintptr_t>(placed) >= hint);
+    Require(GuestArena::GuestArenaContains_nid_postfix(placed, page));
+    GuestArena::GuestArenaRelease_nid_postfix(placed, page);
+}
+
+static void CheckFixedMappingsReachTheApplicationAreaEnd() {
+    constexpr std::size_t page = 0x4000;
+    std::uintptr_t base = 0;
+    std::size_t size = 0;
+    GuestArena::GuestArenaRange_nid_postfix(&base, &size);
+    constexpr std::uintptr_t expectedOffset =
+#ifdef ANYPS5_ENABLE_ASAN
+        0x0000100000000000ull;
+#else
+        0;
+#endif
+    constexpr std::uintptr_t applicationAreaEnd = 0xFC00000000ull + expectedOffset;
+    Require(base == 0x200000000ull + expectedOffset && base + size == applicationAreaEnd);
     std::int64_t phys = 0;
     Require(sceKernelAllocateDirectMemory(0, 0x7fffffffffll, page * 2, 0, 0, &phys) == 0);
     void* const requested = reinterpret_cast<void*>(applicationAreaEnd - page * 2);
@@ -619,9 +1051,8 @@ static void CheckFixedMappingsReachTheApplicationAreaEnd() {
     Require(sceKernelMunmap(mapped, page * 2) == 0);
     Require(sceKernelReleaseDirectMemory(phys, page * 2) == 0);
 }
-#endif
 
-#if defined(__linux__)
+#if defined(__linux__) && !defined(ANYPS5_ENABLE_ASAN)
 static std::size_t LockedKilobytes() {
     std::ifstream status("/proc/self/status");
     std::string line;
@@ -645,7 +1076,7 @@ static void CheckMlock() {
     Require(sceKernelMapFlexibleMemory(&mapped, length, 3, 0) == 0);
     auto* bytes = static_cast<unsigned char*>(mapped);
     Require(sceKernelMlock_nid_postfix(mapped, 0) == 0);
-#if defined(__linux__)
+#if defined(__linux__) && !defined(ANYPS5_ENABLE_ASAN)
     const auto lockedBefore = LockedKilobytes();
 #endif
     Require(sceKernelMlock_nid_postfix(bytes + 1, length - page) == 0);
@@ -656,7 +1087,7 @@ static void CheckMlock() {
     Require(GetProcessWorkingSetSizeEx(GetCurrentProcess(), &minimum, &maximum, &limits) && minimum >= length && maximum > minimum);
     Require(VirtualUnlock(mapped, length));
     Require(!VirtualUnlock(mapped, length) && GetLastError() == ERROR_NOT_LOCKED);
-#elif defined(__linux__)
+#elif defined(__linux__) && !defined(ANYPS5_ENABLE_ASAN)
     Require(LockedKilobytes() - lockedBefore == length / 1024);
 #endif
     Require(sceKernelMlock_nid_postfix(mapped, length) == 0);
@@ -665,10 +1096,14 @@ static void CheckMlock() {
     Require(sceKernelMlock_nid_postfix(reinterpret_cast<void*>(std::numeric_limits<std::uintptr_t>::max() - page + 1), page * 2) == invalid);
     void* reserved = nullptr;
     Require(sceKernelReserveVirtualRange(&reserved, page, 0, 0) == 0);
+#ifndef ANYPS5_ENABLE_ASAN
     Require(sceKernelMlock_nid_postfix(reserved, page) == outOfMemory);
+#endif
     Require(sceKernelMunmap(reserved, page) == 0);
     Require(sceKernelMunmap(mapped, length) == 0);
+#ifndef ANYPS5_ENABLE_ASAN
     Require(sceKernelMlock_nid_postfix(mapped, page) == outOfMemory);
+#endif
 }
 
 static void CheckSharedDirectMemoryLifecycle() {
@@ -1006,13 +1441,7 @@ static void CheckReadsIntoSharedWriteTracking() {
     std::int32_t deleted = -1;
     Require(sceKernelAioDeleteRequest(id, &deleted) == 0);
     Require(sceKernelMprotect(mapped, page * 2, 1) == 0);
-    bool refused = false;
-    try {
-        sceKernelPread(fd, mapped, page, 0);
-    } catch (const std::exception&) {
-        refused = true;
-    }
-    Require(refused);
+    Require(sceKernelPread(fd, mapped, page, 0) == static_cast<std::int64_t>(SCE_KERNEL_ERROR_EFAULT));
     KernelAioResult refusedResult{-1, 0};
     KernelAioRwRequest refusedRequest{0, page, bytes, &refusedResult, fd};
     Require(sceKernelAioSubmitReadCommands(&refusedRequest, 1, 0, &id) == 0);
@@ -1048,6 +1477,62 @@ static bool Written(const void* base, std::size_t bytes, PageRuns expected) {
     for (const auto& [first, last] : runs) std::fprintf(stderr, " [%zu, %zu)", static_cast<std::size_t>(first), static_cast<std::size_t>(last));
     std::fputs("\n", stderr);
     return false;
+}
+
+static bool CollectArmedRuns(const void* base, std::size_t offset, std::size_t bytes, PageRuns& runs) {
+    runs.clear();
+    const auto address = reinterpret_cast<std::uintptr_t>(base);
+    std::pair<std::uintptr_t, PageRuns*> context{address, &runs};
+    return GuestWriteWatch::GuestWriteWatchCollectArmed_nid_postfix(address + offset, bytes, [](void* context, std::uintptr_t begin, std::uintptr_t end) {
+        auto& [origin, into] = *static_cast<std::pair<std::uintptr_t, PageRuns*>*>(context);
+        if (!into->empty() && into->back().second == (begin - origin) / 4096) into->back().second = (end - origin) / 4096;
+        else into->emplace_back((begin - origin) / 4096, (end - origin) / 4096);
+    }, &context);
+}
+
+static void CheckWriteWatchArmedCollect() {
+    if (!GuestWriteWatch::GuestWriteWatchAvailable_nid_postfix()) return;
+    constexpr std::size_t length = 0x100000;
+    constexpr std::size_t small = 4096;
+    void* mapping = nullptr;
+    Require(sceKernelMapFlexibleMemory(&mapping, length, 3, 0) == 0);
+    auto* bytes = static_cast<volatile unsigned char*>(mapping);
+    PageRuns runs;
+    Require(CollectRuns(mapping, 0, length / 2, runs) && runs == PageRuns{{0, length / small / 2}});
+    bytes[5 * small] = 1;
+    bytes[200 * small] = 1;
+    Require(CollectArmedRuns(mapping, 0, length, runs) && runs == PageRuns{{5, 6}});
+    Require(Written(mapping, length, {{length / small / 2, length / small}}));
+    Require(Written(mapping, length, {}));
+    Require(sceKernelMunmap(mapping, length) == 0);
+}
+
+static bool CollectFreshRuns(const void* base, std::size_t offset, std::size_t bytes, PageRuns& runs) {
+    runs.clear();
+    const auto address = reinterpret_cast<std::uintptr_t>(base);
+    std::pair<std::uintptr_t, PageRuns*> context{address, &runs};
+    return GuestWriteWatch::GuestWriteWatchCollectFresh_nid_postfix(address + offset, bytes, [](void* context, std::uintptr_t begin, std::uintptr_t end) {
+        auto& [origin, into] = *static_cast<std::pair<std::uintptr_t, PageRuns*>*>(context);
+        if (!into->empty() && into->back().second == (begin - origin) / 4096) into->back().second = (end - origin) / 4096;
+        else into->emplace_back((begin - origin) / 4096, (end - origin) / 4096);
+    }, &context);
+}
+
+static void CheckWriteWatchFreshCollect() {
+    if (!GuestWriteWatch::GuestWriteWatchAvailable_nid_postfix()) return;
+    constexpr std::size_t length = 0x100000;
+    constexpr std::size_t small = 4096;
+    void* mapping = nullptr;
+    Require(sceKernelMapFlexibleMemory(&mapping, length, 3, 0) == 0);
+    auto* bytes = static_cast<volatile unsigned char*>(mapping);
+    PageRuns runs;
+    Require(CollectRuns(mapping, 0, length / 2, runs) && runs == PageRuns{{0, length / small / 2}});
+    bytes[5 * small] = 1;
+    Require(CollectFreshRuns(mapping, 0, length, runs) && runs == PageRuns{{length / small / 2, length / small}});
+    Require(CollectFreshRuns(mapping, 0, length, runs) && runs.empty());
+    bytes[200 * small] = 1;
+    Require(Written(mapping, length, {{5, 6}, {200, 201}}));
+    Require(sceKernelMunmap(mapping, length) == 0);
 }
 
 static void CheckWriteWatch() {
@@ -1279,6 +1764,90 @@ static void CheckDirectMemoryWriteWatch() {
     Require(sceKernelMunmap(flexible, page * 3) == 0);
     Require(sceKernelReleaseDirectMemory(phys, page * 3) == 0);
 }
+
+static void CheckDirectMemoryWriteWatchFollowsRemovedMappings() {
+    if (!GuestWriteWatch::GuestWriteWatchAvailable_nid_postfix()) {
+        std::puts("write watch unavailable: removed direct mappings not tested");
+        return;
+    }
+    constexpr std::size_t page = 0x4000;
+    std::int64_t phys = 0;
+    Require(sceKernelAllocateDirectMemory(0, 0x7fffffffffll, page * 4, 0, 0, &phys) == 0);
+    void* whole = nullptr;
+    Require(sceKernelMapDirectMemory(&whole, page * 4, 3, 0, phys, 0) == 0);
+    const auto address = reinterpret_cast<std::uintptr_t>(whole);
+    const auto watched = [](const void* pointer, std::size_t offset) { return GuestWriteWatch::GuestWriteWatchCovers_nid_postfix(reinterpret_cast<std::uintptr_t>(pointer) + offset, page); };
+    void* pair = nullptr;
+    Require(sceKernelMapDirectMemory(&pair, page * 2, 3, 0, phys + page, 0) == 0);
+    Require(watched(whole, 0) && !watched(whole, page) && !watched(whole, page * 2) && watched(whole, page * 3));
+    Require(!watched(pair, 0) && !watched(pair, page));
+    Require(sceKernelMunmap(pair, page) == 0);
+    void* single = nullptr;
+    Require(sceKernelMapDirectMemory(&single, page, 3, 0, phys + page, 0) == 0);
+    Require(!watched(single, 0) && watched(whole, 0) && watched(whole, page * 3));
+    Require(sceKernelMunmap(single, page) == 0);
+    Require(sceKernelMunmap(static_cast<unsigned char*>(pair) + page, page) == 0);
+    void* replaced = whole;
+    Require(sceKernelMapDirectMemory(&replaced, page, 3, 0x10, phys + page * 3, 0) == 0 && replaced == whole);
+    Require(!watched(whole, 0) && !watched(whole, page * 3));
+    std::uintptr_t start = 0;
+    std::uintptr_t end = 0;
+    std::uint64_t offset = 0;
+    int type = 0;
+    Require(QueryDirectMapping(address, &start, &end, &offset, &type) && start == address && end == address + page && offset == static_cast<std::uint64_t>(phys) + page * 3);
+    void* alone = nullptr;
+    Require(sceKernelMapDirectMemory(&alone, page, 3, 0, phys, 0) == 0);
+    Require(watched(alone, 0));
+    void* again = nullptr;
+    Require(sceKernelMapDirectMemory(&again, page, 3, 0, phys, 0) == 0);
+    Require(!watched(alone, 0) && !watched(again, 0));
+    Require(sceKernelMunmap(again, page) == 0);
+    Require(sceKernelMunmap(alone, page) == 0);
+    Require(sceKernelMunmap(whole, page * 4) == 0);
+    Require(sceKernelReleaseDirectMemory(phys, page * 4) == 0);
+}
+
+static double MapAcrossBackingsSeconds(std::int64_t phys, std::size_t backings) {
+    constexpr std::size_t page = 0x4000;
+    const auto threadSeconds = [] {
+        timespec now{};
+        Require(clock_gettime(CLOCK_THREAD_CPUTIME_ID, &now) == 0);
+        return static_cast<double>(now.tv_sec) + static_cast<double>(now.tv_nsec) * 1e-9;
+    };
+    auto best = std::numeric_limits<double>::max();
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        void* mapped = nullptr;
+        const auto before = threadSeconds();
+        Require(sceKernelMapDirectMemory(&mapped, page * backings, 3, 0, phys, 0) == 0);
+        best = std::min(best, threadSeconds() - before);
+        const auto last = reinterpret_cast<std::uintptr_t>(mapped) + page * (backings - 1);
+        std::uintptr_t start = 0;
+        std::uintptr_t end = 0;
+        std::uint64_t offset = 0;
+        int type = 0;
+        Require(QueryDirectMapping(last, &start, &end, &offset, &type) && start == last && end == last + page);
+        Require(sceKernelMunmap(mapped, page * backings) == 0);
+    }
+    return best;
+}
+
+static void CheckMappingCostFollowsTheMappingCount() {
+    constexpr std::size_t page = 0x4000;
+    constexpr std::size_t few = 1024;
+    constexpr std::size_t many = few * 16;
+    std::int64_t phys = 0;
+    Require(sceKernelAllocateDirectMemory(0, 0x7fffffffffll, page * many, 0, 0, &phys) == 0);
+    Require(sceKernelReleaseDirectMemory(phys, page * many) == 0);
+    for (std::size_t index = 0; index < many; ++index) {
+        const auto wanted = phys + static_cast<std::int64_t>(page * index);
+        std::int64_t piece = 0;
+        Require(sceKernelAllocateDirectMemory(wanted, wanted + static_cast<std::int64_t>(page), page, 0, 0, &piece) == 0 && piece == wanted);
+    }
+    const auto small = MapAcrossBackingsSeconds(phys, few);
+    const auto large = MapAcrossBackingsSeconds(phys, many);
+    Require(large <= small * 48);
+    Require(sceKernelReleaseDirectMemory(phys, page * many) == 0);
+}
 #endif
 
 static void CheckVirtualQuerySplitFlexibleRanges() {
@@ -1355,25 +1924,90 @@ static void CheckVirtualQueryPartialMunmap() {
     Require(munmap_nid_postfix(memory + page * 2, page) == 0);
 }
 
+
+static void CheckAvailableDirectMemoryIsLargestFreeBlock() {
+    constexpr std::int64_t window = 0x4000000;
+    const std::int64_t top = static_cast<std::int64_t>(DIRECT_MEMORY_SIZE) - window;
+    std::int64_t first = -1;
+    std::int64_t gap = -1;
+    std::int64_t last = -1;
+    Require(sceKernelAllocateDirectMemory(top, top + window, 0x200000, 0x200000, 0, &first) == 0 && first == top);
+    Require(sceKernelAllocateDirectMemory(top, top + window, 0x400000, 0x200000, 0, &gap) == 0 && gap == top + 0x200000);
+    Require(sceKernelAllocateDirectMemory(top, top + window, 0x200000, 0x200000, 0, &last) == 0 && last == top + 0x600000);
+    Require(sceKernelReleaseDirectMemory(gap, 0x400000) == 0);
+
+    std::int64_t start = -1;
+    std::size_t size = 0;
+    Require(sceKernelAvailableDirectMemorySize(top, top + window, 0, &start, &size) == 0);
+    Require(start == top + 0x800000 && size == static_cast<std::size_t>(window - 0x800000));
+    Require(sceKernelAvailableDirectMemorySize(top, top + 0x800000, 0, &start, &size) == 0);
+    Require(start == top + 0x200000 && size == 0x400000);
+    Require(sceKernelAvailableDirectMemorySize(top, top + window, 0x1000000, &start, &size) == 0);
+    Require(start == top + 0x1000000 && size == static_cast<std::size_t>(window - 0x1000000));
+    Require(sceKernelAvailableDirectMemorySize(top, top + 0x200000, 0, &start, &size) == SCE_KERNEL_ERROR_EAGAIN);
+    Require(start == 0 && size == 0);
+    Require(sceKernelAvailableDirectMemorySize(top, top + window, 0, nullptr, &size) == SCE_KERNEL_ERROR_EINVAL);
+
+    Require(sceKernelReleaseDirectMemory(first, 0x200000) == 0);
+    Require(sceKernelReleaseDirectMemory(last, 0x200000) == 0);
+    Require(sceKernelAvailableDirectMemorySize(top, top + window, 0, &start, &size) == 0);
+    Require(start == top && size == static_cast<std::size_t>(window));
+}
+
+static void CheckMunmapOverUnmappedPages() {
+    constexpr std::size_t page = 0x4000;
+    const auto failed = reinterpret_cast<void*>(static_cast<std::uintptr_t>(-1));
+    void* raw = mmap_nid_postfix(nullptr, page * 3, 3, 0x1002, -1, 0);
+    Require(raw != failed);
+    auto* memory = static_cast<unsigned char*>(raw);
+    memory[0] = 1;
+    memory[page * 2] = 2;
+    Require(munmap_nid_postfix(memory + page, page) == 0);
+    Require(munmap_nid_postfix(memory, page * 3) == 0);
+    {
+        GuestAllocations::Mutation mutation;
+        Require(!mutation.Overlaps(memory, page * 3));
+    }
+    VirtualQueryInfo info{};
+    Require(sceKernelVirtualQuery(memory, 0, &info, sizeof(info)) == SCE_KERNEL_ERROR_EACCES);
+    Require(sceKernelVirtualQuery(memory + page * 2, 0, &info, sizeof(info)) == SCE_KERNEL_ERROR_EACCES);
+    Require(munmap_nid_postfix(memory, page * 3) == 0);
+    Require(sceKernelMunmap(memory, page * 3) == 0);
+    Require(sceKernelMunmap(memory, 0) == SCE_KERNEL_ERROR_EINVAL);
+}
+
 int main() {
+#ifdef _WIN32
+    _putenv_s("APS5_PIN_WAIT_MS", "1000");
+#endif
+    CheckAvailableDirectMemoryIsLargestFreeBlock();
     CheckVirtualQuerySplitFlexibleRanges();
     CheckVirtualQueryForNonReadableGuestRange();
     CheckReleaseFlexibleMemory();
     CheckVirtualQueryPartialMunmap();
+    CheckMunmapOverUnmappedPages();
     CheckNamedAndHintedMappings();
     CheckUnsupportedMappingFlags();
     CheckInternalNamedFlexibleMapping();
+    CheckGuestModuleUsesFlexibleMemory();
     CheckBatchMapStopsAtInvalidEntry();
     CheckCheckedReleaseDirectMemory();
     CheckAudioCoprocessorProtection();
     CheckDirectMemoryFollowsPhysicalPages();
     CheckDirectReleaseErrors();
+    CheckSparseDirectMemoryBacking();
     CheckReleaseDirectMemoryClearsMappings();
     CheckReleaseDirectMemoryRejectsInvalidRanges();
     CheckFixedMappingReplacesPartialOverlap();
+    CheckFixedMappingOverHoleInsideAllocation();
     CheckDirectMemoryGpuProtBits();
+    CheckGpuAccessFollowsProtection();
+    CheckGpuMapsAreObserved();
+    CheckClearingTheObserverWaitsForItsCalls();
+    CheckHintedVirtualReservation();
     CheckFixedVirtualReservation();
     CheckReservedRangeIsNotCommitted();
+    CheckHintInsideReservation();
     CheckNoOverwriteRefusesLiveMapping();
     CheckMlock();
     CheckSharedDirectMemoryLifecycle();
@@ -1381,17 +2015,29 @@ int main() {
     CheckMtypeprotect();
     CheckHeapAlignment();
     CheckHeapAfterMappingReuse();
-#ifdef _WIN32
     CheckNoOverwriteRejectsHostOccupiedMapping();
     CheckFixedMappingsReachTheApplicationAreaEnd();
+#ifdef _WIN32
+    CheckGuestModuleImageProtection();
 #endif
+    CheckUnhintedKernelMappingsLandInTheWindow();
+#if defined(__linux__)
+    CheckUnmappedArenaRangeStaysReserved();
+#endif
+    CheckArenaPlacesUnhintedMappingsInsideTheWindow();
+    CheckArenaReusesAFreedRange();
+    CheckArenaHonoursHintsWithoutGoingBelowThem();
     CheckSharedWriteTracking();
     CheckReadsIntoSharedWriteTracking();
     CheckPinnedSharedPages();
     CheckFailedCollectKeepsWrites();
 #if defined(__linux__)
     CheckWriteWatch();
+    CheckWriteWatchArmedCollect();
+    CheckWriteWatchFreshCollect();
     CheckDirectMemoryWriteWatch();
+    CheckDirectMemoryWriteWatchFollowsRemovedMappings();
+    CheckMappingCostFollowsTheMappingCount();
     CheckDirectMemoryBackingNeedsNoFilesystem();
     CheckDirectMemorySharedBacking();
 #endif
@@ -1458,7 +2104,7 @@ int main() {
     Require(munmap_nid_postfix(memory, page) == 0);
     Require(memory[page * 2] == 73);
     Require(munmap_nid_postfix(memory + page * 2, page) == 0);
-    Require(munmap_nid_postfix(memory, page) == -1);
+    Require(munmap_nid_postfix(memory, page) == 0);
     Require(madvise_nid_postfix(memory, page, 4) == 0);
     *__error_nid_postfix() = 0;
     Require(mprotect_nid_postfix(memory, page, 1) == -1 && *__error_nid_postfix() == 22);
@@ -1476,4 +2122,17 @@ int main() {
         }
         Require(munmap_nid_postfix(mapped, 1) == 0);
     }
+
+    reject(page, 3, 0x2001002, -1, 0, 45);
+    constexpr std::size_t superpage = std::size_t{1} << 21;
+    auto* aligned = static_cast<unsigned char*>(mmap_nid_postfix(nullptr, superpage + page, 3, 0x1001002, -1, 0));
+    Require(aligned != failed && (reinterpret_cast<std::uintptr_t>(aligned) & (superpage - 1)) == 0);
+    aligned[0] = 1;
+    aligned[superpage + page - 1] = 2;
+    {
+        GuestAllocations::Mutation mutation;
+        const auto range = mutation.Find(aligned);
+        Require(range.bytes == superpage + page && range.readable && range.writable);
+    }
+    Require(munmap_nid_postfix(aligned, superpage + page) == 0);
 }

@@ -89,6 +89,29 @@ static void CheckBounded() {
     Require(Format(buffer, 16, u"%s", nullNarrow) == 6 && buffer == std::u16string(u"(null)"), "vswprintf null %s argument");
 }
 
+static void CheckPositional() {
+    char16_t buffer[32];
+    Require(swprintf_nid_postfix(buffer, 32, u"%2$d-%1$d", 1, 2) == 3 && buffer == std::u16string(u"2-1"),
+        "swprintf positional integers");
+    Require(swprintf_nid_postfix(buffer, 32, u"%2$ls %1$ls", u"world", u"hello") == 11 && buffer == std::u16string(u"hello world"),
+        "swprintf positional wide strings");
+    Require(swprintf_nid_postfix(buffer, 32, u"[%1$*2$d|%3$.*2$f]", 7, 2, 2.5) == 9 && buffer == std::u16string(u"[ 7|2.50]"),
+        "swprintf positional width and precision");
+    Require(swprintf_nid_postfix(buffer, 32, u"%1$Lg %2$d %d", 0.5L, 3, 9) == 7 && buffer == std::u16string(u"0.5 3 9"),
+        "swprintf positional long double and the next argument");
+    Require(snwprintf_s_nid_postfix(buffer, 32, u"%2$s%1$lc", 0x20ac, "\xc3\xa9") == 2 && buffer == std::u16string(u"\u00e9\u20ac"),
+        "snwprintf_s positional arguments");
+}
+
+static void CheckPointer() {
+    char16_t buffer[64];
+    const auto address = [](std::uintptr_t value) { return reinterpret_cast<void*>(value); };
+    Require(Format(buffer, 64, u"%p|%p|%p", address(0), address(0x1234), address(0xdeadbeef12)) == 23 &&
+        buffer == std::u16string(u"0x0|0x1234|0xdeadbeef12"), "vswprintf %p uses the 0x form");
+    Require(Format(buffer, 64, u"[%8p][%-8p][%08p][%.6p]", address(0x1a), address(0x1a), address(0x1a), address(0x1a)) == 40 &&
+        buffer == std::u16string(u"[    0x1a][0x1a    ][0x00001a][0x00001a]"), "vswprintf %p width and precision");
+}
+
 static void CheckCount() {
     char16_t buffer[16];
     int count = -7;
@@ -110,6 +133,14 @@ static void CheckCount() {
     Require(Format(buffer, 16, u"a%Ln", &count) < 0 && count == -7, "vswprintf %Ln");
     const int* const nullCount = nullptr;
     Require(Format(buffer, 16, u"a%n", nullCount) < 0, "vswprintf null %n argument");
+}
+
+static void CheckGroupingFlag() {
+    char16_t buffer[48];
+    Require(swprintf_nid_postfix(buffer, 48, u"%'d|%'-6u|%'.2f|%'+05d|%'g", 1234567, 42u, 1234.5, 12, 1e6) == 34 &&
+        buffer == std::u16string(u"1234567|42    |1234.50|+0012|1e+06"), "swprintf ' flag");
+    Require(snwprintf_s_nid_postfix(buffer, 48, u"%'lld %ls", 9876543210ll, u"x") == 12 && buffer == std::u16string(u"9876543210 x"),
+        "snwprintf_s ' flag");
 }
 
 static void CheckSwprintf() {
@@ -138,6 +169,8 @@ static void CheckSwprintf() {
 
 int main() {
     CheckBounded();
+    CheckPositional();
+    CheckPointer();
     CheckCount();
     CheckSwprintf();
     Check(u"%.2s", "\xc3\xa9\xc3\xa8", u"\u00e9\u00e8");
@@ -151,4 +184,5 @@ int main() {
     Check(u"%.2s", "\xf0\x9f\x98\x80x", u"\U0001f600");
     Check(u"%.1s", "\xf0\x9f\x98\x80x", u"");
     Check(u"%.3s", "\xf0\x9f\x98\x80x", u"\U0001f600x");
+    CheckGroupingFlag();
 }

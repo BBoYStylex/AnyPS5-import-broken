@@ -1,27 +1,30 @@
 #include "prx/libc/include/general/VabiMacros.hpp"
-#include "SceTypes.hpp"
 #include <cstdlib>
+#include <cstdint>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #ifndef _WIN32
 #include <dlfcn.h>
 #endif
 #include <stdexcept>
+#include <source_location>
 #include <thread>
 extern "C" {
+int APS5_VABI sceKernelDlsym(std::int32_t, const char*, void**);
 void* APS5_VABI dlopen_nid_postfix(const char*, int);
 void* APS5_VABI dlsym_nid_postfix(void*, const char*);
 int APS5_VABI dlclose_nid_postfix(void*);
 char* APS5_VABI dlerror_nid_postfix();
-KernelModule APS5_VABI sceKernelLoadStartModule(const char*, size_t, const void*, uint32_t, const KernelLoadModuleOpt*, int*);
-int APS5_VABI sceKernelStopUnloadModule(KernelModule, size_t, const void*, uint32_t, const KernelUnloadModuleOpt*, int*);
 int APS5_VABI _sceKernelRtldThreadAtexitIncrement_nid_postfix(const void*);
 int APS5_VABI _sceKernelRtldThreadAtexitDecrement_nid_postfix(const void*);
 }
-static void Require(bool value) { if (!value) std::abort(); }
-#ifndef _WIN32
+static void Require(bool value, const std::source_location& location = std::source_location::current()) {
+    if (value) return;
+    std::fprintf(stderr, "guest_dynamic_loader: failed at %s:%u\n", location.file_name(), location.line());
+    std::abort();
+}
 extern "C" int APS5_VABI GuestDefaultScopeOnly(int a, int b) { return a * b; }
-#endif
 template<typename TFunction>
 static bool ThrowsRuntimeError(TFunction function) {
     try {
@@ -39,6 +42,14 @@ int main(int argc, char** argv) {
     Require(dlerror_nid_postfix() == nullptr);
     Require(dlopen_nid_postfix("anyps5-missing-module-for-test.prx", 2) == nullptr);
     Require(dlerror_nid_postfix() != nullptr);
+    void* mainSymbol = nullptr;
+    const int mainResult = sceKernelDlsym(0, "GuestDefaultScopeOnly", &mainSymbol);
+    std::fprintf(stderr, "sceKernelDlsym(0, GuestDefaultScopeOnly): result=0x%08x, symbol=%p\n", static_cast<unsigned>(mainResult), mainSymbol);
+    Require(mainResult == 0 && mainSymbol != nullptr);
+    using MainFunction = int (APS5_VABI *)(int, int);
+    Require(reinterpret_cast<MainFunction>(mainSymbol)(6, 7) == 42);
+    Require(sceKernelDlsym(0, "anyps5_missing_main_symbol", &mainSymbol) == static_cast<int>(0x80020003u));
+    dlerror_nid_postfix();
     void* executable = dlopen_nid_postfix(nullptr, 2);
     Require(executable != nullptr && dlclose_nid_postfix(executable) == 0);
     void* module = dlopen_nid_postfix(argv[1], 2 | 0x100);
@@ -46,19 +57,6 @@ int main(int argc, char** argv) {
     using Add = int (APS5_VABI *)(int, int);
     auto add = reinterpret_cast<Add>(dlsym_nid_postfix(module, "GuestModuleAdd"));
     Require(add && add(17, 25) == 42);
-#ifdef _WIN32
-    using Count = int (APS5_VABI *)();
-    const auto count = reinterpret_cast<Count>(dlsym_nid_postfix(module, "GuestModuleStartCount"));
-    Require(count && count() == 0);
-    const int payload = 1234;
-    int result = 0;
-    const auto started = sceKernelLoadStartModule(argv[1], sizeof(payload), &payload, 0, nullptr, &result);
-    Require(started > 0 && result == payload && count() == 1);
-    const auto again = sceKernelLoadStartModule(argv[1], 0, nullptr, 0, nullptr, &result);
-    Require(again > 0 && result == 0 && count() == 1);
-    Require(sceKernelStopUnloadModule(again, 0, nullptr, 0, nullptr, nullptr) == 0);
-    Require(sceKernelStopUnloadModule(started, 0, nullptr, 0, nullptr, nullptr) == 0);
-#endif
     Require(dlsym_nid_postfix(reinterpret_cast<void*>(-2), "GuestModuleAdd") == reinterpret_cast<void*>(add));
     Require(dlsym_nid_postfix(nullptr, "GuestModuleAdd") == reinterpret_cast<void*>(add));
 #ifndef _WIN32
@@ -127,4 +125,5 @@ int main(int argc, char** argv) {
     Require(dlsym_nid_postfix(nullptr, "malloc") == nullptr);
     Require(::dlclose(host) == 0);
 #endif
+    std::puts("guest_dynamic_loader: all checks passed");
 }

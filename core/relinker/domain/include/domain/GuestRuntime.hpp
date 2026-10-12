@@ -2,6 +2,7 @@
 #define DOMAIN_GUESTRUNTIME_HPP
 
 #include <cstdint>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -29,6 +30,9 @@ struct GuestRuntime {
     // Output names of deferred guest modules this one imports from; they start before it.
     std::vector<std::string> DeferredDependencies;
     std::vector<std::string> Names;
+    std::vector<std::string> UnmatchedImportModules;
+    std::set<std::string> ZeroReturnExports;
+    bool DeferInitialization = false;
 };
 
 }

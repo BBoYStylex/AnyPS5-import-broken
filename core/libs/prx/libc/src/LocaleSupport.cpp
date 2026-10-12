@@ -1,9 +1,10 @@
 #include <climits>
+#include <clocale>
 #include <cstddef>
 #include <cstdio>
 #include <cstdint>
 #include <cwchar>
-#include <cwctype>
+#include <cerrno>
 #include <ios>
 #include <locale>
 #include <mutex>
@@ -17,6 +18,7 @@
 #include <string>
 
 #include "prx/libc/include/General.hpp"
+#include "prx/libc/include/SonyCrt.hpp"
 #include "prx/libc/include/ApplicationHeap.hpp"
 #include "prx/libc/include/GuestLocale.hpp"
 #include "SceTypes.hpp"
@@ -321,8 +323,15 @@ mbstate_t* APS5_VABI _Getpwcstate_nid_postfix() {
     return &state;
 }
 
-wint_t APS5_VABI _Towctrans_nid_postfix(wint_t c, wctrans_t desc) {
-    return std::towctrans(c, desc);
+std::uint32_t APS5_VABI _Towctrans_nid_postfix(std::uint32_t c, std::uint64_t desc) {
+    constexpr std::uint64_t ToLower = 1;
+    constexpr std::uint64_t ToUpper = 2;
+    if (desc != ToLower && desc != ToUpper) {
+        errno = 22;
+        return c;
+    }
+    if (c > UCHAR_MAX) return c;
+    return static_cast<std::uint32_t>((desc == ToLower ? g_lowerTable : g_upperTable)[c + 1]);
 }
 
 // Locale ids and stream objects the title imports besides the ones above; the streams are zeroed
@@ -378,6 +387,10 @@ void APS5_VABI _init_env_nid_postfix() {
 void APS5_VABI init_env_nid_postfix(const InitEnvParams* params) {
     (void)params;
     _init_env_nid_postfix();
+}
+
+SonyLconv* APS5_VABI localeconv_nid_postfix(void) {
+    return SonyLocaleconv();
 }
 
 }

@@ -11,11 +11,6 @@ int APS5_VABI sceVoiceSetThreadsParams(void* params) {
  return 0;
 }
 
-int APS5_VABI sceVoiceSetMuteFlag() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
 int APS5_VABI sceVoiceGetResourceInfo(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
