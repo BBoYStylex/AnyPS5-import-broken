@@ -15,6 +15,11 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#elif defined(__APPLE__)
+#include "prx/libc/include/specifics/linux/ElfTypes.hpp"
+#include <mach-o/dyld.h>
+#include <mach-o/loader.h>
+#include <unistd.h>
 #else
 #include <cerrno>
 #include <cstring>
@@ -77,7 +82,7 @@ void recordChange(void* mutation, const void* pointer, std::size_t bytes) {
     if (mutation != nullptr && bytes != 0) static_cast<MutationState*>(mutation)->changed.emplace_back(reinterpret_cast<std::uintptr_t>(pointer), bytes);
 }
 
-#ifndef _WIN32
+#ifdef __linux__
 std::vector<std::pair<std::uintptr_t, std::size_t>> fileBackedWritableImage() {
     const auto image = std::filesystem::read_symlink("/proc/self/exe").string();
     std::ifstream maps("/proc/self/maps");
@@ -259,6 +264,42 @@ int collectImagePages(dl_phdr_info* image, std::size_t, void* data) {
     return 1;
 }
 
+#ifdef __APPLE__
+void collectDyldImagePages(ImagePages& collected) {
+    const auto pageSize = collected.pageSize;
+    for (std::uint32_t image = 0; image < _dyld_image_count(); ++image) {
+        const auto* header = reinterpret_cast<const mach_header_64*>(_dyld_get_image_header(image));
+        if (!header || header->magic != MH_MAGIC_64 || (header->flags & MH_DYLIB_IN_CACHE) != 0) continue;
+        const auto slide = static_cast<std::uint64_t>(_dyld_get_image_vmaddr_slide(image));
+        bool relinked = false;
+        {
+            const auto* scan = reinterpret_cast<const load_command*>(header + 1);
+            for (std::uint32_t index = 0; index < header->ncmds; ++index) {
+                relinked = relinked || (scan->cmd == LC_SEGMENT_64 && std::strncmp(reinterpret_cast<const segment_command_64*>(scan)->segname, "__APS5DATA", 16) == 0);
+                scan = reinterpret_cast<const load_command*>(reinterpret_cast<const std::uint8_t*>(scan) + scan->cmdsize);
+            }
+        }
+        const auto* command = reinterpret_cast<const load_command*>(header + 1);
+        for (std::uint32_t index = 0; index < header->ncmds; ++index) {
+            if (command->cmd == LC_SEGMENT_64) {
+                const auto& segment = *reinterpret_cast<const segment_command_64*>(command);
+                const bool guestMemory = !relinked || std::strncmp(segment.segname, "__ELF", 5) == 0;
+                if (guestMemory && segment.vmsize != 0 && segment.initprot != VM_PROT_NONE) {
+                    const auto start = (slide + segment.vmaddr) & ~(pageSize - 1);
+                    const auto end = (slide + segment.vmaddr + segment.vmsize + pageSize - 1) & ~(pageSize - 1);
+                    for (auto page = start; page < end; page += pageSize) {
+                        auto& entry = collected.pages[page];
+                        entry.readable = entry.readable || (segment.initprot & (VM_PROT_READ | VM_PROT_WRITE)) != 0;
+                        entry.writable = entry.writable || (segment.initprot & VM_PROT_WRITE) != 0;
+                    }
+                }
+            }
+            command = reinterpret_cast<const load_command*>(reinterpret_cast<const std::uint8_t*>(command) + command->cmdsize);
+        }
+    }
+}
+#endif
+
 std::uintptr_t registerImagePages(const ImagePages& collected) {
     auto& state = registry();
     const auto pageSize = collected.pageSize;
@@ -287,7 +328,11 @@ void GuestAllocationsRegisterMainImage_nid_postfix(void*) {
     auto& state = registry();
     if (state.mainImageRegistered) return;
     ImagePages collected{.main = true, .pageSize = static_cast<std::uint64_t>(::sysconf(_SC_PAGESIZE))};
+#ifdef __APPLE__
+    collectDyldImagePages(collected);
+#else
     dl_iterate_phdr(collectImagePages, &collected);
+#endif
     require(!collected.pages.empty(), "main guest image has no loadable segments");
     registerImagePages(collected);
     state.mainImageRegistered = true;
