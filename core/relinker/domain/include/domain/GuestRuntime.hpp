@@ -24,11 +24,6 @@ struct GuestRuntime {
     std::uint32_t InitRva = 0;
     std::uint32_t FiniRva = 0;
     bool UsePlatformTlsResolver = true;
-    // Loaded later through sceKernelLoadStartModule rather than needed by the executable: its
-    // initializer (module_start) runs then, with the caller's arguments, instead of at startup.
-    bool DeferInit = false;
-    // Output names of deferred guest modules this one imports from; they start before it.
-    std::vector<std::string> DeferredDependencies;
     std::vector<std::string> Names;
     std::vector<std::string> UnmatchedImportModules;
     std::set<std::string> ZeroReturnExports;

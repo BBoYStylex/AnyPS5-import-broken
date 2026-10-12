@@ -355,15 +355,7 @@ std::vector<GuestArtifact> GuestModuleBuilder::Build(const std::filesystem::path
         if (name.empty() || name.find_first_of("/\\:$") != std::string::npos) throw Domain::RelinkerException("Invalid host dependency: " + name);
         if (uniqueHosts.insert(name).second) hostLibraries.push_back(name);
     };
-    std::set<std::size_t> startupModules;
-    const std::function<void(std::size_t)> markStartup = [&](std::size_t index) {
-        if (!startupModules.insert(index).second) return;
-        for (const auto dependency : dependencies[index]) markStartup(dependency);
-    };
-    for (const auto& name : neededNames) {
-        if (const auto guest = guestNames.find(name); guest != guestNames.end()) markStartup(guest->second);
-        addHost(name);
-    }
+    for (const auto& name : neededNames) addHost(name);
     for (const auto& image : images) for (const auto& dependency : image.Dependencies) addHost(dependency);
     if (uniqueHosts.contains("libSceLibcInternal.prx") && uniqueHosts.insert("libc.prx").second) hostLibraries.push_back("libc.prx");
     dynamic.DynamicSegmentData.clear();
@@ -406,16 +398,6 @@ std::vector<GuestArtifact> GuestModuleBuilder::Build(const std::filesystem::path
         if (std::filesystem::exists(target) && std::filesystem::equivalent(inputPath, target)) throw Domain::RelinkerException("Guest output would overwrite the input executable");
         Domain::GuestRuntime runtime;
         runtime.UsePlatformTlsResolver = image.UsePlatformTlsResolver;
-        // System libraries (libSce*, libc) start with the process, as the console starts sce_module;
-        // other guest modules the executable does not need are title plugins (Unity's PSN, SaveData,
-        // ...) whose module_start expects the arguments of their sceKernelLoadStartModule call.
-        const bool systemLibrary = image.OutputName.starts_with("libSce") || image.OutputName.starts_with("libc.");
-        runtime.DeferInit = windows && !systemLibrary && !startupModules.contains(index);
-        for (const auto dependency : dependencies[index]) {
-            const auto& name = images[dependency].OutputName;
-            const bool dependencySystem = name.starts_with("libSce") || name.starts_with("libc.");
-            if (!dependencySystem && !startupModules.contains(dependency)) runtime.DeferredDependencies.push_back(name);
-        }
         runtime.Path = relativeDirectory + "/" + image.OutputName;
         runtime.Names = {Io::Utf8Path(image.SourcePath.filename()), image.Soname};
         runtime.DeferInitialization = deferred(index);
