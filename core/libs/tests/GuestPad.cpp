@@ -24,6 +24,15 @@ int APS5_VABI scePadResetOrientation(int);
 int APS5_VABI scePadSetAngularVelocityDeadbandState(int, bool);
 int APS5_VABI scePadSetAngularVelocityBiasCorrectionState(int, bool);
 int APS5_VABI scePadIsRemoteController(int, bool*);
+int APS5_VABI scePadVrControllerSetVibration(int, const void*);
+int APS5_VABI scePadVrControllerSetVibrationMode(int, int);
+int APS5_VABI scePadVrControllerReadCombinedState(int, void*);
+int APS5_VABI scePadVrControllerGetDeviceInformation(int, void*);
+int APS5_VABI scePadVrControllerRead(int, void*, int);
+int APS5_VABI scePadVrControllerGetTriggerEffectState(int, void*);
+int APS5_VABI scePadVrControllerReadState(int, void*);
+int APS5_VABI scePadVrControllerSetTriggerEffect(int, const void*);
+int APS5_VABI scePadVrControllerSetTriggerEffects(int, const void*);
 }
 
 static void Require(bool value) { if (!value) std::abort(); }
@@ -177,6 +186,25 @@ static void CheckRemoteController(int handle) {
     Require(!remote);
 }
 
+static void CheckVrControllerAbsent(int user, int handle) {
+    Require(scePadOpen_nid_postfix(user, 3, 0, nullptr) == PAD_ERROR_INVALID_ARG);
+    Require(scePadOpen_nid_postfix(user, 4, 0, nullptr) == PAD_ERROR_INVALID_ARG);
+    unsigned char buffer[0x100];
+    for (unsigned char& byte : buffer) byte = 0x5a;
+    for (const int candidate : {handle, handle + 1, 0}) {
+        Require(scePadVrControllerReadState(candidate, buffer) == PAD_ERROR_INVALID_HANDLE);
+        Require(scePadVrControllerRead(candidate, buffer, 1) == PAD_ERROR_INVALID_HANDLE);
+        Require(scePadVrControllerReadCombinedState(candidate, buffer) == PAD_ERROR_INVALID_HANDLE);
+        Require(scePadVrControllerGetDeviceInformation(candidate, buffer) == PAD_ERROR_INVALID_HANDLE);
+        Require(scePadVrControllerGetTriggerEffectState(candidate, buffer) == PAD_ERROR_INVALID_HANDLE);
+        Require(scePadVrControllerSetVibration(candidate, buffer) == PAD_ERROR_INVALID_HANDLE);
+        Require(scePadVrControllerSetVibrationMode(candidate, 1) == PAD_ERROR_INVALID_HANDLE);
+        Require(scePadVrControllerSetTriggerEffect(candidate, buffer) == PAD_ERROR_INVALID_HANDLE);
+        Require(scePadVrControllerSetTriggerEffects(candidate, buffer) == PAD_ERROR_INVALID_HANDLE);
+    }
+    for (const unsigned char byte : buffer) Require(byte == 0x5a);
+}
+
 static void CheckInjectedState(const std::filesystem::path& path) {
     PadInputState physical;
     physical.buttons = 0x2000;
@@ -258,6 +286,7 @@ int main() {
     CheckReadQueue(handle);
     CheckReadStateHandle(handle);
     CheckRemoteController(handle);
+    CheckVrControllerAbsent(user, handle);
     CheckInjectedState(path);
     Require(scePadSetVibrationMode(handle, 1) == 0);
     Require(scePadSetVibrationMode(handle, 2) == 0);
