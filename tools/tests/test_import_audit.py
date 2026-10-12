@@ -212,6 +212,30 @@ class ImportAuditTests(unittest.TestCase):
                     record, = json.loads(result.read_text())["imports"]
                     self.assertEqual((record["class"], record["name"]), ("stub", name))
 
+    def test_test_only_alias_cannot_make_a_throwing_export_look_implemented(self):
+        work = self.work
+        nid, name = "AAAAAAAAAAA", "sceAliasUnknown"
+        write_source(work.source, "libSceAlias", 'APS5_EXPORT("AAAAAAAAAAA", sceAliasUnknown);\n' + STUB_SOURCE.format(name=name))
+        tests = work.source / "libSceAlias/tests/nested"
+        tests.mkdir(parents=True)
+        (tests / "Alias.cpp").write_text('APS5_EXPORT("BBBBBBBBBBB", sceAliasUnknown);\n', encoding="utf-8")
+        (work.libs / "libSceAlias.prx").write_bytes(exporting(nid))
+        registry, result = work.root / "registry.json", work.root / "audit.json"
+        write_registry(registry, [(nid, "libSceAlias.prx")])
+        code, _, errors = work.run(registry, "--json", str(result))
+        self.assertEqual((code, errors), (0, ""))
+        record, = json.loads(result.read_text(encoding="utf-8"))["imports"]
+        self.assertEqual((record["class"], record["name"]), ("stub", name))
+        self.assertEqual(import_audit.source_stubs(work.source), {("libSceAlias.prx", nid): name})
+
+    def test_aliases_in_nested_production_sources_still_identify_stubs(self):
+        work = self.work
+        source = work.source / "libSceAlias/src/nested"
+        source.mkdir(parents=True)
+        name = "sceAliasUnknown"
+        (source / "Export.cpp").write_text('APS5_EXPORT("AAAAAAAAAAA", sceAliasUnknown);\n' + STUB_SOURCE.format(name=name), encoding="utf-8")
+        self.assertEqual(import_audit.source_stubs(work.source), {("libSceAlias.prx", "AAAAAAAAAAA"): name})
+
     def test_comments_and_literals_do_not_override_export_aliases(self):
         work = self.work
         nid, name = "AAAAAAAAAAA", "sceAliasUnknown"
