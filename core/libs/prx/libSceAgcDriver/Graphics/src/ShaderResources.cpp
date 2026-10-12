@@ -3617,7 +3617,7 @@ std::shared_ptr<ShaderResources::DrawBindings> ShaderResources::PrepareDrawBindi
             const auto snapshotIndex = snapshotIndices[binding.allocations[element]];
             if (snapshotIndex == selected.size()) continue;
             const auto& snapshot = result->snapshots[snapshotIndex];
-            buffers[offset + element] = {snapshot.buffer->Handle(), 0, snapshot.buffer->Bytes().size()};
+            buffers[offset + element] = {snapshot.buffer->Handle(), 0, GuestBufferMemory::DescriptorRange(snapshot.buffer->Bytes().size())};
         }
     }
     context.Resolved(&DeviceFunctions::updateDescriptorSets, "vkUpdateDescriptorSets")(context.device, static_cast<std::uint32_t>(writes.size()), writes.data(), 0, nullptr);

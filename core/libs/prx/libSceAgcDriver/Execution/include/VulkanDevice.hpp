@@ -35,6 +35,8 @@ public:
     explicit VulkanDevice(const PresentationWindow* window = nullptr);
     struct CompileOnly {};
     explicit VulkanDevice(CompileOnly);
+    struct WithoutRobustBufferAccess2 {};
+    explicit VulkanDevice(WithoutRobustBufferAccess2);
     ComputePipelineReplayResult ReplayComputePipeline(const ComputePipelineCapture& capture, std::span<const std::byte> initialCache = {});
     ~VulkanDevice();
     VulkanDevice(const VulkanDevice&) = delete;
@@ -305,7 +307,7 @@ public:
     bool PrebuildGraphicsLibraries(const Graphics::ShaderStages& stages, std::span<const Graphics::CompiledShader> shaders);
 
 private:
-    VulkanDevice(const PresentationWindow* window, bool compileOnly);
+    VulkanDevice(const PresentationWindow* window, bool compileOnly, bool allowRobustBufferAccess2 = true);
     friend struct VulkanDeviceTestAccess;
     // The device's Graphics::Context: a copy of the one built at setup (its instance functions
     // resolved then, its function table filled then), or with APS5_NO_CONTEXT_CACHE=1 built anew.
