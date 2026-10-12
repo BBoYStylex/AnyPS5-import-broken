@@ -22,6 +22,7 @@ int APS5_VABI getpid_nid_postfix(void);
 int* APS5_VABI __error_nid_postfix();
 Pthread APS5_VABI pthread_self_nid_postfix(void);
 int APS5_VABI pthread_getaffinity_np_nid_postfix(Pthread thread, std::size_t cpusetSize, void* cpuset);
+int APS5_VABI scePthreadGetthreadid(void);
 }
 
 static constexpr int SCE_OK = 0;
@@ -40,6 +41,7 @@ struct RestoreProcessMask {
 };
 
 static constexpr std::size_t GUEST_CPUSET_BYTES = 32;
+static constexpr int GUEST_ESRCH = 3;
 static constexpr int GUEST_EINVAL = 22;
 static constexpr int GUEST_EFAULT = 14;
 static constexpr int GUEST_ERANGE = 34;
@@ -232,4 +234,15 @@ int main() {
     Require(pthread_getaffinity_np_nid_postfix(nullptr, GUEST_CPUSET_BYTES, rawSet) == GUEST_EINVAL);
     Require(pthread_getaffinity_np_nid_postfix(nullptr, 0, rawSet) == GUEST_EINVAL);
     Require(pthread_getaffinity_np_nid_postfix(pthread_self_nid_postfix(), GUEST_CPUSET_BYTES, nullptr) == GUEST_EFAULT);
+
+    Require(cpuset_getaffinity_nid_postfix(3, 1, scePthreadGetthreadid(), 8, processSet) == 0 && processSet[0] == available);
+    Require(cpuset_getaffinity_nid_postfix(3, 1, 999999, 8, processSet) == -1 && *__error_nid_postfix() == GUEST_ESRCH);
+    Require(cpuset_getaffinity_nid_postfix(3, 2, 999999, 8, processSet) == -1 && *__error_nid_postfix() == GUEST_ESRCH);
+    Require(cpuset_getaffinity_nid_postfix(99, 1, -1, 8, processSet) == -1 && *__error_nid_postfix() == GUEST_EINVAL);
+    Require(cpuset_getaffinity_nid_postfix(3, 99, -1, 8, processSet) == -1 && *__error_nid_postfix() == GUEST_EINVAL);
+    Require(cpuset_setaffinity_nid_postfix(3, 1, scePthreadGetthreadid(), 8, processSet) == 0);
+    Require(cpuset_setaffinity_nid_postfix(3, 1, 999999, 8, processSet) == -1 && *__error_nid_postfix() == GUEST_ESRCH);
+    Require(cpuset_setaffinity_nid_postfix(3, 2, 999999, 8, processSet) == -1 && *__error_nid_postfix() == GUEST_ESRCH);
+    Require(cpuset_setaffinity_nid_postfix(99, 1, -1, 8, processSet) == -1 && *__error_nid_postfix() == GUEST_EINVAL);
+    Require(cpuset_setaffinity_nid_postfix(3, 99, -1, 8, processSet) == -1 && *__error_nid_postfix() == GUEST_EINVAL);
 }
