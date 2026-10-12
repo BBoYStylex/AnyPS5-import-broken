@@ -167,6 +167,11 @@ static int OpenNative(const std::filesystem::path& native, int flags, std::uint1
         if (std::filesystem::exists(status) && !std::filesystem::is_directory(status)) return SceErrorFromErrno(ENOTDIR);
     }
 #endif
+    if ((flags & SCE_KERNEL_O_NOFOLLOW) != 0 && (flags & (SCE_KERNEL_O_CREAT | SCE_KERNEL_O_EXCL)) != (SCE_KERNEL_O_CREAT | SCE_KERNEL_O_EXCL)) {
+        constexpr int GuestEmlink = 31;
+        std::error_code error;
+        if (std::filesystem::is_symlink(native, error)) return SceErrorFromErrno(GuestEmlink);
+    }
     int fd = NativeOpen(native, MapFlags(flags), mode);
 #ifdef __APPLE__
     if (fd >= 0 && (flags & SCE_KERNEL_O_CREAT) != 0) {
@@ -179,12 +184,14 @@ static int OpenNative(const std::filesystem::path& native, int flags, std::uint1
     }
 #endif
 #ifdef _WIN32
-    if (fd < 0 && errno != ENOENT) {
+    if (fd < 0 && (errno != ENOENT || !native.has_filename())) {
+        auto directory = native;
+        while (!directory.has_filename() && directory.has_relative_path()) directory = directory.parent_path();
         std::error_code error;
-        if (std::filesystem::is_directory(native, error)) {
+        if (std::filesystem::is_directory(directory, error)) {
             if ((flags & (SCE_KERNEL_O_CREAT | SCE_KERNEL_O_EXCL)) == (SCE_KERNEL_O_CREAT | SCE_KERNEL_O_EXCL)) errno = EEXIST;
             else if ((flags & SCE_KERNEL_O_ACCMODE) != SCE_KERNEL_O_RDONLY || (flags & (SCE_KERNEL_O_CREAT | SCE_KERNEL_O_TRUNC))) errno = EISDIR;
-            else fd = File::OpenDirectoryDescriptor(native);
+            else fd = File::OpenDirectoryDescriptor(directory);
         }
     }
 #endif
