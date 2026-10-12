@@ -9,6 +9,9 @@ int APS5_VABI sceUserServiceGetRegisteredUserIdList(UserServiceRegisteredUserIdL
 int APS5_VABI sceUserServiceGetUserColor(int user_id, int* color);
 int APS5_VABI sceUserServiceGetNpAccountId(int user_id, std::uint64_t* account_id);
 int APS5_VABI sceUserServiceGetAgeLevel(int user_id, std::uint32_t* age_level);
+int APS5_VABI sceUserServiceGetUserStatus(int user_id, std::int32_t* status);
+int APS5_VABI sceUserServiceGetUserIdByNpAccountId(std::uint64_t account_id, int* user_id);
+int APS5_VABI sceUserServiceGetUserIdByUserName(const char* name, int* user_id);
 int APS5_VABI sceUserServiceGetAccessibilityChatTranscription(int user_id, std::int32_t* value);
 int APS5_VABI sceUserServiceGetAccessibilityPressAndHoldDelay(int user_id, std::int32_t* value);
 int APS5_VABI sceUserServiceGetAccessibilityTriggerEffect(int user_id, std::int32_t* value);

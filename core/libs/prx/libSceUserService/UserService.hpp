@@ -15,4 +15,6 @@ constexpr int USER_SERVICE_ERROR_UNKNOWN_USER = static_cast<int>(0x80960105u);
 constexpr std::size_t USER_SERVICE_MAX_USER_NAME_LENGTH = 16;
 constexpr const char* USER_SERVICE_INITIAL_USER_NAME = "Player";
 
+constexpr std::int32_t USER_SERVICE_USER_STATUS_LOGGED_IN = 1;
+
 #endif
