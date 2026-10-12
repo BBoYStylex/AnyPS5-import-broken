@@ -481,7 +481,12 @@ static int mount3(const SaveDataMount3* mount, SaveDataMountResult* mount_result
             return SAVE_DATA_ERROR_BUSY;
         }
     }
-    const bool exists = std::filesystem::is_directory(real_path);
+    std::error_code error;
+    const bool exists = std::filesystem::is_directory(real_path, error);
+    if (error && error != std::errc::no_such_file_or_directory) {
+        return SAVE_DATA_ERROR_INTERNAL;
+    }
+    error.clear();
     if (create && exists) {
         return SAVE_DATA_ERROR_EXISTS;
     }
@@ -493,12 +498,19 @@ static int mount3(const SaveDataMount3* mount, SaveDataMountResult* mount_result
         return SAVE_DATA_ERROR_MOUNT_FULL;
     }
     if (create || create2) {
-        std::filesystem::create_directories(real_path);
+        std::filesystem::create_directories(real_path, error);
+        if (error) {
+            return SAVE_DATA_ERROR_INTERNAL;
+        }
     }
     // The title gets a short mount point (16 bytes on the PS5) and opens files under it; the
     // path resolver maps it to the save directory, whose name may be far longer.
     const std::string mountPoint = "/savedata" + std::to_string(slot);
-    AddPathAlias_nid_no_patch(mountPoint.c_str(), std::filesystem::absolute(real_path).string().c_str());
+    const auto absolutePath = std::filesystem::absolute(real_path, error);
+    if (error) {
+        return SAVE_DATA_ERROR_INTERNAL;
+    }
+    AddPathAlias_nid_no_patch(mountPoint.c_str(), absolutePath.string().c_str());
     g_slots[slot].used = true;
     g_slots[slot].mount_point = mountPoint;
     g_slots[slot].real_path = real_path;
