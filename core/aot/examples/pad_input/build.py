@@ -97,7 +97,17 @@ def build(sdk, linker, folder, optimization="O0"):
     recipe = {'schema': SCHEMA, 'contracts': contracts, 'policies': policies,
               'qualification': {'facts_sha256': fact_digest(contracts, policies), 'sources': local_sources}}
     contracts, guards = materialize(source, recipe, ROOT)
-    ir, report = compile_image(Image(source, contracts))
+    image = Image(source, contracts)
+    try:
+        ir, report = compile_image(image)
+    except ValueError:
+        print(run(['xcrun', 'clang', '--version'], folder), file=sys.stderr)
+        print('Rejected input sha256: ' + contracts['sha256'], file=sys.stderr)
+        for function in functions:
+            print('Function contract: ' + json.dumps(function, sort_keys=True), file=sys.stderr)
+            for instruction in image.decoder.disasm(image.read(function['address'], function['size']), function['address']):
+                print(f'{instruction.address:x}: {instruction.mnemonic} {instruction.op_str}', file=sys.stderr)
+        raise
     (folder / 'module.ll').write_text(ir)
     report['native_object'] = build_native_object(ir, folder / 'module.o')
     run(['xcrun', 'clang', '-arch', 'arm64', '-O2', '-Dmain=guest_source_main',
