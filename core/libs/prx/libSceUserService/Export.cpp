@@ -185,5 +185,37 @@ int APS5_VABI sceUserServiceGetNpAccountId(int user_id, uint64_t* account_id) {
  *account_id = 0;
  return USER_SERVICE_OK;
 }
+int APS5_VABI sceUserServiceGetUserStatus(int user_id, int32_t* status) {
+ if (status == nullptr) {
+  return USER_SERVICE_ERROR_INVALID_ARGUMENT;
+ }
+ if (user_id != USER_SERVICE_INITIAL_USER_ID) {
+  return USER_SERVICE_ERROR_NOT_LOGGED_IN;
+ }
+ *status = USER_SERVICE_USER_STATUS_LOGGED_IN;
+ return USER_SERVICE_OK;
+}
+
+int APS5_VABI sceUserServiceGetUserIdByNpAccountId(uint64_t account_id, int* user_id) {
+ if (user_id == nullptr) {
+  return USER_SERVICE_ERROR_INVALID_ARGUMENT;
+ }
+ if (account_id != 0) {
+  return USER_SERVICE_ERROR_UNKNOWN_USER;
+ }
+ *user_id = USER_SERVICE_INITIAL_USER_ID;
+ return USER_SERVICE_OK;
+}
+
+int APS5_VABI sceUserServiceGetUserIdByUserName(const char* name, int* user_id) {
+ if (name == nullptr || user_id == nullptr) {
+  return USER_SERVICE_ERROR_INVALID_ARGUMENT;
+ }
+ if (std::strcmp(name, USER_SERVICE_INITIAL_USER_NAME) != 0) {
+  return USER_SERVICE_ERROR_UNKNOWN_USER;
+ }
+ *user_id = USER_SERVICE_INITIAL_USER_ID;
+ return USER_SERVICE_OK;
+}
 
 }

@@ -2,6 +2,8 @@
 
 ### Unknown function info
 
+- [sceUserServiceGetUserStatus](../../../core/libs/prx/libSceUserService/Export.cpp) (libSceUserService) - reports logged-in status (1) for the initial user and not logged in (0x80960009) for any other user id; multiple local users and login/logout state transitions are not modelled
+- [sceUserServiceGetUserIdByNpAccountId, sceUserServiceGetUserIdByUserName](../../../core/libs/prx/libSceUserService/Export.cpp) (libSceUserService) - map the default PSN account id (0) and default profile name ("Player") to the initial user id; unknown account ids and names return 0x80960105 (USER_SERVICE_ERROR_UNKNOWN_USER)
 - [sceUserServiceGetNpAccountId](../../../core/libs/prx/libSceUserService/Export.cpp) (libSceUserService) - the account id for a user with no linked PSN account is assumed to be 0 with success; libSceNpManager's `sceNpGetAccountIdA` answers the same question with `SCE_NP_ERROR_SIGNED_OUT`
 - [sceUserServiceGetUserColor](../../../core/libs/prx/libSceUserService/Export.cpp) (libSceUserService) - the default profile colour is assumed to be blue (0)
 - [sceUserServiceGetUserName](../../../core/libs/prx/libSceUserService/Export.cpp) (libSceUserService) - `0x80960105`, which a PS5 (firmware 13.60) returns for a user id it does not know, has no known name; it is `USER_SERVICE_ERROR_UNKNOWN_USER` here. On the console a registered user who is not logged in still gets their name; here only the initial user exists
