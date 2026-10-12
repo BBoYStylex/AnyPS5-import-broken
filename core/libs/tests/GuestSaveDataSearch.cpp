@@ -148,7 +148,7 @@ static void SearchAndMount() {
     for (std::size_t i = 0; i < 2; ++i) {
         SaveDataSearchInfo info{};
         std::memcpy(&info, infos.data() + i * 48, sizeof(info));
-        Require(info.blocks == 32768 && info.free_blocks == 32768, "search info must report the save's blocks and free blocks");
+        Require(info.blocks == 96 && info.free_blocks == 96, "search info must report an unrecorded empty save as the minimum allocation, all free");
         for (const auto byte : info.reserved) Require(byte == 0, "search info reserved bytes must be zero");
     }
     std::array<bool, 2> found{};

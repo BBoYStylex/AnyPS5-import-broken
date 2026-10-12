@@ -26,6 +26,8 @@ constexpr std::uint32_t SAVE_DATA_MOUNT_MODE_CREATE = 4;
 constexpr std::uint32_t SAVE_DATA_MOUNT_MODE_CREATE2 = 32;
 
 constexpr std::uint64_t SAVE_DATA_BLOCKS_MAX = 32768;
+constexpr std::uint64_t SAVE_DATA_BLOCK_SIZE = 32768;
+constexpr std::uint64_t SAVE_DATA_BLOCKS_MIN = 96;
 constexpr std::uint32_t SAVE_DATA_PARAM_TYPE_ALL = 0;
 constexpr std::uint32_t SAVE_DATA_PARAM_TYPE_TITLE = 1;
 constexpr std::uint32_t SAVE_DATA_PARAM_TYPE_SUB_TITLE = 2;

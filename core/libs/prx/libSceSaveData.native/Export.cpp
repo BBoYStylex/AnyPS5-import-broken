@@ -157,6 +157,44 @@ bool store_param(const std::string& real_path, const SaveDataParam& param) {
     return write_file_replace(param_path(real_path), bytes);
 }
 
+std::string blocks_path(const std::string& real_path) {
+    return real_path + ".blocks";
+}
+
+bool store_blocks(const std::string& real_path, std::uint64_t blocks) {
+    const std::string text = std::to_string(blocks);
+    return write_file_replace(blocks_path(real_path), std::vector<char>(text.begin(), text.end()));
+}
+
+std::uint64_t used_blocks(const std::string& real_path) {
+    std::uint64_t blocks = 0;
+    std::error_code ec;
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(real_path, ec)) {
+        if (!entry.is_regular_file(ec)) continue;
+        const auto size = entry.file_size(ec);
+        if (ec) continue;
+        blocks += (size + SAVE_DATA_BLOCK_SIZE - 1) / SAVE_DATA_BLOCK_SIZE;
+    }
+    return blocks;
+}
+
+std::uint64_t directory_blocks(const std::string& real_path, std::uint64_t used) {
+    std::vector<char> bytes;
+    if (!std::filesystem::exists(blocks_path(real_path)) || !read_file_all(blocks_path(real_path), bytes) || bytes.empty()) return std::clamp(used, SAVE_DATA_BLOCKS_MIN, SAVE_DATA_BLOCKS_MAX);
+    std::uint64_t blocks = 0;
+    for (const char c : bytes) {
+        if (c < '0' || c > '9') throw std::runtime_error("SaveData: blocks file " + blocks_path(real_path) + " is not a number");
+        blocks = blocks * 10u + static_cast<std::uint64_t>(c - '0');
+    }
+    return blocks == 0 ? std::clamp(used, SAVE_DATA_BLOCKS_MIN, SAVE_DATA_BLOCKS_MAX) : blocks;
+}
+
+SaveDataSearchInfo directory_info(const std::string& real_path) {
+    const std::uint64_t used = used_blocks(real_path);
+    const std::uint64_t blocks = directory_blocks(real_path, used);
+    return SaveDataSearchInfo{blocks, blocks - std::min(blocks, used), {}};
+}
+
 struct ParamField {
     std::size_t offset;
     std::size_t size;
@@ -254,6 +292,7 @@ static int deleteSave(const SaveDataDelete* del) {
     }
     std::error_code ec;
     std::filesystem::remove(param_path(path), ec);
+    std::filesystem::remove(blocks_path(path), ec);
     return SAVE_DATA_OK;
 }
 
@@ -320,7 +359,7 @@ static int dirNameSearch(const SaveDataDirNameSearchCond* cond, SaveDataDirNameS
             result->params[i] = sortByParam ? matches[i].param : load_param(matches[i].path);
         }
         if (result->infos != nullptr) {
-            result->infos[i] = SaveDataSearchInfo{SAVE_DATA_BLOCKS_MAX, SAVE_DATA_BLOCKS_MAX, {}};
+            result->infos[i] = directory_info(matches[i].path);
         }
     }
     result->hit_num = static_cast<std::uint32_t>(matches.size());
@@ -357,8 +396,9 @@ static int getMountInfo(const SaveDataMountPoint* mount_point, SaveDataMountInfo
         return SAVE_DATA_ERROR_NOT_MOUNTED;
     }
     std::memset(info, 0, sizeof(*info));
-    info->blocks = SAVE_DATA_BLOCKS_MAX;
-    info->free_blocks = SAVE_DATA_BLOCKS_MAX;
+    const auto directory = directory_info(g_slots[find_slot_by_mount_point(mount_point->data)].real_path);
+    info->blocks = directory.blocks;
+    info->free_blocks = directory.free_blocks;
     return SAVE_DATA_OK;
 }
 
@@ -499,8 +539,9 @@ static int mount3(const SaveDataMount3* mount, SaveDataMountResult* mount_result
     if (slot == -1) {
         return SAVE_DATA_ERROR_MOUNT_FULL;
     }
-    if (create || create2) {
+    if (create || (create2 && !exists)) {
         std::filesystem::create_directories(real_path);
+        store_blocks(real_path, mount->blocks);
     }
     // The title gets a short mount point (16 bytes on the PS5) and opens files under it; the
     // path resolver maps it to the save directory, whose name may be far longer.
