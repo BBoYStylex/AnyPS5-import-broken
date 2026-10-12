@@ -142,8 +142,7 @@ std::int64_t APS5_VABI readlink_nid_postfix(const char* path, char* buffer, std:
     if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
         std::string target;
         if (!ReadRelativeSymbolicLink(native, target)) {
-            NotImplemented_nid_no_patch("readlink of a Windows reparse point other than a relative symbolic link");
-            return -1;
+            throw std::runtime_error("readlink: reparse point other than a relative symbolic link is unsupported");
         }
         return CopyLinkTarget(target, buffer, size);
     }
