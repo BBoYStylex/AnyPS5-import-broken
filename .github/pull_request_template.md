@@ -14,4 +14,5 @@
 - [ ] Generic behaviour, not specific to one title
 - [ ] Depends on: <!-- #PR, or none -->
 - [ ] Unblocks: <!-- title ID and Game bring-up discussion, e.g. PPSA01325 #3232, or none -->
+- [ ] GPUs tested: <!-- vendor, model, driver and OS for each GPU; n/a if none -->
 - [ ] AI-assisted: <!-- yes / no -->
