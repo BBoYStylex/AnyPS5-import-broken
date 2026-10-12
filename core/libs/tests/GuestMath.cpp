@@ -33,6 +33,7 @@ float APS5_VABI sqrtf_nid_postfix(float);
 double APS5_VABI fabs_nid_postfix(double);
 int APS5_VABI abs_nid_postfix(int);
 double APS5_VABI trunc_nid_postfix(double);
+float APS5_VABI truncf_nid_postfix(float);
 double APS5_VABI ceil_nid_postfix(double);
 double APS5_VABI nearbyint_nid_postfix(double);
 double APS5_VABI fma_nid_postfix(double, double, double);
@@ -138,6 +139,10 @@ static void CheckExactOperations() {
     Require(std::bit_cast<std::uint64_t>(trunc_nid_postfix(-0.5)) == 0x8000000000000000ull);
     Require(trunc_nid_postfix(4503599627370497.) == 4503599627370497. && trunc_nid_postfix(-1e300) == -1e300);
     Require(trunc_nid_postfix(-INFINITY) == -INFINITY && std::isnan(trunc_nid_postfix(nan)));
+    Require(truncf_nid_postfix(2.7f) == 2.0f && truncf_nid_postfix(-2.7f) == -2.0f);
+    Require(std::bit_cast<std::uint32_t>(truncf_nid_postfix(-0.5f)) == 0x80000000u);
+    Require(truncf_nid_postfix(8388609.0f) == 8388609.0f && truncf_nid_postfix(-1e30f) == -1e30f);
+    Require(truncf_nid_postfix(-INFINITY) == -INFINITY && std::isnan(truncf_nid_postfix(std::numeric_limits<float>::quiet_NaN())));
     Require(ceil_nid_postfix(2.2) == 3. && ceil_nid_postfix(-2.7) == -2. && ceil_nid_postfix(5.) == 5.);
     Require(std::bit_cast<std::uint64_t>(ceil_nid_postfix(-0.5)) == 0x8000000000000000ull);
     Require(std::bit_cast<std::uint64_t>(ceil_nid_postfix(-0.)) == 0x8000000000000000ull && ceil_nid_postfix(0x1p-1074) == 1.);
