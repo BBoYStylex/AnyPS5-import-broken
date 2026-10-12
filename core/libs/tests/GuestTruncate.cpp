@@ -26,8 +26,10 @@ static void Require(bool value) { if (!value) std::abort(); }
 constexpr int GuestEnoent = 2;
 constexpr int GuestEacces = 13;
 constexpr int GuestEfault = 14;
+constexpr int GuestEnotdir = 20;
 constexpr int GuestEisdir = 21;
 constexpr int GuestEinval = 22;
+constexpr int GuestEloop = 62;
 constexpr int SceKernelErrorBase = static_cast<int>(0x80020000u);
 
 static void RequireFailure(int result, int error) {
@@ -63,6 +65,9 @@ int main() {
     Require(std::filesystem::file_size(file) == 0);
     RequireFailure(truncate_nid_postfix((directory / "missing").string().c_str(), 0), GuestEnoent);
     RequireFailure(truncate_nid_postfix("", 0), GuestEnoent);
+    RequireFailure(truncate_nid_postfix((path + "/").c_str(), 0), GuestEnotdir);
+    RequireFailure(truncate_nid_postfix((file / "inner").string().c_str(), 0), GuestEnotdir);
+    Require(sceKernelTruncate_nid_postfix((file / "inner").string().c_str(), 0) == SceKernelErrorBase + GuestEnotdir);
     RequireFailure(truncate_nid_postfix(nullptr, 0), GuestEfault);
     RequireFailure(truncate_nid_postfix(directory.string().c_str(), 0), GuestEisdir);
     Require(std::filesystem::is_directory(directory));
@@ -84,6 +89,11 @@ int main() {
         std::fprintf(stderr, "running as root, which ignores file permissions: the read-only cases not tested\n");
     }
     std::filesystem::permissions(file, std::filesystem::perms::owner_read | std::filesystem::perms::owner_write);
+    const auto loop = directory / "loop";
+    std::filesystem::create_symlink(loop.filename(), loop);
+    RequireFailure(truncate_nid_postfix(loop.string().c_str(), 0), GuestEloop);
+    Require(sceKernelTruncate_nid_postfix(loop.string().c_str(), 0) == SceKernelErrorBase + GuestEloop);
+    Require(std::filesystem::remove(loop));
 #endif
     Require(Contents(file) == "locked");
 

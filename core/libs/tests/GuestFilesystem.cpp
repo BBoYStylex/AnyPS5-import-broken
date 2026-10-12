@@ -349,7 +349,7 @@ int main() {
     Require(std::filesystem::file_size(sized) == 6);
     { std::ifstream stream(sized); std::string contents; std::getline(stream, contents);
       Require(contents == "012345"); }
-    Require(sceKernelTruncate_nid_postfix((sized / "missing").string().c_str(), 6) == static_cast<int>(0x80020002u));
+    Require(sceKernelTruncate_nid_postfix((sized / "missing").string().c_str(), 6) == static_cast<int>(0x80020014u));
     Require(sceKernelUtimes_nid_postfix(sized.string().c_str(), nullptr) == 0);
     std::FILE* native = std::fopen(sized.string().c_str(), "r+b");
     Require(native != nullptr);

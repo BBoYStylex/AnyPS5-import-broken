@@ -1174,8 +1174,14 @@ int APS5_VABI sceKernelTruncate_nid_postfix(const char* path, std::int64_t lengt
     if (const int error = ResolvePathError_nid_no_patch(path, native)) return SceKernelError(error);
     std::error_code error;
     const auto status = std::filesystem::status(native, error);
-    if (!std::filesystem::exists(status)) return SceErrorFromErrno(GUEST_ENOENT);
+    if (!std::filesystem::exists(status)) {
+        std::error_code withoutSeparatorError;
+        const bool trailingSeparatorOnFile = !native.has_filename() && std::filesystem::exists(WithoutTrailingSeparator(native), withoutSeparatorError);
+        if (HasNonDirectoryPrefix(native) || trailingSeparatorOnFile) return SceErrorFromErrno(GUEST_ENOTDIR);
+        return SceKernelError(error ? FilesystemError(error) : GUEST_ENOENT);
+    }
     if (std::filesystem::is_directory(status)) return SceErrorFromErrno(GUEST_EISDIR);
+    if (!native.has_filename()) return SceErrorFromErrno(GUEST_ENOTDIR);
     if (const int failure = NativeTruncate(native, length)) return SceErrorFromErrno(failure);
     RecordWrittenPath_nid_no_patch(native);
     return 0;
