@@ -20,6 +20,7 @@ int main(int argc, char** argv) {
             rejected = true;
         }
         Require(rejected);
+        std::filesystem::remove_all("data");
         return 0;
     }
     Require(std::strcmp(GetAppTitleId_nid_postfix().value, "PPSA00000") == 0);
