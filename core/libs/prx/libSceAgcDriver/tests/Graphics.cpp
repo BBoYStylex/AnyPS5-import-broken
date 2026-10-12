@@ -25,6 +25,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <chrono>
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
@@ -4527,6 +4528,55 @@ void parallelCompareTests() {
     CompareSpansFrom({}, none, 0);
 }
 
+void bufferRangeBenchmark() {
+    using namespace AgcDriver::Graphics;
+    alignas(4096) std::array<std::byte, 16384> bytes{};
+    const auto base = reinterpret_cast<std::uintptr_t>(bytes.data());
+    std::uint64_t checksum = 0;
+    for (const std::size_t length : {std::size_t{0}, std::size_t{4096}, bytes.size()}) {
+        std::vector<double> samples;
+        for (unsigned pass = 0; pass < 10; ++pass) {
+            const auto start = std::chrono::steady_clock::now();
+            for (unsigned call = 0; call < 8192; ++call) checksum += AgcDriver::GuestMemory::DescribeCommitted(base, length, true).whole;
+            if (pass != 0) samples.push_back(std::chrono::duration<double, std::nano>(std::chrono::steady_clock::now() - start).count() / 8192);
+        }
+        std::sort(samples.begin(), samples.end());
+        std::cout << "DescribeCommitted " << length << " bytes: " << samples[4] << " ns/call, checksum " << checksum << '\n';
+    }
+    auto context = mockContext();
+    context.bufferDeviceAddress = true;
+    context.hostImportAlignment = 65536;
+    context.limits.maxStorageBufferRange = 1u << 27;
+    for (const std::size_t count : {0u, 1u, 8u, 64u}) {
+        std::vector<double> samples;
+        for (unsigned pass = 0; pass < 10; ++pass) {
+            std::vector<std::unique_ptr<GuestBufferMemory>> batch;
+            for (unsigned call = 0; call < 1024; ++call) {
+                auto memory = std::make_unique<GuestBufferMemory>(context);
+                for (std::size_t i = count; i != 0; --i) {
+                    const auto offset = ((i - 1) / 2) * 128 + ((i - 1) % 2) * 16;
+                    memory->AddSnapshot({base + offset, std::span<const std::byte>(bytes).subspan(offset, 32)});
+                }
+                batch.push_back(std::move(memory));
+            }
+            const auto start = std::chrono::steady_clock::now();
+            for (const auto& memory : batch) memory->UploadPrepare(true);
+            const auto elapsed = std::chrono::duration<double, std::nano>(std::chrono::steady_clock::now() - start).count() / batch.size();
+            if (pass != 0) samples.push_back(elapsed);
+            batch.front()->UploadFinish(true);
+            const auto ranges = batch.front()->AddressRanges();
+            Require(ranges.size() == (count + 1) / 2, "benchmark normalization lost a range");
+            for (const auto& range : ranges) checksum += range.end - range.begin;
+            batch.clear();
+            Require(mock.live == 0, "benchmark batch leaked Vulkan objects");
+            mock = MockVulkan{};
+        }
+        std::sort(samples.begin(), samples.end());
+        std::cout << "UploadPrepare " << count << " snapshot regions: " << samples[4] << " ns/call, checksum " << checksum << '\n';
+    }
+    Require(mock.live == 0, "buffer range benchmark leaked Vulkan objects");
+}
+
 int main(int argc, char** argv) {
 #ifdef _WIN32
     _putenv_s("APS5_PIN_WAIT_MS", "200");
@@ -4536,6 +4586,10 @@ int main(int argc, char** argv) {
     setenv("APS5_HEAP_MIRROR_MIB", "4", 1);
 #endif
     try {
+        if (argc == 2 && std::string_view(argv[1]) == "--benchmark-buffer-ranges") {
+            bufferRangeBenchmark();
+            return 0;
+        }
         if (argc == 2 && std::string_view(argv[1]) == "--descriptor-layout-flags") {
             descriptorLayoutFlagTests();
             std::cout << "Descriptor layout native and captured binding flags passed\n";

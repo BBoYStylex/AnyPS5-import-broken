@@ -11,7 +11,14 @@
 #include <algorithm>
 #include <utility>
 #include <vector>
-#if defined(__linux__)
+#include <memory>
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+#ifndef _WIN32
 #include <sys/mman.h>
 #include <unistd.h>
 #endif
@@ -25,6 +32,59 @@ void reject(TAction action) {
     try { action(); }
     catch (const std::runtime_error&) { return; }
     throw std::runtime_error("expected guest allocation ownership rejection");
+}
+
+void committedRangeTests() {
+    namespace GuestMemory = AgcDriver::GuestMemory;
+    constexpr std::size_t page = 65536;
+#ifdef _WIN32
+    auto* block = static_cast<std::byte*>(VirtualAlloc(nullptr, 3 * page, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
+    Require(block != nullptr, "cannot allocate commitment test pages");
+    const auto release = [](std::byte* memory) { VirtualFree(memory, 0, MEM_RELEASE); };
+#else
+    auto* block = static_cast<std::byte*>(mmap(nullptr, 3 * page, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+    Require(block != MAP_FAILED, "cannot allocate commitment test pages");
+    const auto release = [](std::byte* memory) { munmap(memory, 3 * page); };
+#endif
+    const std::unique_ptr<std::byte, decltype(release)> owner(block, release);
+    const auto protect = [&](std::size_t index, bool readable, bool writable) {
+#ifdef _WIN32
+        DWORD previous = 0;
+        Require(VirtualProtect(block + index * page, page, writable ? PAGE_READWRITE : readable ? PAGE_READONLY : PAGE_NOACCESS, &previous) != 0, "cannot protect commitment test page");
+#else
+        Require(mprotect(block + index * page, page, writable ? PROT_READ | PROT_WRITE : readable ? PROT_READ : PROT_NONE) == 0, "cannot protect commitment test page");
+#endif
+    };
+    const auto base = reinterpret_cast<std::uintptr_t>(block);
+    using Ranges = std::vector<std::pair<std::uint64_t, std::uint64_t>>;
+    const auto full = GuestMemory::DescribeCommitted(base, 3 * page, true);
+    Require(full.whole && full.partialRanges.empty(), "complete mapping retained partial ranges");
+    Require(GuestMemory::CommittedRanges(base, 3 * page, true) == Ranges{{base, base + 3 * page}}, "complete mapping lost its explicit range");
+    const auto empty = GuestMemory::DescribeCommitted(base, 0);
+    Require(empty.whole && empty.partialRanges.empty() && GuestMemory::CommittedRanges(base, 0).empty(), "empty mapping has committed bytes");
+    protect(2, true, false);
+    const auto prefix = GuestMemory::DescribeCommitted(base, 3 * page, true);
+    Require(!prefix.whole && prefix.partialRanges == Ranges{{base, base + 2 * page}}, "read-only tail retained writable commitment");
+    protect(0, true, false);
+    protect(1, false, false);
+    const auto split = GuestMemory::DescribeCommitted(base + 17, 3 * page - 34);
+    Require(!split.whole && split.partialRanges == Ranges{{base + 17, base + page}, {base + 2 * page, base + 3 * page - 17}}, "partial ranges lost a gap or their clipped bounds");
+    const auto unwritable = GuestMemory::DescribeCommitted(base, 3 * page, true);
+    Require(!unwritable.whole && unwritable.partialRanges.empty(), "inaccessible pages acquired writable ranges");
+#ifdef _WIN32
+    Require(VirtualFree(block + page, page, MEM_DECOMMIT) != 0, "cannot decommit the middle page");
+#else
+    Require(munmap(block + page, page) == 0, "cannot unmap the middle page");
+#endif
+    Require(GuestMemory::CommittedRanges(base, 3 * page) == Ranges{{base, base + page}, {base + 2 * page, base + 3 * page}}, "unmapped page retained commitment");
+#ifdef _WIN32
+    Require(VirtualAlloc(block + page, page, MEM_COMMIT, PAGE_READWRITE) == block + page, "cannot recommit the middle page");
+#else
+    Require(mmap(block + page, page, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0) == block + page, "cannot remap the middle page");
+#endif
+    const auto restored = GuestMemory::DescribeCommitted(base, 3 * page);
+    Require(restored.whole && restored.partialRanges.empty(), "adjacent readable mappings did not become whole");
+    Require(GuestMemory::CommittedRanges(base, 3 * page, true) == Ranges{{base + page, base + 2 * page}}, "address reuse retained stale commitment");
 }
 
 }
@@ -73,6 +133,7 @@ void RunGuestLeaseWaitTests() {
 }
 
 void RunGuestAllocationTests() {
+    committedRangeTests();
     void* pointer = GuestHeap::GuestHeapAllocate_nid_postfix(32);
     Require(reinterpret_cast<std::uintptr_t>(pointer) % alignof(std::max_align_t) == 0, "guest malloc is not suitably aligned");
     std::memset(pointer, 0x55, 32);
