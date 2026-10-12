@@ -336,3 +336,32 @@ def read_unwind_index(view, relocations=None):
             'header': {key: value for key, value in index.items() if key != 'table'} | {'indexed': None if index['table'] is None else len(index['table'])},
             'cies': [{key: value for key, value in cie.items() if key != 'end'} for _, cie in sorted(cies.items())],
             'fdes': result, 'stream': stream, 'obligations': obligations}
+
+
+def read_lsda(view, address, function_begin, function_size):
+    cursor = Cursor(view, address, view.segment_end(address))
+    start_encoding = cursor.unpack('<B')
+    landing_base = function_begin
+    if start_encoding != OMIT:
+        landing_base, _ = cursor.encoded(start_encoding, function_base=function_begin, allow_indirect=False)
+    type_encoding = cursor.unpack('<B')
+    if type_encoding != OMIT:
+        cursor.leb()
+    call_encoding = cursor.unpack('<B')
+    require(call_encoding & 0x70 == 0 and call_encoding & 0x80 == 0, f'unsupported LSDA call-site encoding 0x{call_encoding:02x}')
+    table_size = cursor.leb()
+    end = cursor.address + table_size
+    require(end <= cursor.end, f'LSDA call-site table at 0x{address:x} exceeds its segment')
+    sites = []
+    while cursor.address < end:
+        start, _ = cursor.encoded(call_encoding, allow_indirect=False)
+        length, _ = cursor.encoded(call_encoding, allow_indirect=False)
+        landing, _ = cursor.encoded(call_encoding, allow_indirect=False)
+        action = cursor.leb()
+        require(start + length <= function_size, f'LSDA call site exceeds its function at 0x{address:x}')
+        pad = (landing_base + landing) if landing else None
+        if pad is not None:
+            require(function_begin <= pad < function_begin + function_size, f'LSDA landing pad 0x{pad:x} is outside its function')
+        sites.append({'start': function_begin + start, 'size': length, 'landing_pad': pad, 'action': action})
+    require(cursor.address == end, f'LSDA call-site table size mismatch at 0x{address:x}')
+    return sites

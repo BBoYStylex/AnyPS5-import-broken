@@ -41,6 +41,8 @@ const char* TrapName(std::uint64_t kind) {
         case NativeAotGuest::Halt: return "privileged halt instruction";
         case NativeAotGuest::MissingImport: return "missing import provider";
         case NativeAotGuest::UnsupportedRelocation: return "unsupported relocation";
+        case NativeAotGuest::MisalignedVector: return "misaligned aligned vector access";
+        case NativeAotGuest::SplitLock: return "locked access crosses its natural alignment";
         default: return "unsupported guest operation";
     }
 }
@@ -114,7 +116,7 @@ extern "C" [[noreturn]] void NativeAotGuestTrap(std::uint64_t kind, std::uint64_
     std::_Exit(128 + TrapSignal(kind));
 }
 
-extern "C" NativeAotGuestFunction NativeAotGuestLookup(std::uint64_t address) {
+extern "C" NativeAotGuestFunction NativeAotGuestFind(std::uint64_t address) {
     if (loaded != nullptr && address >= imageBase && address - imageBase < loaded->Span) {
         const auto offset = address - imageBase;
         const auto* begin = loaded->Entries;
@@ -126,6 +128,11 @@ extern "C" NativeAotGuestFunction NativeAotGuestLookup(std::uint64_t address) {
     }
     if (address > importRegion && address - importRegion < importRegionSize && (address - importRegion) % 16 == 0)
         return ImportThunk;
+    return nullptr;
+}
+
+extern "C" NativeAotGuestFunction NativeAotGuestLookup(std::uint64_t address) {
+    if (const auto function = NativeAotGuestFind(address)) return function;
     NativeAotGuestTrap(NativeAotGuest::UnknownTarget, address, 0);
 }
 
@@ -159,6 +166,10 @@ namespace NativeAotGuest {
 
 void RegisterProviders(const ProviderBinding* bindings, std::size_t count) {
     registry.insert(registry.end(), bindings, bindings + count);
+}
+
+const ProviderBinding* FindProviderBinding(const char* name) {
+    return FindProvider(name);
 }
 
 std::uint64_t ProviderAddress(const char* name) {
@@ -233,6 +244,20 @@ std::uint64_t ImageBase() {
     return imageBase;
 }
 
+std::uint64_t ImageSpan() {
+    return loaded == nullptr ? 0 : loaded->Span;
+}
+
+std::uint64_t ExportAddress(const char* name) {
+    if (loaded == nullptr || name == nullptr) return 0;
+    for (std::uint64_t index = 0; index < loaded->ExportCount; ++index)
+        if (std::strcmp(loaded->Exports[index].Name, name) == 0) return imageBase + loaded->Exports[index].Address;
+    for (std::uint64_t index = 0; index < loaded->SymbolCount; ++index)
+        if (std::strcmp(loaded->Symbols[index], name) == 0 && importProviders[index] != nullptr)
+            return importRegion + 16 * (index + 1);
+    return 0;
+}
+
 NativeAotGuestState& CurrentState() {
     if (current == nullptr) Fail("no active guest state on this thread");
     return *current;
@@ -284,6 +309,27 @@ void ReturnDouble(NativeAotGuestState& state, double value) {
     std::memcpy(state.Xmm[0], &value, sizeof(value));
 }
 
+std::uint64_t CreateThreadArea() {
+    const auto segmentAlignment = std::max<std::uint64_t>(loaded == nullptr ? 1 : loaded->TlsAlignment, 1);
+    const auto alignment = std::max<std::uint64_t>(segmentAlignment, 64);
+    const auto block = loaded == nullptr ? 0 : (loaded->TlsMemorySize + segmentAlignment - 1) / segmentAlignment * segmentAlignment;
+    const auto bytes = block + 2 * alignment + 0x100;
+    auto* memory = static_cast<std::uint8_t*>(std::calloc(1, bytes));
+    if (memory == nullptr) Fail("cannot allocate guest thread area");
+    const auto start = reinterpret_cast<std::uint64_t>(memory);
+    const auto pointer = (start + block + alignment - 1) / alignment * alignment;
+    if (loaded != nullptr && loaded->TlsFileSize != 0)
+        std::memcpy(reinterpret_cast<void*>(pointer - block), reinterpret_cast<const void*>(imageBase + loaded->TlsAddress), loaded->TlsFileSize);
+    std::uint64_t guard[2];
+    arc4random_buf(guard, sizeof(guard));
+    guard[0] &= ~std::uint64_t{0xff};
+    std::memcpy(reinterpret_cast<void*>(pointer), &pointer, 8);
+    std::memcpy(reinterpret_cast<void*>(pointer + 0x10), &pointer, 8);
+    std::memcpy(reinterpret_cast<void*>(pointer + 0x28), &guard[0], 8);
+    std::memcpy(reinterpret_cast<void*>(pointer + 0x30), &guard[1], 8);
+    return pointer;
+}
+
 std::uint64_t AllocateStack(std::size_t bytes) {
     const auto size = (bytes + PageSize - 1) & ~(PageSize - 1);
     auto* memory = mmap(nullptr, size + PageSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
@@ -315,6 +361,7 @@ void Start(const NativeAotGuestImage& image, int argc, char** argv, char** envp)
     std::memcpy(cursor, auxiliary, sizeof(auxiliary));
     state.Gpr[Rsp] = top;
     state.Gpr[2] = 0;
+    state.FsBase = CreateThreadArea();
     current = &state;
     const auto entry = imageBase + image.EntryPoint;
     const auto result = NativeAotGuestLookup(entry)(&state, entry);

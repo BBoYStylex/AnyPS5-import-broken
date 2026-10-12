@@ -1,6 +1,12 @@
 #include "native/NativeAotGlibc.hpp"
+#include "native/NativeAotGlibcSupport.hpp"
 #include "native/NativeAotGuest.hpp"
+#include <algorithm>
+#include <atomic>
+#include <cctype>
 #include <cerrno>
+#include <condition_variable>
+#include <cwchar>
 #include <csignal>
 #include <cstdarg>
 #include <cstdio>
@@ -18,21 +24,9 @@
 #include <unistd.h>
 #include <vector>
 
-namespace {
-
-using State = NativeAotGuestState;
-using NativeAotGuest::Argument;
-using NativeAotGuest::Return;
+namespace NativeAotGlibcSupport {
 
 thread_local int guestErrno = 0;
-FILE* guestStdin = stdin;
-FILE* guestStdout = stdout;
-FILE* guestStderr = stderr;
-std::mutex exitLock;
-std::vector<std::pair<std::uint64_t, std::uint64_t>> exitHandlers;
-std::map<DIR*, std::vector<std::uint8_t>> directoryEntries;
-std::uint64_t signalHandlers[65] = {};
-std::uint64_t signalStack = 0;
 
 [[noreturn]] void Unsupported(const std::string& message) {
     std::fprintf(stderr, "native AOT glibc provider: %s\n", message.c_str());
@@ -69,38 +63,35 @@ int HostErrno(int guest) {
     return -1;
 }
 
-struct ErrnoScope {
-    int before;
-    ErrnoScope() : before(errno) {}
-    ~ErrnoScope() {
-        if (errno != before) guestErrno = GuestErrno(errno);
-    }
-};
-
-template<class Value>
-Value* Pointer(const State& state, std::size_t index) {
-    return reinterpret_cast<Value*>(Argument(state, index));
+void SetGuestErrno(int value) {
+    guestErrno = value;
 }
 
-const char* Text(const State& state, std::size_t index) {
-    return Pointer<const char>(state, index);
+int CurrentGuestErrno() {
+    return guestErrno;
 }
 
-std::int64_t Signed(const State& state, std::size_t index) {
-    return static_cast<std::int64_t>(Argument(state, index));
+void Register(const NativeAotGuest::ProviderBinding* bindings, std::size_t count) {
+    NativeAotGuest::RegisterProviders(bindings, count);
 }
 
-int Integer(const State& state, std::size_t index) {
-    return static_cast<int>(static_cast<std::uint32_t>(Argument(state, index)));
+
 }
 
-void ReturnPointer(State& state, const void* value) {
-    Return(state, reinterpret_cast<std::uint64_t>(value));
-}
+namespace {
 
-void ReturnInteger(State& state, std::int64_t value) {
-    Return(state, static_cast<std::uint64_t>(value));
-}
+using namespace NativeAotGlibcSupport;
+using NativeAotGuest::Argument;
+using NativeAotGuest::Return;
+
+FILE* guestStdin = stdin;
+FILE* guestStdout = stdout;
+FILE* guestStderr = stderr;
+std::mutex exitLock;
+std::vector<std::pair<std::uint64_t, std::uint64_t>> exitHandlers;
+std::map<DIR*, std::vector<std::uint8_t>> directoryEntries;
+std::uint64_t signalHandlers[65] = {};
+std::uint64_t signalStack = 0;
 
 int HostSignal(int guest) {
     switch (guest) {
@@ -209,30 +200,60 @@ int HostDirectory(std::int64_t guest) {
 }
 
 struct VarArgs {
-    const State& state;
-    std::size_t integer;
-    std::size_t floating;
-    std::uint64_t stack;
+    const State* state = nullptr;
+    std::size_t integer = 0;
+    std::size_t floating = 0;
+    std::uint64_t stack = 0;
+    std::uint64_t list = 0;
+    std::uint32_t integerOffset = 0;
+    std::uint32_t floatingOffset = 0;
+    std::uint64_t saveArea = 0;
 
     VarArgs(const State& value, std::size_t fixedIntegers)
-        : state(value), integer(fixedIntegers), floating(0), stack(value.Gpr[4] + 8) {}
+        : state(&value), integer(fixedIntegers), stack(value.Gpr[4] + 8) {}
 
-    std::uint64_t Next() {
-        if (integer < 6) return Argument(state, integer++);
+    explicit VarArgs(std::uint64_t vaList) : list(vaList) {
+        std::memcpy(&integerOffset, reinterpret_cast<const void*>(vaList), 4);
+        std::memcpy(&floatingOffset, reinterpret_cast<const void*>(vaList + 4), 4);
+        std::memcpy(&stack, reinterpret_cast<const void*>(vaList + 8), 8);
+        std::memcpy(&saveArea, reinterpret_cast<const void*>(vaList + 16), 8);
+    }
+
+    std::uint64_t Overflow() {
         std::uint64_t value;
         std::memcpy(&value, reinterpret_cast<const void*>(stack), 8);
         stack += 8;
         return value;
     }
 
+    std::uint64_t Next() {
+        if (list != 0) {
+            if (integerOffset < 48) {
+                std::uint64_t value;
+                std::memcpy(&value, reinterpret_cast<const void*>(saveArea + integerOffset), 8);
+                integerOffset += 8;
+                return value;
+            }
+            return Overflow();
+        }
+        if (integer < 6) return Argument(*state, integer++);
+        return Overflow();
+    }
+
     double NextDouble() {
         double value;
-        if (floating < 8) {
-            std::memcpy(&value, state.Xmm[floating++], 8);
+        if (list != 0) {
+            if (floatingOffset < 176) {
+                std::memcpy(&value, reinterpret_cast<const void*>(saveArea + floatingOffset), 8);
+                floatingOffset += 16;
+                return value;
+            }
+        } else if (floating < 8) {
+            std::memcpy(&value, state->Xmm[floating++], 8);
             return value;
         }
-        std::memcpy(&value, reinterpret_cast<const void*>(stack), 8);
-        stack += 8;
+        const auto raw = Overflow();
+        std::memcpy(&value, &raw, 8);
         return value;
     }
 };
@@ -353,7 +374,7 @@ std::string Format(const char* format, VarArgs& arguments) {
                 print(arguments.NextDouble());
                 break;
             case 'm':
-                output += std::strerror(HostErrno(guestErrno));
+                output += std::strerror(HostErrno(CurrentGuestErrno()));
                 break;
             case 'n':
                 Unsupported("%n formatting");
@@ -364,6 +385,21 @@ std::string Format(const char* format, VarArgs& arguments) {
     return output;
 }
 
+void WriteStream(State& state, FILE* stream, const std::string& text) {
+    ErrnoScope scope;
+    const auto written = std::fwrite(text.data(), 1, text.size(), stream);
+    ReturnInteger(state, written == text.size() ? static_cast<std::int64_t>(text.size()) : -1);
+}
+
+void WriteBuffer(State& state, char* buffer, std::uint64_t capacity, const std::string& text) {
+    if (capacity != 0) {
+        const auto count = std::min<std::uint64_t>(capacity - 1, text.size());
+        std::memcpy(buffer, text.data(), count);
+        buffer[count] = '\0';
+    }
+    ReturnInteger(state, static_cast<std::int64_t>(text.size()));
+}
+
 void WriteFormatted(State& state, FILE* stream, const char* format, std::size_t fixed) {
     VarArgs arguments(state, fixed);
     const auto text = Format(format, arguments);
@@ -372,8 +408,109 @@ void WriteFormatted(State& state, FILE* stream, const char* format, std::size_t 
     ReturnInteger(state, written == text.size() ? static_cast<std::int64_t>(text.size()) : -1);
 }
 
+int Scan(const char* input, const char* format, VarArgs& arguments) {
+    const char* cursor = input;
+    int assigned = 0;
+    bool converted = false;
+    for (const char* spec = format; *spec != '\0';) {
+        if (std::isspace(static_cast<unsigned char>(*spec))) {
+            while (std::isspace(static_cast<unsigned char>(*spec))) ++spec;
+            while (std::isspace(static_cast<unsigned char>(*cursor))) ++cursor;
+            continue;
+        }
+        if (*spec != '%' || spec[1] == '%') {
+            const char expected = *spec == '%' ? '%' : *spec;
+            spec += *spec == '%' ? 2 : 1;
+            if (expected == '%')
+                while (std::isspace(static_cast<unsigned char>(*cursor))) ++cursor;
+            if (*cursor != expected) return (*cursor == '\0' && !converted) ? -1 : assigned;
+            ++cursor;
+            continue;
+        }
+        ++spec;
+        const bool suppressed = *spec == '*';
+        if (suppressed) ++spec;
+        std::string width;
+        while (std::isdigit(static_cast<unsigned char>(*spec))) width += *spec++;
+        std::string length;
+        while (*spec != '\0' && std::strchr("hlLqjzt", *spec) != nullptr) length += *spec++;
+        const char conversion = *spec++;
+        std::string set;
+        if (conversion == '[') {
+            set = "[";
+            if (*spec == '^') set += *spec++;
+            if (*spec == ']') set += *spec++;
+            while (*spec != '\0' && *spec != ']') set += *spec++;
+            if (*spec != ']') Unsupported("unterminated scanf set");
+            set += *spec++;
+        }
+        if (conversion == 'n') {
+            if (!suppressed) {
+                const auto target = arguments.Next();
+                const auto count = static_cast<std::int64_t>(cursor - input);
+                const auto size = length == "hh" ? 1 : length == "h" ? 2 : length.empty() ? 4 : 8;
+                std::memcpy(reinterpret_cast<void*>(target), &count, static_cast<std::size_t>(size));
+            }
+            continue;
+        }
+        if (length == "L" || (!length.empty() && length != "hh" && length != "h" && length != "l" && length != "ll" &&
+                              length != "j" && length != "z" && length != "t" && length != "q"))
+            Unsupported("unsupported scanf length modifier");
+        int consumed = -1;
+        std::string host = std::string("%") + (suppressed ? "*" : "") + width;
+        int result;
+        if (std::strchr("diuxXo", conversion) != nullptr) {
+            long long value = 0;
+            host += "ll";
+            host += conversion;
+            host += "%n";
+            result = suppressed ? std::sscanf(cursor, host.c_str(), &consumed) : std::sscanf(cursor, host.c_str(), &value, &consumed);
+            if (consumed < 0) return (result == EOF && !converted) ? -1 : assigned;
+            if (!suppressed) {
+                const auto size = length == "hh" ? 1 : length == "h" ? 2 : length.empty() ? 4 : 8;
+                std::memcpy(reinterpret_cast<void*>(arguments.Next()), &value, static_cast<std::size_t>(size));
+            }
+        } else if (std::strchr("fFeEgGaA", conversion) != nullptr) {
+            double value = 0;
+            host += "l";
+            host += conversion;
+            host += "%n";
+            result = suppressed ? std::sscanf(cursor, host.c_str(), &consumed) : std::sscanf(cursor, host.c_str(), &value, &consumed);
+            if (consumed < 0) return (result == EOF && !converted) ? -1 : assigned;
+            if (!suppressed) {
+                const auto target = reinterpret_cast<void*>(arguments.Next());
+                if (length.empty()) {
+                    const float narrow = static_cast<float>(value);
+                    std::memcpy(target, &narrow, sizeof(narrow));
+                } else {
+                    std::memcpy(target, &value, sizeof(value));
+                }
+            }
+        } else if (conversion == 'p') {
+            void* value = nullptr;
+            host += "p%n";
+            result = suppressed ? std::sscanf(cursor, host.c_str(), &consumed) : std::sscanf(cursor, host.c_str(), &value, &consumed);
+            if (consumed < 0) return (result == EOF && !converted) ? -1 : assigned;
+            if (!suppressed) std::memcpy(reinterpret_cast<void*>(arguments.Next()), &value, sizeof(value));
+        } else if (conversion == 's' || conversion == 'c' || conversion == '[') {
+            if (length == "l") Unsupported("wide scanf conversion");
+            host += conversion == '[' ? set : std::string(1, conversion);
+            host += "%n";
+            if (suppressed) result = std::sscanf(cursor, host.c_str(), &consumed);
+            else result = std::sscanf(cursor, host.c_str(), reinterpret_cast<char*>(arguments.Next()), &consumed);
+            if (consumed < 0) return (result == EOF && !converted) ? -1 : assigned;
+        } else {
+            Unsupported(std::string("unsupported scanf conversion ") + conversion);
+        }
+        cursor += consumed;
+        converted = true;
+        if (!suppressed) ++assigned;
+    }
+    return assigned;
+}
+
 void ErrnoLocation(State& state) {
-    ReturnPointer(state, &guestErrno);
+    ReturnPointer(state, &NativeAotGlibcSupport::guestErrno);
 }
 
 void FxStat(State& state) {
@@ -444,7 +581,7 @@ void SysvSignal(State& state) {
     const auto guest = Integer(state, 0);
     const auto handler = Argument(state, 1);
     if (guest <= 0 || guest >= 65) {
-        guestErrno = 22;
+        SetGuestErrno(22);
         ReturnInteger(state, -1);
         return;
     }
@@ -533,7 +670,7 @@ void ClockGettime(State& state) {
         case 3: host = CLOCK_THREAD_CPUTIME_ID; break;
         case 4: host = CLOCK_MONOTONIC_RAW; break;
         default:
-            guestErrno = 22;
+            SetGuestErrno(22);
             ReturnInteger(state, -1);
             return;
     }
@@ -725,7 +862,7 @@ void Munmap(State& state) {
 
 void Perror(State& state) {
     const auto* prefix = Text(state, 0);
-    const auto* message = std::strerror(HostErrno(guestErrno));
+    const auto* message = std::strerror(HostErrno(CurrentGuestErrno()));
     if (prefix != nullptr && *prefix != '\0') std::fprintf(stderr, "%s: %s\n", prefix, message);
     else std::fprintf(stderr, "%s\n", message);
 }
@@ -856,7 +993,314 @@ void Utimensat(State& state) {
                                    (guestFlags & 0x100) ? AT_SYMLINK_NOFOLLOW : 0));
 }
 
+void AlignedAlloc(State& state) {
+    auto alignment = Argument(state, 0);
+    if (alignment == 0 || (alignment & (alignment - 1)) != 0) {
+        SetGuestErrno(22);
+        ReturnPointer(state, nullptr);
+        return;
+    }
+    alignment = std::max<std::uint64_t>(alignment, sizeof(void*));
+    void* result = nullptr;
+    const auto status = posix_memalign(&result, alignment, Argument(state, 1));
+    if (status != 0) SetGuestErrno(GuestErrno(status));
+    ReturnPointer(state, status == 0 ? result : nullptr);
+}
+
+void Bcmp(State& state) {
+    ReturnInteger(state, std::memcmp(Pointer<const void>(state, 0), Pointer<const void>(state, 1), Argument(state, 2)) != 0);
+}
+
+void Memchr(State& state) {
+    ReturnPointer(state, std::memchr(Pointer<const void>(state, 0), Integer(state, 1), Argument(state, 2)));
+}
+
+void Fseeko(State& state) {
+    ErrnoScope scope;
+    ReturnInteger(state, fseeko(Pointer<FILE>(state, 0), static_cast<off_t>(Signed(state, 1)), Integer(state, 2)));
+}
+
+void Ftello(State& state) {
+    ErrnoScope scope;
+    ReturnInteger(state, ftello(Pointer<FILE>(state, 0)));
+}
+
+void Setbuf(State& state) {
+    auto* buffer = Pointer<char>(state, 1);
+    std::setvbuf(Pointer<FILE>(state, 0), buffer, buffer == nullptr ? _IONBF : _IOFBF, 8192);
+}
+
+void Ungetc(State& state) {
+    ErrnoScope scope;
+    ReturnInteger(state, std::ungetc(Integer(state, 0), Pointer<FILE>(state, 1)));
+}
+
+void Snprintf(State& state) {
+    VarArgs arguments(state, 3);
+    WriteBuffer(state, Pointer<char>(state, 0), Argument(state, 1), Format(Text(state, 2), arguments));
+}
+
+void Vsnprintf(State& state) {
+    VarArgs arguments(Argument(state, 3));
+    WriteBuffer(state, Pointer<char>(state, 0), Argument(state, 1), Format(Text(state, 2), arguments));
+}
+
+void Vfprintf(State& state) {
+    VarArgs arguments(Argument(state, 2));
+    WriteStream(state, Pointer<FILE>(state, 0), Format(Text(state, 1), arguments));
+}
+
+void Vasprintf(State& state) {
+    VarArgs arguments(Argument(state, 2));
+    const auto text = Format(Text(state, 1), arguments);
+    auto* result = static_cast<char*>(std::malloc(text.size() + 1));
+    if (result == nullptr) {
+        SetGuestErrno(12);
+        ReturnInteger(state, -1);
+        return;
+    }
+    std::memcpy(result, text.c_str(), text.size() + 1);
+    *Pointer<char*>(state, 0) = result;
+    ReturnInteger(state, static_cast<std::int64_t>(text.size()));
+}
+
+void Sscanf(State& state) {
+    VarArgs arguments(state, 2);
+    ReturnInteger(state, Scan(Text(state, 0), Text(state, 1), arguments));
+}
+
+void Vsscanf(State& state) {
+    VarArgs arguments(Argument(state, 2));
+    ReturnInteger(state, Scan(Text(state, 0), Text(state, 1), arguments));
+}
+
+void StrerrorR(State& state) {
+    const auto host = HostErrno(Integer(state, 0));
+    auto* buffer = Pointer<char>(state, 1);
+    const auto capacity = Argument(state, 2);
+    if (host < 0) {
+        if (capacity != 0) std::snprintf(buffer, capacity, "Unknown error %d", Integer(state, 0));
+        ReturnPointer(state, buffer);
+        return;
+    }
+    ReturnPointer(state, std::strerror(host));
+}
+
+std::mutex futexLock;
+std::condition_variable futexWake;
+std::map<std::uint64_t, std::uint64_t> futexGenerations;
+
+std::int32_t GuestThreadId() {
+    static std::atomic<std::int32_t> next{0};
+    static const std::int32_t process = getpid();
+    thread_local std::int32_t identifier = 0;
+    if (identifier == 0) {
+        const auto ordinal = next.fetch_add(1);
+        identifier = ordinal == 0 ? process : process + ordinal;
+    }
+    return identifier;
+}
+
+void Syscall(State& state) {
+    const auto number = Signed(state, 0);
+    if (number == 186) {
+        ReturnInteger(state, GuestThreadId());
+        return;
+    }
+    if (number == 318) {
+        auto* buffer = Pointer<void>(state, 1);
+        const auto size = Argument(state, 2);
+        arc4random_buf(buffer, size);
+        ReturnInteger(state, static_cast<std::int64_t>(size));
+        return;
+    }
+    if (number != 202) Unsupported("unsupported Linux system call " + std::to_string(number));
+    const auto address = Argument(state, 1);
+    const auto operation = Integer(state, 2) & ~128;
+    if (operation == 1) {
+        std::lock_guard<std::mutex> lock(futexLock);
+        ++futexGenerations[address];
+        futexWake.notify_all();
+        ReturnInteger(state, 0);
+        return;
+    }
+    if (operation != 0 || Argument(state, 4) != 0) Unsupported("unsupported futex operation");
+    std::unique_lock<std::mutex> lock(futexLock);
+    std::int32_t current;
+    std::memcpy(&current, reinterpret_cast<const void*>(address), 4);
+    if (current != Integer(state, 3)) {
+        SetGuestErrno(11);
+        ReturnInteger(state, -1);
+        return;
+    }
+    const auto generation = futexGenerations[address];
+    futexWake.wait(lock, [&] { return futexGenerations[address] != generation; });
+    ReturnInteger(state, 0);
+}
+
+void CxaAtexit(State& state) {
+    std::lock_guard<std::mutex> lock(exitLock);
+    exitHandlers.emplace_back(Argument(state, 0), Argument(state, 1));
+    ReturnInteger(state, 0);
+}
+
+void Wcslen(State& state) {
+    ReturnInteger(state, static_cast<std::int64_t>(std::wcslen(Pointer<const wchar_t>(state, 0))));
+}
+
+void Wmemchr(State& state) {
+    ReturnPointer(state, std::wmemchr(Pointer<const wchar_t>(state, 0), static_cast<wchar_t>(Argument(state, 1)), Argument(state, 2)));
+}
+
+void Fputwc(State& state) {
+    const auto value = static_cast<std::uint32_t>(Argument(state, 0));
+    if (value >= 128) {
+        SetGuestErrno(84);
+        ReturnInteger(state, static_cast<std::int64_t>(0xffffffffu));
+        return;
+    }
+    ErrnoScope scope;
+    const auto result = std::fputc(static_cast<int>(value), Pointer<FILE>(state, 1));
+    ReturnInteger(state, result == EOF ? static_cast<std::int64_t>(0xffffffffu) : value);
+}
+
+void Getwc(State& state) {
+    ErrnoScope scope;
+    const auto value = std::getc(Pointer<FILE>(state, 0));
+    if (value == EOF) {
+        ReturnInteger(state, static_cast<std::int64_t>(0xffffffffu));
+        return;
+    }
+    if (value >= 128) {
+        SetGuestErrno(84);
+        ReturnInteger(state, static_cast<std::int64_t>(0xffffffffu));
+        return;
+    }
+    ReturnInteger(state, value);
+}
+
+void Ungetwc(State& state) {
+    const auto value = static_cast<std::uint32_t>(Argument(state, 0));
+    if (value >= 128) {
+        ReturnInteger(state, static_cast<std::int64_t>(0xffffffffu));
+        return;
+    }
+    ErrnoScope scope;
+    const auto result = std::ungetc(static_cast<int>(value), Pointer<FILE>(state, 1));
+    ReturnInteger(state, result == EOF ? static_cast<std::int64_t>(0xffffffffu) : value);
+}
+
+void Printf(State& state) {
+    WriteFormatted(state, stdout, Text(state, 0), 1);
+}
+
+void Puts(State& state) {
+    ErrnoScope scope;
+    ReturnInteger(state, std::puts(Text(state, 0)) == EOF ? -1 : 1);
+}
+
+template<class Result, Result (*Function)(const char*, char**, int)>
+void IntegerParse(State& state) {
+    ErrnoScope scope;
+    ReturnInteger(state, static_cast<std::int64_t>(Function(Text(state, 0), Pointer<char*>(state, 1), Integer(state, 2))));
+}
+
+template<class Result, Result (*Function)(const wchar_t*, wchar_t**, int)>
+void WideIntegerParse(State& state) {
+    ErrnoScope scope;
+    ReturnInteger(state, static_cast<std::int64_t>(Function(Pointer<const wchar_t>(state, 0), Pointer<wchar_t*>(state, 1), Integer(state, 2))));
+}
+
+void Strtod(State& state) {
+    ErrnoScope scope;
+    NativeAotGuest::ReturnDouble(state, std::strtod(Text(state, 0), Pointer<char*>(state, 1)));
+}
+
+void Strtof(State& state) {
+    ErrnoScope scope;
+    const float value = std::strtof(Text(state, 0), Pointer<char*>(state, 1));
+    std::memset(state.Xmm[0], 0, sizeof(state.Xmm[0]));
+    std::memcpy(state.Xmm[0], &value, sizeof(value));
+}
+
+void Wcstod(State& state) {
+    ErrnoScope scope;
+    NativeAotGuest::ReturnDouble(state, std::wcstod(Pointer<const wchar_t>(state, 0), Pointer<wchar_t*>(state, 1)));
+}
+
+void Wcstof(State& state) {
+    ErrnoScope scope;
+    const float value = std::wcstof(Pointer<const wchar_t>(state, 0), Pointer<wchar_t*>(state, 1));
+    std::memset(state.Xmm[0], 0, sizeof(state.Xmm[0]));
+    std::memcpy(state.Xmm[0], &value, sizeof(value));
+}
+
+void ExtendedParse(State&) {
+    Unsupported("long double parsing requires an x87 extended-precision conversion");
+}
+
+void Swprintf(State& state) {
+    const auto* wide = Pointer<const wchar_t>(state, 2);
+    std::string format;
+    for (; *wide != 0; ++wide) {
+        if (*wide >= 128) Unsupported("swprintf format outside the C locale");
+        format += static_cast<char>(*wide);
+    }
+    if (format.find("%ls") != std::string::npos || format.find("%lc") != std::string::npos || format.find("%S") != std::string::npos)
+        Unsupported("swprintf wide string arguments");
+    VarArgs arguments(state, 3);
+    const auto text = Format(format.c_str(), arguments);
+    auto* output = Pointer<wchar_t>(state, 0);
+    const auto capacity = Argument(state, 1);
+    if (text.size() >= capacity) {
+        if (capacity != 0) output[0] = 0;
+        SetGuestErrno(75);
+        ReturnInteger(state, -1);
+        return;
+    }
+    for (std::size_t index = 0; index < text.size(); ++index) output[index] = static_cast<unsigned char>(text[index]);
+    output[text.size()] = 0;
+    ReturnInteger(state, static_cast<std::int64_t>(text.size()));
+}
+
 const NativeAotGuest::ProviderBinding Bindings[] = {
+    {"printf", Printf, nullptr},
+    {"puts", Puts, nullptr},
+    {"strtoul", IntegerParse<unsigned long, std::strtoul>, nullptr},
+    {"strtoll", IntegerParse<long long, std::strtoll>, nullptr},
+    {"strtoull", IntegerParse<unsigned long long, std::strtoull>, nullptr},
+    {"strtod", Strtod, nullptr},
+    {"strtof", Strtof, nullptr},
+    {"strtold", ExtendedParse, nullptr},
+    {"wcstol", WideIntegerParse<long, std::wcstol>, nullptr},
+    {"wcstoul", WideIntegerParse<unsigned long, std::wcstoul>, nullptr},
+    {"wcstoll", WideIntegerParse<long long, std::wcstoll>, nullptr},
+    {"wcstoull", WideIntegerParse<unsigned long long, std::wcstoull>, nullptr},
+    {"wcstod", Wcstod, nullptr},
+    {"wcstof", Wcstof, nullptr},
+    {"wcstold", ExtendedParse, nullptr},
+    {"swprintf", Swprintf, nullptr},
+    {"aligned_alloc", AlignedAlloc, nullptr},
+    {"bcmp", Bcmp, nullptr},
+    {"memchr", Memchr, nullptr},
+    {"fseeko", Fseeko, nullptr},
+    {"ftello", Ftello, nullptr},
+    {"setbuf", Setbuf, nullptr},
+    {"ungetc", Ungetc, nullptr},
+    {"snprintf", Snprintf, nullptr},
+    {"vsnprintf", Vsnprintf, nullptr},
+    {"vfprintf", Vfprintf, nullptr},
+    {"vasprintf", Vasprintf, nullptr},
+    {"__isoc99_sscanf", Sscanf, nullptr},
+    {"__isoc99_vsscanf", Vsscanf, nullptr},
+    {"strerror_r", StrerrorR, nullptr},
+    {"syscall", Syscall, nullptr},
+    {"__cxa_atexit", CxaAtexit, nullptr},
+    {"wcslen", Wcslen, nullptr},
+    {"wmemchr", Wmemchr, nullptr},
+    {"fputwc", Fputwc, nullptr},
+    {"getwc", Getwc, nullptr},
+    {"ungetwc", Ungetwc, nullptr},
     {"__errno_location", ErrnoLocation, nullptr},
     {"__fxstat", FxStat, nullptr},
     {"__xstat", XStat, nullptr},
@@ -937,6 +1381,9 @@ namespace NativeAotGlibc {
 
 void Register() {
     NativeAotGuest::RegisterProviders(Bindings, sizeof(Bindings) / sizeof(Bindings[0]));
+    NativeAotGlibcSupport::RegisterLocale();
+    NativeAotGlibcSupport::RegisterThreads();
+    NativeAotGlibcSupport::RegisterDynamic();
 }
 
 }

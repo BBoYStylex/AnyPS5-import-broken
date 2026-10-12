@@ -370,7 +370,7 @@ def unwind_tables(ranges, header, frame):
     return bytes(index), bytes(stream)
 
 
-def program_image(code, labels, imports=(), data_imports=(), entry='_start', relative=(), unwind=()):
+def program_image(code, labels, imports=(), data_imports=(), entry='_start', relative=(), unwind=(), tls=None):
     image = bytearray(0x40000 + 0x2000)
     struct.pack_into('<16sHHIQQQIHHHHHH', image, 0, b'\x7fELF\x02\x01\x01' + bytes(9), 3, 62, 1, CODE + labels[entry], 64, 0, 0, 64, 56, 3, 64, 0, 0)
     struct.pack_into('<IIQQQQQQ', image, 64, 1, 5, CODE, CODE, CODE, len(code), len(code), 0x1000)
@@ -407,13 +407,21 @@ def program_image(code, labels, imports=(), data_imports=(), entry='_start', rel
         struct.pack_into('<qQ', image, DYNAMIC + index * 16, *tag)
     struct.pack_into('<IIQQQQQQ', image, 120, 1, 6, DYNAMIC, DYNAMIC, DYNAMIC, 0x2000, 0x2000, 0x1000)
     struct.pack_into('<IIQQQQQQ', image, 176, 2, 6, DYNAMIC, DYNAMIC, DYNAMIC, len(tags) * 16, len(tags) * 16, 8)
+    if tls is not None:
+        template, memsz, align = tls
+        address = DYNAMIC + 0x1c00
+        image[address:address + len(template)] = template
+        count = struct.unpack_from('<H', image, 0x38)[0]
+        struct.pack_into('<IIQQQQQQ', image, 64 + count * 56, 7, 4, address, address, address, len(template), memsz, align)
+        struct.pack_into('<H', image, 0x38, count + 1)
     if unwind:
         header, frame = DYNAMIC + 0x1800, DYNAMIC + 0x1900
         index, stream = unwind_tables([(CODE + labels[start], labels[end] - labels[start]) for start, end in unwind], header, frame)
         image[header:header + len(index)] = index
         image[frame:frame + len(stream)] = stream
-        struct.pack_into('<H', image, 0x38, 4)
-        struct.pack_into('<IIQQQQQQ', image, 232, 0x6474e550, 4, header, header, header, len(index), len(index), 4)
+        count = struct.unpack_from('<H', image, 0x38)[0]
+        struct.pack_into('<H', image, 0x38, count + 1)
+        struct.pack_into('<IIQQQQQQ', image, 64 + count * 56, 0x6474e550, 4, header, header, header, len(index), len(index), 4)
     return bytes(image)
 
 
@@ -429,6 +437,6 @@ def build_program(raw, directory, roots=(), strict=True):
         run(['xcrun', 'clang', '-c', '-O2', '-arch', 'arm64', '-Wno-override-module', str(module), '-o', str(obj)])
         objects.append(str(obj))
     binary = directory / 'program'
-    run(['xcrun', 'clang++', '-std=c++20', '-O1', '-arch', 'arm64', f'-I{ROOT / "core/libs"}', str(NATIVE / 'NativeAotGuest.cpp'),
-         str(NATIVE / 'NativeAotGlibc.cpp'), str(NATIVE / 'NativeAotGuestMain.cpp'), *objects, '-o', str(binary)])
+    sources = [str(path) for path in sorted(NATIVE.glob('NativeAotGuest*.cpp')) + sorted(NATIVE.glob('NativeAotGlibc*.cpp'))]
+    run(['xcrun', 'clang++', '-std=c++20', '-O1', '-arch', 'arm64', f'-I{ROOT / "core/libs"}', *sources, *objects, '-o', str(binary)])
     return binary, report

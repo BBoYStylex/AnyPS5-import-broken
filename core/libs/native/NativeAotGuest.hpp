@@ -38,6 +38,11 @@ struct NativeAotGuestEntry {
     NativeAotGuestFunction Function;
 };
 
+struct NativeAotGuestExport {
+    const char* Name;
+    std::uint64_t Address;
+};
+
 struct NativeAotGuestImage {
     std::uint64_t Version;
     const std::uint8_t* Bytes;
@@ -60,10 +65,13 @@ struct NativeAotGuestImage {
     std::uint64_t TlsFileSize;
     std::uint64_t TlsMemorySize;
     std::uint64_t TlsAlignment;
+    const NativeAotGuestExport* Exports;
+    std::uint64_t ExportCount;
 };
 
 [[noreturn]] void NativeAotGuestTrap(std::uint64_t kind, std::uint64_t address, std::uint64_t detail);
 NativeAotGuestFunction NativeAotGuestLookup(std::uint64_t address);
+NativeAotGuestFunction NativeAotGuestFind(std::uint64_t address);
 void NativeAotGuestCpuid(NativeAotGuestState* state);
 std::uint64_t NativeAotGuestReadTsc();
 }
@@ -81,6 +89,8 @@ enum Trap : std::uint64_t {
     MissingImport = 8,
     UnsupportedRelocation = 9,
     UnsupportedOperation = 10,
+    MisalignedVector = 11,
+    SplitLock = 12,
 };
 
 enum SymbolFlag : std::uint64_t {
@@ -96,8 +106,11 @@ struct ProviderBinding {
 };
 
 void RegisterProviders(const ProviderBinding* bindings, std::size_t count);
+const ProviderBinding* FindProviderBinding(const char* name);
 std::uint64_t Load(const NativeAotGuestImage& image);
 std::uint64_t ImageBase();
+std::uint64_t ImageSpan();
+std::uint64_t ExportAddress(const char* name);
 NativeAotGuestState& CurrentState();
 std::uint64_t ReturnSentinel();
 std::uint64_t Invoke(NativeAotGuestState& state, std::uint64_t target);
@@ -108,6 +121,7 @@ void ReturnDouble(NativeAotGuestState& state, double value);
 std::uint64_t Push(NativeAotGuestState& state, std::uint64_t value);
 std::uint64_t ProviderAddress(const char* name);
 std::uint64_t AllocateStack(std::size_t bytes);
+std::uint64_t CreateThreadArea();
 [[noreturn]] void Start(const NativeAotGuestImage& image, int argc, char** argv, char** envp);
 
 }

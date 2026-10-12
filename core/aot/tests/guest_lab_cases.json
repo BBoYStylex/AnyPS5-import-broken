@@ -5345,5 +5345,323 @@
    "rax",
    "rdx"
   ]
+ },
+ {
+  "asm": [
+   "lock add qword ptr [rsi + 128], rcx"
+  ],
+  "flags": 2261,
+  "pointers": {
+   "rsi": 0
+  }
+ },
+ {
+  "asm": [
+   "lock sub qword ptr [rsi + 128], rcx"
+  ],
+  "flags": 2261,
+  "pointers": {
+   "rsi": 0
+  }
+ },
+ {
+  "asm": [
+   "lock and qword ptr [rsi + 128], rcx"
+  ],
+  "flags": 2245,
+  "pointers": {
+   "rsi": 0
+  }
+ },
+ {
+  "asm": [
+   "lock or qword ptr [rsi + 128], rcx"
+  ],
+  "flags": 2245,
+  "pointers": {
+   "rsi": 0
+  }
+ },
+ {
+  "asm": [
+   "lock xor qword ptr [rsi + 128], rcx"
+  ],
+  "flags": 2245,
+  "pointers": {
+   "rsi": 0
+  }
+ },
+ {
+  "asm": [
+   "lock xadd qword ptr [rsi + 128], rcx"
+  ],
+  "flags": 2261,
+  "pointers": {
+   "rsi": 0
+  }
+ },
+ {
+  "asm": [
+   "xadd qword ptr [rsi + 128], rcx"
+  ],
+  "flags": 2261,
+  "pointers": {
+   "rsi": 0
+  }
+ },
+ {
+  "asm": [
+   "lock inc qword ptr [rsi + 128]"
+  ],
+  "flags": 2261,
+  "pointers": {
+   "rsi": 0
+  }
+ },
+ {
+  "asm": [
+   "lock dec qword ptr [rsi + 128]"
+  ],
+  "flags": 2261,
+  "pointers": {
+   "rsi": 0
+  }
+ },
+ {
+  "asm": [
+   "lock add qword ptr [rsi + 128], -1"
+  ],
+  "flags": 2261,
+  "pointers": {
+   "rsi": 0
+  }
+ },
+ {
+  "asm": [
+   "mov rax, qword ptr [rsi + 128]",
+   "lock cmpxchg qword ptr [rsi + 128], rcx"
+  ],
+  "flags": 64,
+  "pointers": {
+   "rsi": 0
+  }
+ },
+ {
+  "asm": [
+   "lock cmpxchg qword ptr [rsi + 128], rcx"
+  ],
+  "flags": 64,
+  "pointers": {
+   "rsi": 0
+  }
+ },
+ {
+  "asm": [
+   "cmpxchg rdx, rcx"
+  ],
+  "flags": 64,
+  "fixed": {
+   "rdx": [
+    0,
+    5,
+    7
+   ],
+   "rax": [
+    5,
+    7
+   ]
+  }
+ },
+ {
+  "asm": [
+   "xadd rdx, rcx"
+  ],
+  "flags": 2261
+ },
+ {
+  "asm": [
+   "lock xchg qword ptr [rsi + 128], rcx"
+  ],
+  "flags": 2261,
+  "pointers": {
+   "rsi": 0
+  }
+ },
+ {
+  "asm": [
+   "lock add dword ptr [rsi + 128], ecx"
+  ],
+  "flags": 2261,
+  "pointers": {
+   "rsi": 0
+  }
+ },
+ {
+  "asm": [
+   "lock sub dword ptr [rsi + 128], ecx"
+  ],
+  "flags": 2261,
+  "pointers": {
+   "rsi": 0
+  }
+ },
+ {
+  "asm": [
+   "lock and dword ptr [rsi + 128], ecx"
+  ],
+  "flags": 2245,
+  "pointers": {
+   "rsi": 0
+  }
+ },
+ {
+  "asm": [
+   "lock or dword ptr [rsi + 128], ecx"
+  ],
+  "flags": 2245,
+  "pointers": {
+   "rsi": 0
+  }
+ },
+ {
+  "asm": [
+   "lock xor dword ptr [rsi + 128], ecx"
+  ],
+  "flags": 2245,
+  "pointers": {
+   "rsi": 0
+  }
+ },
+ {
+  "asm": [
+   "lock xadd dword ptr [rsi + 128], ecx"
+  ],
+  "flags": 2261,
+  "pointers": {
+   "rsi": 0
+  }
+ },
+ {
+  "asm": [
+   "xadd dword ptr [rsi + 128], ecx"
+  ],
+  "flags": 2261,
+  "pointers": {
+   "rsi": 0
+  }
+ },
+ {
+  "asm": [
+   "lock inc dword ptr [rsi + 128]"
+  ],
+  "flags": 2261,
+  "pointers": {
+   "rsi": 0
+  }
+ },
+ {
+  "asm": [
+   "lock dec dword ptr [rsi + 128]"
+  ],
+  "flags": 2261,
+  "pointers": {
+   "rsi": 0
+  }
+ },
+ {
+  "asm": [
+   "lock add dword ptr [rsi + 128], -1"
+  ],
+  "flags": 2261,
+  "pointers": {
+   "rsi": 0
+  }
+ },
+ {
+  "asm": [
+   "mov eax, dword ptr [rsi + 128]",
+   "lock cmpxchg dword ptr [rsi + 128], ecx"
+  ],
+  "flags": 64,
+  "pointers": {
+   "rsi": 0
+  }
+ },
+ {
+  "asm": [
+   "lock cmpxchg dword ptr [rsi + 128], ecx"
+  ],
+  "flags": 64,
+  "pointers": {
+   "rsi": 0
+  }
+ },
+ {
+  "asm": [
+   "cmpxchg edx, ecx"
+  ],
+  "flags": 64,
+  "fixed": {
+   "rdx": [
+    0,
+    5,
+    7
+   ],
+   "rax": [
+    5,
+    7
+   ]
+  }
+ },
+ {
+  "asm": [
+   "xadd edx, ecx"
+  ],
+  "flags": 2261
+ },
+ {
+  "asm": [
+   "lock xchg dword ptr [rsi + 128], ecx"
+  ],
+  "flags": 2261,
+  "pointers": {
+   "rsi": 0
+  }
+ },
+ {
+  "asm": [
+   "fld tbyte ptr [rsi + 128]",
+   "fstp tbyte ptr [rsi + 160]"
+  ],
+  "flags": 2261,
+  "pointers": {
+   "rsi": 0
+  }
+ },
+ {
+  "asm": [
+   "fldz",
+   "fld tbyte ptr [rsi + 128]",
+   "fld st(0)",
+   "fstp tbyte ptr [rsi + 176]",
+   "fstp st(1)",
+   "fstp tbyte ptr [rsi + 192]"
+  ],
+  "flags": 2261,
+  "pointers": {
+   "rsi": 0
+  }
+ },
+ {
+  "asm": [
+   "fld tbyte ptr [rsi + 128]",
+   "fld tbyte ptr [rsi + 144]",
+   "fstp st(0)",
+   "fstp tbyte ptr [rsi + 208]"
+  ],
+  "flags": 2261,
+  "pointers": {
+   "rsi": 0
+  }
  }
 ]

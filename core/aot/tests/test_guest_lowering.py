@@ -56,11 +56,11 @@ class GuestProgramTests(unittest.TestCase):
         self.directory = Path(self.temporary.name)
         self.addCleanup(self.temporary.cleanup)
 
-    def program(self, source, imports=('exit',), data_imports=(), relative=(), strict=True, unwind=()):
+    def program(self, source, imports=('exit',), data_imports=(), relative=(), strict=True, unwind=(), tls=None):
         slots = ''.join(f'.p2align 3\n{name}_slot: .quad 0\n' for name in [*imports, *data_imports])
         code, labels = guest_lab.assemble_program(source + slots, self.directory)
         raw = guest_lab.program_image(code, labels, [(name, f'{name}_slot') for name in imports],
-                                      [(name, f'{name}_slot') for name in data_imports], relative=relative, unwind=unwind)
+                                      [(name, f'{name}_slot') for name in data_imports], relative=relative, unwind=unwind, tls=tls)
         return guest_lab.build_program(raw, self.directory, strict=strict)
 
     def run_binary(self, binary):
@@ -239,12 +239,80 @@ table:
         self.assertEqual(report['jump_tables'], {'qualified': 0, 'candidate': 0})
         self.assertIn('indirect-jump-dispatch', {item['kind'] for item in report['obligations']})
         result = self.run_binary(binary)
-        self.assertIn(b'control transfer to an address without converted code', result.stderr)
+        self.assertNotEqual(result.returncode, 22)
+        self.assertIn(b'guest return address does not match any converted caller', result.stderr)
         binary, report = self.program(source + 'end_of_start:\n', unwind=[('_start', 'table')])
         self.assertEqual(report['jump_tables'], {'qualified': 0, 'candidate': 1})
         self.assertIn('jump-table-extent-candidate', {item['kind'] for item in report['obligations']})
         result = self.run_binary(binary)
         self.assertEqual(result.returncode, 22, result.stderr)
+
+    def test_nonlocal_jump_resumes_at_a_call_return(self):
+        binary, _ = self.program(PRELUDE + '''
+    sub rsp, 32
+    mov rbx, rsp
+    call save
+    test eax, eax
+    jne resumed
+    call jumper
+    mov edi, 1
+''' + EXIT + '''
+resumed:
+    mov edi, eax
+''' + EXIT + '''
+save:
+    lea rcx, [rsp + 8]
+    mov qword ptr [rbx], rcx
+    mov rcx, qword ptr [rsp]
+    mov qword ptr [rbx + 8], rcx
+    xor eax, eax
+    ret
+jumper:
+    mov rsp, qword ptr [rbx]
+    mov eax, 42
+    jmp qword ptr [rbx + 8]
+''')
+        result = self.run_binary(binary)
+        self.assertEqual(result.returncode, 42, result.stderr)
+
+    def test_thread_pointer_and_static_tls(self):
+        binary, _ = self.program(PRELUDE + '''
+    mov rax, qword ptr fs:[0]
+    cmp rax, qword ptr fs:[16]
+    jne bad
+    cmp qword ptr fs:[40], 0
+    je bad
+    mov rcx, qword ptr fs:[-16]
+    cmp rcx, 77
+    jne bad
+    mov qword ptr fs:[-8], 5
+    mov rcx, qword ptr [rax - 8]
+    add ecx, 30
+    mov edi, ecx
+''' + EXIT + '''
+bad:
+    mov edi, 1
+''' + EXIT, tls=(bytes([77] + [0] * 7), 16, 8))
+        result = self.run_binary(binary)
+        self.assertEqual(result.returncode, 35, result.stderr)
+
+    def test_split_lock_traps(self):
+        binary, _ = self.program(PRELUDE + '''
+    lea rax, [rsp - 13]
+    lock add dword ptr [rax], 1
+    xor edi, edi
+''' + EXIT)
+        result = self.run_binary(binary)
+        self.assertIn(b'locked access crosses its natural alignment', result.stderr)
+
+    def test_provider_conversions(self):
+        binary = self.directory / 'provider_checks'
+        native = guest_lab.NATIVE
+        sources = [str(native / 'NativeAotGuest.cpp'), *map(str, sorted(native.glob('NativeAotGlibc*.cpp')))]
+        guest_lab.run(['xcrun', 'clang++', '-std=c++20', '-O1', '-arch', 'arm64', f'-I{guest_lab.ROOT / "core/libs"}',
+                       str(Path(__file__).parent / 'guest_provider_checks.cpp'), *sources, '-o', str(binary)])
+        result = self.run_binary(binary)
+        self.assertEqual((result.returncode, result.stdout), (0, b'ok\n'), result.stdout)
 
     def test_flags_read_after_call_are_rejected(self):
         with self.assertRaisesRegex(guest_lift.LiftError, 'read after the call'):

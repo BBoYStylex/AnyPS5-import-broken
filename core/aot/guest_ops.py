@@ -6,6 +6,8 @@ GPR = ['rax', 'rcx', 'rdx', 'rbx', 'rsp', 'rbp', 'rsi', 'rdi', 'r8', 'r9', 'r10'
 FLAGS = ['cf', 'pf', 'af', 'zf', 'sf', 'of']
 STATE_XMM = 128
 STATE_FS = 384
+STATE_X87 = 400
+STATE_X87_TOP = 528
 ALIASES = {}
 for full, dword, word, low in zip(GPR[:8], ['eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi'],
                                   ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'],
@@ -30,6 +32,8 @@ TRAP_INVALID = 6
 TRAP_HALT = 7
 TRAP_UNSUPPORTED = 10
 TRAP_ALIGNMENT = 11
+TRAP_SPLIT_LOCK = 12
+ATOMIC = {'add': 'add', 'sub': 'sub', 'and': 'and', 'or': 'or', 'xor': 'xor', 'inc': 'add', 'dec': 'sub', 'xadd': 'add'}
 
 
 INTRINSIC = re.compile(r'call (<[^>]+>|\S+) (@llvm\.[\w.]+)\((.*)\)\s*$')
@@ -893,6 +897,146 @@ class Integer(Emitter):
 
     def op_blsmsk(self):
         self.blsx('blsmsk')
+
+    def locked(self):
+        mnemonic = base_mnemonic(self.ins)
+        operands = self.operands()
+        destination = operands[0]
+        if destination.type != X86_OP_MEM:
+            self.unsupported('lock prefix without a memory destination')
+        bits = destination.size * 8
+        if bits not in (8, 16, 32, 64):
+            self.unsupported('locked operand width')
+        address = self.address(destination)
+        if bits > 8:
+            misaligned = self.v(f'icmp ne i64 {self.v(f"and i64 {address}, {bits // 8 - 1}")}, 0')
+            self.trap_if(misaligned, TRAP_SPLIT_LOCK)
+        pointer = self.pointer(address)
+        if mnemonic == 'xchg':
+            self.write(operands[1], self.v(f'atomicrmw xchg ptr {pointer}, i{bits} {self.read(operands[1], bits)} seq_cst, align {bits // 8}'))
+            return
+        if mnemonic == 'cmpxchg':
+            self.compare_exchange(pointer, bits, operands[1])
+            return
+        if mnemonic not in ATOMIC:
+            self.unsupported('locked operation semantics are not implemented')
+        if mnemonic in ('inc', 'dec'):
+            source = self.const(1, bits)
+        elif operands[1].type == X86_OP_IMM:
+            source = self.const(operands[1].imm, bits)
+        else:
+            source = self.read(operands[1], bits)
+        old = self.v(f'atomicrmw {ATOMIC[mnemonic]} ptr {pointer}, i{bits} {source} seq_cst, align {bits // 8}')
+        self.rmw_flags(mnemonic, old, source, bits)
+        if mnemonic == 'xadd':
+            self.write(operands[1], old)
+
+    def rmw_flags(self, mnemonic, old, source, bits):
+        if mnemonic in ('add', 'xadd'):
+            self.add_flags(old, source, self.v(f'add i{bits} {old}, {source}'), bits)
+        elif mnemonic == 'sub':
+            self.sub_flags(old, source, self.v(f'sub i{bits} {old}, {source}'), bits)
+        elif mnemonic in ('and', 'or', 'xor'):
+            self.logic_flags(self.v(f'{mnemonic} i{bits} {old}, {source}'), bits)
+        else:
+            carry = self.flag('cf')
+            result = self.v(f'{"add" if mnemonic == "inc" else "sub"} i{bits} {old}, {source}')
+            if mnemonic == 'inc':
+                self.add_flags(old, source, result, bits)
+            else:
+                self.sub_flags(old, source, result, bits)
+            self.set_flag('cf', carry)
+
+    def compare_exchange(self, pointer, bits, source):
+        accumulator = self.accumulator(bits)[0]
+        expected, _ = self.read_register(accumulator)
+        replacement = self.read(source, bits)
+        pair = self.v(f'cmpxchg ptr {pointer}, i{bits} {expected}, i{bits} {replacement} seq_cst seq_cst, align {bits // 8}')
+        old = self.v(f'extractvalue {{ i{bits}, i1 }} {pair}, 0')
+        success = self.v(f'extractvalue {{ i{bits}, i1 }} {pair}, 1')
+        self.sub_flags(expected, old, self.v(f'sub i{bits} {expected}, {old}'), bits)
+        failed, done = self.label(), self.label()
+        self.emit(f'br i1 {success}, label %{done}, label %{failed}')
+        self.place(failed)
+        self.write_register(accumulator, old)
+        self.emit(f'br label %{done}')
+        self.place(done)
+
+    def op_cmpxchg(self):
+        destination, source = self.operands()
+        bits = destination.size * 8
+        if destination.type == X86_OP_MEM:
+            self.compare_exchange(self.pointer(self.address(destination)), bits, source)
+            return
+        accumulator = self.accumulator(bits)[0]
+        expected, _ = self.read_register(accumulator)
+        current = self.read(destination)
+        replacement = self.read(source, bits)
+        equal = self.v(f'icmp eq i{bits} {expected}, {current}')
+        self.sub_flags(expected, current, self.v(f'sub i{bits} {expected}, {current}'), bits)
+        stored, failed, done = self.label(), self.label(), self.label()
+        self.emit(f'br i1 {equal}, label %{stored}, label %{failed}')
+        self.place(stored)
+        self.write(destination, replacement)
+        self.emit(f'br label %{done}')
+        self.place(failed)
+        self.write_register(accumulator, current)
+        self.emit(f'br label %{done}')
+        self.place(done)
+
+    def op_xadd(self):
+        destination, source = self.operands()
+        bits = destination.size * 8
+        old = self.read(destination)
+        addend = self.read(source, bits)
+        total = self.v(f'add i{bits} {old}, {addend}')
+        self.add_flags(old, addend, total, bits)
+        self.write(source, old)
+        self.write(destination, total)
+
+    def x87_slot(self, depth):
+        top = self.v(f'load i64, ptr {self.v(f"getelementptr i8, ptr %s, i64 {STATE_X87_TOP}")}')
+        index = self.v(f'and i64 {self.v(f"add i64 {top}, {depth}")}, 7')
+        return self.v(f'getelementptr i8, ptr %s, i64 {self.v(f"add i64 {STATE_X87}, {self.v(f"mul i64 {index}, 16")}")}')
+
+    def x87_move_top(self, delta):
+        pointer = self.v(f'getelementptr i8, ptr %s, i64 {STATE_X87_TOP}')
+        top = self.v(f'load i64, ptr {pointer}')
+        self.emit(f'store i64 {self.v(f"and i64 {self.v(f"add i64 {top}, {delta & 7}")}, 7")}, ptr {pointer}')
+
+    def x87_push(self, value):
+        self.x87_move_top(-1)
+        self.emit(f'store i80 {value}, ptr {self.x87_slot(0)}, align 1')
+
+    def x87_register(self, operand):
+        name = self.ins.reg_name(operand.reg)
+        if not name.startswith('st'):
+            self.unsupported(f'x87 register {name}')
+        return 0 if name == 'st(0)' else int(name[3:-1])
+
+    def op_fld(self):
+        source, = self.operands()
+        if source.type == X86_OP_MEM:
+            if source.size != 10:
+                self.unsupported('x87 load with format conversion')
+            value = self.load(self.address(source), 80)
+        else:
+            value = self.v(f'load i80, ptr {self.x87_slot(self.x87_register(source))}, align 1')
+        self.x87_push(value)
+
+    def op_fldz(self):
+        self.x87_push('0')
+
+    def op_fstp(self):
+        destination, = self.operands()
+        value = self.v(f'load i80, ptr {self.x87_slot(0)}, align 1')
+        if destination.type == X86_OP_MEM:
+            if destination.size != 10:
+                self.unsupported('x87 store with format conversion')
+            self.store(self.address(destination), value, 80)
+        else:
+            self.emit(f'store i80 {value}, ptr {self.x87_slot(self.x87_register(destination))}, align 1')
+        self.x87_move_top(1)
 
     def op_cpuid(self):
         self.flush()

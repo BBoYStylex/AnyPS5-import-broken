@@ -13,7 +13,7 @@ from guest_ops import (FLAGS, GPR, STATE_XMM, TRAP_FALLTHROUGH, TRAP_HALT, TRAP_
 
 TRAP_UNKNOWN_TARGET = 1
 TRIPLE = 'arm64-apple-macosx14.0.0'
-RUNTIME = ['declare void @NativeAotGuestTrap(i64, i64, i64) noreturn', 'declare ptr @NativeAotGuestLookup(i64)',
+RUNTIME = ['declare void @NativeAotGuestTrap(i64, i64, i64) noreturn', 'declare ptr @NativeAotGuestLookup(i64)', 'declare ptr @NativeAotGuestFind(i64)',
            'declare void @NativeAotGuestCpuid(ptr)', 'declare i64 @NativeAotGuestReadTsc()']
 
 
@@ -48,6 +48,7 @@ class Lowering(Vector):
         for flag in FLAGS:
             self.emit(f'%F{flag} = alloca i1')
             self.emit(f'store i1 false, ptr %F{flag}')
+        self.emit('%Resume = alloca i64')
         self.reload()
         self.emit('%base = load i64, ptr @__aps5_guest_base')
         expected = self.v(f'add i64 %base, {self.unit.start}')
@@ -104,7 +105,12 @@ class Lowering(Vector):
             continuation = f'L{following:x}' if following in unit.instructions else self.label()
             self.emit(f'br i1 {self.v(f"icmp eq i64 {result}, {back}")}, label %{continuation}, label %{propagate}')
             self.place(propagate)
-            self.leave_with(result)
+            if self.resume_points():
+                self.emit(f'store i64 {result}, ptr %Resume')
+                self.emit('br label %resume')
+                self.needs_resume = True
+            else:
+                self.leave_with(result)
             if following not in unit.instructions:
                 self.place(continuation)
                 self.trap(TRAP_FALLTHROUGH)
@@ -129,7 +135,16 @@ class Lowering(Vector):
                 self.emit(f'br label %L{operand.imm:x}')
                 return
             target = self.target_value()
-            function = self.call_target(operand.imm if operand.type == X86_OP_IMM else None, target)
+            if operand.type == X86_OP_IMM:
+                self.leave_with(self.invoke(self.call_target(operand.imm, target), target))
+                return
+            function = self.v(f'call ptr @NativeAotGuestFind(i64 {target})')
+            local, remote = self.label(), self.label()
+            self.emit(f'br i1 {self.v(f"icmp eq ptr {function}, null")}, label %{local}, label %{remote}')
+            self.place(local)
+            self.flush()
+            self.leave_with(target)
+            self.place(remote)
             self.leave_with(self.invoke(function, target))
             return
         suffix = mnemonic[1:]
@@ -143,6 +158,17 @@ class Lowering(Vector):
             self.place(taken)
             absolute = self.absolute(target)
             self.leave_with(self.invoke(symbol(target), absolute))
+
+    def resume_points(self):
+        if not hasattr(self, '_resume'):
+            unit = self.unit
+            points = set(getattr(unit, 'landing_pads', []))
+            for address, ins in unit.instructions.items():
+                following = address + ins.size
+                if ins.mnemonic == 'call' and following in unit.instructions:
+                    points.add(following)
+            self._resume = sorted(points)
+        return self._resume
 
     def table(self, ins):
         description = self.unit.tables[ins.address]
@@ -162,8 +188,8 @@ class Lowering(Vector):
             self.control(ins)
             return
         if 0xf0 in ins.prefix:
-            self.unsupported('locked memory operation requires the concurrency lowering')
-        if mnemonic.startswith('rep') or mnemonic in ('movsb', 'movsw', 'movsq', 'stosb', 'stosw', 'stosd', 'stosq'):
+            self.locked()
+        elif mnemonic.startswith('rep') or mnemonic in ('movsb', 'movsw', 'movsq', 'stosb', 'stosw', 'stosd', 'stosq'):
             self.string()
         elif mnemonic.startswith('cmov'):
             self.cmov(mnemonic[4:])
@@ -200,6 +226,14 @@ def lower_unit(unit, units, trace=False):
             del lowering.lines[mark:]
             lowering.ins = unit.instructions[address]
             lowering.trap(10)
+    if getattr(lowering, 'needs_resume', False):
+        lowering.lines.append('resume:')
+        result = lowering.v('load i64, ptr %Resume')
+        outside = lowering.label()
+        cases = ' '.join(f'i64 {address}, label %L{address:x}' for address in lowering.resume_points())
+        lowering.emit(f'switch i64 {lowering.v(f"sub i64 {result}, %base")}, label %{outside} [ {cases} ]')
+        lowering.place(outside)
+        lowering.leave_with(result)
     lowering.lines.append('}')
     return '\n'.join(lowering.lines), lowering.declarations, errors
 
@@ -226,9 +260,13 @@ def describe_image(program, units):
         relocations.append((relocation['slot'], relocation['kind'], number, relocation['addend']))
     span = max(s['vaddr'] + s['memsz'] for s in loads)
     relro_address, relro_size = program.relro
+    exports = sorted((symbol['name'], symbol['value']) for symbol in program.dynamic['symbols'][1:]
+                     if symbol['name'] and symbol['section'] and symbol['section'] < 0xff00 and symbol['info'] & 15 in (1, 2))
+    tls = program.tls
+    tls_fields = (tls['vaddr'], tls['filesz'], tls['memsz'], max(tls['align'], 1)) if tls else (0, 0, 0, 1)
     return {'blob': bytes(blob), 'segments': segments, 'symbols': symbols, 'flags': flags, 'relocations': relocations,
             'span': span, 'relro': (relro_address, relro_size), 'entry': view.entry,
-            'entries': sorted(units)}
+            'entries': sorted(units), 'tls': tls_fields, 'exports': exports}
 
 
 def string_constant(name, text):
@@ -258,11 +296,16 @@ def descriptor_module(image):
     lines.append(f'@__aps5_guest_symbol_flags = private constant [{max(symbol_count, 1)} x i64] [{", ".join(f"i64 {f}" for f in image["flags"]) or "i64 0"}]')
     lines.append(f'@__aps5_guest_entries = private constant [{len(image["entries"])} x {{ i64, ptr }}] [' +
                  ', '.join(f'{{ i64, ptr }} {{ i64 {a}, ptr {symbol(a)} }}' for a in image['entries']) + ']')
+    exports = image['exports']
+    for number, (name, _) in enumerate(exports):
+        lines.append(string_constant(f'@__aps5_guest_export_{number}', name))
+    lines.append(f'@__aps5_guest_exports = private constant [{max(len(exports), 1)} x {{ ptr, i64 }}] [' +
+                 (', '.join(f'{{ ptr, i64 }} {{ ptr @__aps5_guest_export_{number}, i64 {address} }}' for number, (_, address) in enumerate(exports)) or '{ ptr, i64 } zeroinitializer') + ']')
     fields = ['i64 1', 'ptr @__aps5_guest_bytes', f'i64 {len(blob)}', 'ptr @__aps5_guest_segments', f'i64 {len(image["segments"])}',
               'ptr @__aps5_guest_relocations', f'i64 {len(image["relocations"])}', 'ptr @__aps5_guest_symbols',
               'ptr @__aps5_guest_symbol_flags', f'i64 {symbol_count}', 'ptr @__aps5_guest_entries', f'i64 {len(image["entries"])}',
               f'i64 {image["entry"]}', f'i64 {image["span"]}', f'i64 {image["relro"][0]}', f'i64 {image["relro"][1]}',
-              'ptr @__aps5_guest_base', 'i64 0', 'i64 0', 'i64 0', 'i64 0']
+              'ptr @__aps5_guest_base', *[f'i64 {value}' for value in image['tls']], 'ptr @__aps5_guest_exports', f'i64 {len(exports)}']
     types = ', '.join(field.split(' ')[0] for field in fields)
     lines.append(f'@__aps5_guest_image = constant {{ {types} }} {{ {", ".join(fields)} }}')
     return '\n'.join(lines) + '\n'

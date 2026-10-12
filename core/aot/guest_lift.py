@@ -11,9 +11,10 @@ from elftools.elf.elffile import ELFFile
 import dynamic
 import guest_ops
 import load_facts
-from unwind_index import LoadView, UnwindError
+from unwind_index import LoadView, UnwindError, read_lsda
 
 TERMINAL = {'ret', 'hlt', 'ud2', 'int3'}
+CALLEE_SAVED = {'rbx', 'rbp', 'r12', 'r13', 'r14', 'r15'}
 PT_TLS = 7
 PT_GNU_RELRO = 0x6474e552
 RELOCATIONS = {0, 1, 6, 7, 8}
@@ -50,6 +51,21 @@ class Program:
         self.writable = [(s['vaddr'], s['vaddr'] + s['memsz']) for s in self.view.loads if s['flags'] & 2]
         relro = [s for s in self.view.segments if s['type'] == PT_GNU_RELRO]
         self.relro = (relro[0]['vaddr'], relro[0]['memsz']) if relro else (0, 0)
+        tls = [s for s in self.view.segments if s['type'] == PT_TLS]
+        require(len(tls) <= 1, 'multiple PT_TLS segments')
+        self.tls = tls[0] if tls else None
+        self.landing_pads = {}
+        for fact in self.facts['facts']:
+            if fact['kind'] != 'unwind-range' or fact['status'] != 'qualified' or not fact.get('lsda'):
+                continue
+            require(not fact['lsda']['indirect'], f'indirect LSDA pointer for 0x{fact["address"]:x}')
+            try:
+                sites = read_lsda(self.view, fact['lsda']['address'], fact['address'], fact['size'])
+            except UnwindError as error:
+                raise LiftError(f'LSDA for 0x{fact["address"]:x}: {error}') from error
+            pads = sorted({site['landing_pad'] for site in sites if site['landing_pad'] is not None})
+            if pads:
+                self.landing_pads[fact['address']] = pads
 
     def import_name(self, slot):
         relocation = self.relocations.get(slot)
@@ -127,7 +143,8 @@ class Unit:
         self.noreturn = set()
 
     def explore(self, roots):
-        pending = [self.start]
+        self.landing_pads = list(self.program.landing_pads.get(self.start, []))
+        pending = [self.start, *self.landing_pads]
         deferred = []
         while True:
             while pending:
@@ -369,7 +386,7 @@ def reaching_constant_address(unit, address, register):
                 return None
             values.add(value)
             continue
-        if ins.mnemonic == 'call' or current == unit.start:
+        if (ins.mnemonic == 'call' and register not in CALLEE_SAVED) or current == unit.start:
             return None
         sources = unit.predecessors(current)
         if not sources:
@@ -411,8 +428,9 @@ def flag_liveness(unit):
                 live[address] = before
                 changed = True
     problems = []
-    if live[unit.start]:
-        problems.append(f'flags {sorted(live[unit.start])} are read before definition at unit entry 0x{unit.start:x}')
+    for entry in [unit.start, *getattr(unit, 'landing_pads', [])]:
+        if live[entry]:
+            problems.append(f'flags {sorted(live[entry])} are read before definition at unit entry 0x{entry:x}')
     for address, ins in unit.instructions.items():
         following = address + ins.size
         if ins.mnemonic == 'call' and following in live and live[following]:
