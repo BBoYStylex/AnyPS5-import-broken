@@ -219,6 +219,11 @@ set(agcDriverSources
         ${CMAKE_CURRENT_SOURCE_DIR}/Submit/src/Dcb.cpp
 )
 
+add_custom_target(agc_shader_headers DEPENDS
+    "${agcTextureDetileShaderHeader}" "${agcTextureDetileImageShaderHeader}"
+    "${agcMeshArgumentsShaderHeader}" "${agcCmaskClearShaderHeader}"
+    "${agcSampleCounterShaderHeader}" "${agcSampleDumpsShaderHeader}")
+
 add_library(libSceAgcDriver SHARED EXCLUDE_FROM_ALL
         ${agcDriverSources}
 )
@@ -252,6 +257,11 @@ target_link_libraries(libSceAgcDriver PRIVATE
 
 set_target_properties(libSceAgcDriver PROPERTIES CXX_EXTENSIONS OFF)
 configure_windows_unwind(libSceAgcDriver)
+
+if(ANYPS5_NATIVE_GRAPHICS)
+    include(PostCompile.cmake)
+    return()
+endif()
 
 if(BUILD_TESTING)
     add_test_executable(agc_write_watch_coverage_tests tests/WriteWatchCoverage.cpp)
@@ -371,7 +381,7 @@ if(BUILD_TESTING)
     if(WIN32)
         set_tests_properties(agc_thread_priority PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
-    else()
+    elseif(NOT APPLE)
         foreach(mode rt high)
             add_test(NAME agc_thread_priority_refused_${mode} COMMAND agc_thread_priority_tests refused)
             set_tests_properties(agc_thread_priority_refused_${mode} PROPERTIES ENVIRONMENT
@@ -1150,7 +1160,7 @@ if(BUILD_TESTING)
         set_tests_properties(agc_driver_pm4_failure agc_descriptor_pool_reset_failure PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
     endif()
-    if(NOT WIN32)
+    if(NOT WIN32 AND NOT APPLE)
         add_test(NAME agc_driver_pm4_priority_refused COMMAND agc_driver_pm4_tests priority-refused)
         set_tests_properties(agc_driver_pm4_priority_refused PROPERTIES ENVIRONMENT
             "ANYPS5_NO_SHADER_CACHE=1;APS5_THREAD_PRIORITY=high;DBUS_SYSTEM_BUS_ADDRESS=unix:path=/nonexistent/aps5-no-rtkit" SKIP_RETURN_CODE 77)
