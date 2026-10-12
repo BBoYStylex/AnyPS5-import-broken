@@ -115,6 +115,8 @@ int APS5_VABI sceAmprAmmCommandBufferRemap(Apr::CommandBufferObject*, std::uint6
 int APS5_VABI sceAmprAmmCommandBufferRemapWithGpuMaskId(Apr::CommandBufferObject*, std::uint64_t, std::uint64_t, std::uint64_t, std::int32_t, std::uint8_t);
 int APS5_VABI sceAmprAmmCommandBufferMultiMap(Apr::CommandBufferObject*, std::uint64_t, std::uint64_t, std::uint64_t, std::int32_t);
 int APS5_VABI sceAmprAmmCommandBufferMultiMapWithGpuMaskId(Apr::CommandBufferObject*, std::uint64_t, std::uint64_t, std::uint64_t, std::int32_t, std::uint8_t);
+int APS5_VABI sceKernelWriteModifyMtypeProtectCommand(Apr::CommandBufferObject*, std::uint64_t, std::uint64_t, std::int32_t, std::int32_t, std::int32_t);
+int APS5_VABI sceKernelWriteRemapIntoPrtCommand(Apr::CommandBufferObject*, std::uint64_t, std::uint64_t, std::uint64_t, std::int32_t, std::uint32_t);
 int APS5_VABI sceAmprAmmCommandBufferModifyProtect(Apr::CommandBufferObject*, std::uint64_t, std::uint64_t, std::int32_t, std::int32_t);
 int APS5_VABI sceAmprAmmCommandBufferModifyProtectWithGpuMaskId(Apr::CommandBufferObject*, std::uint64_t, std::uint64_t, std::int32_t, std::int32_t, std::uint8_t);
 int APS5_VABI sceAmprAmmCommandBufferModifyMtypeProtect(Apr::CommandBufferObject*, std::uint64_t, std::uint64_t, std::int32_t, std::int32_t, std::int32_t);
@@ -1044,6 +1046,55 @@ void TestAmmRemapAndProtect() {
     Require(sceAmprAmmMeasureAmmCommandSizeModifyMtypeProtect(returned, page, 0, 0x08, 0x03) == ammRejected);
 }
 
+void TestKernelAmmRecorders() {
+    std::uint64_t start = 0;
+    std::uint64_t end = 0;
+    std::uint64_t multimapStart = 0;
+    std::uint64_t multimapEnd = 0;
+    Require(sceAmprAmmGetVirtualAddressRanges(&start, &end, &multimapStart, &multimapEnd) == 0);
+
+    const std::uint64_t address = start + 0x400000;
+    const std::uint64_t source = start + 0x440000;
+
+    Recorder protect;
+    auto offset = protect.Offset();
+    auto commands = protect.Commands();
+    Require(sceKernelWriteModifyMtypeProtectCommand(&protect.buffer, address, page, 3, 0x22, 0x22) == 0);
+    RequireAppended(protect, offset, commands, Apr::Opcode::AmmModifyMtypeProtect, sceAmprAmmMeasureAmmCommandSizeModifyMtypeProtect(address, page, 3, 0x22, 0x22));
+
+    Recorder remap;
+    offset = remap.Offset();
+    commands = remap.Commands();
+    Require(sceKernelWriteRemapIntoPrtCommand(&remap.buffer, address, source, page, cpuReadWrite, 0) == 0);
+    RequireAppended(remap, offset, commands, Apr::Opcode::AmmRemapIntoPrt, sceAmprAmmMeasureAmmCommandSizeRemapWithGpuMaskId(address, source, page, cpuReadWrite, 0));
+    Apr::AmmRemapCommand written;
+    std::memcpy(&written, remap.memory.data() + offset, sizeof(written));
+    Require(written.reserved == 1011);
+
+    Recorder nonDefaultOpcode;
+    Require(sceKernelWriteRemapIntoPrtCommand(&nonDefaultOpcode.buffer, address, source, page, cpuReadWrite, 7) == 0);
+    Apr::AmmRemapCommand writtenNonDefault;
+    std::memcpy(&writtenNonDefault, nonDefaultOpcode.memory.data(), sizeof(writtenNonDefault));
+    Require(writtenNonDefault.reserved == 7);
+
+    Recorder empty;
+    Require(sceKernelWriteModifyMtypeProtectCommand(&empty.buffer, address + 8, page, 0, 0x03, 0x03) == invalidArgument);
+    Require(sceKernelWriteRemapIntoPrtCommand(&empty.buffer, address, source + 8, page, cpuReadWrite, 0) == invalidArgument);
+    Require(sceKernelWriteModifyMtypeProtectCommand(nullptr, address, page, 0, 0x03, 0x03) == invalidArgument);
+    Require(sceKernelWriteRemapIntoPrtCommand(nullptr, address, source, page, cpuReadWrite, 0) == invalidArgument);
+    Require(empty.Offset() == 0 && empty.Commands() == 0);
+
+    Apr::CommandBufferObject unbound{};
+    Require(sceAmprCommandBufferConstructor(&unbound) == 0);
+    Require(sceKernelWriteModifyMtypeProtectCommand(&unbound, address, page, 0, 0x03, 0x03) == permissionDenied);
+    Require(sceKernelWriteRemapIntoPrtCommand(&unbound, address, source, page, cpuReadWrite, 0) == permissionDenied);
+
+    const auto measured = static_cast<std::uint32_t>(sceAmprAmmMeasureAmmCommandSizeModifyMtypeProtect(address, page, 0, 0x03, 0x03));
+    Recorder exact(measured);
+    Require(sceKernelWriteModifyMtypeProtectCommand(&exact.buffer, address, page, 0, 0x03, 0x03) == 0);
+    Require(sceKernelWriteModifyMtypeProtectCommand(&exact.buffer, address, page, 0, 0x03, 0x03) == busy);
+}
+
 void TestAmmPrt() {
     std::uint64_t start = 0;
     std::uint64_t end = 0;
@@ -1151,6 +1202,7 @@ int main() {
     TestAmmRangesAboveHintedMaps();
     TestAmm();
     TestAmmRemapAndProtect();
+    TestKernelAmmRecorders();
     TestAmmPrt();
     return 0;
 }
