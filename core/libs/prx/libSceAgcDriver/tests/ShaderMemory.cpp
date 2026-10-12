@@ -21,6 +21,7 @@
 #include <spirv/unified1/spirv.hpp>
 #include <algorithm>
 #include <array>
+#include <barrier>
 #include <cstdlib>
 #include <cstring>
 #include <initializer_list>
@@ -335,6 +336,103 @@ void verifyFrontendPair() {
         verifyResult(pixelReference, *MaterializeShader(pixel, *pixelCapture, *pixelHandle));
         verifyResult(zeroReference, *MaterializeShader(zero, *zeroCapture, *zeroHandle));
     }
+}
+
+void verifyMaterializedSnapshotCollisions() {
+    using namespace ShaderRecompiler;
+    const std::array<std::uint32_t, 2> firstData{0x252becb5u, 0u};
+    const std::array<std::uint32_t, 2> secondData{0xb3d4134au, 0x94fffe4du};
+    const std::vector<std::uint32_t> code{0xbf800000u, 0x7e000200u, 0xf800180fu, 0u, 0xbf810000u};
+    auto request = FrontendRequest(code, firstData);
+    request.shader.stage = ShaderStage::Fragment;
+    request.context.compute.reset();
+    request.context.pixel = ShaderPixelStageInfo{};
+    request.context.pixel->wave32 = true;
+    request.context.pixel->targetOutputMode[0] = 9u;
+    request.context.waveSize = 32u;
+    request.useCache = true;
+    const auto handle = PrepareShader(request);
+    const auto capture = [&](std::span<const std::uint32_t> data) {
+        SrtRuntime runtime{};
+        runtime.userData = data;
+        runtime.shaderBase = request.shader.codeAddress;
+        return CaptureResources(request, runtime, *handle);
+    };
+    const auto firstCapture = capture(firstData);
+    const auto secondCapture = capture(secondData);
+    require(firstCapture->snapshot.userData != secondCapture->snapshot.userData,
+            "snapshot memo: captures do not contain distinct user data");
+    const auto pushWord = [](const RecompileResult& result) {
+        require(result.pushConstants.size() >= sizeof(std::uint32_t), "snapshot memo: user data is not in push constants");
+        std::uint32_t word = 0;
+        std::memcpy(&word, result.pushConstants.data(), sizeof(word));
+        return word;
+    };
+    auto fresh = request;
+    fresh.useCache = false;
+    require(pushWord(Recompile(fresh)) == firstData[0], "snapshot memo: the first uncached result has wrong user data");
+    fresh.context.userData = secondData;
+    require(pushWord(Recompile(fresh)) == secondData[0], "snapshot memo: the second uncached result has wrong user data");
+    const auto first = MaterializeShader(request, *firstCapture, *handle);
+    const auto second = MaterializeShader(request, *secondCapture, *handle);
+    require(pushWord(*first) == firstData[0], "snapshot memo: the first cached result has wrong user data");
+    if (pushWord(*second) != secondData[0]) {
+        std::cerr << "snapshot memo: expected second push word 0x" << std::hex << secondData[0]
+                  << ", received 0x" << pushWord(*second) << std::dec << '\n';
+    }
+    require(pushWord(*second) == secondData[0], "snapshot memo: a hash collision reused another capture's push constants");
+    require(first != second, "snapshot memo: distinct user data reused one result object");
+    const auto firstAgain = MaterializeShader(request, *firstCapture, *handle);
+    require(pushWord(*firstAgain) == firstData[0], "snapshot memo: A after B retained B's push constants");
+    const auto secondAgain = MaterializeShader(request, *secondCapture, *handle);
+    require(pushWord(*secondAgain) == secondData[0], "snapshot memo: repeated B retained A's push constants");
+    require(MaterializeShader(request, *secondCapture, *handle) == secondAgain,
+            "snapshot memo: an identical capture did not reuse the shared result");
+    require(pushWord(*first) == firstData[0] && pushWord(*second) == secondData[0],
+            "snapshot memo: replacing a colliding entry changed a retained result");
+    for (std::uint32_t iteration = 1; iteration <= 16; ++iteration) {
+        auto concurrentCode = code;
+        concurrentCode[0] |= iteration;
+        auto concurrent = request;
+        concurrent.shader.code = concurrentCode;
+        const auto concurrentHandle = PrepareShader(concurrent);
+        SrtRuntime runtime{};
+        runtime.shaderBase = concurrent.shader.codeAddress;
+        runtime.userData = firstData;
+        const auto firstConcurrent = CaptureResources(concurrent, runtime, *concurrentHandle);
+        runtime.userData = secondData;
+        const auto secondConcurrent = CaptureResources(concurrent, runtime, *concurrentHandle);
+        std::barrier ready(2);
+        auto firstFuture = std::async(std::launch::async, [&] {
+            ready.arrive_and_wait();
+            return MaterializeShader(concurrent, *firstConcurrent, *concurrentHandle);
+        });
+        auto secondFuture = std::async(std::launch::async, [&] {
+            ready.arrive_and_wait();
+            return MaterializeShader(concurrent, *secondConcurrent, *concurrentHandle);
+        });
+        const auto concurrentFirst = firstFuture.get();
+        const auto concurrentSecond = secondFuture.get();
+        require(pushWord(*concurrentFirst) == firstData[0] && pushWord(*concurrentSecond) == secondData[0],
+                "snapshot memo: concurrent colliding misses reused the wrong result");
+        require(concurrentFirst != concurrentSecond, "snapshot memo: concurrent distinct captures shared one result");
+    }
+    const auto dynamicBytes = [](const ResourceSnapshot& snapshot) {
+        return (snapshot.buffers.capacity() + snapshot.images.capacity() + snapshot.samplers.capacity()) * sizeof(DescriptorValue)
+            + (snapshot.flattenedSrt.capacity() + snapshot.userData.capacity()) * sizeof(std::uint32_t)
+            + snapshot.srtPoison.capacity() * sizeof(SrtReadPoison);
+    };
+    const std::vector<std::uint32_t> bufferCode{0xe0700000u, 0x80000000u, 0xbf810000u};
+    const std::array<std::uint32_t, 4> bufferData{0x10000000u, 0u, 0x40u, 0x00027facu};
+    auto bufferRequest = FrontendRequest(bufferCode, bufferData);
+    bufferRequest.useCache = true;
+    const auto bufferHandle = PrepareShader(bufferRequest);
+    SrtRuntime bufferRuntime{};
+    bufferRuntime.userData = bufferData;
+    bufferRuntime.shaderBase = bufferRequest.shader.codeAddress;
+    const auto bufferCapture = CaptureResources(bufferRequest, bufferRuntime, *bufferHandle);
+    std::cout << "Snapshot storage: inline=" << sizeof(ResourceSnapshot) << ", pixel dynamic=" << dynamicBytes(firstCapture->snapshot)
+              << ", single-buffer dynamic=" << dynamicBytes(bufferCapture->snapshot) << " bytes\n";
 }
 
 void verifyRegisterSources() {
@@ -3165,6 +3263,11 @@ void verifySrgbDepthCompareModes() {
 int main(int argc, char** argv) {
     try {
         using namespace ShaderRecompiler;
+        if (argc == 2 && std::string_view(argv[1]) == "--snapshot-memo-collision") {
+            verifyMaterializedSnapshotCollisions();
+            std::cout << "Materialized snapshot collisions retain current user data\n";
+            return 0;
+        }
         if (argc == 2 && std::string_view(argv[1]) == "--frontend-pair") {
             verifyFrontendPair();
             std::cout << "Prepared frontend reuse preserves full and partial-thread programs\n";
