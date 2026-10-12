@@ -459,6 +459,10 @@ int APS5_VABI sceKernelGetModuleInfo2(KernelModule handle, ModuleInfo* info) {
 
 std::int32_t APS5_VABI sceKernelGetLibkernelTextLocation_nid_postfix(void** address, std::size_t* size) {
     if (!address || !size) throw std::invalid_argument("sceKernelGetLibkernelTextLocation: null argument");
+#ifdef __APPLE__
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+#else
     const auto images = GuestImages();
     if (images.empty()) throw std::runtime_error("sceKernelGetLibkernelTextLocation: the main program is not loaded");
     ModuleInfo info{};
@@ -474,6 +478,7 @@ std::int32_t APS5_VABI sceKernelGetLibkernelTextLocation_nid_postfix(void** addr
     *address = reinterpret_cast<void*>(static_cast<std::uintptr_t>(info.segments[0].address));
     *size = info.segments[0].size;
     return 0;
+#endif
 }
 
 std::uint64_t GuestImageSegmentBytes_nid_no_patch() {
