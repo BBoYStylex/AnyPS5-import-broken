@@ -281,7 +281,7 @@ class ImportAuditTests(unittest.TestCase):
             self.assertIn("bad.prx", err)
             self.assertFalse(report.exists())
 
-    @unittest.skipUnless(shutil.which("gcc"), "needs gcc")
+    @unittest.skipUnless(sys.platform.startswith("linux") and shutil.which("gcc"), "needs Linux and an ELF-producing gcc")
     def test_compiled_module_import_is_found_after_removing_section_headers(self):
         work = self.work
         source, module = work.root / "module.c", work.modules / "compiled.prx"
