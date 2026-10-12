@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from debug_candidates import recover_debug_candidates
+from debug_candidates import recover_debug_candidates, recover_debug_dossier
 from recover import load_elf
 from test_compiler import fixture
 
@@ -85,6 +85,39 @@ class DebugCandidateTests(unittest.TestCase):
         self.assertEqual({x['symbol'] for x in result['functions']}, {'sample', 'twice'})
         self.assertTrue(all(not x['obligations'] for x in result['functions']))
         self.assertEqual(result, recover_debug_candidates(image, companion))
+
+    def test_partial_dossier_keeps_boundaries_and_abi_for_optimized_values(self):
+        image, companion = self.build('int sample(int a) { return a + 1; }', ['-O2'])
+        item, = recover_debug_dossier(image, companion)['functions']
+        self.assertEqual(item['facts']['source_abi'], {'parameters': ['i32'], 'result': 'i32'})
+        self.assertEqual(item['facts']['boundary']['address'], 0x1000)
+        self.assertTrue(item['value_locations'])
+        self.assertTrue(item['unresolved'])
+        self.assertNotIn('candidate', item)
+
+    def test_partial_dossier_retains_storage_despite_unknown_layout(self):
+        image, companion = self.build('int sample(int a) { char good[17]; struct {unsigned b:3;} bad; good[0]=a; bad.b=a; return good[0]+bad.b; }')
+        item, = recover_debug_dossier(image, companion)['functions']
+        self.assertIn(17, [r['size'] for r in item['storage_candidates']])
+        self.assertTrue(any('nonplain' in r['reason'] for r in item['unresolved']))
+        self.assertNotIn('candidate', item)
+
+    def test_partial_dossier_never_turns_register_values_into_storage(self):
+        image, companion = self.build('int sample(int a) { return a * 2; }', ['-O2'])
+        item, = recover_debug_dossier(image, companion)['functions']
+        self.assertEqual(item['storage_candidates'], [])
+        for row in item['value_locations']:
+            self.assertLess(row['pc_begin'], row['pc_end'])
+            self.assertGreaterEqual(row['pc_begin'], item['facts']['boundary']['address'])
+            self.assertLessEqual(row['pc_end'], item['facts']['boundary']['address'] + item['facts']['boundary']['size'])
+
+    def test_partial_dossier_invalidates_on_changed_input(self):
+        image, companion = self.build('int sample(int a) { return a; }')
+        raw = bytearray(image.read_bytes())
+        raw[0x1000] ^= 1
+        image.write_bytes(raw)
+        with self.assertRaisesRegex(ValueError, '0 image matches'):
+            recover_debug_dossier(image, companion)
 
 
 if __name__ == '__main__':
