@@ -214,6 +214,32 @@ int CreateAnonymousFile() {
 #endif
 }
 
+#ifdef _WIN32
+int CreateNamedShmFile(const std::string& name, int flags) {
+    std::string safeName;
+    for (char c : name) {
+        if (c == '/' || c == '\\' || c == ':' || c == '*' || c == '?' || c == '\"' || c == '<' || c == '>' || c == '|') {
+            safeName += '_';
+        } else {
+            safeName += c;
+        }
+    }
+    const auto dir = std::filesystem::temp_directory_path();
+    const auto filePath = dir / ("anyps5-shm-" + safeName);
+
+    int openFlags = _O_RDWR | _O_BINARY | _O_NOINHERIT;
+    if ((flags & SCE_KERNEL_O_CREAT) != 0) openFlags |= _O_CREAT;
+    if ((flags & SCE_KERNEL_O_EXCL) != 0) openFlags |= _O_EXCL;
+    if ((flags & SCE_KERNEL_O_TRUNC) != 0) openFlags |= _O_TRUNC;
+
+    int descriptor = -1;
+    const int error = _wsopen_s(&descriptor, filePath.c_str(), openFlags, _SH_DENYNO, _S_IREAD | _S_IWRITE);
+    if (error == 0) return descriptor;
+    errno = error;
+    return -1;
+}
+#endif
+
 }
 
 namespace File {
@@ -456,7 +482,13 @@ extern "C" int APS5_VABI shm_open_nid_postfix(const char* path, int flags, int m
     if ((flags & ~AcceptedFlags) != 0) return Fail(GuestInvalid);
     if (path != anonymousObject) {
 #ifdef _WIN32
-        NotImplemented_nid_no_patch("shm_open of a named object");
+        if (path == nullptr) return Fail(GuestInvalid);
+        if (accessMode == SCE_KERNEL_O_RDONLY) return Fail(GuestInvalid);
+        const int descriptor = CreateNamedShmFile(path, flags);
+        if (descriptor >= 0) return descriptor;
+        const int error = errno;
+        if (const int guest = GuestError(error)) return Fail(guest);
+        throw std::runtime_error("shm_open: creating the host file failed, errno=" + std::to_string(error));
 #else
         return OpenNamedFile(path, flags, mode);
 #endif
@@ -471,8 +503,21 @@ extern "C" int APS5_VABI shm_open_nid_postfix(const char* path, int flags, int m
 
 extern "C" int APS5_VABI shm_unlink_nid_postfix(const char* path) {
 #ifdef _WIN32
-    (void)path;
-    NotImplemented_nid_no_patch("shm_unlink of a named object");
+    if (path == nullptr) return Fail(GuestInvalid);
+    std::string safeName;
+    for (const char* p = path; *p; ++p) {
+        char c = *p;
+        if (c == '/' || c == '\\' || c == ':' || c == '*' || c == '?' || c == '\"' || c == '<' || c == '>' || c == '|') {
+            safeName += '_';
+        } else {
+            safeName += c;
+        }
+    }
+    const auto dir = std::filesystem::temp_directory_path();
+    const auto filePath = dir / ("anyps5-shm-" + safeName);
+    std::error_code ec;
+    std::filesystem::remove(filePath, ec);
+    return 0;
 #else
     int validationError = 0;
     const auto hostName = NamedHostPath(path, validationError);

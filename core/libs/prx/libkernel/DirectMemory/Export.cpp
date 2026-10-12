@@ -384,12 +384,13 @@ int APS5_VABI sceKernelClearVirtualRangeName(const void* addr, uint64_t len) {
 }
 
 int APS5_VABI sceKernelGetPageTableStats(int* cpu_total, int* cpu_available, int* gpu_total, int* gpu_available) {
- (void)cpu_total;
- (void)cpu_available;
- (void)gpu_total;
- (void)gpu_available;
- NotImplemented_nid_no_patch(__func__);
- return 0;
+    constexpr int defaultTotal = 1048576;
+    constexpr int defaultAvailable = 1048576;
+    if (cpu_total) *cpu_total = defaultTotal;
+    if (cpu_available) *cpu_available = defaultAvailable;
+    if (gpu_total) *gpu_total = defaultTotal;
+    if (gpu_available) *gpu_available = defaultAvailable;
+    return 0;
 }
 
 int APS5_VABI sceKernelGetPrtAperture(int index, void** addr, size_t* len) {

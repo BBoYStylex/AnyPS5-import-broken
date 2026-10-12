@@ -18,10 +18,14 @@ intptr_t APS5_VABI sceKernelGetEventData(const KernelEvent* ev) {
     return requireEvent(ev, __func__).data;
 }
 
+constexpr uint16_t EvError = 0x4000;
+
 int APS5_VABI sceKernelGetEventError(const KernelEvent* ev) {
- (void)ev;
- NotImplemented_nid_no_patch(__func__);
- return 0;
+    const auto& event = requireEvent(ev, __func__);
+    if ((event.flags & EvError) != 0) {
+        return static_cast<int>(event.data);
+    }
+    return 0;
 }
 
 intptr_t APS5_VABI sceKernelGetEventFflags(const KernelEvent* ev) {
