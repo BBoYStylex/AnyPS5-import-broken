@@ -60,6 +60,11 @@ target_link_options(anyps5_native_graphics INTERFACE LINKER:-dead_strip)
 target_include_directories(anyps5_native_graphics PUBLIC "${LIBS_INCLUDE_DIR}")
 set_target_properties(anyps5_native_graphics PROPERTIES POSITION_INDEPENDENT_CODE ON CXX_EXTENSIONS OFF)
 
+add_test_executable(native_shared_memory_alias_tests NativeSharedMemoryAliasTests.cpp)
+target_link_libraries(native_shared_memory_alias_tests PRIVATE anyps5_native_graphics)
+add_test(NAME native_shared_memory_alias COMMAND native_shared_memory_alias_tests)
+set_tests_properties(native_shared_memory_alias PROPERTIES TIMEOUT 20)
+
 add_test_executable(native_runtime_smoke NativeRuntimeSmoke.cpp)
 target_link_libraries(native_runtime_smoke PRIVATE anyps5_native_graphics)
 
