@@ -51,6 +51,7 @@ double APS5_VABI fmod_nid_postfix(double, double);
 float APS5_VABI asinf_nid_postfix(float);
 float APS5_VABI acosf_nid_postfix(float);
 double APS5_VABI asin_nid_postfix(double);
+double APS5_VABI acos_nid_postfix(double);
 float APS5_VABI atan2f_nid_postfix(float, float);
 float APS5_VABI hypotf_nid_postfix(float, float);
 double APS5_VABI hypot_nid_postfix(double, double);
@@ -441,6 +442,24 @@ static void CheckAsin() {
     Require(errno == 0);
     std::feclearexcept(FE_ALL_EXCEPT);
     asin_nid_postfix(nan);
+    Require(!std::fetestexcept(FE_INVALID));
+
+    Require(acos_nid_postfix(1.) == 0.);
+    Require(Near(acos_nid_postfix(-1.), pi, 1e-15));
+    Require(Near(acos_nid_postfix(0.), pi_2, 1e-15));
+    Require(Near(acos_nid_postfix(0.5), pi/3, 1e-15));
+    Require(std::isnan(acos_nid_postfix(2.0)) && std::signbit(acos_nid_postfix(2.0)));
+    Require(std::isnan(acos_nid_postfix(-2.0)) && std::signbit(acos_nid_postfix(-2.0)));
+    Require(std::isnan(acos_nid_postfix(infinity)) && std::signbit(acos_nid_postfix(infinity)));
+    Require(std::isnan(acos_nid_postfix(-infinity)) && std::signbit(acos_nid_postfix(-infinity)));
+    Require(std::isnan(acos_nid_postfix(nan)));
+    std::feclearexcept(FE_ALL_EXCEPT);
+    errno = 0;
+    acos_nid_postfix(2.0);
+    Require(std::fetestexcept(FE_INVALID));
+    Require(errno == 0);
+    std::feclearexcept(FE_ALL_EXCEPT);
+    acos_nid_postfix(nan);
     Require(!std::fetestexcept(FE_INVALID));
 }
 

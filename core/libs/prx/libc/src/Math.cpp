@@ -193,7 +193,13 @@ double APS5_VABI asin_nid_postfix(double x) {
     }
     return std::asin(x);
 }
-double APS5_VABI acos_nid_postfix(double x) { return std::acos(x); }
+double APS5_VABI acos_nid_postfix(double x) {
+    if (std::isgreater(x, 1.0) || std::isless(x, -1.0)) {
+        std::feraiseexcept(FE_INVALID);
+        return -std::numeric_limits<double>::quiet_NaN();
+    }
+    return std::acos(x);
+}
 double APS5_VABI sqrt_nid_postfix(double x) { return std::sqrt(x); }
 float APS5_VABI sqrtf_nid_postfix(float x) { return std::sqrt(x); }
 double APS5_VABI fabs_nid_postfix(double x) { return std::fabs(x); }
