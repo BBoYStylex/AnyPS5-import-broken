@@ -67,6 +67,7 @@ int main(int argc, char** argv) {
 #ifdef LIFTED
         state.Gpr[4] = stack;
         state.Mxcsr = 0x1f80;
+        state.X87Control = 0x37f;
         NativeAotGuest::Invoke(state, base + %(code)d + offset);
 #else
         lab_enter(reinterpret_cast<std::uint64_t>(lab_bodies) + offset, &state);

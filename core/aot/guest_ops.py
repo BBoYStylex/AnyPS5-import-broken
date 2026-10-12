@@ -8,6 +8,7 @@ STATE_XMM = 128
 STATE_FS = 384
 STATE_X87 = 400
 STATE_X87_TOP = 528
+STATE_X87_CONTROL = 536
 ALIASES = {}
 for full, dword, word, low in zip(GPR[:8], ['eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi'],
                                   ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'],
@@ -1035,12 +1036,46 @@ class Integer(Emitter):
     def op_fld(self):
         source, = self.operands()
         if source.type == X86_OP_MEM:
-            if source.size != 10:
-                self.unsupported('x87 load with format conversion')
-            value = self.load(self.address(source), 80)
+            if source.size == 10:
+                value = self.load(self.address(source), 80)
+            elif source.size in (4, 8):
+                value = self.widen_x87(self.load(self.address(source), source.size * 8), source.size * 8)
+            else:
+                self.unsupported('x87 load format')
         else:
             value = self.v(f'load i80, ptr {self.x87_slot(self.x87_register(source))}, align 1')
         self.x87_push(value)
+
+    def widen_x87(self, raw, bits):
+        control = self.v(f'load i64, ptr {self.v(f"getelementptr i8, ptr %s, i64 {STATE_X87_CONTROL}")}')
+        self.trap_if(self.v(f'icmp ne i64 {self.v(f"and i64 {control}, 63")}, 63'), TRAP_UNSUPPORTED)
+        fraction_bits, bias, exponent_max = (52, 1023, 2047) if bits == 64 else (23, 127, 255)
+        raw = self.zext(raw, bits, 64)
+        fraction = self.v(f'and i64 {raw}, {(1 << fraction_bits) - 1}')
+        exponent = self.v(f'and i64 {self.v(f"lshr i64 {raw}, {fraction_bits}")}, {exponent_max}')
+        normal_sig = self.v(f'or i64 {self.v(f"shl i64 {fraction}, {63 - fraction_bits}")}, 9223372036854775808')
+        zero_fraction = self.v(f'icmp eq i64 {fraction}, 0')
+        leading = self.v(f'call i64 @llvm.ctlz.i64(i64 {fraction}, i1 false)')
+        shift = self.v(f'select i1 {zero_fraction}, i64 0, i64 {leading}')
+        sub_sig = self.v(f'shl i64 {fraction}, {shift}')
+        sub_exp = self.v(f'sub i64 {16447 - bias - fraction_bits}, {leading}')
+        sub_exp = self.v(f'select i1 {zero_fraction}, i64 0, i64 {sub_exp}')
+        special_sig = self.v(f'or i64 {normal_sig}, {self.v(f"select i1 {zero_fraction}, i64 0, i64 4611686018427387904")}')
+        special = self.v(f'icmp eq i64 {exponent}, {exponent_max}')
+        zero_exp = self.v(f'icmp eq i64 {exponent}, 0')
+        sig = self.v(f'select i1 {zero_exp}, i64 {sub_sig}, i64 {normal_sig}')
+        sig = self.v(f'select i1 {special}, i64 {special_sig}, i64 {sig}')
+        exp = self.v(f'select i1 {zero_exp}, i64 {sub_exp}, i64 {self.v(f"add i64 {exponent}, {16383 - bias}")}')
+        exp = self.v(f'select i1 {special}, i64 32767, i64 {exp}')
+        sign = self.v(f'lshr i64 {raw}, {bits - 1}')
+        sign_exp = self.v(f'or i64 {exp}, {self.v(f"shl i64 {sign}, 15")}')
+        high = self.v(f'shl i80 {self.v(f"zext i64 {sign_exp} to i80")}, 64')
+        return self.v(f'or i80 {high}, {self.v(f"zext i64 {sig} to i80")}')
+
+    def op_fnstcw(self):
+        destination, = self.operands()
+        value = self.v(f'load i64, ptr {self.v(f"getelementptr i8, ptr %s, i64 {STATE_X87_CONTROL}")}')
+        self.write(destination, self.trunc(value, 16), 16)
 
     def op_fldz(self):
         self.x87_push('0')
@@ -1668,6 +1703,25 @@ class Vector(Integer):
 
     def op_cvtsi2ss(self):
         self.integer_to_float('ss')
+
+    def op_cvttpd2dq(self):
+        destination, source = self.operands()
+        mode = self.v(f'load i64, ptr {self.v("getelementptr i8, ptr %s, i64 392")}')
+        self.trap_if(self.v(f'icmp ne i64 {self.v(f"and i64 {mode}, 18446744073709551552")}, 8064'), TRAP_UNSUPPORTED)
+        raw = self.read128(source, True)
+        values = self.v(f'bitcast i128 {raw} to <2 x double>')
+        result = '0'
+        for lane in range(2):
+            value = self.v(f'extractelement <2 x double> {values}, i32 {lane}')
+            above = self.v(f'fcmp ogt double {value}, {self.float_literal(-2147483649.0, "double")}')
+            below = self.v(f'fcmp olt double {value}, {self.float_literal(2147483648.0, "double")}')
+            valid = self.v(f'and i1 {above}, {below}')
+            converted = self.v(f'fptosi double {value} to i32')
+            safe = self.v(f'select i1 {valid}, i32 {converted}, i32 2147483648')
+            widened = self.v(f'zext i32 {safe} to i128')
+            shifted = self.v(f'shl i128 {widened}, {lane * 32}')
+            result = self.v(f'or i128 {result}, {shifted}')
+        self.set_xmm(self.xmm_index(destination), result)
 
     def op_cvttsd2si(self):
         self.float_to_integer('sd', True)

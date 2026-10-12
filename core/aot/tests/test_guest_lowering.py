@@ -17,6 +17,34 @@ class GuestSemanticsTests(unittest.TestCase):
             failures = guest_lab.Lab(directory).compare(cases, samples=samples, seed=11)
         self.assertEqual(failures[:3], [])
 
+    def test_packed_truncation_and_extended_loads(self):
+        cases = [
+            {'asm': ['cvttpd2dq xmm0, xmm1']},
+            {'asm': ['cvttpd2dq xmm0, xmmword ptr [rsi]']},
+            {'asm': ['fld qword ptr [rsi]', 'fstp tbyte ptr [rsi + 16]']},
+            {'asm': ['fld dword ptr [rsi]', 'fstp tbyte ptr [rsi + 16]']},
+            {'asm': ['fnstcw word ptr [rsi + 32]']},
+        ]
+        for case in cases:
+            case['pointers'] = {'rsi': 64}
+            case['vectors'] = 'double'
+        self.compare(cases, samples=128)
+
+    def test_extended_loads_at_encoding_boundaries(self):
+        cases = []
+        for bits, size, register in ((32, 'dword', 'eax'), (64, 'qword', 'rax')):
+            fraction = 23 if bits == 32 else 52
+            exponent = 255 if bits == 32 else 2047
+            patterns = [0, 1, (1 << fraction) - 1, 1 << fraction,
+                        (exponent - 1) << fraction, exponent << fraction,
+                        (exponent << fraction) | 1, (exponent << fraction) | (1 << (fraction - 1))]
+            for raw in patterns:
+                for sign in (0, 1 << (bits - 1)):
+                    cases.append({'asm': [f'mov {register}, {raw | sign}', f'mov {size} ptr [rsi], {register}',
+                                          f'fld {size} ptr [rsi]', 'fstp tbyte ptr [rsi + 16]'],
+                                  'pointers': {'rsi': 64}})
+        self.compare(cases, samples=1)
+
     def test_forms_0(self):
         self.compare(CASES[0 * CHUNK:1 * CHUNK])
 
@@ -230,6 +258,12 @@ counter: .quad 0
         binary, _ = self.program(source, imports=('exit', 'pthread_create', 'pthread_join'), concurrent=True)
         result = self.run_binary(binary)
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_packed_truncation_rejects_misaligned_source(self):
+        binary, _ = self.program(PRELUDE + 'sub rsp, 64\nlea rsi, [rsp + 1]\ncvttpd2dq xmm0, xmmword ptr [rsi]\nxor edi, edi\n' + EXIT)
+        result = self.run_binary(binary)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(b'misaligned aligned vector access', result.stderr)
 
     def test_variadic_provider_reads_registers_and_stack(self):
         binary, _ = self.program(PRELUDE + '''
