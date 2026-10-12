@@ -26,7 +26,7 @@ def command_output(stdout, stderr="", returncode=0):
     def run(command, **kwargs):
         return RUN([sys.executable, "-c", code], **kwargs)
 
-    with patch.object(subprocess, "_text_encoding", return_value="cp1252"), \
+    with patch.object(subprocess, "_text_encoding", return_value="cp1252", create=True), \
             patch.object(subprocess, "run", side_effect=run):
         yield
 
