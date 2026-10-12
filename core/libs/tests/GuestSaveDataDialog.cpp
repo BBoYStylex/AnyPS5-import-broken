@@ -34,7 +34,12 @@ static void RequireRunning() {
 }
 
 int main() {
+    Require(sceSaveDataDialogGetStatus() == SAVE_DATA_DIALOG_STATUS_NONE, "initial state");
+    Require(sceSaveDataDialogOpen(nullptr) == SAVE_DATA_DIALOG_ERROR_INVALID_STATE, "uninitialized open");
     Require(sceSaveDataDialogInitialize() == 0, "initialize");
+    Require(sceSaveDataDialogInitialize() == SAVE_DATA_DIALOG_ERROR_ALREADY_INITIALIZED, "double initialize");
+    Require(sceSaveDataDialogOpen(nullptr) == SAVE_DATA_DIALOG_ERROR_ARG_NULL, "null open param");
+    Require(sceSaveDataDialogGetResult(nullptr) == SAVE_DATA_DIALOG_ERROR_ARG_NULL, "null get result");
 
     SaveDataDirName names[2]{{}, {"SDU1"}};
     SaveDataDialogItems items{};
