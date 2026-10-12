@@ -12,4 +12,8 @@ int APS5_VABI flsl_nid_postfix(std::int64_t value) {
     return static_cast<int>(std::bit_width(static_cast<std::uint64_t>(value)));
 }
 
+int APS5_VABI flsll_nid_postfix(std::int64_t value) {
+    return static_cast<int>(std::bit_width(static_cast<std::uint64_t>(value)));
+}
+
 }

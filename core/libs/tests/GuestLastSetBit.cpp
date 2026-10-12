@@ -7,6 +7,7 @@
 extern "C" {
 int APS5_VABI fls_nid_postfix(std::int32_t);
 int APS5_VABI flsl_nid_postfix(std::int64_t);
+int APS5_VABI flsll_nid_postfix(std::int64_t);
 }
 
 static void Require(bool value) {
@@ -27,9 +28,22 @@ static void CheckWidth(int (APS5_VABI *lastSet)(TSigned)) {
             Require(lastSet(std::bit_cast<TSigned>(bits)) == last + 1);
         }
     }
+    std::uint64_t state = 0x123456789abcdef0;
+    for (int sample = 0; sample < 4096; ++sample) {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        const auto bits = static_cast<TUnsigned>(state);
+        int last = 0;
+        for (int bit = 0; bit < width; ++bit) {
+            if ((bits & (TUnsigned{1} << bit)) != 0) last = bit + 1;
+        }
+        Require(lastSet(std::bit_cast<TSigned>(bits)) == last);
+    }
 }
 
 int main() {
     CheckWidth<std::int32_t, std::uint32_t>(fls_nid_postfix);
     CheckWidth<std::int64_t, std::uint64_t>(flsl_nid_postfix);
+    CheckWidth<std::int64_t, std::uint64_t>(flsll_nid_postfix);
 }
