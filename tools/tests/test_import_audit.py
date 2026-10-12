@@ -44,6 +44,28 @@ def exporting(*names):
     return build_elf([(name, 1, GLOBAL_FUNCTION) for name in names])
 
 
+def build_dynamic_elf(*names):
+    image = bytearray(0x500)
+    strings = b"\0" + b"".join(name.encode() + b"\0" for name in names)
+    tags = [(4, 0x1200), (5, 0x1300), (6, 0x1400), (10, len(strings)), (11, 24), (0, 0)]
+    image[0x100:0x100 + len(tags) * 16] = b"".join(struct.pack("<qQ", *tag) for tag in tags)
+    hash_table = struct.pack("<III", 1, len(names) + 1, 1 if names else 0)
+    if names:
+        hash_table += b"".join(struct.pack("<I", int(index == len(names) - 1)) for index in range(len(names)))
+    image[0x200:0x200 + len(hash_table)] = hash_table
+    image[0x300:0x300 + len(strings)] = strings
+    symbols = [struct.pack("<IBBHQQ", 0, 0, 0, 0, 0, 0)]
+    offset = 1
+    for name in names:
+        symbols.append(struct.pack("<IBBHQQ", offset, GLOBAL_FUNCTION, 0, 1, 0x2000, 1))
+        offset += len(name) + 1
+    image[0x400:0x400 + len(symbols) * 24] = b"".join(symbols)
+    image[:64] = struct.pack("<16sHHIQQQIHHHHHH", b"\x7fELF\x02\x01\x01" + bytes(9), 3, 0x3e, 1, 0, 64, 0, 0, 64, 56, 2, 0, 0, 0)
+    image[64:120] = struct.pack("<IIQQQQQQ", 1, 6, 0, 0x1000, 0x1000, len(image), len(image), 0x1000)
+    image[120:176] = struct.pack("<IIQQQQQQ", 2, 6, 0x100, 0x1100, 0x1100, len(tags) * 16, len(tags) * 16, 8)
+    return bytes(image)
+
+
 def build_pe(names):
     section_rva, raw_offset = 0x1000, 0x200
     strings, rvas = b"", []
@@ -112,6 +134,9 @@ class ImportAuditTests(unittest.TestCase):
             ("UNDEFINED11", 0, GLOBAL_FUNCTION), ("LOCALLOCAL1", 1, LOCAL_FUNCTION)]))
         (work.libs / "libc.prx").write_bytes(exporting("CCCCCCCCCCC"))
         (work.modules / "libSceNpCppWebApi.prx").write_bytes(b"\x7fELF")
+        (work.root / "app0" / "sce_module").mkdir(parents=True)
+        (work.root / "app0" / "sce_module" / "libSceNpCppWebApi.prx.guest.prx").write_bytes(exporting("EEEEEEEEEEE"))
+        write_registry(work.root / "game.libSceNpCppWebApi.prx.guest.prx.registry.json", [])
         write_source(work.source, "libSceMsgDialog", STUB_SOURCE.format(name=MESSAGE_NAME) + 'APS5_EXPORT("BBBBBBBBBBB", sceFooUnknown_B);\n' + STUB_SOURCE.format(name="sceFooUnknown_B"))
         registry = work.root / "game.registry.json"
         write_registry(registry, [
@@ -138,6 +163,67 @@ class ImportAuditTests(unittest.TestCase):
         self.assertEqual(kinds[("EEEEEEEEEEE", "libSceNpCppWebApi.prx")], "module")
         self.assertIn(f"{MESSAGE_NID}  {MESSAGE_NAME}", out)
         self.assertIn("DDDDDDDDDDD", out)
+
+    def test_modules_add_their_registries_and_exports_to_the_audit(self):
+        work = self.work
+        (work.libs / "libSceUnrelated.prx").write_bytes(exporting("XXXXXXXXXXX"))
+        (work.modules / "provider.prx").write_bytes(b"guest module")
+        (work.modules / "consumer.prx").write_bytes(b"guest module")
+        output_modules = work.root / "app0" / "sce_module"
+        output_modules.mkdir(parents=True)
+        (output_modules / "provider.prx.guest.prx").write_bytes(exporting("BBBBBBBBBBB"))
+        (output_modules / "consumer.prx.guest.prx").write_bytes(exporting("CCCCCCCCCCC"))
+        registry = work.root / "game.registry.json"
+        write_registry(registry, [("BBBBBBBBBBB", "provider.prx")])
+        write_registry(work.root / "game.provider.prx.guest.prx.registry.json", [])
+        write_registry(work.root / "game.consumer.prx.guest.prx.registry.json", [("BBBBBBBBBBB", ""), ("DDDDDDDDDDD", ""), ("DDDDDDDDDDD", "provider.prx")])
+
+        result = work.root / "audit.json"
+        code, out, err = work.run(registry, "--json", str(result))
+
+        self.assertEqual((code, err), (1, ""))
+        data = json.loads(result.read_text())
+        self.assertEqual(data["registries"], [str(registry), str(work.root / "game.consumer.prx.guest.prx.registry.json"), str(work.root / "game.provider.prx.guest.prx.registry.json")])
+        classes = {(item["nid"], item["library"]): item["class"] for item in data["imports"]}
+        self.assertEqual(classes[("BBBBBBBBBBB", "provider.prx")], "module")
+        self.assertEqual(classes[("BBBBBBBBBBB", "")], "implemented")
+        self.assertEqual(classes[("DDDDDDDDDDD", "")], "absent")
+        self.assertEqual(classes[("DDDDDDDDDDD", "provider.prx")], "absent")
+        self.assertIn("DDDDDDDDDDD", out)
+
+        explicit = work.root / "explicit.json"
+        explicit_args = [str(registry), str(work.root / "game.consumer.prx.guest.prx.registry.json"), str(work.root / "game.provider.prx.guest.prx.registry.json"), "--libs", str(work.libs), "--modules", str(work.modules), "--source", str(work.source), "--json", str(explicit)]
+        explicit_out, explicit_err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(explicit_out), contextlib.redirect_stderr(explicit_err):
+            code = import_audit.main(explicit_args)
+        explicit_data = json.loads(explicit.read_text())
+        self.assertEqual((code, explicit_err.getvalue()), (1, ""))
+        self.assertEqual(explicit_data["registries"], data["registries"])
+        self.assertEqual(explicit_data["imports"], data["imports"])
+
+        sidecar_dir = work.root / "external-sidecars"
+        sidecar_dir.mkdir()
+        external_sidecars = []
+        for module_name in ("consumer.prx", "provider.prx"):
+            sidecar = work.root / f"game.{module_name}.guest.prx.registry.json"
+            external = sidecar_dir / sidecar.name
+            external.write_bytes(sidecar.read_bytes())
+            sidecar.unlink()
+            external_sidecars.append(external)
+        external_args = [str(registry), *(str(path) for path in external_sidecars), "--libs", str(work.libs), "--modules", str(work.modules), "--source", str(work.source), "--json", str(explicit)]
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            code = import_audit.main(external_args)
+        self.assertEqual(code, 1)
+        self.assertEqual(json.loads(explicit.read_text())["imports"], data["imports"])
+
+    def test_modules_fail_closed_when_the_relinker_sidecar_is_missing(self):
+        work = self.work
+        (work.modules / "missing.prx").write_bytes(b"guest module")
+        registry = work.root / "game.registry.json"
+        write_registry(registry, [])
+        code, out, err = work.run(registry)
+        self.assertEqual((code, out), (2, ""))
+        self.assertIn("missing.prx.guest.prx.registry.json: missing module import registry", err)
 
     def test_clean_audit_exits_zero_and_empty_registry_is_empty(self):
         work = self.work
@@ -218,6 +304,10 @@ class ImportAuditTests(unittest.TestCase):
         for cut in (10, 64, len(image) - 5):
             with self.assertRaisesRegex(import_audit.AuditError, "lib.prx"):
                 import_audit.elf_exports(path, image[:cut])
+
+    def test_sectionless_module_elf_uses_its_dynamic_hash_and_symbols(self):
+        image = build_dynamic_elf("AAAAAAAAAAA", "BBBBBBBBBBB")
+        self.assertEqual(import_audit.elf_dynamic_exports(Path("module.guest.prx"), image), {"AAAAAAAAAAA", "BBBBBBBBBBB"})
 
     def test_pe_reader(self):
         path = Path("lib.prx")

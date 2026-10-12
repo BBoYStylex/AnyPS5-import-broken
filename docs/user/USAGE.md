@@ -154,17 +154,17 @@ GPU results in storage images and render targets stay on the GPU until something
 
 ```sh
 relinker --registry source/input.elf app.elf
-python3 tools/import_audit.py app.registry.json app.libc.prx.guest.prx.registry.json --libs build/core/libs/libs --modules source/sce_module
+python3 tools/import_audit.py app.registry.json --libs build/core/libs/libs --modules source/sce_module
 ```
 
-`--registry` writes `app.registry.json` for the executable and one `app.<module>.registry.json` for each converted bundled module; pass all of them. `--libs` is the directory the `libs` target fills ([build instructions](../dev/BUILD.md)); the exports are read from the built `.prx` files, so the result matches what the loader finds. Imports are counted once per NID and library, and every reference lands in exactly one class:
+`--registry` writes `app.registry.json` for the executable and one `app.<module>.guest.prx.registry.json` for each converted bundled module. When `--modules` is supplied, the audit finds those sidecars next to the main registry and reads exports from the converted modules under `app0/`; pass module sidecars explicitly only when they are stored elsewhere. `--libs` is the directory the `libs` target fills ([build instructions](../dev/BUILD.md)); the exports are read from the built `.prx` files, so the result matches what the loader finds. Imports are counted once per NID and library, and every reference lands in exactly one class:
 
 | Class | Meaning |
 |-------|---------|
-| `implemented` | A built library exports the NID and its function is not a throwing stub. |
+| `implemented` | A built library or bundled module exports the NID and its function is not a throwing stub. |
 | `stub` | Exported, but the whole function calls `NotImplemented_nid_no_patch`: the game loads and throws when it calls it. |
 | `absent` | No built library exports the NID: the loader fails. |
-| `module` | The import names a file found in `--modules` (the title's own library); its exports are not checked. |
+| `module` | The import names a file found in `--modules` (the title's own library); its registry is also audited, and its exports can satisfy sibling module imports. |
 
 The report also lists needed libraries that have no file in `--libs` or `--modules`, and imports exported only by a library other than the one they name; those resolve on Linux and can fail on Windows.
 

@@ -161,6 +161,68 @@ def read_exports(path, data=None):
     raise AuditError(f"{path}: neither ELF nor PE (first bytes {data[:4]!r})")
 
 
+def elf_dynamic_exports(path, data):
+    """Read exports from an ELF image whose section headers were stripped."""
+    header = unpack("<16sHHIQQQIHHHHHH", data, 0, path, "ELF header")
+    ident, phoff, phentsize, phnum = header[0], header[5], header[9], header[10]
+    if ident[4] != 2 or ident[5] != 1 or phentsize != 56 or not phoff:
+        raise AuditError(f"{path}: dynamic exports require little-endian ELF64 program headers")
+    take(data, phoff, phnum * phentsize, path, "program header table")
+    loads = []
+    dynamic = None
+    for index in range(phnum):
+        kind, _, offset, address, _, file_size, _, _ = unpack("<IIQQQQQQ", data, phoff + index * phentsize, path, f"program header {index}")
+        if kind == 1:
+            loads.append((address, file_size, offset))
+        elif kind == 2:
+            if dynamic is not None:
+                raise AuditError(f"{path}: multiple dynamic segments")
+            dynamic = (offset, file_size)
+    if dynamic is None or dynamic[1] % 16:
+        raise AuditError(f"{path}: missing or malformed dynamic segment")
+
+    def virtual_offset(address, size, what):
+        for start, extent, offset in loads:
+            if address >= start and address - start <= extent and size <= extent - (address - start):
+                return take(data, offset + address - start, size, path, what), offset + address - start
+        raise AuditError(f"{path}: {what} at virtual address 0x{address:x} is outside file-backed load segments")
+
+    tags = {}
+    dynamic_offset, dynamic_size = dynamic
+    take(data, dynamic_offset, dynamic_size, path, "dynamic segment")
+    for position in range(dynamic_offset, dynamic_offset + dynamic_size, 16):
+        tag, value = unpack("<qQ", data, position, path, "dynamic entry")
+        if tag == 0:
+            break
+        tags[tag] = value
+    required = (4, 5, 6, 10, 11)
+    if any(tag not in tags for tag in required) or tags[11] != 24:
+        raise AuditError(f"{path}: dynamic symbol/hash/string tables are incomplete")
+    _, hash_offset = virtual_offset(tags[4], 8, "dynamic hash table")
+    _, symbol_count = unpack("<II", data, hash_offset, path, "dynamic hash table")
+    string_size = tags[10]
+    _, string_offset = virtual_offset(tags[5], string_size, "dynamic string table")
+    virtual_offset(tags[6], symbol_count * 24, "dynamic symbol table")
+    names = set()
+    for index in range(symbol_count):
+        name, info, other, section, _, _ = unpack("<IBBHQQ", data, virtual_offset(tags[6] + index * 24, 24, "dynamic symbol")[1], path, "dynamic symbol")
+        binding, visibility = info >> 4, other & 3
+        if name == 0 or section == 0 or binding not in (1, 2, 10) or visibility not in (0, 3):
+            continue
+        names.add(cstring(data, string_offset + name, string_offset + string_size, path, "dynamic export name"))
+    return names
+
+
+def read_module_exports(path):
+    data = path.read_bytes()
+    if data[:4] == b"\x7fELF":
+        try:
+            return elf_dynamic_exports(path, data)
+        except AuditError:
+            return elf_exports(path, data)
+    return read_exports(path, data)
+
+
 def directory_files(directory, pattern):
     path = Path(directory)
     if not path.is_dir():
@@ -191,8 +253,44 @@ def built_libraries(directories):
     return {name: sorted(files) for name, files in exports.items()}, libraries
 
 
-def module_files(directories):
-    return {file.name for directory in directories for file in directory_files(directory, "*")}
+def load_module_inputs(registries, directories):
+    """Load the import registries and converted exports for bundled modules."""
+    module_paths = [file for directory in directories for file in directory_files(directory, "*")]
+    modules = {file.name for file in module_paths}
+
+    extra_registries = []
+    known_registries = {Path(registry).resolve() for registry in registries}
+    module_exports = defaultdict(set)
+    converted_inputs = []
+    for registry in registries:
+        name = registry.name
+        suffix = ".registry.json"
+        if not name.endswith(suffix) or name.endswith(".guest.prx.registry.json"):
+            continue
+        output_stem = name[:-len(suffix)]
+        for module_name in sorted(modules):
+            if not module_name.endswith(".prx"):
+                continue
+            sidecar = registry.parent / f"{output_stem}.{module_name}.guest.prx.registry.json"
+            explicit_sidecars = [path for path in registries if path.name.endswith(f".{module_name}.guest.prx.registry.json")]
+            if not explicit_sidecars:
+                if not sidecar.is_file():
+                    raise AuditError(f"{sidecar}: missing module import registry; rerun relinker with --registry")
+                if sidecar.resolve() not in known_registries:
+                    extra_registries.append(sidecar)
+                    known_registries.add(sidecar.resolve())
+
+            candidates = list((registry.parent / "app0").rglob(f"{module_name}.guest.prx")) if (registry.parent / "app0").is_dir() else []
+            if len(candidates) > 1:
+                raise AuditError(f"{registry.parent / 'app0'}: multiple converted modules named {module_name}.guest.prx")
+            if not candidates:
+                raise AuditError(f"{registry.parent / 'app0'}: converted module {module_name}.guest.prx not found; run the audit beside the relinker output")
+            converted = candidates[0]
+            converted_inputs.append(converted)
+            for export in read_module_exports(converted):
+                nid = export.split("#", 1)[0]
+                module_exports[nid].add(module_name)
+    return modules, dict(module_exports), extra_registries, module_paths + converted_inputs
 
 
 def nid_of(name, aliases):
@@ -246,13 +344,16 @@ def check_conservation(references, records):
 
 def audit(imports, exports, stubs, libraries, modules):
     records = {}
-    for nid, library in imports:
+    for entry in imports:
+        nid, library = entry[:2]
+        from_module = len(entry) > 2 and entry[2]
         record = records.setdefault((nid, library), {"nid": nid, "library": library, "references": 0})
         record["references"] += 1
+        record["from_module"] = record.get("from_module", False) or from_module
     for record in records.values():
         nid, library = record["nid"], record["library"]
         providers = exports.get(nid, [])
-        if library and library in modules:
+        if library and library in modules and not record.get("from_module", False):
             kind = "module"
         elif not providers:
             kind = "absent"
@@ -264,6 +365,7 @@ def audit(imports, exports, stubs, libraries, modules):
         record["providers"] = providers
         record["library_mismatch"] = kind in ("implemented", "stub") and bool(library) and library not in providers and "libc.prx" not in providers
         record["name"] = next((stubs[(provider, nid)] for provider in providers if (provider, nid) in stubs), None) if kind == "stub" else None
+        record.pop("from_module", None)
     ordered = sorted(records.values(), key=lambda record: (record["class"], record["library"], record["nid"]))
     check_conservation(len(imports), ordered)
     missing = defaultdict(int)
@@ -346,30 +448,38 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="classify the imports of a converted game against the built system libraries")
     parser.add_argument("registries", nargs="+", type=Path, help="JSON written by 'relinker --registry'")
     parser.add_argument("--libs", action="append", required=True, help="directory of built .prx files; repeat for several")
-    parser.add_argument("--modules", action="append", default=[], help="directory of the title's own modules; libraries named there are not checked")
+    parser.add_argument("--modules", action="append", default=[], help="directory of the title's own modules; their relinker registries and converted exports are audited automatically")
     parser.add_argument("--source", default=str(PRX), help="core/libs/prx tree used to find throwing stubs (default: this repository's)")
     parser.add_argument("--names", help="aerolib.csv style file (NID, name per line) used to name absent imports")
     parser.add_argument("--json", type=Path, help="write the full result to this file")
     args = parser.parse_args(argv)
     try:
+        modules, module_exports, module_registries, module_files_to_check = load_module_inputs(args.registries, args.modules)
+        registries = args.registries + module_registries
         if args.json:
-            inputs = args.registries + ([Path(args.names)] if args.names else [])
+            inputs = registries + ([Path(args.names)] if args.names else [])
             inputs += [file for directory in args.libs for file in directory_files(directory, "*.prx")]
-            inputs += [file for directory in args.modules for file in directory_files(directory, "*")]
+            inputs += module_files_to_check
             inputs += list(Path(args.source).rglob("*.cpp"))
             output = args.json.resolve()
             if any(output == path.resolve() or (args.json.exists() and args.json.samefile(path)) for path in inputs):
                 raise AuditError(f"{args.json}: JSON output would overwrite an input file")
-        imports = [entry for registry in args.registries for entry in read_registry(registry)]
+        imports = []
+        module_registry_set = set(module_registries)
+        for registry in registries:
+            from_module = registry in module_registry_set or registry.name.endswith(".guest.prx.registry.json")
+            imports.extend((nid, library, from_module) for nid, library in read_registry(registry))
         exports, libraries = built_libraries(args.libs)
-        modules = module_files(args.modules)
+        for nid, providers in module_exports.items():
+            exports.setdefault(nid, []).extend(provider for provider in sorted(providers) if provider not in exports.get(nid, []))
+        libraries.update(modules)
         records, missing = audit(imports, exports, source_stubs(args.source), libraries, modules)
         if args.names:
             attach_names(records, load_names(args.names))
         summary = summarize(records, len(imports), missing)
         if args.json:
             commit, dirty = git_stamp(Path(args.source))
-            result = {"source_commit": commit, "source_dirty": dirty, "registries": [str(path) for path in args.registries], **summary, "imports": records}
+            result = {"source_commit": commit, "source_dirty": dirty, "registries": [str(path) for path in registries], **summary, "imports": records}
             args.json.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     except AuditError as error:
         print(f"FAIL: {error}", file=sys.stderr)
