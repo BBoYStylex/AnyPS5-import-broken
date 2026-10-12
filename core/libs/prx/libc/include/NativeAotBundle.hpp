@@ -2,6 +2,7 @@
 #define CORE_LIBS_PRX_LIBC_INCLUDE_NATIVEAOTBUNDLE_HPP
 
 #include "NativeAotImage.hpp"
+#include "prx/libkernel/Pthread/include/GuestTlsMacOs.hpp"
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -39,6 +40,10 @@ struct NativeAotModule {
     std::size_t initializerCount;
     const NativeAotLifecycleFunction* finalizers;
     std::size_t finalizerCount;
+    const GuestTlsDescriptor* tls;
+    std::size_t tlsBytes;
+    const void* const* threadEntries;
+    std::size_t threadEntryCount;
 };
 
 class NativeAotBundleRegistry {
@@ -52,6 +57,9 @@ public:
     std::size_t MainIndex() const;
     void Start();
     void Stop();
+    void ReserveThread(const void* entry);
+    void ReleaseThread();
+    std::size_t OutstandingThreads() const;
 private:
     struct State;
     std::unique_ptr<State> state;

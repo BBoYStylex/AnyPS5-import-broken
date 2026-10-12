@@ -76,7 +76,7 @@ def object_mappings(image, object_path):
             if not isinstance(relocations, RelocationSection) or relocations['sh_info'] != index:
                 continue
             for relocation in relocations.iter_relocations():
-                widths = {0: 0, 1: 8, 2: 4, 4: 4, 10: 4, 11: 4, 24: 8, 41: 4, 42: 4}
+                widths = {0: 0, 1: 8, 2: 4, 4: 4, 10: 4, 11: 4, 19: 4, 20: 4, 24: 8, 41: 4, 42: 4}
                 kind, offset = relocation['r_info_type'], relocation['r_offset']
                 require(kind in widths, f'unknown executable relocation width: {kind}')
                 width = widths[kind]

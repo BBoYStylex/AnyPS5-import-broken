@@ -37,7 +37,11 @@ configure_file(launcher.py.in native_aot.py @ONLY)
 add_custom_target(native_aot ALL DEPENDS capstone_shared)
 add_library(anyps5_native_image STATIC "${CMAKE_SOURCE_DIR}/core/libs/native/NativeAotImage.cpp"
     "${CMAKE_SOURCE_DIR}/core/libs/native/NativeAotPointer.cpp"
-    "${CMAKE_SOURCE_DIR}/core/libs/native/NativeAotBundle.cpp")
+    "${CMAKE_SOURCE_DIR}/core/libs/native/NativeAotBundle.cpp"
+    "${CMAKE_SOURCE_DIR}/core/libs/prx/libkernel/Pthread/src/GuestTlsMacOs.cpp")
+target_compile_definitions(anyps5_native_image PRIVATE APS5_NATIVE_TLS_POSIX=1)
+find_package(Threads REQUIRED)
+target_link_libraries(anyps5_native_image PUBLIC Threads::Threads)
 if(APPLE)
     target_sources(anyps5_native_image PRIVATE "${CMAKE_SOURCE_DIR}/core/libs/native/NativeAotReadonly.cpp")
 else()
@@ -47,6 +51,11 @@ target_include_directories(anyps5_native_image PUBLIC "${CMAKE_SOURCE_DIR}/core/
 set_target_properties(anyps5_native_image PROPERTIES CXX_EXTENSIONS OFF)
 
 if(BUILD_TESTING)
+    add_test_executable(native_aot_thread_boundary_tests "${CMAKE_SOURCE_DIR}/core/libs/tests/NativeAotThreads.cpp"
+        "${CMAKE_SOURCE_DIR}/core/libs/native/NativeAotThreads.cpp")
+    target_link_libraries(native_aot_thread_boundary_tests PRIVATE anyps5_native_image)
+    add_test(NAME native_aot_thread_boundary COMMAND native_aot_thread_boundary_tests)
+    set_tests_properties(native_aot_thread_boundary PROPERTIES TIMEOUT 30)
     add_test_executable(native_aot_bundle_tests "${CMAKE_SOURCE_DIR}/core/libs/tests/NativeAotBundle.cpp")
     target_link_libraries(native_aot_bundle_tests PRIVATE anyps5_native_image)
     add_test(NAME native_aot_bundle COMMAND native_aot_bundle_tests)

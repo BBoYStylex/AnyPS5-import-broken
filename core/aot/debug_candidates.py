@@ -159,13 +159,20 @@ def frame_location(operations, size):
     return None
 
 
-def recover_debug_dossier(source, companion):
+def recover_debug_dossier(source, companion=None):
     raw, image = load_elf(source)
-    obj, evidence, mappings = object_mappings(image, companion)
+    linked = companion is None
+    if linked:
+        obj, mappings = image, {}
+        evidence = {'path': str(source), 'sha256': hashlib.sha256(raw).hexdigest(), 'kind': 'linked-image'}
+    else:
+        obj, evidence, mappings = object_mappings(image, companion)
     require(obj.get_section_by_name('.debug_info') is not None, 'companion has no DWARF type information')
     dwarf = obj.get_dwarf_info()
     parser = DWARFExprParser(dwarf.structs)
-    symbols = symbol_candidates(obj, mappings)
+    symbols = symbol_candidates(obj, None if linked else mappings)
+    if linked:
+        symbols = list({(row['symbol'], row['address'], row['size']): row for row in symbols}.values())
     result = []
     for unit in dwarf.iter_CUs():
         require(unit['version'] == 4 and unit['address_size'] == 8, 'requires 64-bit DWARF 4')
@@ -191,7 +198,7 @@ def recover_debug_dossier(source, companion):
                 require(high is not None and describe_form_class(high.form) == 'constant'
                         and high.value == match['size'], 'debug range differs from symbol extent')
                 low = die.attributes['DW_AT_low_pc'].value
-                locations = [m['address'] + low for m in mappings.values() if low + high.value <= m['size']]
+                locations = [low] if linked else [m['address'] + low for m in mappings.values() if low + high.value <= m['size']]
                 require(locations == [match['address']], 'debug offset has ambiguous executable section')
                 require('DW_AT_ranges' not in die.attributes and not die.attributes.get('DW_AT_inline'),
                         'discontiguous or inline debug function')
@@ -362,7 +369,9 @@ def main():
 
     parser = argparse.ArgumentParser()
     parser.add_argument('input', type=Path)
-    parser.add_argument('--companion', type=Path, required=True)
+    evidence = parser.add_mutually_exclusive_group(required=True)
+    evidence.add_argument('--companion', type=Path)
+    evidence.add_argument('--linked-debug', action='store_true')
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
     report = recover_debug_dossier(args.input, args.companion)

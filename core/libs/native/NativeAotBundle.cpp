@@ -44,6 +44,9 @@ struct NativeAotBundleRegistry::State {
         std::vector<NativeAotLifecycleFunction> preinitializers;
         std::vector<NativeAotLifecycleFunction> initializers;
         std::vector<NativeAotLifecycleFunction> finalizers;
+        const GuestTlsDescriptor* tls = nullptr;
+        std::size_t tlsBytes = 0;
+        std::vector<const void*> threadEntries;
     };
     std::vector<Module> modules;
     std::vector<std::size_t> order;
@@ -52,6 +55,7 @@ struct NativeAotBundleRegistry::State {
     Phase phase = Phase::Created;
     std::recursive_mutex lifecycleMutex;
     std::vector<std::size_t> initialized;
+    std::size_t outstandingThreads = 0;
 };
 
 NativeAotBundleRegistry::NativeAotBundleRegistry(std::span<const NativeAotModule> modules, std::size_t mainIndex)
@@ -60,7 +64,7 @@ NativeAotBundleRegistry::NativeAotBundleRegistry(std::span<const NativeAotModule
     state->mainIndex = mainIndex;
     std::vector<std::pair<std::uintptr_t, std::uintptr_t>> ranges;
     for (const auto& source : modules) {
-        Require(source.descriptorVersion == 2 && source.moduleVersion <= 65535, "unsupported native module descriptor");
+        Require(source.descriptorVersion == 3 && source.moduleVersion <= 65535, "unsupported native module descriptor");
         State::Module module{Name(source.id), source.moduleVersion, {}, {}, {}, {}, {}, {}, {}};
         Require(std::none_of(state->modules.begin(), state->modules.end(), [&](const auto& previous) { return previous.id == module.id; }),
             "duplicate native module id");
@@ -80,10 +84,27 @@ NativeAotBundleRegistry::NativeAotBundleRegistry(std::span<const NativeAotModule
             Require(source.functions[index] != nullptr, "null native module function");
             module.functions.push_back(source.functions[index]);
         }
+        Require(source.threadEntryCount <= source.functionCount && (source.threadEntryCount == 0 || source.threadEntries != nullptr), "invalid native thread entry table");
+        for (std::size_t index = 0; index < source.threadEntryCount; ++index) {
+            const auto entry = source.threadEntries[index];
+            Require(entry != nullptr && std::find(module.functions.begin(), module.functions.end(), entry) != module.functions.end(),
+                "native thread entry does not belong to its module");
+            module.threadEntries.push_back(entry);
+        }
+        module.tls = source.tls;
+        module.tlsBytes = source.tlsBytes;
+        Require((source.tls == nullptr && source.tlsBytes == 0) ||
+            (source.tls != nullptr && source.tls->version == 1 && source.tlsBytes > 0 && source.tlsBytes <= source.tls->blockSize &&
+             source.tls->templateSize <= source.tlsBytes), "invalid native module TLS layout");
         for (std::size_t index = 0; index < source.exportCount; ++index) {
             auto symbol = source.exports[index];
             const auto name = Name(symbol.name);
-            Require(symbol.address != nullptr && ((symbol.kind == 1 && symbol.bytes == 0 && std::find(module.functions.begin(), module.functions.end(), symbol.address) != module.functions.end()) ||
+            bool validTls = false;
+            if (symbol.kind == 3 && symbol.address != nullptr && module.tls != nullptr) {
+                const auto& index = *static_cast<const GuestTlsIndex*>(symbol.address);
+                validTls = index.module == module.tls && index.offset < module.tlsBytes && symbol.bytes > 0 && symbol.bytes <= module.tlsBytes - index.offset;
+            }
+            Require(symbol.address != nullptr && (validTls || (symbol.kind == 1 && symbol.bytes == 0 && std::find(module.functions.begin(), module.functions.end(), symbol.address) != module.functions.end()) ||
                 (symbol.kind == 2 && symbol.bytes > 0 && Contains(module.ranges, symbol.address, symbol.bytes))), "invalid native module export");
             symbol.name = nullptr;
             Require(module.exports.emplace(name, symbol).second, "duplicate native export name");
@@ -139,6 +160,11 @@ const void* NativeAotBundleRegistry::Find(const char* module, std::uint64_t vers
     Require(found != state->modules.end() && found->version == version, "native lookup module/version mismatch");
     const auto exported = found->exports.find(name);
     Require(exported != found->exports.end() && exported->second.kind == kind, "native lookup symbol/kind mismatch");
+    if (kind == 3) {
+        const std::lock_guard lock(state->lifecycleMutex);
+        Require(state->phase == State::Phase::Active || state->phase == State::Phase::Starting || state->phase == State::Phase::Stopping, "native TLS lookup requires an active bundle");
+        return Aps5GuestTlsGetAddr_nid_no_patch(static_cast<const GuestTlsIndex*>(exported->second.address));
+    }
     return exported->second.address;
 }
 
@@ -164,6 +190,7 @@ void NativeAotBundleRegistry::Start() {
         for (auto current = state->initialized.rbegin(); current != state->initialized.rend(); ++current)
             for (const auto callback : state->modules[*current].finalizers)
                 try { callback(); } catch (...) { ++cleanupFailures; }
+        for (const auto& module : state->modules) if (module.tls) Aps5GuestTlsReleaseCurrentThread_nid_no_patch(module.tls);
         state->initialized.clear();
         state->phase = State::Phase::Failed;
         if (cleanupFailures != 0) std::throw_with_nested(std::runtime_error("native bundle initialization and rollback failed"));
@@ -175,12 +202,36 @@ void NativeAotBundleRegistry::Stop() {
     const std::lock_guard lock(state->lifecycleMutex);
     if (state->phase == State::Phase::Stopped) return;
     Require(state->phase == State::Phase::Active, "native bundle cannot stop in its current state");
+    Require(state->outstandingThreads == 0, "native bundle still has unjoined guest threads");
     state->phase = State::Phase::Stopping;
     std::exception_ptr failure;
     for (auto current = state->initialized.rbegin(); current != state->initialized.rend(); ++current)
         for (const auto callback : state->modules[*current].finalizers)
             try { callback(); } catch (...) { if (!failure) failure = std::current_exception(); }
+    for (const auto& module : state->modules) if (module.tls) Aps5GuestTlsReleaseCurrentThread_nid_no_patch(module.tls);
     state->initialized.clear();
     state->phase = State::Phase::Stopped;
     if (failure) std::rethrow_exception(failure);
+}
+
+void NativeAotBundleRegistry::ReserveThread(const void* entry) {
+    const std::lock_guard lock(state->lifecycleMutex);
+    Require(state->phase == State::Phase::Active, "guest thread requires an active native bundle");
+    Require(state->outstandingThreads < 1024, "native bundle guest-thread bound exceeded");
+    const bool found = std::any_of(state->modules.begin(), state->modules.end(), [&](const auto& module) {
+        return std::find(module.threadEntries.begin(), module.threadEntries.end(), entry) != module.threadEntries.end();
+    });
+    Require(found, "guest thread entry has no qualified native pointer ABI");
+    ++state->outstandingThreads;
+}
+
+void NativeAotBundleRegistry::ReleaseThread() {
+    const std::lock_guard lock(state->lifecycleMutex);
+    Require(state->outstandingThreads != 0, "native bundle thread accounting underflow");
+    --state->outstandingThreads;
+}
+
+std::size_t NativeAotBundleRegistry::OutstandingThreads() const {
+    const std::lock_guard lock(state->lifecycleMutex);
+    return state->outstandingThreads;
 }

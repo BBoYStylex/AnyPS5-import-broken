@@ -32,8 +32,8 @@ int main() {
     const NativeAotModuleExport symbols[]{ {"step", reinterpret_cast<const void*>(&Step), 0, 1}, {"shared", &shared, sizeof(shared), 2} };
     const void* functions[]{reinterpret_cast<const void*>(&Step)};
     const NativeAotModuleDependency dependency[]{ {0, 3} };
-    std::array<NativeAotModule, 2> modules{{ {2, "counter", 3, data, 1, symbols, 2, nullptr, 0, functions, 1},
-        {2, "app", 7, nullptr, 0, nullptr, 0, dependency, 1, nullptr, 0} }};
+    std::array<NativeAotModule, 2> modules{{ {3, "counter", 3, data, 1, symbols, 2, nullptr, 0, functions, 1},
+        {3, "app", 7, nullptr, 0, nullptr, 0, dependency, 1, nullptr, 0} }};
     NativeAotBundleRegistry registry(modules, 1);
     Check(registry.MainIndex() == 1 && registry.InitializationOrder().size() == 2 && registry.InitializationOrder()[0] == 0);
     Check(registry.Find("counter", 3, "shared", 2) == &shared);

@@ -7,11 +7,12 @@ if(CMAKE_OSX_ARCHITECTURES AND NOT CMAKE_OSX_ARCHITECTURES STREQUAL "arm64")
     message(FATAL_ERROR "The native runtime currently requires a single arm64 architecture")
 endif()
 
-add_library(anyps5_native_graphics STATIC)
+add_library(anyps5_native_graphics STATIC NativeAotThreads.cpp)
 add_dependencies(anyps5_native_graphics agc_shader_headers)
 set(nativeComponents libc libkernel libSceAgc libSceAgcDriver
     libSceVideoOut libScePad libSceMouse libSceKeyboard)
 set(nativeUnsupportedSources
+    "${LIBS_INCLUDE_DIR}/prx/libkernel/Pthread/src/GuestTlsMacOs.cpp"
     "${LIBS_INCLUDE_DIR}/prx/libc/src/ApplicationProcessParameters.cpp"
     "${LIBS_INCLUDE_DIR}/prx/libc/src/Strings.cpp"
     "${LIBS_INCLUDE_DIR}/prx/libc/src/Math.cpp"

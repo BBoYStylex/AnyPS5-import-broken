@@ -5,11 +5,13 @@ import re
 from pathlib import Path
 
 from calls import structural_signature
+from contract_recipe import SCHEMA as RECIPE_SCHEMA, fact_digest, materialize, verify_structured_sources, check_policy
 from compiler import Image, compile_image
 from dynamic import parse_dynamic
 from provider_catalog import decode_id
 from recover import load_elf, read_address
 from toolchain import build_native_object
+import module_tls
 
 
 SCHEMA = 'anyps5.aot.bundle.v1'
@@ -41,7 +43,8 @@ def plan_bundle(specification, root):
     root = Path(root).resolve()
     modules = {}
     for record in specification['modules']:
-        require(isinstance(record, dict) and set(record) == {'id', 'version', 'input', 'contracts', 'dependencies'}, 'invalid module fields')
+        require(isinstance(record, dict) and set(record) in ({'id', 'version', 'input', 'contracts', 'dependencies'},
+                {'id', 'version', 'input', 'contracts', 'dependencies', 'guards'}), 'invalid module fields')
         name = record['id']
         require(isinstance(name, str) and len(name) <= 128 and re.fullmatch(r'[A-Za-z_][A-Za-z_0-9]*', name) and name not in modules,
                 'invalid or duplicate module id')
@@ -54,12 +57,23 @@ def plan_bundle(specification, root):
             paths.append(path)
         source, contract_path = paths
         contracts = json.loads(contract_path.read_text())
+        guards = record.get('guards')
+        if guards is not None:
+            require(isinstance(guards, dict) and set(guards) == {'policies', 'facts_sha256', 'sources'}, 'invalid module guard qualification')
+            require(guards['facts_sha256'] == fact_digest(contracts, guards['policies']), 'module guard facts changed')
+            require(set(guards['policies']) == {'checked_pointer_bases', 'checked_pointer_arguments'}, 'invalid module guard policies')
+            for key, policy in guards['policies'].items():
+                check_policy(policy, key == 'checked_pointer_arguments')
+            require(isinstance(guards['sources'], list) and guards['sources'], 'module guards need source identities')
+            verify_structured_sources(guards['sources'], root)
         raw, elf = load_elf(source)
         require(hashlib.sha256(raw).hexdigest() == contracts.get('sha256'), 'bundle input/contract identity mismatch')
         dynamic = parse_dynamic(elf, lambda a, size: read_address(elf, a, size), include_exports=True)
         require(not any(tag in dynamic['tags'] for tag in ('DT_VERSYM', 'DT_VERDEF', 'DT_VERNEED')),
                 'GNU symbol versioning needs separate qualification')
-        modules[name] = {'record': record, 'source': source, 'contracts': contracts, 'dynamic': dynamic,
+        tls_contract = dict(contracts, module_image=True, native_namespace='aps5_' + name + '_')
+        tls = module_tls.layout(elf, raw, tls_contract)
+        modules[name] = {'tls': tls, 'record': record, 'source': source, 'contracts': contracts, 'dynamic': dynamic,
                          'namespace': 'aps5_' + name + '_', 'exports': {},
                          'relro': [(seg['p_vaddr'], seg['p_vaddr'] + seg['p_memsz']) for seg in elf.iter_segments()
                                    if seg['p_type'] == 'PT_GNU_RELRO']}
@@ -114,8 +128,14 @@ def plan_bundle(specification, root):
                 require(symbol['size'] > 0, 'data export needs a bounded ELF object')
                 item = {'kind': 'data', 'address': symbol['value'], 'size': symbol['size'],
                         'native': module['namespace'] + 'object_' + str(symbol['value']) + '_' + str(symbol['size'])}
+            elif kind == 6:
+                tls = module['tls']
+                require(tls is not None and 0 <= symbol['value'] < tls['bytes'] and 0 < symbol['size'] <= tls['bytes'] - symbol['value'],
+                        'TLS export exceeds its qualified template')
+                item = {'kind': 'tls', 'offset': symbol['value'], 'size': symbol['size'], 'bytes': tls['bytes'],
+                        'descriptor': tls['name'], 'native': module['namespace'] + 'tls_object_' + str(symbol['value']) + '_' + str(symbol['size'])}
             else:
-                require(False, 'TLS or untyped module exports require separate lowering')
+                require(False, 'untyped module export requires separate lowering')
             item['symbol'] = symbol['name']
             module['exports'][key] = item
     planned = []
@@ -142,30 +162,41 @@ def plan_bundle(specification, root):
                       and module['dynamic']['symbols'][r['symbol_index']]['section']
                       and module['dynamic']['symbols'][r['symbol_index']]['info'] & 15 == 1]
         contracts['pointer_relocations'] = [*contracts['pointer_relocations'], *local_data]
-        external = {}
+        external, tls_imports = {}, {}
         for symbol in module['dynamic']['symbols'][1:]:
             if symbol['section']:
                 continue
             require(symbol['info'] >> 4 == 1 and symbol['other'] == 0, 'bundle imports require strong default-visible symbols')
             candidates = []
-            for dependency in module['record']['dependencies']:
+            for dependency in modules:
                 key = identity(module['dynamic'], symbol, False, dependency)
                 item = modules[dependency]['exports'].get(key)
                 if item is not None:
                     candidates.append((dependency, item))
             if not candidates:
                 require(symbol['name'] in contracts['imports'], 'unresolved module import: ' + symbol['name'])
+                host = contracts['imports'][symbol['name']]
+                evidence = host.get('host_binding_evidence')
+                require(host.get('native_binding_qualification') or (isinstance(evidence, str) and evidence.strip()),
+                        'host import requires explicit binding qualification: ' + symbol['name'])
                 continue
             require(len(candidates) == 1, 'ambiguous bundle import: ' + symbol['name'])
             dependency, target = candidates[0]
             if target['kind'] == 'function':
-                require(symbol['info'] & 15 == 2, 'function/data module kind mismatch')
+                require(symbol['info'] & 15 in (0, 2), 'function/data module kind mismatch')
                 expected = contracts['imports'].get(symbol['name'])
                 require(expected is not None and structural_signature(expected) == structural_signature(target['contract']),
                         'cross-module function ABI mismatch')
                 expected['name'] = target['native']
                 expected.pop('memory_effects', None)
                 expected.pop('pointer_outputs', None)
+            elif target['kind'] == 'tls':
+                require(symbol['info'] & 15 == 6, 'TLS module kind mismatch')
+                declared = contracts.get('tls_imports', {}).get(symbol['name'])
+                require(isinstance(declared, dict) and set(declared) == {'size', 'evidence'} and declared['size'] == target['size']
+                        and isinstance(declared['evidence'], str) and declared['evidence'].strip(), 'TLS layout requires matching qualification')
+                tls_imports[symbol['name']] = {'name': target['descriptor'], 'offset': target['offset'], 'size': target['size'],
+                                               'bytes': target['bytes'], 'evidence': declared['evidence']}
             else:
                 require(symbol['info'] & 15 == 1, 'function/data module kind mismatch')
                 declared = contracts.get('data_imports', {}).get(symbol['name'])
@@ -174,8 +205,9 @@ def plan_bundle(specification, root):
                 external[symbol['name']] = dict(declared, name=target['native'])
             bindings.append({'symbol': symbol['name'], 'module': dependency, 'native': target['native'], 'kind': target['kind']})
         contracts['data_imports'] = external
+        contracts['tls_imports'] = tls_imports
         planned.append({'id': name, 'source': module['source'], 'contracts': contracts,
-                        'exports': list(module['exports'].values()), 'bindings': bindings})
+                        'exports': list(module['exports'].values()), 'bindings': bindings, 'guards': module['record'].get('guards')})
     return planned
 
 
@@ -186,22 +218,34 @@ def compile_bundle(specification, root, destination):
     destination.mkdir(parents=True)
     results = []
     for module in modules:
+        if module['guards'] is not None:
+            guards = module['guards']
+            recipe = {'schema': RECIPE_SCHEMA, 'contracts': module['contracts'], 'policies': guards['policies'],
+                      'qualification': {'facts_sha256': fact_digest(module['contracts'], guards['policies']), 'sources': guards['sources']}}
+            module['contracts'], module['guard_derivation'] = materialize(module['source'], recipe, root)
         image = Image(module['source'], module['contracts'])
         ir, report = compile_image(image)
         module['lifecycle'] = image.module_lifecycle
+        module['tls'] = image.tls_layout
         aliases = []
         for export in module['exports']:
             if export['kind'] == 'data':
                 aliases.append(f"@{export['native']} = alias i8, ptr {image.pointer(export['address'], export['size'])}")
+            elif export['kind'] == 'tls':
+                aliases.append(f"@{export['native']} = constant {{ ptr, i64 }} {{ ptr @{export['descriptor']}, i64 {export['offset']} }}, align 8")
         ir += '\n' + '\n'.join(dict.fromkeys(aliases)) + '\n'
         output = destination / module['id']
         output.with_suffix('.ll').write_text(ir)
         report['native_object'] = build_native_object(ir, output.with_suffix('.o'))
         report['bindings'] = module['bindings']
+        report['guard_derivation'] = module.get('guard_derivation')
+        output.with_suffix('.contracts.json').write_text(json.dumps(module['contracts'], indent=2) + '\n')
         output.with_suffix('.json').write_text(json.dumps(report, indent=2) + '\n')
         results.append({'id': module['id'], 'input_sha256': image.contracts['sha256'],
                         'object_sha256': hashlib.sha256(output.with_suffix('.o').read_bytes()).hexdigest(),
-                        'bindings': module['bindings']})
+                        'bindings': module['bindings'],
+                        'contracts_sha256': hashlib.sha256(output.with_suffix('.contracts.json').read_bytes()).hexdigest(),
+                        'ir_sha256': hashlib.sha256(output.with_suffix('.ll').read_bytes()).hexdigest()})
     (destination / 'registry.cpp').write_text(registry_source(specification, modules))
     return {'schema': SCHEMA, 'main': specification['main'], 'modules': results,
             'registry_sha256': hashlib.sha256((destination / 'registry.cpp').read_bytes()).hexdigest()}
@@ -219,8 +263,12 @@ def registry_source(specification, modules):
         for function in module['contracts']['functions']:
             arguments = ', '.join(types[kind] for kind in function['parameters'])
             lines.append(f"{types[function['result']]} {function['name']}({arguments});")
+        if module.get('tls'):
+            lines.append(f"extern GuestTlsDescriptor {module['tls']['name']};")
         for export in module['exports']:
-            if export['kind'] == 'data':
+            if export['kind'] == 'tls':
+                lines.append(f"extern const GuestTlsIndex {export['native']};")
+            elif export['kind'] == 'data':
                 lines.append(f"extern unsigned char {export['native']}[];")
     lines += ['}', 'namespace {']
     positions = {module['id']: i for i, module in enumerate(modules)}
@@ -234,13 +282,19 @@ def registry_source(specification, modules):
         exports = module['exports']
         lines.append(f'static const std::array<NativeAotModuleExport, {len(exports)}> {name}_exports{{{{')
         for export in exports:
-            kind = 1 if export['kind'] == 'function' else 2
-            pointer = 'reinterpret_cast<const void*>(&' + export['native'] + ')' if kind == 1 else export['native']
+            kind = {'function': 1, 'data': 2, 'tls': 3}[export['kind']]
+            pointer = 'reinterpret_cast<const void*>(&' + export['native'] + ')' if kind == 1 else ('&' + export['native'] if kind == 3 else export['native'])
             lines.append(f"    {{{json.dumps(export['symbol'])}, {pointer}, {export.get('size', 0)}, {kind}}},")
         lines.append('}};')
         functions = module['contracts']['functions']
         lines.append(f'static const std::array<const void*, {len(functions)}> {name}_functions{{{{')
         lines += [f"    reinterpret_cast<const void*>(&{function['name']})," for function in functions]
+        lines.append('}};')
+        entries = [f['name'] for f in functions if f['result'] == 'ptr' and f['parameters'] == ['ptr'] and not f.get('noreturn')
+                   and f.get('guest_calling_convention', 'x86_64-sysv') == 'x86_64-sysv'
+                   and 'guest_locations' not in f and 'guest_return_register' not in f]
+        lines.append(f'static const std::array<const void*, {len(entries)}> {name}_thread_entries{{{{')
+        lines += [f'    reinterpret_cast<const void*>(&{entry}),' for entry in entries]
         lines.append('}};')
         for stage in ('preinit', 'init', 'fini'):
             callbacks = module.get('lifecycle', {}).get(stage, [])
@@ -254,10 +308,13 @@ def registry_source(specification, modules):
     lines.append(f'static const std::array<NativeAotModule, {len(modules)}> modules{{{{')
     for module in modules:
         name = module['id']
-        lines.append(f'    {{2, "{name}", {records[name]["version"]}, {name}_ranges.data(), {name}_ranges.size(), '
+        tls = module.get('tls')
+        tls_pointer = '&' + tls['name'] if tls else 'nullptr'
+        tls_bytes = tls['bytes'] if tls else 0
+        lines.append(f'    {{3, "{name}", {records[name]["version"]}, {name}_ranges.data(), {name}_ranges.size(), '
                      f'{name}_exports.data(), {name}_exports.size(), {name}_dependencies.data(), {name}_dependencies.size(), '
                      f'{name}_functions.data(), {name}_functions.size(), '
-                     f'{name}_preinit.data(), {name}_preinit.size(), {name}_init.data(), {name}_init.size(), {name}_fini.data(), {name}_fini.size()}},')
+                     f'{name}_preinit.data(), {name}_preinit.size(), {name}_init.data(), {name}_init.size(), {name}_fini.data(), {name}_fini.size(), {tls_pointer}, {tls_bytes}, {name}_thread_entries.data(), {name}_thread_entries.size()}},')
     lines += ['}};', '}', 'extern "C" NativeAotBundleRegistry* NativeAotCompiledBundle_nid_no_patch() {',
               f'    static NativeAotBundleRegistry registry(modules, {positions[specification["main"]]});',
               '    return &registry;', '}']

@@ -9,6 +9,7 @@ from pathlib import Path
 
 from bundle import SCHEMA, compile_bundle, identity, plan_bundle
 from compiler import Image, compile_image
+from contract_recipe import fact_digest
 from test_compiler import fixture
 
 
@@ -77,7 +78,7 @@ class BundleTests(unittest.TestCase):
         binary = output / 'run'
         subprocess.run(['xcrun', 'clang++', '-arch', 'arm64', '-std=c++20', '-O2', '-I', str(root / 'core/libs'),
                         str(source), str(output/'registry.cpp'), str(output/'app.o'), str(output/'leaf.o'),
-                        str(root/'core/libs/native/NativeAotBundle.cpp'), '-o', str(binary)], check=True, capture_output=True)
+                        str(root/'core/libs/native/NativeAotBundle.cpp'), str(root/'core/libs/prx/libkernel/Pthread/src/GuestTlsMacOs.cpp'), '-o', str(binary)], check=True, capture_output=True)
         subprocess.run([str(binary)], check=True, capture_output=True)
         self.assertEqual(len(report['modules']), 2)
 
@@ -148,6 +149,36 @@ class BundleTests(unittest.TestCase):
         contract['imports']['leaf_step']['result'] = 'f64'
         path.write_text(json.dumps(contract))
         with self.assertRaisesRegex(ValueError, 'ABI mismatch'):
+            plan_bundle(self.spec, self.directory)
+
+    def test_transitive_binding_uses_the_closed_group(self):
+        middle = module_image(self.directory, 'middle', bytes.fromhex('ff25fa0f0000'), [('leaf', 'leaf_step', 2)])
+        app = module_image(self.directory, 'app', bytes.fromhex('ff25fa0f0000'), [('middle', 'leaf_step', 2)])
+        spec = dict(self.spec, modules=[app, middle, self.spec['modules'][1]])
+        modules = plan_bundle(spec, self.directory)
+        self.assertEqual(modules[-1]['bindings'][0]['module'], 'leaf')
+
+    def test_missing_guest_export_cannot_fall_back_to_an_unqualified_host_name(self):
+        app = module_image(self.directory, 'app', bytes.fromhex('ff25fa0f0000'), [('leaf', 'absent', 2)])
+        with self.assertRaisesRegex(ValueError, 'host import requires explicit'):
+            plan_bundle(dict(self.spec, modules=[app, self.spec['modules'][1]]), self.directory)
+
+    def test_guard_recipe_binds_facts_and_source(self):
+        record = self.spec['modules'][0]
+        path = self.directory / record['contracts']
+        contract = json.loads(path.read_text())
+        source = self.directory / 'reviewed.c'
+        source.write_text('unsigned probe(unsigned value) { return value + 1; }\n')
+        policies = {'checked_pointer_bases': {'bytes': 1, 'evidence': 'Qualified source objects'},
+                    'checked_pointer_arguments': {'bytes': 1, 'nullable': True, 'evidence': 'Qualified native ABI'}}
+        record['guards'] = {'policies': policies, 'facts_sha256': fact_digest(contract, policies),
+                            'sources': [{'path': source.name, 'sha256': hashlib.sha256(source.read_bytes()).hexdigest()}]}
+        self.assertEqual(len(plan_bundle(self.spec, self.directory)), 2)
+        source.write_text('changed')
+        with self.assertRaisesRegex(ValueError, 'source changed'):
+            plan_bundle(self.spec, self.directory)
+        record['guards']['facts_sha256'] = '0' * 64
+        with self.assertRaisesRegex(ValueError, 'guard facts changed'):
             plan_bundle(self.spec, self.directory)
 
     def test_sce_identity_uses_versions_and_names_not_local_indices(self):

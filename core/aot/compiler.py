@@ -18,6 +18,7 @@ import effects
 import loop_ranges
 import native_image
 import module_lifecycle
+import module_tls
 import checked_stack
 import finite_tables
 import immutable_data
@@ -91,13 +92,17 @@ class Image:
         require(hashlib.sha256(self.bytes).hexdigest() == contracts['sha256'], 'input hash does not match contracts')
         self.elf = ELFFile(io.BytesIO(self.bytes))
         require(self.elf.elfclass == 64 and self.elf.little_endian and self.elf['e_machine'] == 'EM_X86_64', 'expected little-endian x86-64 ELF')
+        try:
+            self.tls_layout = module_tls.layout(self.elf, self.bytes, contracts)
+        except ValueError as error:
+            raise Rejected(str(error)) from error
         self.segments = []
         self.process_parameters = []
         for segment in self.elf.iter_segments():
             if segment['p_type'] == 0x61000001:
                 self.process_parameters.append((segment['p_vaddr'], segment['p_filesz']))
             if segment['p_type'] == 'PT_TLS':
-                require(segment['p_memsz'] == 0, 'TLS requires native TLS lowering')
+                require(segment['p_memsz'] == 0 or self.tls_layout is not None, 'TLS requires native TLS lowering')
             if segment['p_type'] != 'PT_LOAD':
                 continue
             require(segment['p_filesz'] <= segment['p_memsz'], 'segment file size exceeds memory size')
@@ -168,7 +173,7 @@ class Image:
         referenced_imports = set()
         for relocation in self.dynamic['relocations']:
             slot, kind, index, addend = (relocation[key] for key in ('slot', 'kind', 'symbol_index', 'addend'))
-            if kind == 0:
+            if kind in (0, 16, 17, 18):
                 continue
             if kind in (6, 7):
                 require(addend == 0, 'function import relocation has a nonzero addend')
@@ -212,6 +217,10 @@ class Image:
             self.module_lifecycle = module_lifecycle.describe(self) if lifecycle.get('owner') == 'bundle' else {}
         except ValueError as error:
             raise Rejected(str(error)) from error
+        try:
+            module_tls.relocations(self)
+        except ValueError as error:
+            raise Rejected(str(error)) from error
         self.decoder = Cs(CS_ARCH_X86, CS_MODE_64)
         self.decoder.detail = True
         try:
@@ -224,6 +233,7 @@ class Image:
         self.provider_requirements = {}
         try:
             immutable_data.configure(self)
+            module_tls.validate_indexes(self)
         except ValueError as error:
             raise Rejected(str(error)) from error
 
@@ -552,6 +562,10 @@ class Function:
             return state
         if op == 'call':
             callee, slot = self.image.call(ins, self.contract)
+            if callee.get('tls_resolver'):
+                pointer = effects.argument_pointer(self, ins, callee, 0, original)
+                if pointer is None or pointer[0] != 'image' or pointer[2] not in self.image.tls_indexes:
+                    self.fail(ins, 'TLS resolver argument is not a qualified immutable index')
             if not effects.required_bindings(self, ins) <= state['import_bindings']:
                 self.fail(ins, 'native callee requires original provider bindings')
             if slot == 'operand':
@@ -1282,6 +1296,7 @@ def compile_image(image):
     except ValueError as error:
         raise Rejected(str(error)) from error
     lines = [f'target triple = "{image.target_spec["triple"]}"', 'declare void @llvm.trap()', 'declare i8 @llvm.ctpop.i8(i8)']
+    lines.extend(module_tls.declarations(image))
     if image.contracts.get('guard_diagnostics', False):
         lines.append('declare void @NativeAotReportGuardFailure_nid_no_patch(i64, i32)')
     if any(f.checked_pointer_loads or f.checked_pointer_arguments or f.checked_pointer_bases for f in functions):
@@ -1309,7 +1324,7 @@ def compile_image(image):
         lines.extend(native_image.declarations(image, descriptor))
     if image.immutable_regions:
         lines.extend(immutable_data.declarations(image))
-    if image.relocations or image.import_slots or image.data_import_slots or descriptor is not None or image.immutable_regions:
+    if image.tls_layout or image.relocations or image.import_slots or image.data_import_slots or descriptor is not None or image.immutable_regions:
         lines.extend(['@llvm.global_ctors = appending global [1 x { i32, ptr, ptr }] [{ i32, ptr, ptr } { i32 101, ptr @native_image_init, ptr null }]',
                       'define internal void @native_image_init() {'])
         for slot, target in image.relocations:
@@ -1323,6 +1338,8 @@ def compile_image(image):
         for slot, binding in image.data_import_slots.items():
             if slot not in image.immutable_cells:
                 lines.append(f"  store ptr @{binding['name']}, ptr {image.pointer(slot, 8)}, align 1")
+        if image.tls_layout:
+            lines.append(f"  call void @{module_tls.REGISTER}(ptr @{image.tls_layout['name']})")
         if image.immutable_regions:
             lines.append(f'  call void @NativeAotRequireReadOnly_nid_no_patch(ptr @__aps5_aot_readonly_ranges, i64 {len(image.immutable_regions)})')
         if descriptor is not None:
@@ -1347,6 +1364,7 @@ def compile_image(image):
               'provider_pointer_outputs': {name: contract['pointer_outputs'] for name, contract in image.imports.items() if 'pointer_outputs' in contract},
               'provider_effect_contracts': {name: contract['memory_effects'] for name, contract in image.imports.items() if 'memory_effects' in contract},
               'imports': len(image.import_slots), 'pointer_relocations': len(image.relocations),
+              'tls': image.tls_layout, 'tls_indexes': sorted(image.tls_indexes),
               'module_lifecycle': image.module_lifecycle,
               'finite_tables': list(image.finite_tables.values()),
               'indirect_calls': [site for sites in image.call_contracts.values() for site in sites.values()],
