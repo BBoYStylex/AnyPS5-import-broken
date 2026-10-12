@@ -54,7 +54,7 @@ jobs:
       - if: matrix.os != 'ubuntu-24.04-arm'
         run: cmake --build build-aot --parallel 3
       - if: matrix.os == 'ubuntu-24.04-arm'
-        run: cmake --build build-aot --target native_aot aot_ps5link anyps5_native_runtime native_aot_image_tests native_aot_runtime_tests native_aot_readonly_tests native_aot_graphics_layout_tests --parallel 3
+        run: cmake --build build-aot --target native_aot aot_ps5link anyps5_native_runtime native_aot_image_tests native_aot_runtime_tests native_aot_readonly_tests native_aot_graphics_layout_tests native_aot_bundle_tests --parallel 3
       - if: matrix.os != 'ubuntu-24.04-arm'
         run: ctest --test-dir build-aot --output-on-failure --parallel 2
       - if: matrix.os == 'ubuntu-24.04-arm'
