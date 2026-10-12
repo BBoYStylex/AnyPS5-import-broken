@@ -56,6 +56,8 @@ static std::atomic<thread_dtors_func_t> threadDtors{nullptr};
 static std::atomic<get_thread_atexit_count_func_t> threadAtexitCount{nullptr};
 static std::atomic<thread_atexit_report_func_t> threadAtexitReport{nullptr};
 
+namespace {
+
 struct GuestThreadState {
     PthreadPrivate* current = nullptr;
     bool finishing = false;
@@ -63,7 +65,20 @@ struct GuestThreadState {
     int cancelState = GUEST_CANCEL_ENABLE;
     int cancelType = GUEST_CANCEL_DEFERRED;
     CleanupHandler* cleanupHandlers = nullptr;
+#ifdef _WIN32
+    ~GuestThreadState() {
+        if (!current) return;
+        std::lock_guard lock(current->cancelLock);
+        if (current->wakeEvent) {
+            CloseHandle(static_cast<HANDLE>(current->wakeEvent));
+            current->wakeEvent = nullptr;
+        }
+    }
+#endif
 };
+
+}
+
 static GuestThreadState& CurrentGuestState() {
 #ifdef _WIN32
     return WindowsThreadLocal<GuestThreadState>::Get();
@@ -790,8 +805,29 @@ int APS5_VABI scePthreadJoin(Pthread thread, void** retval) {
         ThreadCancel::WaitUntil(thread->_join_cv, lock, std::nullopt, [&] { return thread->_finished.load(); });
     }
 #ifdef _WIN32
-    if (WaitForSingleObject(thread->nativeHandle, INFINITE) != WAIT_OBJECT_0)
+    HANDLE cancelEvent = nullptr;
+    auto& state = CurrentGuestState();
+    if (state.current && state.cancelState == GUEST_CANCEL_ENABLE && !state.exiting) {
+        std::lock_guard lock(state.current->cancelLock);
+        if (!state.current->wakeEvent) {
+            state.current->wakeEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+            if (!state.current->wakeEvent)
+                throw std::system_error(GetLastError(), std::system_category(), "Creating guest cancellation event");
+        }
+        cancelEvent = static_cast<HANDLE>(state.current->wakeEvent);
+        if (state.current->cancelPending.load() && !SetEvent(cancelEvent))
+            throw std::system_error(GetLastError(), std::system_category(), "Signaling pending guest cancellation");
+    }
+    const HANDLE handles[] = {static_cast<HANDLE>(thread->nativeHandle), cancelEvent};
+    for (;;) {
+        ThreadCancel::Check();
+        const DWORD result = cancelEvent ? WaitForMultipleObjects(2, handles, FALSE, INFINITE)
+                                         : WaitForSingleObject(handles[0], INFINITE);
+        if (result == WAIT_OBJECT_0) break;
+        if (cancelEvent && result == WAIT_OBJECT_0 + 1) continue;
         throw std::system_error(GetLastError(), std::system_category(), "Joining guest thread");
+    }
+    ThreadCancel::Check();
     if (retval) *retval = thread->_retval;
     ReleaseThread(thread);
 #else
@@ -874,15 +910,33 @@ void APS5_VABI scePthreadYield() {
 
 int APS5_VABI scePthreadCancel(Pthread thread) {
     if (!thread) return SCE_KERNEL_ERROR_ESRCH;
+#ifdef _WIN32
+    thread->references.fetch_add(1);
+#endif
     thread->cancelPending.store(true);
-    for (;;) {
-        {
-            std::lock_guard lock(thread->cancelLock);
-            if (!thread->cancelWait) return SCE_OK;
-            thread->cancelWait->NotifyAll();
+    try {
+        for (;;) {
+            {
+                std::lock_guard lock(thread->cancelLock);
+#ifdef _WIN32
+                if (thread->wakeEvent && !SetEvent(static_cast<HANDLE>(thread->wakeEvent)))
+                    throw std::system_error(GetLastError(), std::system_category(), "Signaling guest cancellation");
+#endif
+                if (!thread->cancelWait) break;
+                thread->cancelWait->NotifyAll();
+            }
+            std::this_thread::yield();
         }
-        std::this_thread::yield();
+    } catch (...) {
+#ifdef _WIN32
+        ReleaseThread(thread);
+#endif
+        throw;
     }
+#ifdef _WIN32
+    ReleaseThread(thread);
+#endif
+    return SCE_OK;
 }
 
 void APS5_VABI __pthread_cleanup_push_imp_nid_postfix(void (APS5_VABI* routine)(void*), void* argument, void* info) {

@@ -549,6 +549,7 @@ if(BUILD_TESTING)
     set_tests_properties(guest_pthread_cancel_recovery guest_pthread_cancel_recovery_coarse PROPERTIES TIMEOUT 20)
     set_tests_properties(guest_pthread_cancel_recovery_coarse PROPERTIES ENVIRONMENT "APS5_COARSE_TIMED_WAITS=1")
     if(WIN32)
+        target_link_libraries(guest_pthread_cancel_recovery_tests PRIVATE advapi32)
         set_tests_properties(guest_pthread_cancel_recovery guest_pthread_cancel_recovery_coarse PROPERTIES
             ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:libkernel>")
     endif()
