@@ -163,4 +163,15 @@ int main() {
     const int stream = socket_nid_postfix(2, 1, 0);
     Require(stream >= 0);
     Require(close_nid_postfix(stream) == 0);
+    const int nonblockingDgram = socket_nid_postfix(2, 2 | 0x20000000, 0);
+    Require(nonblockingDgram >= 0);
+    Require(fcntl_nid_postfix(nonblockingDgram, 3) == 6);
+    char dummyBuffer[1];
+    Require(recvfrom_nid_postfix(nonblockingDgram, dummyBuffer, sizeof(dummyBuffer), 0, nullptr, nullptr) == -1);
+    Require(*__error_nid_postfix() == 35);
+    Require(close_nid_postfix(nonblockingDgram) == 0);
+    const int cloexecStream = socket_nid_postfix(2, 1 | 0x10000000, 6);
+    Require(cloexecStream >= 0);
+    Require(fcntl_nid_postfix(cloexecStream, 3) == 2);
+    Require(close_nid_postfix(cloexecStream) == 0);
 }
