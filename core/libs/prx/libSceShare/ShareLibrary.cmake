@@ -1,0 +1,6 @@
+function(add_sce_share_library target)
+    set(shareDir ${CMAKE_CURRENT_FUNCTION_LIST_DIR})
+    add_library(${target} SHARED EXCLUDE_FROM_ALL ${shareDir}/Export.cpp)
+    target_include_directories(${target} PRIVATE ${LIBS_INCLUDE_DIR})
+    configure_windows_unwind(${target})
+endfunction()
