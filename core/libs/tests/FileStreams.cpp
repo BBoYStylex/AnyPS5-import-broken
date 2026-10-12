@@ -48,7 +48,8 @@ int main(int argc, char** argv) {
     Require(fflush_nid_postfix(nullptr) == 0);
     auto* stream = fopen_nid_postfix(argv[1], "w+b");
     constexpr char payload[] = "stream round trip";
-    Require(fputs_nid_postfix(payload, stream) >= 0);
+    Require(fputs_nid_postfix(payload, stream) == static_cast<int>(sizeof(payload) - 1));
+    Require(fputs_nid_postfix("", stream) == 0);
     Require(fwrite_nid_postfix(payload, 1, sizeof(payload), stream) == sizeof(payload));
     const auto expectedSize = sizeof(payload) * 2 - 1;
     Require(ftell_nid_postfix(stream) == static_cast<long>(expectedSize));

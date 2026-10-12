@@ -396,7 +396,8 @@ int APS5_VABI fputs_nid_postfix(const char* str, FileStream* stream) {
     if (!str) throw std::runtime_error("fputs: null string");
     const int result = std::fputs(str, GetNativeStream(stream));
     stream->SyncStatus();
-    return result;
+    if (result == EOF) return EOF;
+    return static_cast<int>(std::min<std::size_t>(std::strlen(str), std::numeric_limits<int>::max()));
 }
 
 int APS5_VABI fflush_nid_postfix(FileStream* stream) {
