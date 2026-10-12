@@ -248,4 +248,51 @@ std::int32_t APS5_VABI sceKernelInternalMemoryGetModuleSegmentInfo_nid_postfix(v
     return 0;
 }
 
+// (address, size) out-pointer signature and success return follow fpPS4;
+// it delegates sceKernelInternalMemoryGetModuleSegmentInfo to this helper.
+int APS5_VABI sceKernelGetLibkernelTextLocation(std::uint64_t* address, std::uint64_t* size) {
+    if (address == nullptr || size == nullptr) return SCE_KERNEL_ERROR_EFAULT;
+    const auto self = reinterpret_cast<std::uint64_t>(&sceKernelGetLibkernelTextLocation);
+#ifdef _WIN32
+    HMODULE module = nullptr;
+    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+        reinterpret_cast<LPCSTR>(self), &module) == 0 || module == nullptr)
+        return SCE_KERNEL_ERROR_ESRCH;
+    const auto base = reinterpret_cast<std::uint64_t>(module);
+    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE) return SCE_KERNEL_ERROR_ESRCH;
+    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(base + dos->e_lfanew);
+    if (nt->Signature != IMAGE_NT_SIGNATURE) return SCE_KERNEL_ERROR_ESRCH;
+    const auto* sections = IMAGE_FIRST_SECTION(nt);
+    std::uint64_t textStart = 0;
+    std::uint64_t textEnd = 0;
+    for (WORD i = 0; i < nt->FileHeader.NumberOfSections; ++i) {
+        if ((sections[i].Characteristics & IMAGE_SCN_CNT_CODE) == 0) continue;
+        const std::uint64_t start = base + sections[i].VirtualAddress;
+        const std::uint64_t sectionSize = sections[i].Misc.VirtualSize != 0 ? sections[i].Misc.VirtualSize : sections[i].SizeOfRawData;
+        if (textStart == 0 || start < textStart) textStart = start;
+        if (start + sectionSize > textEnd) textEnd = start + sectionSize;
+    }
+    if (textStart == 0 || self < textStart || self >= textEnd) return SCE_KERNEL_ERROR_ESRCH;
+    *address = textStart;
+    *size = textEnd - textStart;
+    return 0;
+#elif defined(__APPLE__)
+    Dl_info image{};
+    if (dladdr(reinterpret_cast<const void*>(self), &image) == 0 || image.dli_fbase == nullptr) return SCE_KERNEL_ERROR_ESRCH;
+    unsigned long textSize = 0;
+    const auto* text = getsectiondata(static_cast<const mach_header_64*>(image.dli_fbase), "__TEXT", "__text", &textSize);
+    if (text == nullptr || textSize == 0) return SCE_KERNEL_ERROR_ESRCH;
+    *address = reinterpret_cast<std::uint64_t>(text);
+    *size = textSize;
+    return 0;
+#else
+    const auto mapping = HostMapping::Find(self, "sceKernelGetLibkernelTextLocation");
+    if (!mapping || mapping->end <= mapping->start) return SCE_KERNEL_ERROR_ESRCH;
+    *address = mapping->start;
+    *size = mapping->end - mapping->start;
+    return 0;
+#endif
+}
+
 }
