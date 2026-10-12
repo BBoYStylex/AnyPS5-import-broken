@@ -155,4 +155,16 @@ if(ANYPS5_NATIVE_AOT_EXAMPLE)
             set_tests_properties(native_aot_hello_notify_compile PROPERTIES TIMEOUT 30)
         endif()
     endif()
+    if(APPLE)
+        set(padCompileCommand ${CMAKE_COMMAND} -E env "LIBCAPSTONE_PATH=$<TARGET_FILE_DIR:capstone_shared>"
+            "PYTHONPATH=${aotPythonPath}" ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/examples/pad_input/build.py"
+            --sdk "${CMAKE_SOURCE_DIR}/3rdparty/ps5link-sdk" --linker $<TARGET_FILE:aot_ps5link>
+            --output-parent "${CMAKE_CURRENT_BINARY_DIR}/pad-compile-runs")
+        add_custom_target(native_aot_pad_input_compile COMMAND ${padCompileCommand}
+            DEPENDS aot_ps5link capstone_shared USES_TERMINAL)
+        if(BUILD_TESTING)
+            add_test(NAME native_aot_pad_input_compile COMMAND ${padCompileCommand})
+            set_tests_properties(native_aot_pad_input_compile PROPERTIES TIMEOUT 30)
+        endif()
+    endif()
 endif()

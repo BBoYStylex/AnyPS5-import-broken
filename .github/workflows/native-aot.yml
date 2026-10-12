@@ -10,6 +10,8 @@ on:
       - 'core/libs/prx/libc/**'
       - 'core/libs/prx/libkernel/Time/**'
       - 'core/libs/prx/libkernel/System/src/Notification.cpp'
+      - 'core/libs/prx/libScePad/**'
+      - 'core/libs/prx/libSceUserService/**'
       - 'core/libs/tests/NativeAot*'
       - '3rdparty/ps5link-sdk'
       - 'CMakeLists.txt'
