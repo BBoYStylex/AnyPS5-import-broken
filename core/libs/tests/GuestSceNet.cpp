@@ -328,6 +328,73 @@ static void CheckKernelTimeouts() {
     Require(sceNetSocketClose(descriptor) == 0);
 }
 
+static void CheckStreamTimeouts() {
+    const int listener = sceNetSocket(nullptr, 2, 1, 6);
+    Require(listener >= 0);
+    std::array<std::uint8_t, 16> address{16, 2, 0, 0, 127, 0, 0, 1};
+    Require(sceNetBind_nid_postfix(listener, address.data(), address.size()) == 0 && sceNetListen(listener, 1) == 0);
+    std::uint32_t size = address.size();
+    Require(sceNetGetsockname(listener, address.data(), &size) == 0 && size == address.size());
+    const int client = sceNetSocket(nullptr, 2, 1, 6);
+    Require(client >= 0 && sceNetConnect(client, address.data(), address.size()) == 0);
+    const int accepted = sceNetAccept(listener, nullptr, nullptr);
+    Require(accepted >= 0);
+    const auto timesOut = [](auto call) {
+        const auto start = std::chrono::steady_clock::now();
+        return Failed(call(), 35) && std::chrono::steady_clock::now() - start >= std::chrono::milliseconds(40);
+    };
+    const int timeout = 50000;
+    Require(sceNetSetsockopt(accepted, 0xffff, 0x1006, &timeout, sizeof(timeout)) == 0);
+    static std::array<char, 1 << 16> buffer;
+    std::array<std::uint8_t, 16> source{};
+    NetIovec in[] = {{buffer.data(), 8}};
+    NetMsghdr receive{source.data(), static_cast<std::uint32_t>(source.size()), in, 1, nullptr, 0, 0};
+    Require(timesOut([&] { return sceNetRecv(accepted, buffer.data(), 8, 0); }));
+    Require(timesOut([&] { return sceNetRecv(accepted, buffer.data(), 8, 2); }));
+    size = source.size();
+    Require(timesOut([&] { return sceNetRecvfrom(accepted, buffer.data(), 8, 0, source.data(), &size); }));
+    Require(timesOut([&] { return sceNetRecvmsg(accepted, &receive, 0); }));
+    const int unconnected = sceNetSocket(nullptr, 2, 1, 6);
+    Require(unconnected >= 0 && sceNetSetsockopt(unconnected, 0xffff, 0x1006, &timeout, sizeof(timeout)) == 0);
+    Require(sceNetSetsockopt(listener, 0xffff, 0x1006, &timeout, sizeof(timeout)) == 0);
+    for (const int descriptor : {unconnected, listener}) Require(Failed(sceNetRecv(descriptor, buffer.data(), 8, 0), 57));
+    Require(sceNetSocketClose(unconnected) == 0);
+    const char late[] = "late";
+    Require(sceNetSend(client, late, sizeof(late), 0) == sizeof(late));
+    Require(sceNetRecv(accepted, buffer.data(), buffer.size(), 0) == sizeof(late) && std::strcmp(buffer.data(), late) == 0);
+
+    const int small = 4096;
+    Require(sceNetSetsockopt(client, 0xffff, 0x1001, &small, sizeof(small)) == 0);
+    Require(sceNetSetsockopt(client, 0xffff, 0x1005, &timeout, sizeof(timeout)) == 0);
+    static std::array<char, 1 << 16> chunk;
+    chunk.fill('s');
+    std::int64_t sent = 0;
+    for (int round = 0;; ++round) {
+        Require(round < 4096);
+        const auto start = std::chrono::steady_clock::now();
+        const auto result = sceNetSend(client, chunk.data(), chunk.size(), 0);
+        if (result > 0) {
+            Require(result <= static_cast<std::int64_t>(chunk.size()));
+            sent += result;
+            continue;
+        }
+        Require(Failed(result, 35) && std::chrono::steady_clock::now() - start >= std::chrono::milliseconds(40));
+        break;
+    }
+    std::int64_t received = 0;
+    while (received < sent) {
+        buffer.fill(0);
+        const auto result = sceNetRecv(accepted, buffer.data(), buffer.size(), 0);
+        Require(result > 0 && std::all_of(buffer.begin(), buffer.begin() + result, [](char byte) { return byte == 's'; }));
+        received += result;
+    }
+    Require(received == sent);
+    Require(timesOut([&] { return sceNetRecv(accepted, buffer.data(), buffer.size(), 0); }));
+    Require(sceNetSend(client, late, sizeof(late), 0) == sizeof(late));
+    Require(sceNetRecv(accepted, buffer.data(), buffer.size(), 0) == sizeof(late) && std::strcmp(buffer.data(), late) == 0);
+    for (const int descriptor : {client, accepted, listener}) Require(sceNetSocketClose(descriptor) == 0);
+}
+
 static void CheckAddressText(int family, const char* text) {
     std::array<std::uint8_t, 16> address{};
     Require(sceNetInetPton(family, text, address.data()) == 1);
@@ -493,6 +560,7 @@ int main() {
     Require(close_nid_postfix(closed) == 0);
     Require(Failed(sceNetSocketClose(closed), 9));
     CheckKernelTimeouts();
+    CheckStreamTimeouts();
 
     const int listener = sceNetSocket(nullptr, 2, 1, 6);
     Require(listener >= 0);

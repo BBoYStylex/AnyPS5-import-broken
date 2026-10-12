@@ -376,6 +376,25 @@ int set_kernel_timeout(int descriptor, int optname, const void* value, std::uint
     return 0;
 }
 
+int wait_for_stream(const Sock& socket, std::size_t length, bool sending) {
+#ifdef _WIN32
+    const int timeout_us = sending ? socket.snd_timeout_us : socket.rcv_timeout_us;
+    if (socket.type != NET_SOCK_STREAM || socket.nonblock || timeout_us <= 0 || length == 0) return 0;
+    sockaddr_storage peer{};
+    NativeLength peer_length = sizeof(peer);
+    if (::getpeername(socket.native->value, reinterpret_cast<sockaddr*>(&peer), &peer_length) != 0) return 0;
+    WSAPOLLFD descriptor{socket.native->value, static_cast<SHORT>(sending ? POLLWRNORM : POLLRDNORM), 0};
+    const int ready = ::WSAPoll(&descriptor, 1, static_cast<INT>((static_cast<std::int64_t>(timeout_us) + 999) / 1000));
+    if (ready < 0) return native_error();
+    return ready == 0 ? NET_EAGAIN : 0;
+#else
+    (void)socket;
+    (void)length;
+    (void)sending;
+    return 0;
+#endif
+}
+
 int begin_lookup(int rid, bool Resolver::*preservedAbort, std::uint64_t& generation) {
     std::lock_guard lk(g_mutex);
     const auto resolver = g_resolvers.find(rid);
@@ -453,7 +472,7 @@ std::int64_t message_length(const NetMsghdr* message) {
 
 int receive_error(const Sock& socket) {
 #ifdef _WIN32
-    if (WSAGetLastError() == WSAETIMEDOUT && socket.type != NET_SOCK_STREAM && socket.rcv_timeout_us > 0) return NET_EAGAIN;
+    if (WSAGetLastError() == WSAETIMEDOUT && socket.rcv_timeout_us > 0) return NET_EAGAIN;
 #else
     (void)socket;
 #endif
@@ -778,6 +797,7 @@ int64_t APS5_VABI sceNetRecv(int s, void* buf, size_t len, int flags) {
         if (it == g_socks.end()) return fail(NET_EBADF);
         socket = it->second;
     }
+    if (const int error = wait_for_stream(socket, len, false)) return fail(error);
     const GuestArena::HostWrite destination(len == 0 ? nullptr : buf, len);
     if (!destination.Open()) return fail(NET_EFAULT);
     const int native_flags = flags == 2 ? MSG_PEEK : 0;
@@ -800,6 +820,7 @@ int64_t APS5_VABI sceNetRecvfrom(int s, void* buf, size_t len, int flags, void* 
         if (it == g_socks.end()) return fail(NET_EBADF);
         socket = it->second;
     }
+    if (const int error = wait_for_stream(socket, len, false)) return fail(error);
     const GuestArena::HostWrite destination(len == 0 ? nullptr : buf, len);
     if (!destination.Open()) return fail(NET_EFAULT);
     sockaddr_storage peer{};
@@ -826,6 +847,7 @@ int64_t APS5_VABI sceNetSend(int s, const void* buf, size_t len, int flags) {
         if (it == g_socks.end()) return fail(NET_EBADF);
         socket = it->second;
     }
+    if (const int error = wait_for_stream(socket, len, true)) return fail(error);
     const int result = ::send(socket.native->value, static_cast<const char*>(buf), static_cast<int>(len), NATIVE_SEND_FLAGS);
     return result >= 0 ? result : fail(native_error());
 }
@@ -841,6 +863,7 @@ int64_t APS5_VABI sceNetSendto(int s, const void* buf, size_t len, int flags, co
         if (it == g_socks.end()) return fail(NET_EBADF);
         socket = it->second;
     }
+    if (const int error = wait_for_stream(socket, len, true)) return fail(error);
     int result;
     if (!to) {
         if (tolen != 0) return fail(NET_EINVAL);
@@ -885,6 +908,7 @@ int64_t APS5_VABI sceNetRecvmsg(int s, NetMsghdr* msg, int flags) {
         if (it == g_socks.end()) return fail(NET_EBADF);
         socket = it->second;
     }
+    if (const int error = wait_for_stream(socket, static_cast<std::size_t>(total), false)) return fail(error);
     const bool datagram = socket.type != NET_SOCK_STREAM;
     std::vector<char> buffer;
     try {
