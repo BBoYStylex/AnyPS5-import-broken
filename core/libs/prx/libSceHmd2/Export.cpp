@@ -6,6 +6,8 @@
 namespace {
 
 constexpr std::int32_t SCE_HMD2_ERROR_UNSUPPORTED_FEATURE = static_cast<std::int32_t>(0x81110016);
+constexpr std::int32_t SCE_HMD2_ERROR_NOT_SUPPORTED = static_cast<std::int32_t>(0x81110003);
+constexpr std::int32_t SCE_HMD2_ERROR_DEVICE_NOT_FOUND = static_cast<std::int32_t>(0x81110007);
 
 }
 
@@ -20,7 +22,6 @@ int APS5_VABI sceHmd2Close() {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
-
 int APS5_VABI sceHmd2GazeGetResultForFoveatedRendering() {
     NotImplemented_nid_no_patch(__func__);
     return 0;
