@@ -118,6 +118,8 @@ if(BUILD_TESTING)
         add_test(NAME pad_input COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_pad_input.py)
         set_tests_properties(pad_input PROPERTIES TIMEOUT 20)
+        add_test(NAME trace_digest COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_trace_digest.py)
     endif()
 endif()
 
@@ -155,6 +157,12 @@ if(NOT ANYPS5_USE_SYSTEM_DEPS)
     add_subdirectory(3rdparty/SDL2)
     set(CMAKE_EXE_LINKER_FLAGS "${ANYPS5_EXE_LINKER_FLAGS}")
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        get_directory_property(ANYPS5_SDL_X11_XRANDR DIRECTORY 3rdparty/SDL2 DEFINITION HAVE_X11_XRANDR)
+        if(NOT ANYPS5_SDL_X11_XRANDR)
+            message(FATAL_ERROR "SDL has no XRandR support, so X11 display refresh rates cannot be queried. "
+                "Install libxrandr-dev (Debian, Ubuntu) or libXrandr-devel (Fedora), "
+                "enable SDL_X11_XRANDR, then rerun configuration.")
+        endif()
         get_directory_property(ANYPS5_SDL_PIPEWIRE DIRECTORY 3rdparty/SDL2 DEFINITION HAVE_PIPEWIRE)
         get_directory_property(ANYPS5_SDL_PULSEAUDIO DIRECTORY 3rdparty/SDL2 DEFINITION HAVE_PULSEAUDIO)
         get_directory_property(ANYPS5_SDL_ALSA DIRECTORY 3rdparty/SDL2 DEFINITION HAVE_ALSA)
