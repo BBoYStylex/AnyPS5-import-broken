@@ -4,6 +4,7 @@
 #include "prx/libc/include/FileStream.hpp"
 #include "prx/libkernel/File/include/File.hpp"
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cerrno>
 #include <cstdlib>
@@ -13,11 +14,15 @@
 #include <cstring>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+#include <thread>
 #include <vector>
 #ifdef _WIN32
 #include <io.h>
 #include <windows.h>
+#include <winioctl.h>
 #else
+#include <sys/stat.h>
 #include <unistd.h>
 #endif
 extern "C" {
@@ -212,9 +217,301 @@ static void TestRelinkedModuleNames() {
     std::filesystem::remove_all(root);
 }
 
+static bool SameTime(const KernelTimespec& left, const KernelTimespec& right) {
+    return left.tv_sec == right.tv_sec && left.tv_nsec == right.tv_nsec;
+}
+
+#ifdef _WIN32
+static KernelTimespec FromFileTime(const LARGE_INTEGER& time) {
+    constexpr std::int64_t ticksPerSecond = 10000000;
+    constexpr std::int64_t epochSeconds = 11644473600LL;
+    return {time.QuadPart / ticksPerSecond - epochSeconds, (time.QuadPart % ticksPerSecond) * 100};
+}
+
+static void CreateJunction(const std::filesystem::path& link, const std::filesystem::path& target) {
+    Require(std::filesystem::create_directory(link));
+    const auto handle = CreateFileW(link.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
+        FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+    Require(handle != INVALID_HANDLE_VALUE);
+    const auto printName = std::filesystem::absolute(target).make_preferred().wstring();
+    const auto substituteName = L"\\??\\" + printName;
+    const auto substituteBytes = static_cast<USHORT>(substituteName.size() * sizeof(wchar_t));
+    const auto printBytes = static_cast<USHORT>(printName.size() * sizeof(wchar_t));
+    std::vector<unsigned char> buffer(16 + substituteBytes + sizeof(wchar_t) + printBytes + sizeof(wchar_t));
+    const ULONG tag = IO_REPARSE_TAG_MOUNT_POINT;
+    const auto dataLength = static_cast<USHORT>(buffer.size() - 8);
+    const USHORT names[4] = {0, substituteBytes, static_cast<USHORT>(substituteBytes + sizeof(wchar_t)), printBytes};
+    std::memcpy(buffer.data(), &tag, sizeof(tag));
+    std::memcpy(buffer.data() + 4, &dataLength, sizeof(dataLength));
+    std::memcpy(buffer.data() + 8, names, sizeof(names));
+    std::memcpy(buffer.data() + 16, substituteName.c_str(), substituteBytes + sizeof(wchar_t));
+    std::memcpy(buffer.data() + 16 + substituteBytes + sizeof(wchar_t), printName.c_str(), printBytes + sizeof(wchar_t));
+    DWORD returned = 0;
+    const bool created = DeviceIoControl(handle, FSCTL_SET_REPARSE_POINT, buffer.data(), static_cast<DWORD>(buffer.size()),
+        nullptr, 0, &returned, nullptr) != 0;
+    Require(CloseHandle(handle) != 0 && created);
+}
+
+static void SetLinkReadOnly(const std::filesystem::path& link, bool readOnly) {
+    const auto handle = CreateFileW(link.c_str(), FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+    Require(handle != INVALID_HANDLE_VALUE);
+    FILE_BASIC_INFO info{};
+    bool set = GetFileInformationByHandleEx(handle, FileBasicInfo, &info, sizeof(info)) != 0;
+    info.FileAttributes = readOnly ? info.FileAttributes | FILE_ATTRIBUTE_READONLY : info.FileAttributes & ~static_cast<DWORD>(FILE_ATTRIBUTE_READONLY);
+    set = set && SetFileInformationByHandle(handle, FileBasicInfo, &info, sizeof(info)) != 0;
+    Require(CloseHandle(handle) != 0 && set);
+    Require(((GetFileAttributesW(link.c_str()) & FILE_ATTRIBUTE_READONLY) != 0) == readOnly);
+}
+#endif
+
+static bool CreateLink(const std::filesystem::path& link, const std::filesystem::path& target, bool directory) {
+#ifdef _WIN32
+    const DWORD flags = (directory ? SYMBOLIC_LINK_FLAG_DIRECTORY : 0) | SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE;
+    return CreateSymbolicLinkW(link.c_str(), target.c_str(), flags) != 0;
+#else
+    static_cast<void>(directory);
+    std::error_code error;
+    std::filesystem::create_symlink(target, link, error);
+    return !error;
+#endif
+}
+
+static void RequireStatFields(const std::filesystem::path& path, const std::filesystem::path& target, std::uint16_t windowsMode) {
+    const auto name = path.generic_string();
+    FileStat kernel{};
+    FileStat posix{};
+    Require(sceKernelStat(name.c_str(), &kernel) == 0);
+    Require(stat_nid_postfix(name.c_str(), &posix) == 0);
+    Require(std::memcmp(&kernel, &posix, sizeof(kernel)) == 0);
+    Require(kernel.st_flags == 0 && kernel.st_gen == 0 && kernel.st_lspare == 0);
+#ifdef _WIN32
+    const auto handle = CreateFileW(target.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+    Require(handle != INVALID_HANDLE_VALUE);
+    BY_HANDLE_FILE_INFORMATION identity{};
+    FILE_BASIC_INFO times{};
+    const bool read = GetFileInformationByHandle(handle, &identity) != 0 &&
+        GetFileInformationByHandleEx(handle, FileBasicInfo, &times, sizeof(times)) != 0;
+    Require(CloseHandle(handle) != 0 && read);
+    const auto size = static_cast<std::int64_t>((static_cast<std::uint64_t>(identity.nFileSizeHigh) << 32u) | identity.nFileSizeLow);
+    const auto drive = std::filesystem::absolute(path).wstring()[0] | 0x20;
+    Require(kernel.st_mode == windowsMode && kernel.st_uid == 0 && kernel.st_gid == 0);
+    Require(kernel.st_dev == identity.dwVolumeSerialNumber && kernel.st_ino != 0 && kernel.st_rdev == static_cast<std::uint32_t>(drive - L'a'));
+    Require(kernel.st_nlink == identity.nNumberOfLinks && kernel.st_size == size);
+    Require(kernel.st_blksize == 512 && kernel.st_blocks == (size + 511) / 512);
+    Require(SameTime(kernel.st_atim, FromFileTime(times.LastAccessTime)) && SameTime(kernel.st_mtim, FromFileTime(times.LastWriteTime)));
+    Require(SameTime(kernel.st_ctim, FromFileTime(times.ChangeTime)) && SameTime(kernel.st_birthtim, FromFileTime(times.CreationTime)));
+#else
+    static_cast<void>(windowsMode);
+    struct stat native{};
+    Require(::stat(target.c_str(), &native) == 0);
+    Require(kernel.st_mode == static_cast<std::uint16_t>(native.st_mode) && kernel.st_uid == native.st_uid && kernel.st_gid == native.st_gid);
+    Require(kernel.st_dev == static_cast<std::uint32_t>(native.st_dev) && kernel.st_ino == static_cast<std::uint32_t>(native.st_ino));
+    Require(kernel.st_rdev == static_cast<std::uint32_t>(native.st_rdev) && kernel.st_nlink == native.st_nlink && kernel.st_size == native.st_size);
+    Require(kernel.st_blksize == static_cast<std::uint32_t>(native.st_blksize) && kernel.st_blocks == native.st_blocks);
+    Require(SameTime(kernel.st_atim, {native.st_atim.tv_sec, native.st_atim.tv_nsec}));
+    Require(SameTime(kernel.st_mtim, {native.st_mtim.tv_sec, native.st_mtim.tv_nsec}));
+    Require(SameTime(kernel.st_ctim, {native.st_ctim.tv_sec, native.st_ctim.tv_nsec}));
+#endif
+}
+
+static void RequireStatFailure(const std::filesystem::path& path, std::string_view suffix, int kernelError, int posixError, int linkError) {
+    const auto name = path.generic_string() + std::string(suffix);
+    FileStat untouched;
+    std::memset(&untouched, 0x5a, sizeof(untouched));
+    const auto expected = untouched;
+    Require(sceKernelStat(name.c_str(), &untouched) == static_cast<int>(0x80020000u | static_cast<unsigned>(kernelError)));
+    Require(stat_nid_postfix(name.c_str(), &untouched) == -1 && *__error_nid_postfix() == posixError);
+    Require(linkError == 0 || (lstat_nid_postfix(name.c_str(), &untouched) == -1 && *__error_nid_postfix() == linkError));
+    Require(std::memcmp(&untouched, &expected, sizeof(untouched)) == 0);
+}
+
+static void TestStatFields() {
+    const auto root = std::filesystem::path("anyps5-stat-fields-" +
+        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    Require(std::filesystem::create_directories(root / "Folder"));
+    const auto file = root / "Data.bin";
+    { std::ofstream stream(file, std::ios::binary); stream << std::string(1234, 'd'); }
+    { std::ofstream stream(root / "Folder" / "Inner.txt"); stream << "inner"; }
+    const auto readOnly = root / "ReadOnly.txt";
+    { std::ofstream stream(readOnly); stream << "ro"; }
+    std::filesystem::permissions(readOnly, std::filesystem::perms::owner_write | std::filesystem::perms::group_write |
+        std::filesystem::perms::others_write, std::filesystem::perm_options::remove);
+    const auto executable = root / "Tool.EXE";
+    { std::ofstream stream(executable); stream << "x"; }
+    const auto junction = root / "Junction";
+    const auto dangling = root / "Dangling";
+#ifdef _WIN32
+    CreateJunction(junction, root / "Folder");
+    Require(std::filesystem::create_directory(root / "Gone"));
+    CreateJunction(dangling, root / "Gone");
+    Require(std::filesystem::remove(root / "Gone"));
+#else
+    std::filesystem::create_directory_symlink("Folder", junction);
+    std::filesystem::create_directory_symlink("Gone", dangling);
+#endif
+    RequireStatFields(file, file, 0100666);
+    RequireStatFields(root / "DATA.BIN", file, 0100666);
+    RequireStatFields(readOnly, readOnly, 0100444);
+    RequireStatFields(executable, executable, 0100777);
+    RequireStatFields(root / "Folder", root / "Folder", 0040777);
+    RequireStatFields(root / "Folder/", root / "Folder", 0040777);
+    RequireStatFields(junction, root / "Folder", 0040777);
+    RequireStatFields(root / "Junction/", root / "Folder", 0040777);
+    RequireStatFields(junction / "Inner.txt", root / "Folder" / "Inner.txt", 0100666);
+    FileStat viaJunction{};
+    FileStat direct{};
+    Require(sceKernelStat(junction.generic_string().c_str(), &viaJunction) == 0);
+    Require(sceKernelStat((root / "Folder").generic_string().c_str(), &direct) == 0);
+    Require(viaJunction.st_dev == direct.st_dev && viaJunction.st_ino == direct.st_ino);
+    FileStat link{};
+    Require(lstat_nid_postfix((root / "Junction/").generic_string().c_str(), &link) == 0 && std::memcmp(&link, &direct, sizeof(link)) == 0);
+#ifdef _WIN32
+    bool rejected = false;
+    try {
+        lstat_nid_postfix(junction.generic_string().c_str(), &link);
+    } catch (const std::runtime_error& error) {
+        rejected = std::strcmp(error.what(), "lstat of a Windows symbolic link not implemented") == 0;
+    }
+    Require(rejected);
+    const auto readOnlyJunction = root / "ReadOnlyJunction";
+    CreateJunction(readOnlyJunction, root / "Folder");
+    SetLinkReadOnly(readOnlyJunction, true);
+    RequireStatFields(readOnlyJunction, root / "Folder", 0040777);
+    SetLinkReadOnly(readOnlyJunction, false);
+    Require(RemoveDirectoryW(readOnlyJunction.c_str()) != 0);
+#else
+    Require(lstat_nid_postfix(junction.generic_string().c_str(), &link) == 0 && (link.st_mode & 0170000) == 0120000);
+#endif
+    RequireStatFailure(file, "/", 20, 20, 20);
+    RequireStatFailure(file, "\\", 20, 20, 20);
+    const auto fileLink = root / "FileLink";
+    const auto readOnlyLink = root / "ReadOnlyLink";
+    if (CreateLink(fileLink, "Data.bin", false)) {
+        Require(CreateLink(readOnlyLink, "ReadOnly.txt", false));
+        RequireStatFields(fileLink, file, 0100666);
+        RequireStatFields(readOnlyLink, readOnly, 0100444);
+        RequireStatFailure(fileLink, "/", 20, 20, 20);
+#ifdef _WIN32
+        const auto fileAsDirectory = root / "FileAsDirectoryLink";
+        const auto directoryAsFile = root / "DirectoryAsFileLink";
+        Require(CreateLink(fileAsDirectory, "Data.bin", true) && CreateLink(directoryAsFile, "Folder", false));
+        RequireStatFailure(fileAsDirectory, "", 2, 2, 0);
+        RequireStatFailure(directoryAsFile, "", 2, 2, 0);
+        Require(RemoveDirectoryW(fileAsDirectory.c_str()) != 0 && DeleteFileW(directoryAsFile.c_str()) != 0);
+        Require(DeleteFileW(fileLink.c_str()) != 0 && DeleteFileW(readOnlyLink.c_str()) != 0);
+#else
+        Require(std::filesystem::remove(fileLink) && std::filesystem::remove(readOnlyLink));
+#endif
+    } else {
+        std::fprintf(stderr, "symbolic links unavailable: the file link cases not tested\n");
+    }
+    Require(lstat_nid_postfix(file.generic_string().c_str(), &link) == 0 && (link.st_mode & 0170000) == 0100000 && link.st_size == 1234);
+    RequireStatFailure(root / "Missing.bin", "", 2, 2, 2);
+    RequireStatFailure(root / "Missing" / "Data.bin", "", 2, 2, 2);
+    RequireStatFailure(dangling, "", 2, 2, 0);
+    RequireStatFailure(dangling, "/", 2, 2, 2);
+    RequireStatFailure("", "", 2, 2, 2);
+    std::filesystem::permissions(readOnly, std::filesystem::perms::owner_write, std::filesystem::perm_options::add);
+#ifdef _WIN32
+    Require(RemoveDirectoryW(junction.c_str()) != 0 && RemoveDirectoryW(dangling.c_str()) != 0);
+#else
+    Require(std::filesystem::remove(junction) && std::filesystem::remove(dangling));
+#endif
+    std::filesystem::remove_all(root);
+}
+
+static void TestStatDotComponents() {
+    const auto root = std::filesystem::path("anyps5-stat-dots-" +
+        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    Require(std::filesystem::create_directories(root / "Folder"));
+    const auto file = root / "file.txt";
+    { std::ofstream stream(file, std::ios::binary); stream << "0123456789"; }
+    const auto junction = root / "Junction";
+#ifdef _WIN32
+    CreateJunction(junction, root / "Folder");
+#else
+    std::filesystem::create_directory_symlink("Folder", junction);
+#endif
+    for (const std::string_view suffix : {"/.", "/./", "\\.", "/.//", "/..", "/../"}) RequireStatFailure(file, suffix, 20, 20, 20);
+    RequireStatFailure(root / "FILE.TXT", "/.", 20, 20, 20);
+    RequireStatFailure(root / "Missing", "/.", 2, 2, 2);
+    RequireStatFailure(root / "Missing", "/..", 2, 2, 2);
+    RequireStatFailure(root / "Missing", "/./", 2, 2, 2);
+    FileStat folder{};
+    Require(sceKernelStat((root / "Folder").generic_string().c_str(), &folder) == 0);
+    for (const char* suffix : {"Folder/.", "Folder/./", "FOLDER/.", "Junction/.", "junction/./"}) {
+        const auto name = root.generic_string() + "/" + suffix;
+        RequireStatFields(name, root / "Folder", 0040777);
+        FileStat link{};
+        Require(lstat_nid_postfix(name.c_str(), &link) == 0 && std::memcmp(&link, &folder, sizeof(link)) == 0);
+    }
+    RequireStatFields(root.generic_string() + "/Folder/..", root, 0040777);
+    AddPathAlias_nid_no_patch("stat-dots-mount", std::filesystem::absolute(root).string().c_str());
+    for (const std::string_view suffix : {"/", "/.", "\\.", "/./"}) RequireStatFailure("/stat-dots-mount/file.txt", suffix, 20, 20, 20);
+    RequireStatFailure("/stat-dots-mount/Missing", "/.", 2, 2, 2);
+    RequireStatFields("/stat-dots-mount/Folder/.", root / "Folder", 0040777);
+    RequireStatFields("/stat-dots-mount/Junction/", root / "Folder", 0040777);
+    RemovePathAlias_nid_no_patch("stat-dots-mount");
+    const auto fileLink = root / "FileLink";
+    if (CreateLink(fileLink, "file.txt", false)) {
+        RequireStatFailure(fileLink, "/.", 20, 20, 20);
+        RequireStatFailure(root / "FILELINK", "/.", 20, 20, 20);
+#ifdef _WIN32
+        Require(DeleteFileW(fileLink.c_str()) != 0);
+#else
+        Require(std::filesystem::remove(fileLink));
+#endif
+    } else {
+        std::fprintf(stderr, "symbolic links unavailable: the file link dot cases not tested\n");
+    }
+#ifdef _WIN32
+    Require(RemoveDirectoryW(junction.c_str()) != 0);
+#else
+    Require(std::filesystem::remove(junction));
+#endif
+    std::filesystem::remove_all(root);
+}
+
+static void TestStatDuringRemoval() {
+    const auto root = std::filesystem::path("anyps5-stat-removal-" +
+        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    Require(std::filesystem::create_directory(root));
+    const auto file = root / "Flicker.bin";
+    const auto name = file.generic_string();
+    std::atomic<bool> done{false};
+    std::thread flicker([&] {
+        for (int cycle = 0; cycle < 300; ++cycle) {
+            { std::ofstream stream(file, std::ios::binary); stream << "flicker"; }
+            std::error_code error;
+            std::filesystem::remove(file, error);
+        }
+        done.store(true);
+    });
+    while (!done.load()) {
+        FileStat status{};
+        int result = 0;
+        try {
+            result = sceKernelStat(name.c_str(), &status);
+        } catch (const std::exception& error) {
+            flicker.join();
+            std::fprintf(stderr, "sceKernelStat threw while the file was being removed: %s\n", error.what());
+            std::abort();
+        }
+        Require(result == static_cast<int>(0x80020002u) ||
+            (result == 0 && (status.st_mode & 0170000) == 0100000 && (status.st_size == 0 || status.st_size == 7)));
+    }
+    flicker.join();
+    std::filesystem::remove_all(root);
+}
+
 int main() {
     TestParentTraversal();
     TestRelinkedModuleNames();
+    TestStatFields();
+    TestStatDotComponents();
+    TestStatDuringRemoval();
     Require(chmod_nid_postfix(nullptr, 0600) == -1 && *__error_nid_postfix() == 14);
     Require(sceKernelChmod_nid_postfix(nullptr, 0600) == static_cast<int>(0x8002000eu));
     Require(chmod_nid_postfix("", 0600) == -1 && *__error_nid_postfix() == 2);

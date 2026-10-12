@@ -25,14 +25,18 @@ inline int FilesystemError(const std::error_code& error) {
 
 std::error_code RenameNative_nid_no_patch(const std::filesystem::path& source, const std::filesystem::path& destination, bool replacesFile);
 
-inline int ResolvePathError_nid_no_patch(const char* path, std::filesystem::path& resolved) {
+inline int ResolvePathError_nid_no_patch(const char* path, std::filesystem::path& resolved, const GuestPathProbe& exists) {
     try {
-        resolved = ResolvePath_nid_no_patch(path);
+        resolved = ResolvePathProbing_nid_no_patch(path, exists);
         return 0;
     } catch (const std::filesystem::filesystem_error& error) {
         if (error.code() == std::errc::illegal_byte_sequence) return 2;
         return FilesystemError(error.code());
     }
+}
+
+inline int ResolvePathError_nid_no_patch(const char* path, std::filesystem::path& resolved) {
+    return ResolvePathError_nid_no_patch(path, resolved, GuestPathExists_nid_no_patch);
 }
 
 #endif

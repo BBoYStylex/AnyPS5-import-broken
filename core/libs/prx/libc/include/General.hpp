@@ -3,6 +3,7 @@
 
 #include <stdexcept>
 #include <filesystem>
+#include <functional>
 #include <vector>
 
 #include "general/LogMacros.hpp"
@@ -17,8 +18,11 @@ extern "C" int KeepHostStandardError_nid_no_patch();
 extern "C" int HostStandardError_nid_no_patch();
 #endif
 
+using GuestPathProbe = std::function<bool(const std::filesystem::path&)>;
+extern "C" bool GuestPathExists_nid_no_patch(const std::filesystem::path& path);
 extern "C" std::filesystem::path ResolvePath_nid_no_patch(const char* path);
 extern "C" std::filesystem::path RelinkedModulePath_nid_no_patch(const std::filesystem::path& path);
+extern "C" std::filesystem::path ResolvePathProbing_nid_no_patch(const char* path, const GuestPathProbe& exists);
 extern "C" int SetWorkingDirectory_nid_no_patch(const char* resolved);
 extern "C" bool FinalPathComponentIsDot_nid_no_patch(const char* path);
 extern "C" int RenameGuestPath_nid_no_patch(const char* from, const char* to);

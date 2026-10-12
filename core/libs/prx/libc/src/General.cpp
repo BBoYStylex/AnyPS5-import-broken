@@ -71,10 +71,11 @@ bool HasPrefix(const std::string& path, const std::string& prefix) {
            (path.size() == prefix.size() || path[prefix.size()] == '/');
 }
 
-std::filesystem::path ResolveHostPath(std::filesystem::path root, const std::filesystem::path& relative) {
-    const auto direct = root / relative;
+std::filesystem::path ResolveHostPath(std::filesystem::path root, const std::filesystem::path& relative, const GuestPathProbe& exists) {
+    auto direct = root / relative;
+    direct.make_preferred();
+    if (exists(direct)) return direct;
     std::error_code error;
-    if (std::filesystem::exists(direct, error)) return direct;
     for (const auto& part : relative) {
         const auto candidate = root / part;
         const auto status = std::filesystem::symlink_status(candidate, error);
@@ -95,21 +96,27 @@ std::filesystem::path ResolveHostPath(std::filesystem::path root, const std::fil
     return root;
 }
 
-std::optional<std::filesystem::path> ResolveAlias(const std::string& guestPath) {
+std::optional<std::filesystem::path> ResolveAlias(const std::string& guestPath, const GuestPathProbe& exists) {
     const auto relative = TrimSlashes(guestPath.c_str());
-    auto& aliases = Aliases();
-    std::lock_guard lock(aliases.mutex);
-    for (const auto& prefix : aliases.blocked) {
-        if (HasPrefix(relative, prefix))
-            throw std::filesystem::filesystem_error("Guest mount is unavailable", guestPath, std::make_error_code(std::errc::no_such_file_or_directory));
+    std::optional<std::pair<std::size_t, std::string>> matched;
+    {
+        auto& aliases = Aliases();
+        std::lock_guard lock(aliases.mutex);
+        for (const auto& prefix : aliases.blocked) {
+            if (HasPrefix(relative, prefix))
+                throw std::filesystem::filesystem_error("Guest mount is unavailable", guestPath, std::make_error_code(std::errc::no_such_file_or_directory));
+        }
+        for (const auto& [prefix, host] : aliases.entries) {
+            if (!HasPrefix(relative, prefix)) continue;
+            matched.emplace(prefix.size(), host);
+            break;
+        }
     }
-    for (const auto& [prefix, host] : aliases.entries) {
-        if (!HasPrefix(relative, prefix)) continue;
-        if (relative.size() == prefix.size()) return std::filesystem::path(host).make_preferred();
-        std::filesystem::path result = ResolveHostPath(host, relative.substr(prefix.size() + 1));
-        return result.make_preferred();
-    }
-    return std::nullopt;
+    if (!matched) return std::nullopt;
+    const auto& [length, host] = *matched;
+    if (relative.size() == length) return std::filesystem::path(host).make_preferred();
+    std::filesystem::path result = ResolveHostPath(host, relative.substr(length + 1), exists);
+    return result.make_preferred();
 }
 
 struct WorkingDirectory {
@@ -118,12 +125,12 @@ struct WorkingDirectory {
     std::filesystem::path current = root;
 };
 WorkingDirectory& Directories() { static WorkingDirectory state; return state; }
-std::filesystem::path HostPath(WorkingDirectory& state, const std::filesystem::path& guest) {
-    if (auto aliased = ResolveAlias(guest.relative_path().generic_string())) return *aliased;
-    return ResolveHostPath(state.root, guest.relative_path()).make_preferred();
+std::filesystem::path HostPath(const std::filesystem::path& root, const std::filesystem::path& guest, const GuestPathProbe& exists) {
+    if (auto aliased = ResolveAlias(guest.relative_path().generic_string(), exists)) return *aliased;
+    return ResolveHostPath(root, guest.relative_path(), exists).make_preferred();
 }
-void RequireHostDirectory(WorkingDirectory& state, const std::filesystem::path& guest) {
-    const auto host = HostPath(state, guest);
+void RequireHostDirectory(const std::filesystem::path& root, const std::filesystem::path& guest) {
+    const auto host = HostPath(root, guest, GuestPathExists_nid_no_patch);
     std::error_code error;
     const auto status = std::filesystem::status(host, error);
     if (std::filesystem::is_directory(status)) return;
@@ -141,7 +148,8 @@ void RequireHostDirectory(WorkingDirectory& state, const std::filesystem::path& 
 #endif
     throw std::filesystem::filesystem_error("Guest path component is not a directory", host, error);
 }
-std::filesystem::path Resolve(WorkingDirectory& state, const char* path) {
+std::filesystem::path Resolve(const std::filesystem::path& root, const std::filesystem::path& current, const char* path,
+    const GuestPathProbe& exists) {
     std::string text(path);
     for (auto& character : text) if (character == '\\') character = '/';
     std::filesystem::path input(text);
@@ -149,17 +157,17 @@ std::filesystem::path Resolve(WorkingDirectory& state, const char* path) {
     // Preserve the existing ability to pass explicit native drive paths.
     if (input.has_root_name()) return input;
 #endif
-    const auto current = std::filesystem::path("/") / state.current.lexically_relative(state.root);
-    const auto relative = (input.is_absolute() ? input : current / input).relative_path();
+    const auto guestCurrent = std::filesystem::path("/") / current.lexically_relative(root);
+    const auto relative = (input.is_absolute() ? input : guestCurrent / input).relative_path();
     std::filesystem::path guest("/");
     for (auto part = relative.begin(); part != relative.end(); ++part) {
         if (*part == "..") {
             const auto parent = guest.lexically_normal();
-            if (parent.has_relative_path()) RequireHostDirectory(state, parent);
+            if (parent.has_relative_path()) RequireHostDirectory(root, parent);
         }
         guest /= *part;
     }
-    return HostPath(state, guest.lexically_normal());
+    return HostPath(root, guest.lexically_normal(), exists);
 }
 #ifdef _WIN32
 using WriteMark = FILETIME;
@@ -373,11 +381,24 @@ extern "C" void BlockPathAlias_nid_no_patch(const char* guestPrefix) {
     aliases.blocked.push_back(prefix);
 }
 
-extern "C" std::filesystem::path ResolvePath_nid_no_patch(const char* path) {
+extern "C" bool GuestPathExists_nid_no_patch(const std::filesystem::path& path) {
+    std::error_code error;
+    return std::filesystem::exists(path, error);
+}
+
+extern "C" std::filesystem::path ResolvePathProbing_nid_no_patch(const char* path, const GuestPathProbe& exists) {
     if (!path) { APS5_INVALID_ARG_EX; }
     auto& state = Directories();
-    std::lock_guard lock(state.mutex);
-    return Resolve(state, path);
+    std::filesystem::path current;
+    {
+        std::lock_guard lock(state.mutex);
+        current = state.current;
+    }
+    return Resolve(state.root, current, path, exists);
+}
+
+extern "C" std::filesystem::path ResolvePath_nid_no_patch(const char* path) {
+    return ResolvePathProbing_nid_no_patch(path, GuestPathExists_nid_no_patch);
 }
 
 extern "C" std::filesystem::path RelinkedModulePath_nid_no_patch(const std::filesystem::path& path) {
@@ -414,7 +435,7 @@ extern "C" int APS5_VABI chdir_nid_postfix(const char* path) {
     try {
         auto& state = Directories();
         std::lock_guard lock(state.mutex);
-        const auto resolved = Resolve(state, path);
+        const auto resolved = Resolve(state.root, state.current, path, GuestPathExists_nid_no_patch);
         const int error = SetWorkingDirectory(state, resolved);
         if (error) { errno = error; return -1; }
         return 0;
