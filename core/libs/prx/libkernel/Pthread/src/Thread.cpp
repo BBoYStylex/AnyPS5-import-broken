@@ -45,10 +45,13 @@ struct ThreadArgs {
     PthreadEntry entry;
     void* arg;
     PthreadPrivate* self;
+    std::uint32_t guestSignalMask[4];
 #ifndef _WIN32
     sigset_t signalMask;
 #endif
 };
+
+extern "C" int APS5_VABI sigprocmask_nid_postfix(int how, const void* set, void* previousSet);
 
 static std::atomic<thread_dtors_func_t> threadDtors{nullptr};
 static std::atomic<get_thread_atexit_count_func_t> threadAtexitCount{nullptr};
@@ -390,6 +393,7 @@ static void RunThread(std::unique_ptr<ThreadArgs> args) {
     TimedWait::BindThreadWaitState(&self->waitCount);
     CurrentGuestState().current = self;
     RegisterStack(self);
+    sigprocmask_nid_postfix(3, args->guestSignalMask, nullptr);
 #ifndef _WIN32
     const sigset_t signalMask = args->signalMask;
 #endif
@@ -550,7 +554,8 @@ int APS5_VABI scePthreadCreate(Pthread* thread, const PthreadAttr* attr, Pthread
     }
     if (name) p->name = name;
     std::promise<bool> start;
-    auto args = std::make_unique<ThreadArgs>(ThreadArgs{entry, arg, p.get()});
+    auto args = std::make_unique<ThreadArgs>(ThreadArgs{entry, arg, p.get(), {}});
+    sigprocmask_nid_postfix(1, nullptr, args->guestSignalMask);
 #ifdef _WIN32
     SYSTEM_INFO system{};
     GetSystemInfo(&system);
