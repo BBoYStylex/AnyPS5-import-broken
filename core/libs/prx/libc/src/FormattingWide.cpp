@@ -295,7 +295,7 @@ int APS5_VABI fputws_nid_postfix(const char16_t* str, FileStream* stream) {
         auto* native = GetNativeStream(stream);
         if (std::fwrite(bytes.data(), 1, bytes.size(), native) != bytes.size()) throw std::runtime_error("stream write failed");
         stream->SyncStatus();
-        return static_cast<int>(text.size());
+        return 0;
     } catch (const std::exception&) {
         errno = 22;
         return -1;

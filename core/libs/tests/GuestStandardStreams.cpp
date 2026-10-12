@@ -469,7 +469,8 @@ int main() {
 
     FileStream wide(std::tmpfile());
     Require(fputwc_nid_postfix(u'A', &wide) == u'A');
-    Require(fputws_nid_postfix(u"B\x00E9", &wide) == 2);
+    Require(fputws_nid_postfix(u"B\x00E9", &wide) == 0);
+    Require(fputws_nid_postfix(u"", &wide) == 0);
     std::rewind(wide.GetHandle());
     char wideBytes[8]{};
     Require(std::fread(wideBytes, 1, 4, wide.GetHandle()) == 4);
