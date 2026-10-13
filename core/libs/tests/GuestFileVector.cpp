@@ -30,6 +30,7 @@ struct GuestIovec {
 extern "C" {
 int APS5_VABI sceKernelOpen(const char*, int, std::uint16_t);
 int APS5_VABI sceKernelClose(int);
+int APS5_VABI fcntl_nid_postfix(int, int, ...);
 std::int64_t APS5_VABI sceKernelRead(int, void*, std::size_t);
 std::int64_t APS5_VABI sceKernelPread(int, void*, std::size_t, std::int64_t);
 int APS5_VABI sceKernelLseek(int, std::int64_t, int);
@@ -61,6 +62,7 @@ static constexpr std::int64_t ErrorEfault = static_cast<int>(0x8002000Eu);
 static constexpr std::int64_t ErrorEinval = static_cast<int>(0x80020016u);
 static constexpr std::int64_t ErrorEspipe = static_cast<int>(0x8002001Du);
 static constexpr std::int64_t ErrorEagain = static_cast<int>(0x80020023u);
+static constexpr int FcntlSetFlags = 4;
 
 static std::string Contents(const std::filesystem::path& path) {
     std::ifstream stream(path, std::ios::binary);
@@ -208,12 +210,40 @@ int main() {
     Require(std::memcmp(first, "xyz", 3) == 0);
     Require(sceKernelPreadv(ends[0], reads, 2, 0) == ErrorEspipe);
     Require(sceKernelPwritev(ends[1], message, 1, 0) == ErrorEspipe);
-#ifndef _WIN32
-    Require(::fcntl(ends[0], F_SETFL, ::fcntl(ends[0], F_GETFL) | O_NONBLOCK) == 0);
+    Require(fcntl_nid_postfix(ends[0], FcntlSetFlags, SCE_KERNEL_O_NONBLOCK) == 0);
+    Require(fcntl_nid_postfix(ends[1], FcntlSetFlags, SCE_KERNEL_O_NONBLOCK) == 0);
     Require(sceKernelReadv(ends[0], reads, 2) == ErrorEagain);
     Require(readv_nid_postfix(ends[0], reads, 2) == -1 && *__error_nid_postfix() == 35);
-#endif
-    Require(ClosePipe(ends[0]) == 0 && ClosePipe(ends[1]) == 0);
+    Require(sceKernelReadv(ends[0], nullptr, 0) == 0);
+    char fill[16]{};
+    GuestIovec filling[1] = {{fill, sizeof(fill)}};
+    std::int64_t transferred = 0;
+    std::size_t filled = 0;
+    do {
+        transferred = sceKernelWritev(ends[1], filling, 1);
+        if (transferred > 0) filled += static_cast<std::size_t>(transferred);
+        Require(filled <= 16 * 1024 * 1024);
+    } while (transferred > 0);
+    Require(filled > 0 && transferred == ErrorEagain);
+    Require(sceKernelWritev(ends[1], filling, 1) == ErrorEagain);
+    Require(writev_nid_postfix(ends[1], filling, 1) == -1 && *__error_nid_postfix() == 35);
+    Require(sceKernelWritev(ends[1], nullptr, 0) == 0);
+    std::size_t drained = 0;
+    do {
+        transferred = sceKernelReadv(ends[0], filling, 1);
+        if (transferred > 0) drained += static_cast<std::size_t>(transferred);
+    } while (transferred > 0);
+    Require(drained == filled && transferred == ErrorEagain);
+    Require(sceKernelWritev(ends[1], message, 1) == 3);
+    Require(sceKernelReadv(ends[0], filling, 1) == 3 && std::memcmp(fill, "xyz", 3) == 0);
+    Require(fcntl_nid_postfix(ends[0], FcntlSetFlags, 0) == 0);
+    Require(fcntl_nid_postfix(ends[1], FcntlSetFlags, 0) == 0);
+    Require(sceKernelWritev(ends[1], message, 1) == 3);
+    Require(sceKernelReadv(ends[0], filling, 1) == 3 && std::memcmp(fill, "xyz", 3) == 0);
+    Require(ClosePipe(ends[1]) == 0);
+    Require(sceKernelReadv(ends[0], filling, 1) == 0);
+    Require(readv_nid_postfix(ends[0], filling, 1) == 0);
+    Require(ClosePipe(ends[0]) == 0);
 
     const int random = sceKernelOpen("/dev/urandom", 0, 0);
     Require(random >= 0);
