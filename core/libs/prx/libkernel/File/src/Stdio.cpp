@@ -618,10 +618,12 @@ int APS5_VABI flock_nid_postfix(int d, int operation) {
 #ifdef _WIN32
         const auto error = ::GetLastError();
         if ((operation & 4) && error == ERROR_LOCK_VIOLATION) return PosixFailure(GUEST_EWOULDBLOCK);
+        if (error == ERROR_INVALID_HANDLE) return PosixFailure(GUEST_EBADF);
         throw std::runtime_error(std::string(__func__) + ": flock failed, fd=" + std::to_string(d) + ", error=" + std::to_string(error));
 #else
         const int error = errno;
         if ((operation & 4) && error == EWOULDBLOCK) return PosixFailure(GUEST_EWOULDBLOCK);
+        if (error == EBADF) return PosixFailure(GUEST_EBADF);
         throw std::runtime_error(std::string(__func__) + ": flock failed, fd=" + std::to_string(d) + ", errno=" + std::to_string(error));
 #endif
     }
@@ -642,9 +644,7 @@ int APS5_VABI _fstatfs_nid_postfix(int d, KernelStatfs* buf) {
 }
 
 int64_t APS5_VABI fstat_nid_disambig1_nid_postfix(int d, FileStat* sb) {
-    if (sb == nullptr) {
-        APS5_INVALID_ARG_EX;
-    }
+    if (sb == nullptr) return PosixFailure(GUEST_EFAULT);
     if (GuestSockets::IsOpen(d)) throw std::runtime_error(std::string(__func__) + ": the status of a guest socket is not implemented");
     if (!File::FillFileStatFromDescriptor(d, sb)) return PosixFailure(SceErrorFromErrno(errno) & 0xffff);
     return 0;
@@ -760,9 +760,7 @@ std::int64_t APS5_VABI _read_nid_postfix(int descriptor, void* buffer, std::size
 }
 
 int64_t APS5_VABI write_nid_postfix(int d, const char* str, int64_t size) {
-    if (size < 0) {
-        APS5_INVALID_ARG_EX;
-    }
+    if (size < 0) return PosixFailure(GUEST_EINVAL);
     if (GuestSockets::IsOpen(d)) return GuestSockets::Write(d, str, static_cast<std::size_t>(size));
     if (str == nullptr && size != 0) return PosixFailure(GUEST_EFAULT);
     const char emptyBuffer = 0;
