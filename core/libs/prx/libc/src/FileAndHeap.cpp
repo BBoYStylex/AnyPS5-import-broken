@@ -358,7 +358,7 @@ size_t APS5_VABI fread_nid_postfix(void* buffer, size_t size, size_t count, File
     if (bytes > std::numeric_limits<std::uintptr_t>::max() - reinterpret_cast<std::uintptr_t>(buffer)) throw std::overflow_error("fread: buffer address overflow");
     const GuestArena::HostWrite destination(buffer, bytes);
     if (!destination.Open()) throw std::runtime_error("fread: buffer is not writable");
-    const auto result = std::fread(buffer, size, count, handle);
+    const auto result = std::feof(handle) ? 0 : std::fread(buffer, size, count, handle);
     stream->SyncStatus();
     return result;
 }
