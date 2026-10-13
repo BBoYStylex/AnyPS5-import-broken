@@ -1,5 +1,9 @@
 # libSceNpPartner001 technical debt
 
+### Unknown function info
+
+- Declared without parameters, signatures unknown, no title known to import them yet: `sceNpHasEAAccessSubscriptionAbortRequest` in [libSceNpPartner001](../../../core/libs/prx/libSceNpPartner001/Export.cpp) (libSceNpPartner001). Names from the zecoxao/sce_symbols NID list, each verified against its NID
+
 ### Functional
 
 - [sceNpEAAccessInitialize, sceNpEAAccessTerminate](../../../core/libs/prx/libSceNpPartner001/Export.cpp) (libSceNpPartner001) - initialization marks the library initialized without contacting the server and termination clears it, as in [shadPS4](https://github.com/shadps4-emu/shadPS4/blob/main/src/core/libraries/np/np_partner.cpp); whether the console fails initialization while signed out is unknown. Termination without initialization throws where shadPS4 returns the PS4 error `0x819D0001`, whose PS5 value is unverified, and a second initialization throws where shadPS4 returns 0 without checking. PPSA23566 imports both, not confirmed on its start-up path

@@ -21,4 +21,8 @@ int APS5_VABI sceNpEAAccessTerminate(void) {
     return 0;
 }
 
+int APS5_VABI sceNpHasEAAccessSubscriptionAbortRequest() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
 }

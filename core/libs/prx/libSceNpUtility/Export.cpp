@@ -37,4 +37,13 @@ int APS5_VABI sceNpBandwidthTestShutdown(int context_id, void* result) {
     return SCE_NP_ERROR_INVALID_ARGUMENT;
 }
 
+int APS5_VABI sceNpBandwidthTestInitStartDownloadInternal() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNpBandwidthTestInitStartUploadInternal() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
 }
