@@ -218,8 +218,24 @@ double APS5_VABI exp2_nid_postfix(double x) {
 double APS5_VABI ldexp_nid_postfix(double x, int exponent) { return std::ldexp(x, exponent); }
 double APS5_VABI scalbn_nid_postfix(double x, int exponent) { return std::scalbn(x, exponent); }
 float APS5_VABI scalbnf_nid_postfix(float x, int exponent) { return std::scalbn(x, exponent); }
-double APS5_VABI frexp_nid_postfix(double x, int* exponent) { return std::frexp(x, exponent); }
-float APS5_VABI frexpf_nid_postfix(float x, int* exponent) { return std::frexp(x, exponent); }
+double APS5_VABI frexp_nid_postfix(double x, int* exponent) {
+    std::uint64_t bits;
+    std::memcpy(&bits, &x, sizeof(bits));
+    if ((bits & 0x7ff0000000000000ull) == 0x7ff0000000000000ull || (bits << 1) == 0) {
+        *exponent = 0;
+        return x;
+    }
+    return std::frexp(x, exponent);
+}
+float APS5_VABI frexpf_nid_postfix(float x, int* exponent) {
+    std::uint32_t bits;
+    std::memcpy(&bits, &x, sizeof(bits));
+    if ((bits & 0x7f800000u) == 0x7f800000u || (bits << 1) == 0) {
+        *exponent = 0;
+        return x;
+    }
+    return std::frexp(x, exponent);
+}
 // Guest long is 64-bit, including on Windows where native long is 32-bit.
 std::int64_t APS5_VABI lround_nid_postfix(double x) { return RoundToInt64(x); }
 std::int64_t APS5_VABI lroundf_nid_postfix(float x) { return RoundToInt64(x); }

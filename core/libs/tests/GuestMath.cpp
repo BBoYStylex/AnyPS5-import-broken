@@ -269,6 +269,39 @@ static void CheckAcosfErrno() {
     Require(errno == 0);
 }
 
+static void CheckFrexpSpecialValues() {
+    int exponent = 0x5a5a5a5a;
+    Require(frexp_nid_postfix(0.0, &exponent) == 0.0 && !std::signbit(frexp_nid_postfix(0.0, &exponent)) && exponent == 0);
+    exponent = 0x5a5a5a5a;
+    Require(frexp_nid_postfix(-0.0, &exponent) == -0.0 && std::signbit(frexp_nid_postfix(-0.0, &exponent)) && exponent == 0);
+    exponent = 0x5a5a5a5a;
+    Require(frexp_nid_postfix(std::numeric_limits<double>::infinity(), &exponent) == std::numeric_limits<double>::infinity() && exponent == 0);
+    exponent = 0x5a5a5a5a;
+    Require(frexp_nid_postfix(-std::numeric_limits<double>::infinity(), &exponent) == -std::numeric_limits<double>::infinity() && exponent == 0);
+    exponent = 0x5a5a5a5a;
+    std::feclearexcept(FE_ALL_EXCEPT);
+    Require(std::bit_cast<std::uint64_t>(frexp_nid_postfix(std::bit_cast<double>(UINT64_C(0x7ff0000000000001)), &exponent)) == UINT64_C(0x7ff0000000000001) && exponent == 0);
+    Require(std::fetestexcept(FE_INVALID) == 0);
+    exponent = 0x5a5a5a5a;
+    Require(std::bit_cast<std::uint64_t>(frexp_nid_postfix(std::bit_cast<double>(UINT64_C(0xfff8000000012345)), &exponent)) == UINT64_C(0xfff8000000012345) && exponent == 0);
+    exponent = 0x5a5a5a5a;
+    Require(frexpf_nid_postfix(0.f, &exponent) == 0.f && !std::signbit(frexpf_nid_postfix(0.f, &exponent)) && exponent == 0);
+    exponent = 0x5a5a5a5a;
+    Require(frexpf_nid_postfix(-0.f, &exponent) == -0.f && std::signbit(frexpf_nid_postfix(-0.f, &exponent)) && exponent == 0);
+    exponent = 0x5a5a5a5a;
+    Require(frexpf_nid_postfix(std::numeric_limits<float>::infinity(), &exponent) == std::numeric_limits<float>::infinity() && exponent == 0);
+    exponent = 0x5a5a5a5a;
+    Require(frexpf_nid_postfix(-std::numeric_limits<float>::infinity(), &exponent) == -std::numeric_limits<float>::infinity() && exponent == 0);
+    exponent = 0x5a5a5a5a;
+    std::feclearexcept(FE_ALL_EXCEPT);
+    Require(std::bit_cast<std::uint32_t>(frexpf_nid_postfix(std::bit_cast<float>(0x7f800001u), &exponent)) == 0x7f800001u && exponent == 0);
+    Require(std::fetestexcept(FE_INVALID) == 0);
+    exponent = 0x5a5a5a5a;
+    Require(std::bit_cast<std::uint32_t>(frexpf_nid_postfix(std::bit_cast<float>(0xffc12345u), &exponent)) == 0xffc12345u && exponent == 0);
+    exponent = 0x5a5a5a5a;
+}
+}
+
 static void CheckLongDouble() {
     Require(ExtendedBits(acosl_nid_postfix(-1.0L), 0xc90fdaa22168c235ull, 0x4000));
     Require(ExtendedBits(acosl_nid_postfix(0.0L), 0xc90fdaa22168c235ull, 0x3fff));
@@ -915,6 +948,7 @@ int main() {
     const auto minimum = div_nid_postfix(std::numeric_limits<int>::min(), 10);
     Require(minimum.quot == -214748364 && minimum.rem == -8);
     CheckPowfSpecialValue();
+    CheckFrexpSpecialValues();
     Require(abs_nid_postfix(0) == 0);
     CheckAcosfErrno();
     Require(abs_nid_postfix(42) == 42);
