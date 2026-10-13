@@ -174,6 +174,8 @@ int APS5_VABI sysctl_nid_postfix(const int* name, std::uint32_t nameLength, void
     throw std::runtime_error(std::string(__func__) + ": unsupported MIB " + mib);
 }
 
+uint64_t APS5_VABI sceKernelGetTscFrequency(void);
+
 int APS5_VABI sysctlbyname_nid_postfix(const char* name, void* oldValue, std::size_t* oldLength, const void* newValue, std::size_t newLength) {
     if (name == nullptr) {
         *__error_nid_postfix() = 14;
@@ -201,6 +203,11 @@ int APS5_VABI sysctlbyname_nid_postfix(const char* name, void* oldValue, std::si
         auto* bytes = static_cast<std::uint8_t*>(oldValue);
         for (std::size_t i = 0; i < *oldLength; ++i) bytes[i] = static_cast<std::uint8_t>(device());
         return 0;
+    }
+    if (std::strcmp(name, "machdep.tsc_freq") == 0) {
+        if (newValue != nullptr) throw std::runtime_error(std::string(__func__) + ": setting machdep.tsc_freq");
+        const std::uint64_t frequency = sceKernelGetTscFrequency();
+        return CopyOut(&frequency, sizeof(frequency), oldValue, oldLength);
     }
     if (std::strcmp(name, "kern.sdk_version") == 0) {
         if (newValue != nullptr) {
