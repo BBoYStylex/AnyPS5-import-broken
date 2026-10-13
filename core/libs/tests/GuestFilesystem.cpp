@@ -716,6 +716,13 @@ int main() {
         Require(open_nid_postfix(name.c_str(), 0, 0) == -1 && *__error_nid_postfix() == 20);
     }
     Require(sceKernelOpen((missing / "leaf").generic_string().c_str(), 0, 0) == static_cast<int>(0x80020002u));
+    for (const auto& name : {underPresent, deepUnderPresent}) {
+        Require(sceKernelOpen(name.c_str(), 0x201, 0644) == static_cast<int>(0x80020014u));
+        Require(sceKernelOpen(name.c_str(), 0xA01, 0644) == static_cast<int>(0x80020014u));
+        Require(creat_nid_postfix(name.c_str(), 0644) == -1 && *__error_nid_postfix() == 20);
+    }
+    Require(sceKernelOpen((missing / "leaf").generic_string().c_str(), 0x201, 0644) == static_cast<int>(0x80020002u));
+    Require(std::filesystem::is_regular_file(present) && std::filesystem::file_size(present) == 5 && !std::filesystem::exists(missing));
     Require(open_nid_postfix("", 0, 0) == -1 && *__error_nid_postfix() == 2);
     Require(_open_nid_postfix("", 0) == -1 && *__error_nid_postfix() == 2);
     Require(sceKernelOpen("", 0, 0) == static_cast<int>(0x80020002u));
