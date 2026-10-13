@@ -115,4 +115,29 @@ int APS5_VABI sceKernelUnknown19(void) {
     NotImplemented_nid_no_patch("uDGXwUKqi8s");
     return 0;
 }
+
+int APS5_VABI __sys_dynlib_unload_prx_nid_postfix() {
+    NotImplemented_nid_no_patch("GQli4UAXTfQ");
+    return 0;
+}
+
+int APS5_VABI mmap2_nid_postfix() {
+    NotImplemented_nid_no_patch("tGtH2GTWbyE");
+    return 0;
+}
+
+int APS5_VABI sceKernelEnableDmemAliasing3() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceKernelGetResidentFmemCount2() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceKernelKernelHeapUsage2() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
 }
