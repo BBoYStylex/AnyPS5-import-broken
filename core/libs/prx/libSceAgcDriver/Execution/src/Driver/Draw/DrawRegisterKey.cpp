@@ -24,6 +24,9 @@ std::uint64_t Driver::drawRegisterKey(const QueueState& queue, const ShaderRegis
     const auto unread = [&](std::uint32_t offset) {
         return std::any_of(users.begin(), users.end(), [&](const auto& user) { return offset >= user.second && offset < user.first + 32u; });
     };
+    const auto skipUserData = [&](std::uint32_t offset) {
+        return std::any_of(users.begin(), users.end(), [&](const auto& user) { return offset >= user.first && offset < user.second; });
+    };
     mix(deviceSerial);
     for (const auto& range : Graphics::DrawKeyRegisters) {
         const auto& bank = range.bank == Graphics::RegisterBank::Context ? queue.context : range.bank == Graphics::RegisterBank::Shader ? queue.shader : queue.userConfig;
@@ -31,7 +34,7 @@ std::uint64_t Driver::drawRegisterKey(const QueueState& queue, const ShaderRegis
         const auto end = range.first + range.count;
         const bool shader = range.bank == Graphics::RegisterBank::Shader;
         for (auto it = bank.lower_bound(range.first); it != bank.end() && it->first < end; ++it) {
-            if (shader && unread(it->first)) continue;
+            if (shader && (unread(it->first) || skipUserData(it->first))) continue;
             mix(it->first);
             mix(it->second);
         }
