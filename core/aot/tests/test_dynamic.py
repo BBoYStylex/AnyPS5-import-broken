@@ -69,6 +69,20 @@ class Fixture:
 
 
 class DynamicTests(unittest.TestCase):
+    def test_runtime_tables_do_not_depend_on_section_strings(self):
+        fixture = Fixture(sce=True)
+        original = fixture.parse()
+        struct.pack_into('<Q', fixture.raw, 40, len(fixture.raw) + 4096)
+        struct.pack_into('<HHH', fixture.raw, 58, 64, 38, 35)
+        parsed = fixture.parse()
+        self.assertEqual(parsed, original)
+
+    def test_missing_runtime_symbol_count_still_rejects_truncated_sections(self):
+        fixture = Fixture(hash_table=False, sections=True)
+        struct.pack_into('<Q', fixture.raw, 40, len(fixture.raw) + 4096)
+        with self.assertRaisesRegex(DynamicError, 'truncated section table'):
+            fixture.parse()
+
     def test_sectionless_sysv_tables(self):
         result = Fixture().parse()
         self.assertEqual(result['needed'], ['libdemo.prx'])

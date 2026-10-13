@@ -1,3 +1,4 @@
+from elf_segments import runtime_segments
 import struct
 
 from elftools.elf.enums import ENUM_D_TAG
@@ -39,7 +40,7 @@ def parse_dynamic(elf, read_mapped_address, include_exports=False):
     stream.seek(position)
     require(elf['e_phentsize'] == 56 and 0 < elf['e_phnum'] < 0xffff, 'invalid program header count or size')
     require(range_fits(elf['e_phoff'], elf['e_phnum'] * 56, file_size), 'truncated program header table')
-    segments = list(elf.iter_segments())
+    segments = runtime_segments(elf)
     loads = [segment for segment in segments if segment['p_type'] == 'PT_LOAD']
     dynamic_segments = [segment for segment in segments if segment['p_type'] == 'PT_DYNAMIC']
     sce_segments = [segment for segment in segments if segment['p_type'] == PT_SCE_DYNLIBDATA]

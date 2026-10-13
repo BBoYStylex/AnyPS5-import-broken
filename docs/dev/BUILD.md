@@ -367,6 +367,8 @@ After configuring the AOT test build, run `ctest --test-dir build -R native_aot_
 
 For qualified concurrent glibc inputs, pass `--concurrent` to `guest_emit.py` and rebuild every IR shard and the descriptor together. This enables the conservative ordered-normal-memory profile required by `pthread_create`; its preconditions and exclusions are in [AOT technical debt](debt/aot.md). The descriptor version is 8; stale guest-state objects must be regenerated. Run `ctest --test-dir build-aot --output-on-failure -R native_aot_guest_lowering` on Apple Silicon to exercise real guest workers, TLS isolation, atomic contention, message passing, fenced store buffering and independent reads.
 
+For qualified concurrent glibc inputs, pass `--concurrent` to `guest_emit.py` and rebuild every IR shard and the descriptor together. This enables the conservative ordered-normal-memory profile required by `pthread_create`; its preconditions and exclusions are in [AOT technical debt](debt/aot.md). The descriptor version is 7; stale guest-state objects must be regenerated together with the expanded YMM state. Run `ctest --test-dir build-aot --output-on-failure -R native_aot_guest_lowering` on Apple Silicon to exercise real guest workers, TLS isolation, atomic contention, message passing, fenced store buffering and independent reads.
+
 `--abi sce-app` selects the SCE application entry contract explicitly; `glibc` remains the default. The image descriptor records this choice and a mismatched launcher is refused before entry. `NativeAotGuest::StartSceApplication` calls the original entry with an argc/argv parameter block in RDI, a null optional teardown callback in RSI and an aligned guest stack. It requires separately qualified SCE providers; the glibc launcher is not a substitute. This adapter does not implement PRX loading or make the independently inventoried homebrew executable: VEX/cache semantics and the supplied libc module remain outstanding.
 
 The concurrent profile defaults to `--ordered-access atomic` to use volatile sequentially consistent LLVM atomics for naturally aligned scalar accesses. The alignment check retains the fenced path for unaligned addresses; `--ordered-access fenced` remains available as the conservative reference. Version 5 also fences provider/callback transitions and CPUID when concurrency is enabled. This profile still requires the normal-memory and provider-buffer qualifications in AOT technical debt. It is not a general x86 TSO proof or a game-performance claim.
@@ -391,3 +393,43 @@ transfer after these changes; it makes no performance claim.
 `guest_emit.py --concurrent --memory-epochs` builds both private and ordered versions ahead of time, with checked boundary promotion and scalar provider bindings. `--seal-image` additionally requires mapping-stable providers and forbids remapping the image; it can specialize verified immutable dispatch tables. Both options require the glibc startup ABI and exclude tracing. Keep the ordinary `--concurrent` conversion as a differential reference; compare final executable hashes and output before timing. These options do not establish private ownership for worker buffers.
 
 `--optimize-calls` applies the qualified scalar provider calls and sparse register writeback without enabling memory epochs. It also permits private REP copy/fill recognition in the explicitly single-thread profile. Tracing and non-glibc startup reject this option. The single-thread runtime still rejects guest worker creation; use `--concurrent` for workers.
+
+### Original SCE package on Apple ARM64
+
+The optional `original_sce` example converts the original application and supplied
+`libc.prx` from the public [PPSA99999 release](https://github.com/blackbearreloaded/ps5-native-app-boilerplate/releases/tag/01.000.000).
+Use `PPSA99999.zip` with SHA-256
+`44dc91e346a6db7d1c5f60fb0931bfd3aa5d9a048478081d4994185796c0dc7c`.
+Extract `eboot.bin` and `sce_module/libc.prx` with that project's
+`ps5-native-tool self --extract --file INPUT --out OUTPUT`. The example checks
+the resulting ELF hashes. Keep the package, tool and source checkout outside
+this repository. The source checkout must contain tag commit
+`c93771e0f9bf4f0993c3c317d7df4cc01888fb72` and its qualified import manifest.
+
+First build `anyps5_native_graphics` using the native graphics configuration
+above. Then generate the application objects and bindings, using fresh output
+folders and absolute paths for the CMake cache option:
+
+```sh
+python3 core/aot/examples/original_sce/build.py --app /path/app.elf --module /path/libc.elf --source-root /path/ps5-native-app-boilerplate --native-library /path/build/core/libs/native/libanyps5_native_graphics.a --output /path/original-artifacts
+cmake -S . -B /path/build -DANYPS5_NATIVE_SCE_ARTIFACTS=/path/original-artifacts
+cmake --build /path/build --target native_sce_package
+python3 core/aot/examples/original_sce/reference.py --source-root /path/ps5-native-app-boilerplate --output /path/reference
+python3 core/aot/examples/original_sce/verify.py --binary /path/build/core/libs/native/native_sce_package --reference /path/reference/reference --asset-root /path/extracted-package --output /path/verification
+python3 core/aot/examples/original_sce/verify.py --binary /path/build/core/libs/native/native_sce_package --reference /path/reference/reference --asset-root /path/extracted-package --output /path/verification-missing --missing-asset
+```
+
+Use the Vulkan loader and MoltenVK environment from the cube check. The asset
+root contains `assets/banner.txt` and `sce_sys/param.json`. Both verifications
+compare all 1920 by 1080 RGB pixels to the source-tag renderer compiled directly
+for ARM64. The reference replaces presentation and file access, retaining the
+original drawing, tiled addressing, font and asset parsing. It is an independent
+pixel oracle, not proof of every system API.
+
+The original application runs indefinitely. The verifier requests host shutdown
+after a completed vblank and sleep boundary, checks module initialization and
+finalization, and checks GPU teardown. This is not a claim that guest `main`
+returns. Running without `ANYPS5_TEST_FRAME_LIMIT=1` retains the original loop.
+The package objects and original runtime shim are converted; no host replacement
+for the supplied PRX is linked. The shim's many exports are aliases and metadata,
+not a complete third-party C library. System functions come from AnyPS5 providers.

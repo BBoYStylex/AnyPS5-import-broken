@@ -117,9 +117,6 @@ int APS5_VABI strncmp_nid_postfix(const char* s1, const char* s2, size_t n) {
     return std::strncmp(s1, s2, n);
 }
 
-size_t APS5_VABI strlen_nid_postfix(const char* s) {
-    return std::strlen(s);
-}
 
 char* APS5_VABI strcpy_nid_postfix(char* dest, const char* src) {
     return std::strcpy(dest, src);

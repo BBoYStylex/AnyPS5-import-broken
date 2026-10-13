@@ -3,6 +3,9 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <span>
+
+struct GuestTlsDescriptor;
 
 extern "C" {
 
@@ -15,7 +18,10 @@ struct alignas(16) NativeAotGuestState {
     std::uint64_t X87Top;
     std::uint64_t X87Control;
     std::uint64_t X87Valid;
+    alignas(16) std::uint8_t YmmUpper[16][16];
 };
+
+static_assert(offsetof(NativeAotGuestState, YmmUpper) == 560);
 
 using NativeAotGuestFunction = std::uint64_t (*)(NativeAotGuestState*, std::uint64_t);
 
@@ -77,6 +83,7 @@ NativeAotGuestFunction NativeAotGuestLookup(std::uint64_t address);
 NativeAotGuestFunction NativeAotGuestFind(std::uint64_t address);
 extern std::uint8_t NativeAotGuestSharedMemory;
 bool NativeAotGuestSingleThreadEpoch();
+void NativeAotGuestFlushCacheLine(std::uint64_t address);
 void NativeAotGuestCpuid(NativeAotGuestState* state);
 std::uint64_t NativeAotGuestReadTsc();
 }
@@ -102,7 +109,7 @@ enum SymbolFlag : std::uint64_t {
     Weak = 1,
 };
 
-enum class Abi : std::uint64_t { Glibc = 0, SceApplication = 1 };
+enum class Abi : std::uint64_t { Glibc = 0, SceApplication = 1, SceModule = 2 };
 
 using Provider = void (*)(NativeAotGuestState&);
 Provider ImportedProvider(std::uint64_t address);
@@ -113,11 +120,20 @@ struct ProviderBinding {
     void* Data;
     bool QualifiedMemoryEpoch = false;
     bool StableImageMapping = false;
+    const void* NativeAddress = nullptr;
 };
 
+struct ImageBinding {
+    const NativeAotGuestImage* Image;
+    Abi StartupAbi;
+    GuestTlsDescriptor* TlsModule = nullptr;
+};
+
+void LoadBundle(std::span<const ImageBinding> images, std::size_t mainIndex);
 void RegisterProviders(const ProviderBinding* bindings, std::size_t count);
 const ProviderBinding* FindProviderBinding(const char* name);
 std::uint64_t Load(const NativeAotGuestImage& image, Abi abi = Abi::Glibc);
+bool IsConvertedFunction(std::uint64_t address);
 std::uint64_t ImageBase();
 std::uint64_t ImageSpan();
 std::uint64_t ExportAddress(const char* name);

@@ -7,7 +7,7 @@ def immutable_ranges(loads, relro=(0, 0)):
     mapped, writable = [], []
     for segment in loads:
         start, size = segment['vaddr'], segment['memsz']
-        if not size:
+        if not size or not segment['flags'] & 7:
             continue
         if start < 0 or size < 0 or start + size >= LIMIT:
             raise ValueError('invalid guest segment range')
