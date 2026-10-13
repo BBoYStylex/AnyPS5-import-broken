@@ -511,6 +511,16 @@ int main() {
     Require(std::filesystem::create_directory(renamedFrom) && std::filesystem::create_directory(renamedOnto));
     { std::ofstream stream(renamedFrom / "child"); stream << "moved"; }
     const auto renamedFromName = renamedFrom.generic_string();
+    const auto renamedFull = root / "kernel-rename-full";
+    Require(std::filesystem::create_directory(renamedFull));
+    { std::ofstream stream(renamedFull / "child"); stream << "kept"; }
+    Require(sceKernelRename(renamedFromName.c_str(), (renamedFrom / "inside").generic_string().c_str()) == static_cast<int>(0x80020016u));
+    Require(sceKernelRename(renamedFromName.c_str(), renamedFull.generic_string().c_str()) == static_cast<int>(0x80020042u));
+    Require(sceKernelRename(renamedFromName.c_str(), presentName.c_str()) == static_cast<int>(0x80020014u));
+    Require(sceKernelRename(presentName.c_str(), renamedFromName.c_str()) == static_cast<int>(0x80020015u));
+    Require(sceKernelRename(renamedFromName.c_str(), (root / "kernel-rename-absent" / "name").generic_string().c_str()) == static_cast<int>(0x80020002u));
+    Require(sceKernelRename(renamedFromName.c_str(), (present / "name").generic_string().c_str()) == static_cast<int>(0x80020014u));
+    Require(std::filesystem::file_size(renamedFrom / "child") == 5 && std::filesystem::remove_all(renamedFull) == 2);
     Require(sceKernelRename(renamedFromName.c_str(), renamedOnto.generic_string().c_str()) == 0);
     Require(!std::filesystem::exists(renamedFrom) && std::filesystem::file_size(renamedOnto / "child") == 5);
     Require(std::filesystem::remove_all(renamedOnto) == 2);
