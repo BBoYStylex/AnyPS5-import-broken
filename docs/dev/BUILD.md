@@ -374,3 +374,44 @@ The concurrent profile defaults to `--ordered-access atomic` to use volatile seq
 For a separately qualified zstd corpus, `core/aot/examples/zstd_benchmark.py` compares supplied ARM64 AOT/native and x86-64 Rosetta executables. Pass `--aot`, `--arm64`, `--x86`, `--decoder`, `--dataset` and a fresh `--output` JSON path; `--baseline-aot` adds another AOT implementation. It validates compressed outputs before alternating timed runs and records hashes, wall/CPU time and peak RSS. `--single-thread` also disables asynchronous I/O on every variant. Source and feature equivalence must be qualified separately. These are warm CLI measurements, not cold-cache, isolated kernel or game benchmarks.
 
 The guest glibc bridge can also qualify an adapted jq CLI without Oniguruma. Build a source-equivalent ARM64 reference separately, then compare results, errors and exit codes with `python3 core/aot/examples/jq_transfer.py --aot /path/to/aot-jq --reference /path/to/arm64-jq --output /path/to/new-receipt.json`. Source archives, converted binaries and receipts stay outside the repository. This comparison does not establish arbitrary glibc libm bit equivalence or console compatibility.
+
+
+### Original SCE package on Apple ARM64
+
+The optional `original_sce` example converts the original application and supplied
+`libc.prx` from the public [PPSA99999 release](https://github.com/blackbearreloaded/ps5-native-app-boilerplate/releases/tag/01.000.000).
+Use `PPSA99999.zip` with SHA-256
+`44dc91e346a6db7d1c5f60fb0931bfd3aa5d9a048478081d4994185796c0dc7c`.
+Extract `eboot.bin` and `sce_module/libc.prx` with that project's
+`ps5-native-tool self --extract --file INPUT --out OUTPUT`. The example checks
+the resulting ELF hashes. Keep the package, tool and source checkout outside
+this repository. The source checkout must contain tag commit
+`c93771e0f9bf4f0993c3c317d7df4cc01888fb72` and its qualified import manifest.
+
+First build `anyps5_native_graphics` using the native graphics configuration
+above. Then generate the application objects and bindings, using fresh output
+folders and absolute paths for the CMake cache option:
+
+```sh
+python3 core/aot/examples/original_sce/build.py --app /path/app.elf --module /path/libc.elf --source-root /path/ps5-native-app-boilerplate --native-library /path/build/core/libs/native/libanyps5_native_graphics.a --output /path/original-artifacts
+cmake -S . -B /path/build -DANYPS5_NATIVE_SCE_ARTIFACTS=/path/original-artifacts
+cmake --build /path/build --target native_sce_package
+python3 core/aot/examples/original_sce/reference.py --source-root /path/ps5-native-app-boilerplate --output /path/reference
+python3 core/aot/examples/original_sce/verify.py --binary /path/build/core/libs/native/native_sce_package --reference /path/reference/reference --asset-root /path/extracted-package --output /path/verification
+python3 core/aot/examples/original_sce/verify.py --binary /path/build/core/libs/native/native_sce_package --reference /path/reference/reference --asset-root /path/extracted-package --output /path/verification-missing --missing-asset
+```
+
+Use the Vulkan loader and MoltenVK environment from the cube check. The asset
+root contains `assets/banner.txt` and `sce_sys/param.json`. Both verifications
+compare all 1920 by 1080 RGB pixels to the source-tag renderer compiled directly
+for ARM64. The reference replaces presentation and file access, retaining the
+original drawing, tiled addressing, font and asset parsing. It is an independent
+pixel oracle, not proof of every system API.
+
+The original application runs indefinitely. The verifier requests host shutdown
+after a completed vblank and sleep boundary, checks module initialization and
+finalization, and checks GPU teardown. This is not a claim that guest `main`
+returns. Running without `ANYPS5_TEST_FRAME_LIMIT=1` retains the original loop.
+The package objects and original runtime shim are converted; no host replacement
+for the supplied PRX is linked. The shim's many exports are aliases and metadata,
+not a complete third-party C library. System functions come from AnyPS5 providers.

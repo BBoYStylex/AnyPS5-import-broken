@@ -7,8 +7,13 @@ if(CMAKE_OSX_ARCHITECTURES AND NOT CMAKE_OSX_ARCHITECTURES STREQUAL "arm64")
     message(FATAL_ERROR "The native runtime currently requires a single arm64 architecture")
 endif()
 
-add_library(anyps5_native_graphics STATIC NativeAotThreads.cpp)
+add_library(anyps5_native_graphics STATIC NativeAotThreads.cpp
+    "${LIBS_INCLUDE_DIR}/prx/libSceLibcInternal/HeapTrace.cpp"
+    "${LIBS_INCLUDE_DIR}/prx/libSceSysmodule/Export.cpp"
+    "${LIBS_INCLUDE_DIR}/prx/libSceSystemService/Export.cpp")
 add_dependencies(anyps5_native_graphics agc_shader_headers agc_trace_revision)
+set_source_files_properties("${LIBS_INCLUDE_DIR}/prx/libkernel/System/src/Process.cpp"
+    TARGET_DIRECTORY anyps5_native_graphics PROPERTIES COMPILE_DEFINITIONS APS5_NATIVE_AGGREGATE=1)
 set(nativeComponents libc libkernel libSceAgc libSceAgcDriver
     libSceVideoOut libScePad libSceMouse libSceKeyboard)
 set(nativeUnsupportedSources
@@ -280,4 +285,21 @@ if(ANYPS5_AOT_SHA256_SOURCE_ROOT AND (ANYPS5_AOT_MODULE_ELF_LINKER OR ANYPS5_AOT
         DEPENDS anyps5_native_graphics anyps5_native_image capstone_shared USES_TERMINAL VERBATIM)
     add_test(NAME native_module_bundle COMMAND ${moduleConsumerCommand})
     set_tests_properties(native_module_bundle PROPERTIES TIMEOUT 30)
+endif()
+
+set(ANYPS5_NATIVE_SCE_ARTIFACTS "" CACHE PATH "Generated original SCE application and module artifacts")
+if(ANYPS5_NATIVE_SCE_ARTIFACTS)
+    if(NOT EXISTS "${ANYPS5_NATIVE_SCE_ARTIFACTS}/driver.cpp" OR NOT EXISTS "${ANYPS5_NATIVE_SCE_ARTIFACTS}/bindings.S")
+        message(FATAL_ERROR "Generate the qualified SCE artifacts before configuring this target")
+    endif()
+    enable_language(ASM)
+    file(GLOB_RECURSE sceGuestObjects CONFIGURE_DEPENDS "${ANYPS5_NATIVE_SCE_ARTIFACTS}/*.o")
+    if(NOT sceGuestObjects)
+        message(FATAL_ERROR "The SCE artifact directory contains no compiled ARM64 objects")
+    endif()
+    set_source_files_properties(${sceGuestObjects} PROPERTIES EXTERNAL_OBJECT TRUE GENERATED TRUE)
+    add_executable(native_sce_package NativeAotGuest.cpp NativeAotSce.cpp
+        "${ANYPS5_NATIVE_SCE_ARTIFACTS}/driver.cpp" "${ANYPS5_NATIVE_SCE_ARTIFACTS}/bindings.S" ${sceGuestObjects})
+    target_link_libraries(native_sce_package PRIVATE anyps5_native_graphics)
+    target_compile_features(native_sce_package PRIVATE cxx_std_20)
 endif()

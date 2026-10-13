@@ -688,7 +688,7 @@ destroy_end:
     def test_provider_conversions(self):
         binary = self.directory / 'provider_checks'
         native = guest_lab.NATIVE
-        sources = [str(native / 'NativeAotGuest.cpp'), *map(str, sorted(native.glob('NativeAotGlibc*.cpp')))]
+        sources = [str(guest_lab.ROOT / 'core/libs/prx/libkernel/Pthread/src/GuestTlsMacOs.cpp'), str(native / 'NativeAotGuest.cpp'), *map(str, sorted(native.glob('NativeAotGlibc*.cpp')))]
         guest_lab.run(['xcrun', 'clang++', '-std=c++20', '-O1', '-arch', 'arm64', f'-I{guest_lab.ROOT / "core/libs"}',
                        str(Path(__file__).parent / 'guest_provider_checks.cpp'), *sources, '-o', str(binary)])
         result = self.run_binary(binary)

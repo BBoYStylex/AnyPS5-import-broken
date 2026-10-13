@@ -1,4 +1,5 @@
 #include "native/NativeAotGuest.hpp"
+#include "prx/libkernel/Pthread/include/GuestTlsMacOs.hpp"
 #include <algorithm>
 #include <atomic>
 #include <cerrno>
@@ -12,6 +13,9 @@
 #include <sys/mman.h>
 #include <unistd.h>
 #include <vector>
+#include <map>
+#include <memory>
+#include <bit>
 
 namespace {
 
@@ -31,6 +35,36 @@ std::uint64_t importRegionSize = 0;
 std::vector<NativeAotGuest::Provider> importProviders;
 std::vector<NativeAotGuest::ProviderBinding> registry;
 thread_local NativeAotGuestState* current = nullptr;
+
+struct MappedImage {
+    const NativeAotGuestImage* Image;
+    std::uint64_t Base;
+    std::uint64_t ImportBase;
+    std::uint64_t ImportBytes;
+    std::vector<std::uint64_t> Values;
+    std::vector<NativeAotGuest::Provider> Providers;
+    GuestTlsDescriptor* TlsModule;
+};
+std::vector<MappedImage> mappedImages;
+std::map<std::uint64_t, NativeAotGuest::Provider> nativeBindings;
+std::map<std::uint64_t, std::string> opaqueBindings;
+
+struct CurrentScope {
+    NativeAotGuestState* Previous;
+    explicit CurrentScope(NativeAotGuestState* state) : Previous(current) { current = state; }
+    ~CurrentScope() { current = Previous; }
+    CurrentScope(const CurrentScope&) = delete;
+    CurrentScope& operator=(const CurrentScope&) = delete;
+};
+
+struct StackScope {
+    NativeAotGuestState& State;
+    std::uint64_t Saved;
+    explicit StackScope(NativeAotGuestState& state) : State(state), Saved(state.Gpr[Rsp]) {}
+    ~StackScope() { State.Gpr[Rsp] = Saved; }
+    StackScope(const StackScope&) = delete;
+    StackScope& operator=(const StackScope&) = delete;
+};
 
 const char* TrapName(std::uint64_t kind) {
     switch (kind) {
@@ -75,15 +109,21 @@ void ProviderFence() {
 }
 
 std::uint64_t ImportThunk(NativeAotGuestState* state, std::uint64_t address) {
-    const auto index = (address - importRegion) / 16 - 1;
-    if (index >= importProviders.size() || importProviders[index] == nullptr)
-        NativeAotGuestTrap(NativeAotGuest::MissingImport, address, index);
-    auto* previous = current;
-    current = state;
+    NativeAotGuest::Provider provider = nullptr;
+    if (const auto found = nativeBindings.find(address); found != nativeBindings.end()) provider = found->second;
+    if (provider == nullptr) {
+        for (const auto& image : mappedImages) {
+            if (address > image.ImportBase && address - image.ImportBase < image.ImportBytes && (address - image.ImportBase) % 16 == 0) {
+                provider = image.Providers[(address - image.ImportBase) / 16 - 1];
+                break;
+            }
+        }
+    }
+    if (provider == nullptr) NativeAotGuestTrap(NativeAotGuest::MissingImport, address, 0);
+    CurrentScope scope(state);
     ProviderFence();
-    importProviders[index](*state);
+    provider(*state);
     ProviderFence();
-    current = previous;
     const auto rsp = state->Gpr[Rsp];
     std::uint64_t target;
     std::memcpy(&target, reinterpret_cast<const void*>(rsp), sizeof(target));
@@ -91,13 +131,17 @@ std::uint64_t ImportThunk(NativeAotGuestState* state, std::uint64_t address) {
     return target;
 }
 
-void ProtectImage(const NativeAotGuestImage& image, std::uint64_t span) {
+std::uint64_t OpaqueImportThunk(NativeAotGuestState*, std::uint64_t address) {
+    Fail("native import has no qualified call ABI: " + opaqueBindings.at(address));
+}
+
+void ProtectImage(const NativeAotGuestImage& image, std::uint64_t span, std::uint64_t base) {
     std::vector<int> pages(span / PageSize, PROT_NONE);
     std::vector<bool> relro(span / PageSize, false);
     for (std::uint64_t index = 0; index < image.SegmentCount; ++index) {
         const auto& segment = image.Segments[index];
         if (segment.MemorySize == 0) continue;
-        const auto protection = (segment.Flags & 2) ? PROT_READ | PROT_WRITE : PROT_READ;
+        const auto protection = (segment.Flags & 2) ? PROT_READ | PROT_WRITE : (segment.Flags & 5) ? PROT_READ : PROT_NONE;
         for (auto page = segment.Address / PageSize; page <= (segment.Address + segment.MemorySize - 1) / PageSize; ++page)
             pages[page] |= protection;
     }
@@ -108,7 +152,7 @@ void ProtectImage(const NativeAotGuestImage& image, std::uint64_t span) {
     }
     for (std::uint64_t page = 0; page < pages.size(); ++page) {
         const auto protection = relro[page] ? (pages[page] & ~PROT_WRITE) : pages[page];
-        if (mprotect(reinterpret_cast<void*>(imageBase + page * PageSize), PageSize, protection) != 0)
+        if (mprotect(reinterpret_cast<void*>(base + page * PageSize), PageSize, protection) != 0)
             Fail("cannot protect guest image memory");
     }
 }
@@ -136,17 +180,22 @@ extern "C" void NativeAotGuestFlushCacheLine(std::uint64_t address) {
 }
 
 extern "C" NativeAotGuestFunction NativeAotGuestFind(std::uint64_t address) {
-    if (loaded != nullptr && address >= imageBase && address - imageBase < loaded->Span) {
-        const auto offset = address - imageBase;
-        const auto* begin = loaded->Entries;
-        const auto* end = begin + loaded->EntryCount;
-        const auto* found = std::lower_bound(begin, end, offset, [](const NativeAotGuestEntry& entry, std::uint64_t value) {
-            return entry.Address < value;
-        });
-        if (found != end && found->Address == offset) return found->Function;
+    for (const auto& context : mappedImages) {
+        const auto& image = *context.Image;
+        if (address >= context.Base && address - context.Base < image.Span) {
+            const auto offset = address - context.Base;
+            const auto* begin = image.Entries;
+            const auto* end = begin + image.EntryCount;
+            const auto* found = std::lower_bound(begin, end, offset, [](const NativeAotGuestEntry& entry, std::uint64_t value) {
+                return entry.Address < value;
+            });
+            if (found != end && found->Address == offset) return found->Function;
+        }
+        if (address > context.ImportBase && address - context.ImportBase < context.ImportBytes && (address - context.ImportBase) % 16 == 0)
+            return ImportThunk;
     }
-    if (address > importRegion && address - importRegion < importRegionSize && (address - importRegion) % 16 == 0)
-        return ImportThunk;
+    if (nativeBindings.contains(address)) return ImportThunk;
+    if (opaqueBindings.contains(address)) return OpaqueImportThunk;
     return nullptr;
 }
 
@@ -195,70 +244,147 @@ std::uint64_t ProviderAddress(const char* name) {
     if (loaded == nullptr) return 0;
     for (std::uint64_t index = 0; index < loaded->SymbolCount; ++index)
         if (std::strcmp(loaded->Symbols[index], name) == 0 && importProviders[index] != nullptr)
-            return importRegion + 16 * (index + 1);
+            for (const auto& context : mappedImages) if (context.Image == loaded) return context.Values[index];
     const auto* binding = FindProvider(name);
     if (binding == nullptr || binding->Function == nullptr) return 0;
     Fail(std::string("provider is not imported by the guest image: ") + name);
 }
 
+void LoadBundle(std::span<const ImageBinding> images, std::size_t mainIndex) {
+    if (loaded != nullptr) Fail("guest images are already loaded");
+    if (images.empty() || images.size() > 64 || mainIndex >= images.size()) Fail("invalid closed image bundle");
+    if (images.size() > 1 && images[mainIndex].StartupAbi != Abi::SceApplication) Fail("multiple images require an SCE application");
+    mappedImages.reserve(images.size());
+    std::map<std::string, std::uint64_t> exports;
+    for (const auto& binding : images) {
+        if (binding.Image == nullptr) Fail("null guest image");
+        const auto& image = *binding.Image;
+        if (image.Version != 9) Fail("unsupported guest image descriptor");
+        if (image.Abi != static_cast<std::uint64_t>(binding.StartupAbi) || image.Abi > 2) Fail("guest image startup ABI does not match the launcher");
+        if (image.Concurrent > 1) Fail("unsupported guest memory model");
+        if (images.size() > 1 && (&binding != &images[mainIndex]) && binding.StartupAbi != Abi::SceModule)
+            Fail("secondary image is not a qualified SCE module");
+        if (image.Span == 0 || image.Span > UINT64_MAX - PageSize) Fail("invalid guest image span");
+        const auto span = (image.Span + PageSize - 1) & ~(PageSize - 1);
+        auto* memory = mmap(nullptr, span, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+        if (memory == MAP_FAILED) Fail("cannot reserve guest image memory");
+        const auto base = reinterpret_cast<std::uint64_t>(memory);
+        for (std::uint64_t index = 0; index < image.SegmentCount; ++index) {
+            const auto& segment = image.Segments[index];
+            if (segment.Address > image.Span || segment.MemorySize > image.Span - segment.Address ||
+                segment.FileSize > segment.MemorySize || segment.FileOffset > image.ByteCount || segment.FileSize > image.ByteCount - segment.FileOffset)
+                Fail("guest segment exceeds the image");
+            std::memcpy(reinterpret_cast<void*>(base + segment.Address), image.Bytes + segment.FileOffset, segment.FileSize);
+        }
+        if (image.SymbolCount > 1048576) Fail("too many guest imports");
+        const auto importBytes = 16 * (image.SymbolCount + 1);
+        const auto regionBytes = (importBytes + PageSize - 1) & ~(PageSize - 1);
+        auto* region = mmap(nullptr, regionBytes, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
+        if (region == MAP_FAILED) Fail("cannot reserve guest import addresses");
+        mappedImages.push_back({&image, base, reinterpret_cast<std::uint64_t>(region), importBytes,
+            std::vector<std::uint64_t>(image.SymbolCount), std::vector<Provider>(image.SymbolCount),
+            binding.TlsModule});
+        if (binding.TlsModule != nullptr) {
+            if (binding.StartupAbi == Abi::Glibc || binding.TlsModule->version != 0 || image.TlsMemorySize == 0 ||
+                image.TlsMemorySize > 1048576 || image.TlsFileSize > image.TlsMemorySize || image.TlsAlignment > 65536 ||
+                !std::has_single_bit(image.TlsAlignment)) Fail("invalid closed-module TLS descriptor");
+            bool readable = image.TlsFileSize == 0;
+            for (std::uint64_t segment = 0; segment < image.SegmentCount; ++segment) {
+                const auto& item = image.Segments[segment];
+                if (image.TlsAddress >= item.Address && image.TlsAddress - item.Address <= item.FileSize &&
+                    image.TlsFileSize <= item.FileSize - (image.TlsAddress - item.Address)) readable = true;
+            }
+            if (!readable) Fail("module TLS template is not file backed");
+            *binding.TlsModule = {1, base + image.TlsAddress, image.TlsFileSize,
+                (image.TlsMemorySize + image.TlsAlignment - 1) & ~(image.TlsAlignment - 1), image.TlsAlignment, 0};
+        } else if (binding.StartupAbi == Abi::SceModule && image.TlsMemorySize != 0) Fail("module TLS requires a native descriptor");
+        for (std::uint64_t index = 0; index < image.ExportCount; ++index) {
+            const auto& symbol = image.Exports[index];
+            if (symbol.Name == nullptr || symbol.Address >= image.Span) Fail("invalid guest export");
+            if (!exports.emplace(symbol.Name, base + symbol.Address).second) Fail("ambiguous export in closed image bundle");
+        }
+    }
+    for (auto& context : mappedImages) {
+        const auto& image = *context.Image;
+        std::string missing;
+        for (std::uint64_t index = 0; index < image.SymbolCount; ++index) {
+            const auto name = image.Symbols[index];
+            if (const auto found = exports.find(name); found != exports.end()) {
+                context.Values[index] = found->second;
+                continue;
+            }
+            const auto* binding = FindProvider(name);
+            if (binding == nullptr) {
+                if ((image.SymbolFlags[index] & Weak) == 0) missing += std::string(missing.empty() ? "" : ", ") + name;
+                continue;
+            }
+            context.Providers[index] = binding->Function;
+            if (binding->NativeAddress != nullptr) {
+                const auto address = reinterpret_cast<std::uint64_t>(binding->NativeAddress);
+                context.Values[index] = address;
+                if (binding->Function != nullptr) {
+                    const auto [found, inserted] = nativeBindings.emplace(address, binding->Function);
+                    if (!inserted && found->second != binding->Function) Fail("conflicting native call ABI bindings");
+                } else opaqueBindings.emplace(address, name);
+            } else if (binding->Function != nullptr) {
+                context.Values[index] = context.ImportBase + 16 * (index + 1);
+            } else if (binding->Data != nullptr) context.Values[index] = reinterpret_cast<std::uint64_t>(binding->Data);
+            else Fail("provider has no code or data binding");
+        }
+        if (!missing.empty()) Fail("missing import providers: " + missing);
+        for (std::uint64_t index = 0; index < image.RelocationCount; ++index) {
+            const auto& relocation = image.Relocations[index];
+            if (relocation.Address > image.Span || 8 > image.Span - relocation.Address) Fail("guest relocation outside the image");
+            std::uint64_t value;
+            switch (relocation.Kind) {
+                case RelocationNone: continue;
+                case RelocationRelative: value = context.Base + static_cast<std::uint64_t>(relocation.Addend); break;
+                case RelocationGlobalData:
+                case RelocationJumpSlot:
+                case RelocationAbsolute:
+                    if (relocation.Symbol >= image.SymbolCount) Fail("guest relocation symbol out of range");
+                    value = context.Values[relocation.Symbol] == 0 ? 0 : context.Values[relocation.Symbol] + static_cast<std::uint64_t>(relocation.Addend);
+                    break;
+                case 16:
+                    if (image.Abi != static_cast<std::uint64_t>(Abi::SceModule) || context.TlsModule == nullptr || relocation.Symbol != 0 || relocation.Addend != 0)
+                        Fail("module TLS relocation has no qualified descriptor token");
+                    value = reinterpret_cast<std::uint64_t>(context.TlsModule);
+                    break;
+                default: Fail("unsupported guest relocation kind " + std::to_string(relocation.Kind));
+            }
+            std::memcpy(reinterpret_cast<void*>(context.Base + relocation.Address), &value, sizeof(value));
+        }
+        ProtectImage(image, (image.Span + PageSize - 1) & ~(PageSize - 1), context.Base);
+        *image.Base = context.Base;
+    }
+    for (const auto& context : mappedImages)
+        if (context.TlsModule != nullptr) Aps5GuestTlsRegister_nid_no_patch(context.TlsModule);
+    const auto& primary = mappedImages[mainIndex];
+    loaded = primary.Image;
+    imageBase = primary.Base;
+    importRegion = primary.ImportBase;
+    importRegionSize = primary.ImportBytes;
+    importProviders = primary.Providers;
+}
+
 std::uint64_t Load(const NativeAotGuestImage& image, Abi abi) {
-    if (image.Version != 7) Fail("unsupported guest image descriptor");
-    if (image.Abi != static_cast<std::uint64_t>(abi)) Fail("guest image startup ABI does not match the launcher");
-    if (image.Concurrent > 1) Fail("unsupported guest memory model");
-    if (loaded != nullptr) Fail("only one guest image is supported per process");
-    const auto span = (image.Span + PageSize - 1) & ~(PageSize - 1);
-    auto* memory = mmap(nullptr, span, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
-    if (memory == MAP_FAILED) Fail("cannot reserve guest image memory");
-    imageBase = reinterpret_cast<std::uint64_t>(memory);
-    for (std::uint64_t index = 0; index < image.SegmentCount; ++index) {
-        const auto& segment = image.Segments[index];
-        if (segment.Address + segment.MemorySize > image.Span || segment.FileOffset + segment.FileSize > image.ByteCount)
-            Fail("guest segment exceeds the image");
-        std::memcpy(reinterpret_cast<void*>(imageBase + segment.Address), image.Bytes + segment.FileOffset, segment.FileSize);
-    }
-    importRegionSize = 16 * (image.SymbolCount + 1);
-    const auto regionBytes = (importRegionSize + PageSize - 1) & ~(PageSize - 1);
-    auto* region = mmap(nullptr, regionBytes, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
-    if (region == MAP_FAILED) Fail("cannot reserve guest import addresses");
-    importRegion = reinterpret_cast<std::uint64_t>(region);
-    importProviders.assign(image.SymbolCount, nullptr);
-    std::vector<std::uint64_t> values(image.SymbolCount, 0);
-    std::string missing;
-    for (std::uint64_t index = 0; index < image.SymbolCount; ++index) {
-        const auto* binding = FindProvider(image.Symbols[index]);
-        if (binding == nullptr) {
-            if ((image.SymbolFlags[index] & Weak) == 0) missing += std::string(missing.empty() ? "" : ", ") + image.Symbols[index];
-            continue;
-        }
-        if (binding->Function != nullptr) {
-            importProviders[index] = binding->Function;
-            values[index] = importRegion + 16 * (index + 1);
-        } else {
-            values[index] = reinterpret_cast<std::uint64_t>(binding->Data);
-        }
-    }
-    if (!missing.empty()) Fail("missing import providers: " + missing);
-    for (std::uint64_t index = 0; index < image.RelocationCount; ++index) {
-        const auto& relocation = image.Relocations[index];
-        if (relocation.Address + 8 > image.Span) Fail("guest relocation outside the image");
-        std::uint64_t value;
-        switch (relocation.Kind) {
-            case RelocationNone: continue;
-            case RelocationRelative: value = imageBase + static_cast<std::uint64_t>(relocation.Addend); break;
-            case RelocationGlobalData:
-            case RelocationJumpSlot:
-            case RelocationAbsolute:
-                if (relocation.Symbol >= image.SymbolCount) Fail("guest relocation symbol out of range");
-                value = values[relocation.Symbol] == 0 ? 0 : values[relocation.Symbol] + static_cast<std::uint64_t>(relocation.Addend);
-                break;
-            default: Fail("unsupported guest relocation kind " + std::to_string(relocation.Kind));
-        }
-        std::memcpy(reinterpret_cast<void*>(imageBase + relocation.Address), &value, sizeof(value));
-    }
-    ProtectImage(image, span);
-    *image.Base = imageBase;
-    loaded = &image;
+    const ImageBinding binding{&image, abi};
+    LoadBundle(std::span(&binding, 1), 0);
     return imageBase;
+}
+
+bool IsConvertedFunction(std::uint64_t address) {
+    for (const auto& context : mappedImages) {
+        if (address < context.Base || address - context.Base >= context.Image->Span) continue;
+        const auto offset = address - context.Base;
+        const auto* begin = context.Image->Entries;
+        const auto* end = begin + context.Image->EntryCount;
+        const auto* found = std::lower_bound(begin, end, offset, [](const NativeAotGuestEntry& entry, std::uint64_t value) {
+            return entry.Address < value;
+        });
+        if (found != end && found->Address == offset) return true;
+    }
+    return false;
 }
 
 std::uint64_t ImageBase() {
@@ -275,7 +401,7 @@ std::uint64_t ExportAddress(const char* name) {
         if (std::strcmp(loaded->Exports[index].Name, name) == 0) return imageBase + loaded->Exports[index].Address;
     for (std::uint64_t index = 0; index < loaded->SymbolCount; ++index)
         if (std::strcmp(loaded->Symbols[index], name) == 0 && importProviders[index] != nullptr)
-            return importRegion + 16 * (index + 1);
+            for (const auto& context : mappedImages) if (context.Image == loaded) return context.Values[index];
     return 0;
 }
 
@@ -295,17 +421,14 @@ std::uint64_t Push(NativeAotGuestState& state, std::uint64_t value) {
 }
 
 std::uint64_t Invoke(NativeAotGuestState& state, std::uint64_t target) {
-    const auto saved = state.Gpr[Rsp];
+    StackScope stack(state);
     state.Gpr[Rsp] &= ~std::uint64_t{15};
     Push(state, ReturnSentinel());
-    auto* previous = current;
-    current = &state;
+    CurrentScope scope(&state);
     ProviderFence();
     const auto result = NativeAotGuestLookup(target)(&state, target);
     ProviderFence();
-    current = previous;
     if (result != ReturnSentinel()) NativeAotGuestTrap(UnexpectedReturn, result, target);
-    state.Gpr[Rsp] = saved;
     return state.Gpr[0];
 }
 
@@ -380,7 +503,8 @@ std::uint64_t AllocateStack(std::size_t bytes) {
 
 void StartSceApplication(const NativeAotGuestImage& image, int argc, char** argv) {
     if (argc < 0 || (argc != 0 && argv == nullptr)) Fail("invalid SCE application arguments");
-    Load(image, Abi::SceApplication);
+    if (loaded == nullptr) Load(image, Abi::SceApplication);
+    else if (loaded != &image || image.Abi != static_cast<std::uint64_t>(Abi::SceApplication)) Fail("SCE startup image differs from the closed bundle main");
     NativeAotGuestState state{};
     state.Mxcsr = 0x1f80;
     state.X87Control = 0x37f;

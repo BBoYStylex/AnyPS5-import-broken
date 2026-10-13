@@ -221,7 +221,7 @@ class Lab:
             objects.append(str(obj))
         binary = self.directory / 'lifted_run'
         run(['xcrun', 'clang++', '-std=c++20', '-O1', '-arch', 'arm64', f'-I{ROOT / "core/libs"}', str(harness),
-             str(NATIVE / 'NativeAotGuest.cpp'), *objects, '-o', str(binary)])
+             str(NATIVE / 'NativeAotGuest.cpp'), str(ROOT / 'core/libs/prx/libkernel/Pthread/src/GuestTlsMacOs.cpp'), *objects, '-o', str(binary)])
         return binary, roots
 
     def oracle_binary(self, cases):
@@ -439,6 +439,7 @@ def build_program(raw, directory, roots=(), strict=True, concurrent=False, abi="
         objects.append(str(obj))
     binary = directory / 'program'
     sources = [str(path) for path in sorted(NATIVE.glob('NativeAotGuest*.cpp')) + sorted(NATIVE.glob('NativeAotGlibc*.cpp'))]
+    sources.append(str(ROOT / 'core/libs/prx/libkernel/Pthread/src/GuestTlsMacOs.cpp'))
     if launcher is not None:
         sources.remove(str(NATIVE / 'NativeAotGuestMain.cpp'))
         main = directory / 'launcher.cpp'

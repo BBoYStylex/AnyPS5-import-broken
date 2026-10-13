@@ -427,11 +427,11 @@
       "sources": [
         {
           "path": "core/libs/prx/libc/src/Strings.cpp",
-          "sha256": "f5a5cd7ba90249c6cbf6566e7861267bb6399fa82bdab725d07e6b063559b9ae",
+          "sha256": "849b7c94507b069c478a779da02ca958e2b7da820442296e6a09201dd2caf2e3",
           "excerpt": "return std::memset(s, c, n);"
         }
       ],
-      "facts_sha256": "cc5ffe7a161af13351893b1148d8dff71287ea9ae2671fdc36507974a240a4ac"
+      "facts_sha256": "ee5a031d122a007f7225866b721edcddf90309786c0a06f1fbd31a92de10bc6d"
     },
     {
       "identity": {
@@ -463,11 +463,11 @@
       "sources": [
         {
           "path": "core/libs/prx/libc/src/Strings.cpp",
-          "sha256": "f5a5cd7ba90249c6cbf6566e7861267bb6399fa82bdab725d07e6b063559b9ae",
+          "sha256": "849b7c94507b069c478a779da02ca958e2b7da820442296e6a09201dd2caf2e3",
           "excerpt": "return std::memcpy(dest, src, n);"
         }
       ],
-      "facts_sha256": "7feddf6ce23e9aefd3e3c4b4b0d5927006e8061b4c80c029478b4140f5e1a875"
+      "facts_sha256": "1d5baf62b13f4f3e3768cfb9e00ca46b23b000911f6d7044225c5415e59d0106"
     },
     {
       "identity": {
@@ -491,12 +491,12 @@
       },
       "sources": [
         {
-          "path": "core/libs/prx/libc/src/Strings.cpp",
-          "sha256": "f5a5cd7ba90249c6cbf6566e7861267bb6399fa82bdab725d07e6b063559b9ae",
+          "path": "core/libs/prx/libc/src/StringLength.cpp",
+          "sha256": "88446982f7385c26c0d91ca01dd143e84dee7c0bc2245c373558b4427f876ee8",
           "excerpt": "return std::strlen(s);"
         }
       ],
-      "facts_sha256": "9187ea4845e94bcb5c70b1177ba95e9ef54eff48ff97a4489c64d0e89b35ad20"
+      "facts_sha256": "478103ff3fa85de06cec8ac6f3b02a458b9fe9fa1b0f2ec7ea689ba1b40c40e6"
     }
   ]
 }

@@ -3,6 +3,9 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <span>
+
+struct GuestTlsDescriptor;
 
 extern "C" {
 
@@ -104,7 +107,7 @@ enum SymbolFlag : std::uint64_t {
     Weak = 1,
 };
 
-enum class Abi : std::uint64_t { Glibc = 0, SceApplication = 1 };
+enum class Abi : std::uint64_t { Glibc = 0, SceApplication = 1, SceModule = 2 };
 
 using Provider = void (*)(NativeAotGuestState&);
 
@@ -112,11 +115,20 @@ struct ProviderBinding {
     const char* Name;
     Provider Function;
     void* Data;
+    const void* NativeAddress = nullptr;
 };
 
+struct ImageBinding {
+    const NativeAotGuestImage* Image;
+    Abi StartupAbi;
+    GuestTlsDescriptor* TlsModule = nullptr;
+};
+
+void LoadBundle(std::span<const ImageBinding> images, std::size_t mainIndex);
 void RegisterProviders(const ProviderBinding* bindings, std::size_t count);
 const ProviderBinding* FindProviderBinding(const char* name);
 std::uint64_t Load(const NativeAotGuestImage& image, Abi abi = Abi::Glibc);
+bool IsConvertedFunction(std::uint64_t address);
 std::uint64_t ImageBase();
 std::uint64_t ImageSpan();
 std::uint64_t ExportAddress(const char* name);

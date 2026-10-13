@@ -38,19 +38,19 @@ class Program:
         try:
             self.view = LoadView(self.raw)
             self.facts = load_facts.recover_load_facts(self.raw)
-            self.dynamic = dynamic.parse_dynamic(ELFFile(io.BytesIO(self.raw)), self.view.read)
+            self.dynamic = dynamic.parse_dynamic(ELFFile(io.BytesIO(self.raw)), self.view.read, include_exports=abi != 'glibc')
         except (UnwindError, dynamic.DynamicError) as error:
             raise LiftError(str(error)) from error
-        require(abi in ('glibc', 'sce-app'), 'unknown guest startup ABI')
+        require(abi in ('glibc', 'sce-app', 'sce-module'), 'unknown guest startup ABI')
         self.abi = abi
-        allowed = (3,) if abi == 'glibc' else (3, 0xfe10)
+        allowed = (3,) if abi == 'glibc' else (3, 0xfe18) if abi == 'sce-module' else (3, 0xfe10)
         require(self.view.type in allowed, f'{abi} lowering requires a compatible position-independent image')
         self.decoder = Cs(CS_ARCH_X86, CS_MODE_64)
         self.decoder.detail = True
         self.decoded = {}
         self.relocations = {r['slot']: r for r in self.dynamic['relocations']}
         for relocation in self.dynamic['relocations']:
-            require(relocation['kind'] in RELOCATIONS, f'relocation type {relocation["kind"]} at 0x{relocation["slot"]:x} needs guest TLS lowering')
+            require(relocation['kind'] in RELOCATIONS or (abi == 'sce-module' and relocation['kind'] == 16 and relocation['symbol_index'] == 0), f'relocation type {relocation["kind"]} at 0x{relocation["slot"]:x} needs guest TLS lowering')
         self.writable = [(s['vaddr'], s['vaddr'] + s['memsz']) for s in self.view.loads if s['flags'] & 2]
         relro = [s for s in self.view.segments if s['type'] == PT_GNU_RELRO]
         self.relro = (relro[0]['vaddr'], relro[0]['memsz']) if relro else (0, 0)

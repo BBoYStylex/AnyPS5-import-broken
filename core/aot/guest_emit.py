@@ -2,6 +2,7 @@ import argparse
 import json
 import subprocess
 import time
+import re
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
@@ -130,7 +131,7 @@ class Lowering(Vector):
             self.emit(f'store i128 {self.v(f"load i128, ptr {pointer}, align 16")}, ptr %Y{index}')
 
     def prologue(self):
-        self.lines.append(f'define hidden i64 {symbol(self.unit.start)}(ptr noalias %s, i64 %entry) {{')
+        self.lines.append(f'define hidden i64 {symbol(self.unit.start)}(ptr noalias %s, i64 %entry) uwtable {{')
         self.lines.append('prologue:')
         for index in range(16):
             self.emit(f'%R{index} = alloca i64')
@@ -275,6 +276,8 @@ class Lowering(Vector):
 
     def instruction(self, ins):
         self.ins = ins
+        if self.unit.program.abi != 'glibc' and any(operand.type == X86_OP_MEM and ins.reg_name(operand.mem.segment) in ('fs', 'gs') for operand in ins.operands):
+            self.unsupported('SCE static TLS addressing requires a separate host ABI')
         mnemonic = ins.mnemonic
         if mnemonic in ('call', 'ret', 'jmp', 'hlt', 'ud2', 'int3') or (mnemonic.startswith('j') and mnemonic[1:]):
             self.control(ins)
@@ -345,7 +348,7 @@ def describe_image(program, units):
         number = 0
         if relocation['kind'] in (1, 6, 7):
             entry = program.dynamic['symbols'][relocation['symbol_index']]
-            name = entry['name']
+            name = canonical_name(program, entry)
             if name not in index:
                 index[name] = len(symbols)
                 symbols.append(name)
@@ -354,13 +357,30 @@ def describe_image(program, units):
         relocations.append((relocation['slot'], relocation['kind'], number, relocation['addend']))
     span = max(s['vaddr'] + s['memsz'] for s in loads)
     relro_address, relro_size = program.relro
-    exports = sorted((symbol['name'], symbol['value']) for symbol in program.dynamic['symbols'][1:]
+    exports = sorted((canonical_name(program, symbol, True), symbol['value']) for symbol in program.dynamic['symbols'][1:]
                      if symbol['name'] and symbol['section'] and symbol['section'] < 0xff00 and symbol['info'] & 15 in (1, 2))
     tls = program.tls
     tls_fields = (tls['vaddr'], tls['filesz'], tls['memsz'], max(tls['align'], 1)) if tls else (0, 0, 0, 1)
     return {'blob': bytes(blob), 'segments': segments, 'symbols': symbols, 'flags': flags, 'relocations': relocations,
             'span': span, 'relro': (relro_address, relro_size), 'entry': view.entry,
             'entries': sorted(units), 'tls': tls_fields, 'exports': exports, 'abi': program.abi}
+
+
+def abi_code(name):
+    return {'glibc': 0, 'sce-app': 1, 'sce-module': 2}[name]
+
+
+def canonical_name(program, entry, exported=False):
+    if program.abi == 'glibc' or '#' not in entry['name']:
+        return entry['name']
+    from bundle import identity
+    return json.dumps(identity(program.dynamic, entry, exported, ''), separators=(',', ':'))
+
+
+def namespace_ir(text, namespace):
+    guest_lift.require(not namespace or re.fullmatch(r'[A-Za-z_][A-Za-z_0-9]*_', namespace), 'invalid guest image namespace')
+    pattern = r'"(?:\\[0-9A-Fa-f]{2}|[^"\\])*"|@__aps5_[A-Za-z_0-9]+'
+    return re.sub(pattern, lambda match: '@' + namespace + match.group()[1:] if match.group().startswith('@__aps5_') else match.group(), text)
 
 
 def string_constant(name, text):
@@ -395,11 +415,11 @@ def descriptor_module(image, concurrent=False):
         lines.append(string_constant(f'@__aps5_guest_export_{number}', name))
     lines.append(f'@__aps5_guest_exports = private constant [{max(len(exports), 1)} x {{ ptr, i64 }}] [' +
                  (', '.join(f'{{ ptr, i64 }} {{ ptr @__aps5_guest_export_{number}, i64 {address} }}' for number, (_, address) in enumerate(exports)) or '{ ptr, i64 } zeroinitializer') + ']')
-    fields = ['i64 7', 'ptr @__aps5_guest_bytes', f'i64 {len(blob)}', 'ptr @__aps5_guest_segments', f'i64 {len(image["segments"])}',
+    fields = ['i64 9', 'ptr @__aps5_guest_bytes', f'i64 {len(blob)}', 'ptr @__aps5_guest_segments', f'i64 {len(image["segments"])}',
               'ptr @__aps5_guest_relocations', f'i64 {len(image["relocations"])}', 'ptr @__aps5_guest_symbols',
               'ptr @__aps5_guest_symbol_flags', f'i64 {symbol_count}', 'ptr @__aps5_guest_entries', f'i64 {len(image["entries"])}',
               f'i64 {image["entry"]}', f'i64 {image["span"]}', f'i64 {image["relro"][0]}', f'i64 {image["relro"][1]}',
-              'ptr @__aps5_guest_base', *[f'i64 {value}' for value in image['tls']], 'ptr @__aps5_guest_exports', f'i64 {len(exports)}', f'i64 {int(concurrent)}', f'i64 {int(image.get("abi", "glibc") == "sce-app")}']
+              'ptr @__aps5_guest_base', *[f'i64 {value}' for value in image['tls']], 'ptr @__aps5_guest_exports', f'i64 {len(exports)}', f'i64 {int(concurrent)}', f'i64 {abi_code(image.get("abi", "glibc"))}']
     types = ', '.join(field.split(' ')[0] for field in fields)
     lines.append(f'@__aps5_guest_image = constant {{ {types} }} {{ {", ".join(fields)} }}')
     return '\n'.join(lines) + '\n'
@@ -418,7 +438,7 @@ def callees(unit, units):
 
 
 def lower_shard(arguments):
-    raw, starts, output, extra, trace, concurrent, abi, ordered_access = arguments
+    raw, starts, output, extra, trace, concurrent, abi, ordered_access, namespace = arguments
     program = guest_lift.Program(raw, abi=abi)
     units, _, _ = guest_lift.discover(program, extra)
     texts, declarations, errors, called = [], set(), [], set()
@@ -430,15 +450,16 @@ def lower_shard(arguments):
         called |= callees(units[start], units)
     if trace:
         declarations |= {'declare void @NativeAotGuestTraceEnter(ptr, i64)', 'declare void @NativeAotGuestTraceLeave(ptr, i64, i64)'}
-    Path(output).write_text(shard_module(texts, declarations, set(starts), called))
+    Path(output).write_text(namespace_ir(shard_module(texts, declarations, set(starts), called), namespace))
     return errors
 
 
-def build(input_path, output_dir, shards=16, jobs=8, extra=(), strict=True, trace=False, concurrent=False, abi="glibc", ordered_access=None):
+def build(input_path, output_dir, shards=16, jobs=8, extra=(), strict=True, trace=False, concurrent=False, abi="glibc", ordered_access=None, namespace=""):
     if ordered_access is None:
         ordered_access = 'atomic' if concurrent else 'fenced'
     guest_lift.require(ordered_access in ('fenced', 'atomic'), 'unknown ordered access implementation')
     guest_lift.require(concurrent or ordered_access == 'fenced', 'atomic access requires --concurrent')
+    namespace_ir('', namespace)
     started = time.monotonic()
     raw = Path(input_path).read_bytes()
     program = guest_lift.Program(raw, abi=abi)
@@ -446,7 +467,7 @@ def build(input_path, output_dir, shards=16, jobs=8, extra=(), strict=True, trac
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
     image = describe_image(program, units)
-    (output / 'image.ll').write_text(descriptor_module(image, concurrent))
+    (output / 'image.ll').write_text(namespace_ir(descriptor_module(image, concurrent), namespace))
     ordered = sorted(units, key=lambda start: -len(units[start].instructions))
     buckets = [[] for _ in range(shards)]
     sizes = [0] * shards
@@ -454,14 +475,14 @@ def build(input_path, output_dir, shards=16, jobs=8, extra=(), strict=True, trac
         smallest = sizes.index(min(sizes))
         buckets[smallest].append(start)
         sizes[smallest] += len(units[start].instructions)
-    work = [(raw, sorted(bucket), str(output / f'shard{number:02}.ll'), tuple(extra), trace, concurrent, abi, ordered_access) for number, bucket in enumerate(buckets) if bucket]
+    work = [(raw, sorted(bucket), str(output / f'shard{number:02}.ll'), tuple(extra), trace, concurrent, abi, ordered_access, namespace) for number, bucket in enumerate(buckets) if bucket]
     if jobs == 1:
         errors = [error for item in work for error in lower_shard(item)]
     else:
         with ProcessPoolExecutor(jobs) as pool:
             errors = [error for result in pool.map(lower_shard, work) for error in result]
     report = {'schema': 'anyps5.aot.guest-lowering.v1', 'input_sha256': program.sha256, 'units': len(units),
-              'startup_abi': abi, 'ordered_access': ordered_access,
+              'startup_abi': abi, 'ordered_access': ordered_access, 'native_namespace': namespace,
               'memory_profile': 'ordered-normal-memory' if concurrent else 'single-thread',
               'instructions': sum(len(unit.instructions) for unit in units.values()),
               'jump_tables': {status: sum(1 for unit in units.values() for table in unit.tables.values() if table['status'] == status)
@@ -481,11 +502,12 @@ def main():
     parser.add_argument('--shards', type=int, default=16)
     parser.add_argument('--inventory', action='store_true')
     parser.add_argument('--trace', action='store_true')
+    parser.add_argument('--namespace', default='')
     parser.add_argument('--concurrent', action='store_true')
     parser.add_argument('--ordered-access', choices=('fenced', 'atomic'))
-    parser.add_argument('--abi', choices=('glibc', 'sce-app'), default='glibc')
+    parser.add_argument('--abi', choices=('glibc', 'sce-app', 'sce-module'), default='glibc')
     args = parser.parse_args()
-    report = build(args.input, args.output, args.shards, strict=not args.inventory, trace=args.trace, concurrent=args.concurrent, abi=args.abi, ordered_access=args.ordered_access)
+    report = build(args.input, args.output, args.shards, strict=not args.inventory, trace=args.trace, concurrent=args.concurrent, abi=args.abi, ordered_access=args.ordered_access, namespace=args.namespace)
     print(json.dumps({key: report[key] for key in ('units', 'instructions', 'jump_tables', 'seconds')}))
     print(f'{len(report["unsupported"])} unsupported instruction sites')
 
