@@ -8,12 +8,12 @@ from pathlib import Path
 from capstone.x86 import X86_OP_IMM, X86_OP_MEM
 
 import guest_lift
-from guest_ops import (FLAGS, GPR, STATE_XMM, TRAP_FALLTHROUGH, TRAP_HALT, TRAP_INVALID, TRAP_UNKNOWN_ENTRY,
+from guest_ops import (FLAGS, GPR, STATE_XMM, STATE_YMM_UPPER, TRAP_FALLTHROUGH, TRAP_HALT, TRAP_INVALID, TRAP_UNKNOWN_ENTRY,
                        Unsupported, Vector)
 
 TRAP_UNKNOWN_TARGET = 1
 TRIPLE = 'arm64-apple-macosx14.0.0'
-RUNTIME = ['declare void @NativeAotGuestTrap(i64, i64, i64) noreturn', 'declare ptr @NativeAotGuestLookup(i64)', 'declare ptr @NativeAotGuestFind(i64)',
+RUNTIME = ['declare void @NativeAotGuestFlushCacheLine(i64)', 'declare void @NativeAotGuestTrap(i64, i64, i64) noreturn', 'declare ptr @NativeAotGuestLookup(i64)', 'declare ptr @NativeAotGuestFind(i64)',
            'declare void @NativeAotGuestCpuid(ptr)', 'declare i64 @NativeAotGuestReadTsc()']
 
 
@@ -22,6 +22,14 @@ def symbol(address):
 
 
 class Lowering(Vector):
+    def op_clflush(self):
+        operand, = self.operands()
+        if operand.type != X86_OP_MEM:
+            self.unsupported('CLFLUSH requires a memory operand')
+        self.emit('fence seq_cst')
+        self.emit(f'call void @NativeAotGuestFlushCacheLine(i64 {self.address(operand)})')
+        self.emit('fence seq_cst')
+
     def op_cpuid(self):
         if self.concurrent:
             self.emit('fence seq_cst')
@@ -105,6 +113,10 @@ class Lowering(Vector):
             pointer = self.v(f'getelementptr i8, ptr %s, i64 {STATE_XMM + 16 * index}')
             self.emit(f'store i128 {self.v(f"load i128, ptr %X{index}")}, ptr {pointer}, align 16')
 
+        for index in range(16):
+            pointer = self.v(f'getelementptr i8, ptr %s, i64 {STATE_YMM_UPPER + 16 * index}')
+            self.emit(f'store i128 {self.v(f"load i128, ptr %Y{index}")}, ptr {pointer}, align 16')
+
     def reload(self):
         for index in range(16):
             pointer = self.v(f'getelementptr i8, ptr %s, i64 {8 * index}')
@@ -113,6 +125,10 @@ class Lowering(Vector):
             pointer = self.v(f'getelementptr i8, ptr %s, i64 {STATE_XMM + 16 * index}')
             self.emit(f'store i128 {self.v(f"load i128, ptr {pointer}, align 16")}, ptr %X{index}')
 
+        for index in range(16):
+            pointer = self.v(f'getelementptr i8, ptr %s, i64 {STATE_YMM_UPPER + 16 * index}')
+            self.emit(f'store i128 {self.v(f"load i128, ptr {pointer}, align 16")}, ptr %Y{index}')
+
     def prologue(self):
         self.lines.append(f'define hidden i64 {symbol(self.unit.start)}(ptr noalias %s, i64 %entry) {{')
         self.lines.append('prologue:')
@@ -120,6 +136,7 @@ class Lowering(Vector):
             self.emit(f'%R{index} = alloca i64')
         for index in range(16):
             self.emit(f'%X{index} = alloca i128, align 16')
+            self.emit(f'%Y{index} = alloca i128, align 16')
         for flag in FLAGS:
             self.emit(f'%F{flag} = alloca i1')
             self.emit(f'store i1 false, ptr %F{flag}')
@@ -378,7 +395,7 @@ def descriptor_module(image, concurrent=False):
         lines.append(string_constant(f'@__aps5_guest_export_{number}', name))
     lines.append(f'@__aps5_guest_exports = private constant [{max(len(exports), 1)} x {{ ptr, i64 }}] [' +
                  (', '.join(f'{{ ptr, i64 }} {{ ptr @__aps5_guest_export_{number}, i64 {address} }}' for number, (_, address) in enumerate(exports)) or '{ ptr, i64 } zeroinitializer') + ']')
-    fields = ['i64 5', 'ptr @__aps5_guest_bytes', f'i64 {len(blob)}', 'ptr @__aps5_guest_segments', f'i64 {len(image["segments"])}',
+    fields = ['i64 7', 'ptr @__aps5_guest_bytes', f'i64 {len(blob)}', 'ptr @__aps5_guest_segments', f'i64 {len(image["segments"])}',
               'ptr @__aps5_guest_relocations', f'i64 {len(image["relocations"])}', 'ptr @__aps5_guest_symbols',
               'ptr @__aps5_guest_symbol_flags', f'i64 {symbol_count}', 'ptr @__aps5_guest_entries', f'i64 {len(image["entries"])}',
               f'i64 {image["entry"]}', f'i64 {image["span"]}', f'i64 {image["relro"][0]}', f'i64 {image["relro"][1]}',

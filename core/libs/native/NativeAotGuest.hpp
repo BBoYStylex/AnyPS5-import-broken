@@ -15,7 +15,10 @@ struct alignas(16) NativeAotGuestState {
     std::uint64_t X87Top;
     std::uint64_t X87Control;
     std::uint64_t X87Valid;
+    alignas(16) std::uint8_t YmmUpper[16][16];
 };
+
+static_assert(offsetof(NativeAotGuestState, YmmUpper) == 560);
 
 using NativeAotGuestFunction = std::uint64_t (*)(NativeAotGuestState*, std::uint64_t);
 
@@ -75,6 +78,7 @@ struct NativeAotGuestImage {
 [[noreturn]] void NativeAotGuestTrap(std::uint64_t kind, std::uint64_t address, std::uint64_t detail);
 NativeAotGuestFunction NativeAotGuestLookup(std::uint64_t address);
 NativeAotGuestFunction NativeAotGuestFind(std::uint64_t address);
+void NativeAotGuestFlushCacheLine(std::uint64_t address);
 void NativeAotGuestCpuid(NativeAotGuestState* state);
 std::uint64_t NativeAotGuestReadTsc();
 }
