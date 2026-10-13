@@ -210,8 +210,6 @@ private:
         return EINVAL;
     }
 #elif defined(__APPLE__)
-    // macOS has no /proc/self/maps; dyld, the Rosetta runtime and ranges the kernel never lets a process
-    // map (max protection none, e.g. 0x10_0000_0000-0x70_0000_0000) all sit inside the PS5 application map.
     static std::vector<std::pair<std::uintptr_t, std::uintptr_t>> HostMappings() {
         std::vector<std::pair<std::uintptr_t, std::uintptr_t>> mappings;
         mach_vm_address_t address = ArenaStart;
@@ -229,7 +227,6 @@ private:
         return mappings;
     }
 
-    // MAP_FIXED_NOREPLACE does not exist on macOS; a fixed mach_vm_map fails instead of replacing.
     static int ReserveNoReplace(std::uintptr_t address, std::size_t bytes) {
         mach_vm_address_t wanted = address;
         const kern_return_t result = mach_vm_map(mach_task_self(), &wanted, bytes, 0, VM_FLAGS_FIXED, MEMORY_OBJECT_NULL, 0, FALSE, VM_PROT_NONE, VM_PROT_ALL, VM_INHERIT_DEFAULT);
