@@ -199,7 +199,7 @@ int APS5_VABI scePadReadState(int handle, PadData* data) {
 
  *data = Pad::ReadState();
 
- return 0;
+ return PAD_OK;
 }
 
 int APS5_VABI scePadResetLightBar(int handle) {
@@ -313,7 +313,7 @@ int APS5_VABI scePadIsRemoteController(int handle, bool* remote) {
  if (handle != PAD_HANDLE) return PAD_ERROR_INVALID_HANDLE;
  if (remote == nullptr) return PAD_ERROR_INVALID_ARG;
  *remote = false;
- return 0;
+ return PAD_OK;
 }
 
 
