@@ -2,6 +2,10 @@
 
 #include <cstdint>
 #include <charconv>
+#include <cfenv>
+#include <cmath>
+#include <limits>
+#include <locale>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -206,6 +210,22 @@ JsonValue parseJsonArray(const std::string& text, std::size_t& position, std::si
     return value;
 }
 
+class JsonNumberEnvironment {
+public:
+    JsonNumberEnvironment() {
+        if (std::feholdexcept(&previous) != 0) throw std::runtime_error("cannot preserve numeric environment for param.json");
+        if (std::fesetround(FE_TONEAREST) != 0) {
+            std::fesetenv(&previous);
+            throw std::runtime_error("cannot set numeric rounding for param.json");
+        }
+    }
+    ~JsonNumberEnvironment() { std::fesetenv(&previous); }
+    JsonNumberEnvironment(const JsonNumberEnvironment&) = delete;
+    JsonNumberEnvironment& operator=(const JsonNumberEnvironment&) = delete;
+private:
+    std::fenv_t previous;
+};
+
 JsonValue parseJsonNumber(const std::string& text, std::size_t& position) {
     const std::size_t start = position;
     if (peekChar(text, position) == '-') ++position;
@@ -230,7 +250,19 @@ JsonValue parseJsonNumber(const std::string& text, std::size_t& position) {
     JsonValue value;
     value.type = JsonType::Number;
     value.numberText = text.substr(start, position - start);
-    value.numberValue = std::stod(value.numberText);
+    const auto& number = value.numberText;
+    const JsonNumberEnvironment environment;
+    std::istringstream input(number);
+    input.imbue(std::locale::classic());
+    input >> value.numberValue;
+    const auto magnitude = std::abs(value.numberValue);
+    const bool small = magnitude > 0 && magnitude <= std::numeric_limits<double>::min();
+    const auto significant = number.find_first_of("123456789");
+    const auto exponent = number.find_first_of("eE");
+    const bool roundedToZero = value.numberValue == 0 && significant != std::string::npos &&
+        (exponent == std::string::npos || significant < exponent);
+    if (input.bad() || !input.eof() || (input.fail() && !small) || !std::isfinite(value.numberValue) || roundedToZero)
+        throw std::runtime_error("number outside supported range in param.json");
     return value;
 }
 
