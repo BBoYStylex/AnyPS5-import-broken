@@ -480,6 +480,68 @@ void testOverlay() {
     LibcRunShutdown_nid_postfix();
 }
 
+void testFlipMaster() {
+    const int mainHandle = sceVideoOutOpen(255, 0, 0, nullptr);
+    const int overlayHandle = sceVideoOutOpen(255, 1, 0, nullptr);
+    auto mainCfg = VideoOutDriver::Get().GetConfig(mainHandle);
+    auto overlayCfg = VideoOutDriver::Get().GetConfig(overlayHandle);
+    std::vector<std::byte> allocation(65536 + 65535);
+    const auto storage = alignedBuffer(allocation);
+    VideoOutBuffers buffer{storage.data(), nullptr, {nullptr, nullptr}};
+    VideoOutBufferAttribute2 attribute{};
+    sceVideoOutSetBufferAttribute2(&attribute, 0x8000000000000000ull, 0, 64, 64, 0, 0, 0);
+    check(sceVideoOutRegisterBuffers2(mainHandle, 0, 0, &buffer, 1, &attribute, 0, nullptr) == 0, "buffer registration failed");
+    const auto waitFlips = [&](std::uint64_t count) {
+        std::unique_lock lock(mainCfg->mutex);
+        const bool done = mainCfg->vblankCond.wait_for(lock, std::chrono::seconds(15), [&] { return mainCfg->failure || mainCfg->flipStatus.count == count; });
+        if (mainCfg->failure) std::rethrow_exception(mainCfg->failure);
+        check(done && mainCfg->flipStatus.flipPendingNum == 0, "the flip did not complete");
+    };
+    const auto tied = [](const std::shared_ptr<VideoOutConfig>& cfg, int master, std::uint32_t slaves) {
+        std::lock_guard lock(cfg->mutex);
+        return cfg->flipMaster == master && cfg->flipSlaves == slaves;
+    };
+    for (int invalid : {-1, 0, 3, VIDEO_OUT_NUM_MAX, 0x7fffffff}) {
+        check(sceVideoOutSetFlipMaster(invalid, mainHandle) == VIDEO_OUT_ERROR_INVALID_HANDLE, "an invalid slave handle was tied");
+        check(sceVideoOutSetFlipMaster(overlayHandle, invalid) == VIDEO_OUT_ERROR_INVALID_HANDLE, "an invalid master handle was tied");
+        check(sceVideoOutClearFlipMaster(invalid) == VIDEO_OUT_ERROR_INVALID_HANDLE, "an invalid handle was untied");
+    }
+    check(sceVideoOutSetFlipMaster(mainHandle, mainHandle) == VIDEO_OUT_ERROR_UNSUPPORTED_OPERATION, "a port became its own flip master");
+    check(expectFailure([&] { sceVideoOutClearFlipMaster(mainHandle); }).find("without a flip master") != std::string::npos, "a port without a flip master was untied");
+    check(tied(mainCfg, 0, 0) && tied(overlayCfg, 0, 0), "a rejected call changed the tie");
+
+    auto gate = std::make_shared<Gate>();
+    AgcDriverRegisterVideoOutput_nid_postfix(7, gate);
+    std::array<uint32_t, 6> held{0xc004105c, 7, 0xfffffffeu, 1, 0, 0};
+    Packet heldPacket{held.data(), 6, 0, {}};
+    check(sceAgcDriverSubmitDcb(&heldPacket) == 0, "the gated flip was not accepted");
+    check(sceVideoOutSubmitFlip(mainHandle, 0, 1, 1) == 0, "the flip was not accepted");
+    check(sceVideoOutSetFlipMaster(overlayHandle, mainHandle) == VIDEO_OUT_ERROR_RESOURCE_BUSY, "a master with a pending flip was tied");
+    gate->Release();
+    waitFlips(1);
+    AgcDriverUnregisterVideoOutput_nid_postfix(7, gate);
+
+    check(sceVideoOutSetFlipMaster(overlayHandle, mainHandle) == 0, "the overlay port was not tied to the main port");
+    check(tied(overlayCfg, mainHandle, 0) && tied(mainCfg, 0, 1), "the tie was not recorded");
+    check(sceVideoOutSetFlipMaster(overlayHandle, mainHandle) == VIDEO_OUT_ERROR_UNSUPPORTED_OPERATION, "a slave port was tied twice");
+    check(sceVideoOutSetFlipMaster(mainHandle, overlayHandle) == VIDEO_OUT_ERROR_UNSUPPORTED_OPERATION, "a master port became a slave");
+    check(expectFailure([&] { sceVideoOutSubmitFlip(mainHandle, 0, 1, 2); }).find("sceVideoOutSetFlipMaster") != std::string::npos, "a flip on a tied port was accepted");
+    check(expectFailure([&] { sceVideoOutClose(mainHandle); }).find("flip master") != std::string::npos, "a master with a slave port was closed");
+    check(sceVideoOutClearFlipMaster(overlayHandle) == 0, "the tie was not cleared");
+    check(tied(overlayCfg, 0, 0) && tied(mainCfg, 0, 0), "the tie was not removed");
+    check(sceVideoOutSubmitFlip(mainHandle, 0, 1, 3) == 0, "the flip after clearing the tie was not accepted");
+    waitFlips(2);
+
+    check(sceVideoOutSetFlipMaster(overlayHandle, mainHandle) == 0, "the overlay port was not tied again");
+    check(sceVideoOutClose(overlayHandle) == 0, "the slave port was not closed");
+    check(tied(mainCfg, 0, 0), "closing the slave port kept the tie");
+    check(sceVideoOutSubmitFlip(mainHandle, 0, 1, 4) == 0, "the flip after closing the slave port was not accepted");
+    waitFlips(3);
+    sceVideoOutUnregisterBuffers(mainHandle, 0);
+    check(sceVideoOutClose(mainHandle) == 0, "the master port was not closed");
+    LibcRunShutdown_nid_postfix();
+}
+
 void testUnavailable() {
     const auto message = expectFailure([] { sceVideoOutOpen(255, 0, 0, nullptr); });
     check(expectFailure([] { sceVideoOutOpen(255, 0, 0, nullptr); }) == message, "a second open lost the presentation failure");
@@ -725,6 +787,7 @@ int main(int argc, char** argv) {
         else if (argc == 2 && std::string(argv[1]) == "onedevice") testOneDevice();
         else if (argc == 2 && std::string(argv[1]) == "unopened") testUnopenedEventRegistration();
         else if (argc == 2 && std::string(argv[1]) == "overlay") testOverlay();
+        else if (argc == 2 && std::string(argv[1]) == "flipmaster") testFlipMaster();
         else if (argc == 2 && std::string(argv[1]) == "deferred") testDeferredBuffer();
         else if (argc == 2 && std::string(argv[1]) == "unregistered") testUnregisteredBuffer();
         else testLifetime(argc == 2 && std::string(argv[1]) == "reopen");

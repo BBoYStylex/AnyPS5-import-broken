@@ -190,6 +190,9 @@ int APS5_VABI sceVideoOutSubmitFlip(int handle, int index, int flipMode, int64_t
     if (cfg->closing) {
         throw std::runtime_error(std::string(__func__) + ": VIDEO_OUT_ERROR_INVALID_HANDLE");
     }
+    if (cfg->flipMaster != 0 || cfg->flipSlaves != 0) {
+        throw std::runtime_error(std::string(__func__) + ": flips on a port tied by sceVideoOutSetFlipMaster are not modelled");
+    }
     const bool special = (index == VIDEO_OUT_BUFFER_INDEX_BLANK || index == VIDEO_OUT_BUFFER_INDEX_BLACK);
     if (!special && !cfg->buffers[index].Occupied()) {
         throw std::runtime_error(std::string(__func__) + ": VIDEO_OUT_ERROR_INVALID_INDEX");
