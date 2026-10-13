@@ -3179,7 +3179,7 @@ void Recorder::Submit() {
         submission.pSignalSemaphores = &timeline;
     }
     const auto submitStart = std::chrono::steady_clock::now();
-    Check(function(queueSubmit, "vkQueueSubmit")(context.queue, 1, &submission, batch->fence), "vkQueueSubmit recorder");
+    context.CheckResult(function(queueSubmit, "vkQueueSubmit")(context.queue, 1, &submission, batch->fence), "vkQueueSubmit recorder");
     batch->submitted = true;
     batch->serial = ++submissions;
     batch->submittedAt = std::chrono::steady_clock::now();
@@ -3255,7 +3255,7 @@ void Recorder::WaitSerial(std::uint64_t serial) {
         unlockedWaits.fetch_add(1, std::memory_order_relaxed);
         unlockedWaitedUs.fetch_add(static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - start).count()), std::memory_order_relaxed);
     }
-    Check(result, "vkWaitSemaphoresKHR recorder");
+    context.CheckResult(result, "vkWaitSemaphoresKHR recorder");
 }
 
 void Recorder::FinishUpTo(std::uint64_t serial) {
@@ -3532,10 +3532,10 @@ bool Recorder::syncThroughUnlocked(std::uint64_t address, std::uint64_t end, int
     if (!RecorderAlive(myId)) {
         // Torn down meanwhile: its destructor's Sync() ran every completion, nothing is pending.
         ++holdCounters.hookUnlockedTornDown;
-        Check(result, "vkWaitSemaphoresKHR recorder");
+        context.CheckResult(result, "vkWaitSemaphoresKHR recorder");
         return true;
     }
-    Check(result, "vkWaitSemaphoresKHR recorder");
+    context.CheckResult(result, "vkWaitSemaphoresKHR recorder");
     // The completions up to the target, under the mutex again; the fences are signaled, so the
     // waits inside finish() return at once (charged to the same site entry). Another thread may
     // have finished some meanwhile.
@@ -3639,11 +3639,11 @@ void Recorder::finish(std::unique_ptr<Batch> batch, bool wait, int source, bool 
         }
         if (result != VK_SUCCESS && result != VK_ERROR_DEVICE_LOST) {
             const auto idle = context.Function<PFN_vkDeviceWaitIdle>("vkDeviceWaitIdle")(context.device);
-            Check(idle, "vkDeviceWaitIdle after recorder fence failure");
+            context.CheckResult(idle, "vkDeviceWaitIdle after recorder fence failure");
         }
         if (result != VK_SUCCESS) {
             release(*batch);
-            Check(result, "vkWaitForFences recorder");
+            context.CheckResult(result, "vkWaitForFences recorder");
         }
     }
     readGpuTiming(*batch);

@@ -158,6 +158,17 @@ Do not disable Dozen if it is the only Vulkan driver available; the application 
 
 GPU results in storage images and render targets stay on the GPU until something reads their memory. A title that frees such an image after waiting for its GPU work and reuses the memory can have its new data overwritten when the results are stored later ([TechnicalDebt](../dev/TechnicalDebt.md)). `APS5_STORE_AT_FLIP=1` stores every pending result when a display buffer is flipped, at the cost of one write-back per pending image and frame. Any other value stops the title at its first flip.
 
+### GPU fault reports
+
+When the Vulkan device is lost, a device that supports `VK_EXT_device_fault` reports what the driver recorded about the fault before the error is raised: the operation that saw the loss, the driver's description, and the faulting GPU addresses with their access type and precision. One report is written to the standard error output per device.
+
+```
+[gpu-fault] device lost at vkQueueSubmit recorder; no driver description; addresses 1/1, vendor entries 0/0
+[gpu-fault] address write-invalid 0x7f3660000, precision 0x1000
+```
+
+The addresses are GPU virtual addresses, not guest addresses. `APS5_NO_DEVICE_FAULT=1` leaves the extension disabled. Limits are listed in the [libSceAgcDriver](../dev/debt/libSceAgcDriver.md) technical debt.
+
 ### Tracing system library calls
 
 Windows only. An executable converted with `--trace-imports` records the calls it makes to the libraries named in `APS5_TRACE_CALLS`, a comma-separated list such as `libkernel,libSceSaveData`, or `all`. Without the variable nothing is recorded. The crash and abort reports then end with the last 64 calls: sequence number, thread, library, import name as the executable imports it (a NID) and the caller's address. They are followed by the 32 most called imports since start-up, with their number of calls.

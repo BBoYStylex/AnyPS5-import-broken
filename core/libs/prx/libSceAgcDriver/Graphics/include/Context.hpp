@@ -5,6 +5,7 @@
 #define VK_NO_PROTOTYPES
 #endif
 #include <vulkan/vulkan.h>
+#include "prx/libSceAgcDriver/Graphics/include/DeviceFault.hpp"
 #include <atomic>
 #include <cstdint>
 #include <cstdio>
@@ -176,6 +177,12 @@ struct Context {
     bool provokingVertexModePerPipeline = false;
     bool singlePassStorage = false;
     VkSampleCountFlags sampleLocationSampleCounts = 0;
+    const DeviceFault* deviceFault = nullptr;
+
+    void CheckResult(VkResult result, const char* operation) const {
+        if (deviceFault != nullptr) deviceFault->Report(result, operation);
+        Check(result, operation);
+    }
 
     template<typename TFunction>
     TFunction Function(const char* name) const {
