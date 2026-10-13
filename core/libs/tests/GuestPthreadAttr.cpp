@@ -27,12 +27,20 @@ int APS5_VABI pthread_attr_setinheritsched_nid_postfix(PthreadAttr* attr, int in
 int APS5_VABI pthread_attr_getscope_nid_postfix(const PthreadAttr* attr, int* scope);
 int APS5_VABI pthread_attr_setscope_nid_postfix(PthreadAttr* attr, int scope);
 int APS5_VABI pthread_attr_get_np_nid_postfix(Pthread thread, PthreadAttr* attr);
+int APS5_VABI pthread_attr_getschedpolicy_nid_postfix(const PthreadAttr* attr, int* policy);
+int APS5_VABI pthread_attr_setschedpolicy_nid_postfix(PthreadAttr* attr, int policy);
+Pthread APS5_VABI scePthreadSelf();
+int APS5_VABI scePthreadGetschedparam(Pthread thread, int* policy, KernelSchedParam* param);
+int APS5_VABI scePthreadSetschedparam(Pthread thread, int policy, const KernelSchedParam* param);
+int APS5_VABI pthread_setschedparam_nid_postfix(Pthread thread, int policy, const KernelSchedParam* param);
 }
 
 static constexpr int SCE_OK = 0;
 static constexpr int SCE_KERNEL_ERROR_EINVAL = static_cast<int>(0x80020016);
 static constexpr int EXPLICIT_SCHED = 0;
 static constexpr int INHERIT_SCHED = 4;
+static constexpr int GUEST_SCHED_FIFO = 1;
+static constexpr int GUEST_SCHED_RR = 3;
 static constexpr int SCOPE_PROCESS = 0;
 static constexpr int SCOPE_SYSTEM = 2;
 static constexpr int DETACH_JOINABLE = 0;
@@ -217,11 +225,59 @@ static void CheckThreadScope() {
     Require(scePthreadJoin(inheritedThread, nullptr) == SCE_OK);
 }
 
+static void CheckThreadSchedulingPolicy(int inheritSched) {
+    Pthread self = scePthreadSelf();
+    int originalPolicy = -1;
+    KernelSchedParam originalParam{};
+    Require(scePthreadGetschedparam(self, &originalPolicy, &originalParam) == SCE_OK);
+    Require(scePthreadSetschedparam(self, inheritSched == EXPLICIT_SCHED ? GUEST_SCHED_FIFO : GUEST_SCHED_RR, &originalParam) == SCE_OK);
+
+    PthreadAttr attr = nullptr;
+    Require(scePthreadAttrInit(&attr) == SCE_OK);
+    Require(pthread_attr_setinheritsched_nid_postfix(&attr, inheritSched) == 0);
+    Require(pthread_attr_setschedpolicy_nid_postfix(&attr,
+        inheritSched == EXPLICIT_SCHED ? GUEST_SCHED_RR : GUEST_SCHED_FIFO) == 0);
+
+    std::promise<void> release;
+    auto released = release.get_future();
+    Pthread thread = nullptr;
+    Require(scePthreadCreate(&thread, &attr, Worker, &released, nullptr) == SCE_OK);
+    Require(scePthreadAttrDestroy(&attr) == SCE_OK);
+    Require(scePthreadSetschedparam(self, originalPolicy, &originalParam) == SCE_OK);
+
+    PthreadAttr queryAttr = nullptr;
+    Require(scePthreadAttrInit(&queryAttr) == SCE_OK);
+    const auto requirePolicy = [&](int expectedPolicy) {
+        using QueryAttributes = int (APS5_VABI *)(Pthread, PthreadAttr*);
+        const QueryAttributes queries[] = {scePthreadAttrGet, pthread_attr_get_np_nid_postfix};
+        for (const auto query : queries) {
+            Require(pthread_attr_setschedpolicy_nid_postfix(&queryAttr,
+                expectedPolicy == GUEST_SCHED_RR ? GUEST_SCHED_FIFO : GUEST_SCHED_RR) == 0);
+            Require(query(thread, &queryAttr) == 0);
+            int policy = -1;
+            Require(pthread_attr_getschedpolicy_nid_postfix(&queryAttr, &policy) == 0);
+            Require(policy == expectedPolicy);
+        }
+    };
+    requirePolicy(GUEST_SCHED_RR);
+    const KernelSchedParam updatedParam{UPDATED_PRIORITY};
+    Require(scePthreadSetschedparam(thread, GUEST_SCHED_FIFO, &updatedParam) == SCE_OK);
+    requirePolicy(GUEST_SCHED_FIFO);
+    Require(pthread_setschedparam_nid_postfix(thread, GUEST_SCHED_RR, &updatedParam) == 0);
+    requirePolicy(GUEST_SCHED_RR);
+    Require(scePthreadAttrDestroy(&queryAttr) == SCE_OK);
+
+    release.set_value();
+    Require(scePthreadJoin(thread, nullptr) == SCE_OK);
+}
+
 int main() {
     CheckStackSizeLimit();
     CheckSoloSched();
     CheckSchedulingAttributes();
     CheckThreadScope();
+    CheckThreadSchedulingPolicy(EXPLICIT_SCHED);
+    CheckThreadSchedulingPolicy(INHERIT_SCHED);
     PthreadAttr attr = nullptr;
     Require(scePthreadAttrInit(&attr) == SCE_OK);
     Require(scePthreadAttrSetinheritsched(&attr, EXPLICIT_SCHED) == SCE_OK);
