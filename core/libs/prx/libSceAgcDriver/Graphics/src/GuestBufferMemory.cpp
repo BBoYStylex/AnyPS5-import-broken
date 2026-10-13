@@ -703,6 +703,20 @@ const HostImport* importJoined(const Context& context, HostImports& state, std::
     return importRunAt(context, state, std::move(run), true, begin, lease);
 }
 
+}
+
+std::uint64_t DefaultHostImportBudget(const VkPhysicalDeviceMemoryProperties& memory) {
+    constexpr std::uint64_t floor = 6144ull << 20u;
+    constexpr std::uint64_t ceiling = 24576ull << 20u;
+    std::uint64_t host = 0;
+    for (std::uint32_t index = 0; index < memory.memoryHeapCount; ++index) {
+        if ((memory.memoryHeaps[index].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) == 0) host = std::max<std::uint64_t>(host, memory.memoryHeaps[index].size);
+    }
+    return std::clamp(host / 2, floor, ceiling);
+}
+
+namespace {
+
 const HostImport* importRunAt(const Context& context, HostImports& state, ImportRun run, bool joined, std::uint64_t address, const GuestAllocations::Lease& lease) {
     const auto base = run.base;
     const auto bytes = run.bytes;
@@ -730,9 +744,9 @@ const HostImport* importRunAt(const Context& context, HostImports& state, Import
     // Pinned imports count against the driver's system memory budget; past it ordinary host
     // allocations fail, so imports stop at APS5_HOST_IMPORT_MIB (default 6 GiB, which covers the
     // registered memory of address-based shaders; past it they copy gigabytes per dispatch).
-    static const std::uint64_t budget = [] {
+    static const std::uint64_t budget = [&] {
         const char* value = std::getenv("APS5_HOST_IMPORT_MIB");
-        return (value ? std::strtoull(value, nullptr, 10) : 6144ull) << 20u;
+        return value != nullptr ? std::strtoull(value, nullptr, 10) << 20u : DefaultHostImportBudget(context.memory);
     }();
     const auto live = state.liveBytes;
     if (live + bytes > budget) {
