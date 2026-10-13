@@ -1,4 +1,5 @@
 #include <relinker/analysis/CodeInstructionCollector.hpp>
+#include <relinker/parsing/DynamicSymbolCount.hpp>
 #include <relinker/analysis/UnusedNidFilter/IControlFlowGraph.hpp>
 #include <relinker/analysis/UnusedNidFilter/EhFrameReader.hpp>
 #include <codegen/x86/X64InstructionDecoder.hpp>
@@ -122,43 +123,11 @@ std::set<Domain::VirtualAddress> CodeInstructionCollector::Collect(const std::ve
     range(0, 64);
     if (const auto entry = Io::ReadU64(bytes, 24); entry != 0) addRoot(entry);
     for (const auto tag : {12u, 13u}) if (const auto address = value(tag, 0x60000000 + tag); address && *address != 0) addRoot(*address);
-    const auto symbolBytes = value(0x6100003f, 0xffffffffffffffffull);
-    std::uint64_t symbolCount = 0;
-    if (symbolBytes) {
-        if (*symbolBytes % 24 != 0) throw Domain::RelinkerException("Code analysis: invalid symbol table size");
-        symbolCount = *symbolBytes / 24;
-    } else if (tags.contains(4)) symbolCount = Io::ReadU32(bytes, fileOffset(tags.at(4), 8) + 4);
-    else if (tags.contains(0x6ffffef5)) {
-        const auto address = tags.at(0x6ffffef5);
-        const auto header = fileOffset(address, 16);
-        const auto bucketCount = Io::ReadU32(bytes, header);
-        const auto firstSymbol = Io::ReadU32(bytes, header + 4);
-        const auto bloomCount = Io::ReadU32(bytes, header + 8);
-        if (bucketCount == 0 || bloomCount == 0 || firstSymbol == 0)
-            throw Domain::RelinkerException("Code analysis: invalid GNU hash header", address);
-        const std::uint64_t bucketOffset = 16 + static_cast<std::uint64_t>(bloomCount) * 8;
-        const auto chainOffset = bucketOffset + static_cast<std::uint64_t>(bucketCount) * 4;
-        const auto start = fileOffset(address, chainOffset);
-        std::uint64_t lastBucket = 0;
-        for (std::uint64_t index = 0; index < bucketCount; ++index) {
-            const auto bucket = Io::ReadU32(bytes, start + bucketOffset + index * 4);
-            if (bucket != 0 && bucket < firstSymbol)
-                throw Domain::RelinkerException("Code analysis: invalid GNU hash bucket", address);
-            lastBucket = std::max(lastBucket, static_cast<std::uint64_t>(bucket));
-        }
-        symbolCount = firstSymbol;
-        if (lastBucket != 0) {
-            symbolCount = lastBucket;
-            for (;;) {
-                const auto offset = chainOffset + (symbolCount - firstSymbol) * 4;
-                if (offset > std::numeric_limits<std::uint64_t>::max() - address)
-                    throw Domain::RelinkerException("Code analysis: invalid GNU hash chain", address);
-                const auto chain = Io::ReadU32(bytes, fileOffset(address + offset, 4));
-                ++symbolCount;
-                if (chain & 1) break;
-            }
-        }
-    }
+    const auto symbolCount = ReadDynamicSymbolCount(bytes, headers,
+        tags.contains(0x6100003f) ? std::optional{tags.at(0x6100003f)} : std::nullopt,
+        tags.contains(4) ? std::optional{tags.at(4)} : std::nullopt,
+        tags.contains(0x6ffffef5) ? std::optional{tags.at(0x6ffffef5)} : std::nullopt,
+        tags.contains(6) ? std::optional{tags.at(6)} : std::nullopt);
     std::uint64_t symbols = 0;
     if (symbolCount != 0) {
         if (value(11, 0x6100003b) != 24) throw Domain::RelinkerException("Code analysis: invalid symbol entry size");

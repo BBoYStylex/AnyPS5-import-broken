@@ -1,4 +1,5 @@
 #include <relinker/pipeline/RelinkerPipeline.hpp>
+#include <relinker/parsing/DynamicSymbolCount.hpp>
 #include <elfpatcher/general/ElfConstants.hpp>
 #include <relinker/analysis/ValidationPolicy.hpp>
 #include <relinker/analysis/UnusedNidFilter/PltCompactor.hpp>
@@ -385,9 +386,14 @@ RelinkResult RelinkerPipeline::Relink(const std::vector<std::uint8_t>& sourceElf
         if (auto declared = Domain::DeclaredImportModule(ref.Nid, importModules); !declared.empty()) dynSection.UnmatchedImportModules.insert(std::move(declared));
     }
 
-    if (hasTag(DT_OS_SYMTABSZ)) {
-        const auto symbolBytes = getTagValue(DT_OS_SYMTABSZ);
-        if (symbolBytes % symEntSize != 0 || dynSymTabOffset > raw.size() || symbolBytes > raw.size() - dynSymTabOffset)
+    const auto symbolCount = ReadDynamicSymbolCount(raw, programHeaders,
+        hasTag(DT_OS_SYMTABSZ) ? std::optional{getTagValue(DT_OS_SYMTABSZ)} : std::nullopt,
+        hasTag(DT_HASH) ? std::optional{getTagValue(DT_HASH)} : std::nullopt,
+        hasTag(0x6ffffef5) ? std::optional{getTagValue(0x6ffffef5)} : std::nullopt,
+        hasTag(DT_SYMTAB) ? std::optional{getTagValue(DT_SYMTAB)} : std::nullopt);
+    if (hasTag(DT_OS_SYMTABSZ) || symbolCount != 0) {
+        const auto symbolBytes = symbolCount * symEntSize;
+        if (dynSymTabOffset > raw.size() || symbolBytes > raw.size() - dynSymTabOffset)
             throw RelinkerException("Invalid executable dynamic symbol table size");
         for (ByteCount off = symEntSize; off < symbolBytes; off += symEntSize) {
             const auto* symbol = raw.data() + dynSymTabOffset + off;
