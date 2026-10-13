@@ -34,6 +34,7 @@
 #ifdef __APPLE__
 #include <cstdlib>
 #include <filesystem>
+#include <sys/param.h>
 #endif
 #endif
 
@@ -51,6 +52,13 @@ bool IsHostSharedMemoryDescriptor(int descriptor) {
     objectPath[length] = '\0';
     return std::string_view(objectPath).starts_with("/dev/shm/anyps5-shm-") ||
         std::string_view(objectPath).starts_with("/memfd:anyps5 shm_open");
+#elif defined(__APPLE__)
+    char objectPath[MAXPATHLEN];
+    if (::fcntl(descriptor, F_GETPATH, objectPath) != 0) return false;
+    const std::filesystem::path object(objectPath);
+    std::error_code error;
+    const auto directory = std::filesystem::canonical(std::filesystem::temp_directory_path(), error);
+    return !error && object.parent_path() == directory && object.filename().string().starts_with("anyps5-shm-");
 #else
     (void)descriptor;
     return false;
