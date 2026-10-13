@@ -23,6 +23,8 @@ namespace GuestArena {
 
 class WindowsMappings {
 public:
+    enum class Collection { All, Armed, Fresh };
+
     static WindowsMappings& Get() {
         static WindowsMappings mappings;
         return mappings;
@@ -113,7 +115,7 @@ public:
                 const auto mapped = views.find(cursor & ~(pageBytes - 1));
                 if (mapped != views.end()) {
                     mapped->second.protection = protection;
-                    mapped->second.armed = false;
+                    mapped->second.armed = 0;
                     invalidate(*mapped->second.page);
                 }
                 DWORD previous;
@@ -153,7 +155,8 @@ public:
             }
             const auto base = cursor + done;
             shared->aliases.push_back(base);
-            views.emplace(base, View{shared, protection, 0, false, owned, offset + done, 0});
+            views.emplace(base, View{shared, protection, {}, 0, owned, offset + done, 0});
+            remember(freshRanges, base, base + pageBytes);
             invalidate(*shared);
         }
     }
@@ -162,7 +165,7 @@ public:
         std::lock_guard lock(mutex);
         for (auto it = views.lower_bound(address); it != views.end() && it->first < address + bytes; ++it) {
             it->second.protection = protection;
-            it->second.armed = false;
+            it->second.armed = 0;
             invalidate(*it->second.page);
         }
     }
@@ -174,10 +177,9 @@ public:
             ++page.pins;
             for (const auto alias : page.aliases) {
                 auto& view = views.at(alias);
-                if (!view.armed) continue;
-                DWORD previous;
-                if (!VirtualProtect(reinterpret_cast<void*>(alias), pageBytes, view.protection, &previous)) fail("pin shared guest page writable");
-                view.armed = false;
+                if (view.armed == 0) continue;
+                protectSubpages(alias, view.armed, view.protection, "pin shared guest page writable");
+                view.armed = 0;
             }
             invalidate(page);
         }
@@ -198,10 +200,10 @@ public:
         const auto found = views.find(base);
         if (found == views.end() || !writable(found->second.protection)) return false;
         auto& view = found->second;
-        invalidate(*view.page);
-        DWORD previous;
-        if (!VirtualProtect(reinterpret_cast<void*>(base), pageBytes, view.protection, &previous)) fail("resume shared memory write");
-        view.armed = false;
+        const auto written = subpagesOf(base, address, address + 1);
+        invalidate(*view.page, written);
+        protectSubpages(base, written, view.protection, "resume shared memory write");
+        view.armed &= static_cast<std::uint8_t>(~written);
         return true;
     }
 
@@ -215,11 +217,12 @@ public:
         for (auto it = first; it != views.end() && it->first < end; ++it) {
             auto& view = it->second;
             ++view.hostWrites;
-            invalidate(*view.page);
-            if (!view.armed) continue;
-            DWORD previous;
-            if (!VirtualProtect(reinterpret_cast<void*>(it->first), pageBytes, view.protection, &previous)) fail("open shared memory to a host write");
-            view.armed = false;
+            const auto written = subpagesOf(it->first, address, end);
+            invalidate(*view.page, written);
+            const auto opened = static_cast<std::uint8_t>(view.armed & written);
+            if (opened == 0) continue;
+            protectSubpages(it->first, opened, view.protection, "open shared memory to a host write");
+            view.armed &= static_cast<std::uint8_t>(~opened);
         }
         return true;
     }
@@ -229,7 +232,7 @@ public:
         const auto end = address + bytes;
         for (auto it = views.lower_bound(address & ~(pageBytes - 1)); it != views.end() && it->first < end; ++it) {
             --it->second.hostWrites;
-            invalidate(*it->second.page);
+            invalidate(*it->second.page, subpagesOf(it->first, address, end));
         }
     }
 
@@ -247,10 +250,13 @@ public:
         const auto offset = view->second.offset;
         SYSTEM_INFO system{};
         GetSystemInfo(&system);
-        for (std::size_t done = 0; done < bytes; done += pageBytes, ++view) {
-            if (view == views.end() || view->first != address + done || view->second.offset != offset + done) throw refuse("the range is not one contiguous run of views of a section");
-            if (view->second.section != section && !sameSection(view->second.section->handle, section->handle)) throw refuse("the range spans several sections");
+        bool contiguous = true;
+        for (std::size_t done = 0; done < bytes; done += pageBytes) {
+            const auto page = views.find(address + done);
+            if (page == views.end()) throw refuse("the range is not a run of shared views");
+            if (page->second.offset != offset + done || (page->second.section != section && !sameSection(page->second.section->handle, section->handle))) contiguous = false;
         }
+        if (!contiguous) return mapAliasRuns(address, bytes);
         const auto lead = offset % system.dwAllocationGranularity;
         void* alias = map(section->handle, GetCurrentProcess(), nullptr, offset - lead, lead + bytes, 0, PAGE_READWRITE, nullptr, 0);
         if (alias == nullptr) {
@@ -263,6 +269,15 @@ public:
 
     void UnmapAlias(void* alias) {
         if (alias == nullptr) return;
+        {
+            std::lock_guard lock(mutex);
+            if (const auto found = splitAliases.find(reinterpret_cast<std::uintptr_t>(alias)); found != splitAliases.end()) {
+                const auto error = releaseAlias(found->first, found->second);
+                splitAliases.erase(found);
+                if (error != ERROR_SUCCESS) throw std::system_error(static_cast<int>(error), std::system_category(), "unmap a run of a shared guest alias");
+                return;
+            }
+        }
         SYSTEM_INFO system{};
         GetSystemInfo(&system);
         const auto base = reinterpret_cast<std::uintptr_t>(alias) & ~(static_cast<std::uintptr_t>(system.dwAllocationGranularity) - 1);
@@ -277,7 +292,7 @@ public:
         return true;
     }
 
-    bool Collect(std::uintptr_t address, std::size_t bytes, void** pages, std::size_t* count, bool clear) {
+    bool Collect(std::uintptr_t address, std::size_t bytes, void** pages, std::size_t* count, bool clear, Collection collection = Collection::All) {
         const auto subphaseOn = CollectSubphaseEnabled();
         const auto lockStart = subphaseOn ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
         std::lock_guard lock(mutex);
@@ -305,7 +320,16 @@ public:
         const auto capacity = *count;
         *count = 0;
         const auto end = address + bytes;
-        if (clear && !collectable(address, end)) return false;
+        if (collection == Collection::Fresh) {
+            const auto fresh = freshRanges.upper_bound(address);
+            if ((fresh == freshRanges.begin() || std::prev(fresh)->second <= address) && (fresh == freshRanges.end() || fresh->first >= end)) return true;
+            for (auto it = views.lower_bound(address & ~(pageBytes - 1)); it != views.end() && it->first < end; ++it) {
+                if (it->second.protection != PAGE_NOACCESS) continue;
+                for (auto at = std::max(address, it->first); at < std::min(end, it->first + pageBytes); at += 4096) {
+                    if ((it->second.collected & (1u << ((at - it->first) / 4096))) == 0) return false;
+                }
+            }
+        } else if (clear && !collectable(address, end)) return false;
         for (auto cursor = address; cursor < end;) {
             const auto nextClean = compareShared ? cleanRanges.end() : cleanRanges.upper_bound(cursor);
             if (!compareShared) {
@@ -321,109 +345,136 @@ public:
             const auto found = views.find(base);
             if (found != views.end()) {
                 auto& view = found->second;
-                const auto stop = std::min(std::min(end, base + pageBytes), nextClean == cleanRanges.end() ? end : nextClean->first);
+                auto stop = std::min(std::min(end, base + pageBytes), nextClean == cleanRanges.end() ? end : nextClean->first);
+                if (collection != Collection::All) {
+                    const auto selected = [&](std::uintptr_t at) {
+                        const bool collected = (view.collected & (1u << ((at - base) / 4096))) != 0;
+                        return collection == Collection::Armed ? collected : !collected;
+                    };
+                    while (cursor < stop && !selected(cursor)) cursor = std::min(stop, cursor + 4096);
+                    if (cursor == stop) continue;
+                    for (auto at = cursor + 4096; at < stop; at += 4096) {
+                        if (!selected(at)) {
+                            stop = at;
+                            break;
+                        }
+                    }
+                }
                 if (view.protection == PAGE_NOACCESS) return false;
                 const bool pinned = view.page->pins != 0;
                 if (subphaseOn && pinned) ++subphase.pinnedPages;
                 if (compareShared && !pinned) {
                     const auto sharedStart = subphaseOn ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
                     if (subphaseOn) ++subphase.sharedPages;
-                    const auto* currentBytes = reinterpret_cast<const std::byte*>(base);
-                    // comparedBytes only has a full snapshot after the first mismatch; before that
-                    // the size test short-circuits and no memcmp runs, so count bytes only there.
-                    const bool compareRuns = view.page->comparedBytes.size() == pageBytes;
-                    if (subphaseOn && compareRuns) subphase.memcmpBytes += pageBytes;
-                    if (!compareRuns || std::memcmp(view.page->comparedBytes.data(), currentBytes, pageBytes) != 0) {
-                        view.page->comparedBytes.resize(pageBytes);
-                        std::memcpy(view.page->comparedBytes.data(), currentBytes, pageBytes);
-                        if (subphaseOn) subphase.memcpyBytes += pageBytes;
-                        invalidate(*view.page);
-                    }
-                    const auto firstChunk = (cursor - base) / 4096;
-                    const auto endChunk = (stop - base + 4095) / 4096;
-                    // Bytes are the part of the page actually requested: cursor may start
-                    // mid-page on the first chunk, so stop - base would overstate it.
-                    const auto spanBytes = stop - cursor;
-                    for (auto chunk = firstChunk; chunk < endChunk; ++chunk) {
-                        if (view.comparedSeen[chunk] == view.page->generation) continue;
-                        // Capacity truncation is still real shared work: time it before
-                        // returning, otherwise truncated walks vanish from the counters.
-                        if (*count == capacity) {
-                            if (subphaseOn) addSubphase(&CollectSubphase::sharedCalls, &CollectSubphase::sharedBytes, &CollectSubphase::sharedNanoseconds, spanBytes, sharedStart);
-                            return true;
+                    view.page->comparedBytes.resize(pageBytes);
+                    for (auto chunk = (cursor - base) / subpageBytes; base + chunk * subpageBytes < stop; ++chunk) {
+                        const auto at = std::max(cursor, base + chunk * subpageBytes);
+                        const auto bit = static_cast<std::uint8_t>(1u << chunk);
+                        const auto* current = reinterpret_cast<const std::byte*>(base + chunk * subpageBytes);
+                        auto* snapshot = view.page->comparedBytes.data() + chunk * subpageBytes;
+                        const bool known = (view.page->comparedValid & bit) != 0;
+                        if (subphaseOn && known) subphase.memcmpBytes += subpageBytes;
+                        if (!known || std::memcmp(snapshot, current, subpageBytes) != 0) {
+                            std::memcpy(snapshot, current, subpageBytes);
+                            view.page->comparedValid |= bit;
+                            if (subphaseOn) subphase.memcpyBytes += subpageBytes;
+                            invalidate(*view.page, bit);
                         }
-                        pages[(*count)++] = reinterpret_cast<void*>(base + chunk * 4096);
-                        if (subphaseOn) ++subphase.returnedPages;
-                        if (clear) view.comparedSeen[chunk] = view.page->generation;
-                    }
-                    cursor = stop;
-                    if (subphaseOn) addSubphase(&CollectSubphase::sharedCalls, &CollectSubphase::sharedBytes, &CollectSubphase::sharedNanoseconds, spanBytes, sharedStart);
-                    continue;
-                }
-                if (pinned || view.seen != view.page->generation) {
-                    // Enumeration: every page of the view is pushed, which is the
-                    // production-path (no COMPARE_SHARED_WRITES) cost of this branch.
-                    const auto enumStart = subphaseOn ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
-                    const auto spanBytes = stop - cursor;
-                    const auto needed = (stop - cursor + 4095) / 4096;
-                    if (needed > capacity - *count) {
-                        // Batch fill: compute end once, avoid repeated bound check
-                        const auto fillEnd = cursor + (capacity - *count) * 4096;
-                        for (auto at = cursor; at < fillEnd; at += 4096) {
+                        if (view.comparedSeen[chunk] != view.page->generation[chunk]) {
+                            if (*count == capacity) {
+                                if (subphaseOn) addSubphase(&CollectSubphase::sharedCalls, &CollectSubphase::sharedBytes, &CollectSubphase::sharedNanoseconds, stop - cursor, sharedStart);
+                                return true;
+                            }
                             pages[(*count)++] = reinterpret_cast<void*>(at);
                             if (subphaseOn) ++subphase.returnedPages;
+                            if (clear) view.comparedSeen[chunk] = view.page->generation[chunk];
                         }
-                        if (subphaseOn) addSubphase(&CollectSubphase::enumCalls, &CollectSubphase::enumBytes, &CollectSubphase::enumNanoseconds, spanBytes, enumStart);
-                        return true;
+                        if (clear) {
+                            view.collected |= bit;
+                            forget(freshRanges, base + chunk * subpageBytes, base + (chunk + 1) * subpageBytes);
+                        }
                     }
-                    // Full enumeration: compute end once
-                    const auto endAt = stop;
-                    for (auto at = cursor; at < endAt; at += 4096) {
-                        pages[(*count)++] = reinterpret_cast<void*>(at);
+                    if (subphaseOn) addSubphase(&CollectSubphase::sharedCalls, &CollectSubphase::sharedBytes, &CollectSubphase::sharedNanoseconds, stop - cursor, sharedStart);
+                    cursor = stop;
+                    continue;
+                }
+                const auto enumStart = subphaseOn ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+                std::uint8_t settled = 0;
+                auto settledEnd = cursor;
+                bool full = false;
+                for (std::size_t sub = 0; sub < subpages; ++sub) {
+                    const auto from = std::max(cursor, base + sub * subpageBytes);
+                    const auto to = std::min(stop, base + (sub + 1) * subpageBytes);
+                    if (from >= to) continue;
+                    if (collection == Collection::Fresh || pinned || view.seen[sub] != view.page->generation[sub]) {
+                        if (*count == capacity) {
+                            full = true;
+                            break;
+                        }
+                        pages[(*count)++] = reinterpret_cast<void*>(from);
                         if (subphaseOn) ++subphase.returnedPages;
                     }
-                    if (subphaseOn) addSubphase(&CollectSubphase::enumCalls, &CollectSubphase::enumBytes, &CollectSubphase::enumNanoseconds, spanBytes, enumStart);
+                    settled |= static_cast<std::uint8_t>(1u << sub);
+                    settledEnd = to;
                 }
-                if (clear && !pinned) {
-                    // Arming: the alias walk plus one VirtualProtect per unarmed alias.
+                if (clear) {
+                    for (std::size_t sub = 0; sub < subpages; ++sub) {
+                        const auto bit = static_cast<std::uint8_t>(1u << sub);
+                        if ((settled & bit) == 0 || (view.collected & bit) != 0) continue;
+                        view.collected |= bit;
+                        forget(freshRanges, base + sub * subpageBytes, base + (sub + 1) * subpageBytes);
+                    }
+                }
+                if (subphaseOn) addSubphase(&CollectSubphase::enumCalls, &CollectSubphase::enumBytes, &CollectSubphase::enumNanoseconds, stop - cursor, enumStart);
+                if (clear && !pinned && settled != 0) {
                     const auto armStart = subphaseOn ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
-                    // Collect contiguous aliases with same protection for batched VirtualProtect
-                    std::vector<std::uintptr_t> toArm;
-                    DWORD currentProtection = 0;
-                    std::uintptr_t rangeStart = 0;
-                    std::size_t rangeBytes = 0;
-                    auto flushRange = [&](std::uintptr_t start, std::size_t bytes, DWORD prot) {
-                        if (bytes == 0) return;
-                        DWORD previous;
-                        if (!VirtualProtect(reinterpret_cast<void*>(start), bytes, prot, &previous)) fail("arm shared memory write tracking");
-                        if (subphaseOn) ++subphase.armedProtectCalls;
-                    };
+                    std::uint8_t untracked = 0;
                     for (const auto alias : view.page->aliases) {
                         auto& other = views.at(alias);
-                        if (!writable(other.protection) || other.armed || other.hostWrites != 0) continue;
-                        const DWORD prot = other.protection == PAGE_EXECUTE_READWRITE ? PAGE_EXECUTE_READ : PAGE_READONLY;
-                        if (rangeBytes == 0) {
-                            rangeStart = alias;
-                            rangeBytes = pageBytes;
-                            currentProtection = prot;
-                        } else if (alias == rangeStart + rangeBytes && prot == currentProtection) {
-                            rangeBytes += pageBytes;
-                        } else {
-                            flushRange(rangeStart, rangeBytes, currentProtection);
-                            rangeStart = alias;
-                            rangeBytes = pageBytes;
-                            currentProtection = prot;
+                        const auto arming = static_cast<std::uint8_t>(settled & ~other.armed);
+                        if (!writable(other.protection) || arming == 0) continue;
+                        if (other.hostWrites != 0) {
+                            untracked |= arming;
+                            continue;
                         }
-                        other.armed = true;
+                        const DWORD protection = other.protection == PAGE_EXECUTE_READWRITE ? PAGE_EXECUTE_READ : PAGE_READONLY;
+                        protectSubpages(alias, arming, protection, "arm shared memory write tracking");
+                        if (subphaseOn) {
+                            bool previous = false;
+                            for (std::size_t sub = 0; sub < subpages; ++sub) {
+                                const bool selected = (arming & (1u << sub)) != 0;
+                                if (selected && !previous) ++subphase.armedProtectCalls;
+                                previous = selected;
+                            }
+                        }
+                        other.armed |= arming;
                     }
-                    flushRange(rangeStart, rangeBytes, currentProtection);
-                    if (cursor == base && stop == base + pageBytes) view.seen = view.page->generation;
-                    rememberClean(cursor, stop);
+                    const auto tracked = static_cast<std::uint8_t>(settled & ~untracked);
+                    auto cleanFrom = cursor;
+                    auto cleanTo = cursor;
+                    for (std::size_t sub = 0; sub < subpages; ++sub) {
+                        if ((tracked & (1u << sub)) == 0) continue;
+                        const auto from = std::max(cursor, base + sub * subpageBytes);
+                        const auto to = std::min(settledEnd, base + (sub + 1) * subpageBytes);
+                        if (from == base + sub * subpageBytes && to == base + (sub + 1) * subpageBytes) view.seen[sub] = view.page->generation[sub];
+                        if (from != cleanTo) {
+                            if (cleanFrom != cleanTo) rememberClean(cleanFrom, cleanTo);
+                            cleanFrom = from;
+                        }
+                        cleanTo = to;
+                    }
+                    if (cleanFrom != cleanTo) rememberClean(cleanFrom, cleanTo);
                     if (subphaseOn) addSubphase(&CollectSubphase::armCalls, &CollectSubphase::armBytes, &CollectSubphase::armNanoseconds, stop - cursor, armStart);
                 }
+                if (full) return true;
                 cursor = stop;
             } else {
                 const auto covStart = subphaseOn ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+                if (collection == Collection::Fresh) {
+                    const auto next = views.lower_bound(cursor);
+                    cursor = next == views.end() ? end : std::min(end, next->first);
+                    continue;
+                }
                 const auto memory = query(cursor);
                 const auto stop = std::min(end, reinterpret_cast<std::uintptr_t>(memory.BaseAddress) + memory.RegionSize);
                 if (subphaseOn) addSubphase(&CollectSubphase::coverageCalls, &CollectSubphase::coverageBytes, &CollectSubphase::coverageNanoseconds, stop - cursor, covStart);
@@ -460,10 +511,19 @@ private:
     }
 
     static constexpr std::size_t pageBytes = 0x4000;
+    static constexpr std::size_t subpageBytes = 0x1000;
+    static_assert(subpageBytes == 4096, "Collect reports one page per subpage");
+    static constexpr std::size_t subpages = pageBytes / subpageBytes;
+    static constexpr std::uint8_t allSubpages = (1u << subpages) - 1;
     struct SharedPage {
-        std::uint64_t generation = 1;
+        std::array<std::uint64_t, subpages> generation = [] {
+            std::array<std::uint64_t, subpages> initial{};
+            initial.fill(1);
+            return initial;
+        }();
         std::vector<std::uintptr_t> aliases;
         std::vector<std::byte> comparedBytes;
+        std::uint8_t comparedValid = 0;
         std::uint32_t pins = 0;
     };
     struct Section {
@@ -476,39 +536,76 @@ private:
     struct View {
         std::shared_ptr<SharedPage> page;
         DWORD protection;
-        std::uint64_t seen;
-        bool armed;
+        std::array<std::uint64_t, subpages> seen;
+        std::uint8_t armed;
         std::shared_ptr<Section> section;
         std::uint64_t offset;
         std::array<std::uint64_t, 4> comparedSeen{};
         std::uint32_t hostWrites;
+        std::uint8_t collected = 0;
     };
-    void forgetClean(std::uintptr_t start, std::uintptr_t end) {
-        auto it = cleanRanges.lower_bound(start);
-        if (it != cleanRanges.begin() && std::prev(it)->second > start) --it;
-        while (it != cleanRanges.end() && it->first < end) {
+    using Ranges = std::map<std::uintptr_t, std::uintptr_t>;
+
+    static void forget(Ranges& ranges, std::uintptr_t start, std::uintptr_t end) {
+        auto it = ranges.lower_bound(start);
+        if (it != ranges.begin() && std::prev(it)->second > start) --it;
+        while (it != ranges.end() && it->first < end) {
             const auto first = it->first;
             const auto last = it->second;
-            it = cleanRanges.erase(it);
-            if (first < start) cleanRanges.emplace(first, start);
-            if (last > end) it = cleanRanges.emplace(end, last).first;
+            it = ranges.erase(it);
+            if (first < start) ranges.emplace(first, start);
+            if (last > end) it = ranges.emplace(end, last).first;
         }
+    }
+
+    static void remember(Ranges& ranges, std::uintptr_t start, std::uintptr_t end) {
+        auto it = ranges.lower_bound(start);
+        if (it != ranges.begin() && std::prev(it)->second >= start) --it;
+        while (it != ranges.end() && it->first <= end) {
+            start = std::min(start, it->first);
+            end = std::max(end, it->second);
+            it = ranges.erase(it);
+        }
+        ranges.emplace(start, end);
+    }
+
+    void forgetClean(std::uintptr_t start, std::uintptr_t end) {
+        forget(cleanRanges, start, end);
     }
 
     void rememberClean(std::uintptr_t start, std::uintptr_t end) {
-        auto it = cleanRanges.lower_bound(start);
-        if (it != cleanRanges.begin() && std::prev(it)->second >= start) --it;
-        while (it != cleanRanges.end() && it->first <= end) {
-            start = std::min(start, it->first);
-            end = std::max(end, it->second);
-            it = cleanRanges.erase(it);
-        }
-        cleanRanges.emplace(start, end);
+        remember(cleanRanges, start, end);
     }
 
-    void invalidate(SharedPage& page) {
-        ++page.generation;
-        for (const auto alias : page.aliases) forgetClean(alias, alias + pageBytes);
+    void invalidate(SharedPage& page, std::uint8_t mask = allSubpages) {
+        for (std::size_t sub = 0; sub < subpages; ++sub) {
+            if ((mask & (1u << sub)) == 0) continue;
+            ++page.generation[sub];
+            for (const auto alias : page.aliases) forgetClean(alias + sub * subpageBytes, alias + (sub + 1) * subpageBytes);
+        }
+    }
+
+    static std::uint8_t subpagesOf(std::uintptr_t base, std::uintptr_t address, std::uintptr_t end) {
+        const auto from = std::max(address, base);
+        const auto to = std::min(end, base + pageBytes);
+        if (to <= from) return 0;
+        const auto first = (from - base) / subpageBytes;
+        const auto last = (to - 1 - base) / subpageBytes;
+        return static_cast<std::uint8_t>(((1u << (last + 1)) - 1) & ~((1u << first) - 1));
+    }
+
+    static void protectSubpages(std::uintptr_t base, std::uint8_t mask, DWORD protection, const char* operation) {
+        for (std::size_t sub = 0; sub < subpages;) {
+            if ((mask & (1u << sub)) == 0) {
+                ++sub;
+                continue;
+            }
+            auto stop = sub;
+            while (stop < subpages && (mask & (1u << stop)) != 0) ++stop;
+            DWORD previous;
+            if (!VirtualProtect(reinterpret_cast<void*>(base + sub * subpageBytes), (stop - sub) * subpageBytes, protection, &previous)) fail(operation);
+            sub = stop;
+        }
     }
 
     bool sameSection(HANDLE first, HANDLE second) const {
@@ -579,6 +676,7 @@ private:
                 if (found != views.end()) {
                     std::erase(found->second.page->aliases, cursor);
                     views.erase(found);
+                    forget(freshRanges, cursor, cursor + pageBytes);
                 }
             } else if (memory.Type == MEM_PRIVATE) {
                 if (!VirtualFree(reinterpret_cast<void*>(cursor), allocationEnd - cursor, MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER)) fail("release private guest memory");
@@ -602,9 +700,47 @@ private:
         (totals.*nanoseconds) += static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start).count());
     }
 
-    std::map<std::uintptr_t, std::uintptr_t> cleanRanges;
+    void* mapAliasRuns(std::uintptr_t address, std::size_t bytes) {
+        auto* reserved = allocate(GetCurrentProcess(), nullptr, bytes, MEM_RESERVE | MEM_RESERVE_PLACEHOLDER, PAGE_NOACCESS, nullptr, 0);
+        if (reserved == nullptr) fail("reserve a read-write alias of shared guest memory");
+        const auto base = reinterpret_cast<std::uintptr_t>(reserved);
+        try {
+            for (std::size_t done = 0; done < bytes;) {
+                const auto& first = views.at(address + done);
+                auto run = pageBytes;
+                while (done + run < bytes) {
+                    const auto& next = views.at(address + done + run);
+                    if (next.offset != first.offset + run || (next.section != first.section && !sameSection(next.section->handle, first.section->handle))) break;
+                    run += pageBytes;
+                }
+                split(base + done, run);
+                if (!map(first.section->handle, GetCurrentProcess(), reinterpret_cast<void*>(base + done), first.offset, run, MEM_REPLACE_PLACEHOLDER, PAGE_READWRITE, nullptr, 0)) fail("map a run of a read-write alias of shared guest memory");
+                done += run;
+            }
+        } catch (...) {
+            releaseAlias(base, bytes);
+            throw;
+        }
+        splitAliases.emplace(base, bytes);
+        return reserved;
+    }
+
+    DWORD releaseAlias(std::uintptr_t base, std::size_t bytes) {
+        DWORD error = ERROR_SUCCESS;
+        for (auto cursor = base; cursor < base + bytes;) {
+            const auto memory = query(cursor);
+            const auto released = memory.State == MEM_RESERVE ? VirtualFree(memory.BaseAddress, 0, MEM_RELEASE) : unmap(GetCurrentProcess(), memory.BaseAddress, 0);
+            if (!released && error == ERROR_SUCCESS) error = GetLastError();
+            cursor = reinterpret_cast<std::uintptr_t>(memory.BaseAddress) + memory.RegionSize;
+        }
+        return error;
+    }
+
+    Ranges cleanRanges;
+    Ranges freshRanges;
     std::map<std::uintptr_t, View> views;
     std::map<std::pair<std::uintptr_t, std::uint64_t>, std::weak_ptr<SharedPage>> physical;
+    std::map<std::uintptr_t, std::size_t> splitAliases;
     CollectSubphase subphase;
     std::mutex mutex;
     AllocateFunction allocate = nullptr;

@@ -27,7 +27,7 @@ void Driver::lookupDraw(const Submission& submission, const std::shared_ptr<Vulk
             mix(graphics.stages.tessellation.has_value());
             if (graphics.stages.tessellation) {
                 const auto& tess = *graphics.stages.tessellation;
-                for (const auto value : {tess.inputControlPoints, tess.outputControlPoints, tess.domain, tess.partitioning, tess.outputTopology}) mix(value);
+                for (const auto value : {tess.inputControlPoints, tess.outputControlPoints, tess.domain, tess.partitioning, tess.outputTopology, tess.patchesPerGroup}) mix(value);
             }
             mix(graphics.rectList);
             mix(programs.size());
@@ -47,6 +47,7 @@ void Driver::lookupDraw(const Submission& submission, const std::shared_ptr<Vulk
                 mix(vertex.fetchAttribReg);
                 mix(vertex.fetchBufferReg);
                 mix(vertex.fetchEmbedded);
+                mix(vertex.paClVsOutCntl);
                 for (std::uint32_t r = 0; r < vertex.resourcesNum; ++r) {
                     for (const auto field : vertex.resources[r].fields) mix(field);
                     const auto& destination = vertex.resourcesDst[r];
@@ -65,6 +66,9 @@ void Driver::lookupDraw(const Submission& submission, const std::shared_ptr<Vulk
             for (const auto value : pixel.targetOutputMode) mix(value);
             for (const auto value : pixel.targetExportMapping) mix(value);
             for (const auto value : pixel.targetExportPacking) mix(static_cast<std::uint64_t>(value));
+            mix(pixel.dualSourceBlend);
+            mix(pixel.alphaToCoverage);
+            mix(static_cast<std::uint64_t>(pixel.rasterPrimitive));
             std::lock_guard cacheLock(drawCacheMutex);
             ++drawEntryCounters.lookups;
             const auto found = drawCache.find(drawKey);
@@ -86,6 +90,7 @@ void Driver::lookupDraw(const Submission& submission, const std::shared_ptr<Vulk
                 for (std::size_t i = 0; !miss && i < programs.size(); ++i) {
                     if (roles[i] == Role::GeometryBack) continue;
                     ++stageValidations;
+                    cursor = Graphics::StagePushOffset(cursor, programs[i].binary.stage, localDevice->GraphicsPipelineLibraries());
                     const auto& variants = entry->stages[i];
                     auto outcome = EntryOutcome::Differing;
                     bool anyLayout = false;

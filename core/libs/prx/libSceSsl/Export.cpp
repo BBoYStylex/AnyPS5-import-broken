@@ -143,6 +143,28 @@ int APS5_VABI sceSslGetNameEntryCount(int ssl_ctx_id, const void* name) {
     return 0;
 }
 
+int APS5_VABI sceSslDisableVerifyOption(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceSslGetAlpnSelected(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceSslSetAlpn(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceSslSetMinSslVersion(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+
+
 int APS5_VABI sceSslGetNameEntryInfo(int ssl_ctx_id, const void* name, int entry_num, char* oid, uint64_t max_oid_len, uint8_t* value, uint64_t max_value_len, uint64_t* value_len) {
     (void)ssl_ctx_id;
     (void)name;
@@ -184,6 +206,11 @@ int APS5_VABI sceSslDeleteConnection(void) {
 }
 
 int APS5_VABI sceSslEnableVerifyOption(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceSslSetVerifyCallback(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
