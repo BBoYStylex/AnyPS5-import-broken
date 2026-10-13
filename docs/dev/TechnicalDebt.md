@@ -1,5 +1,6 @@
 # Project technical debt
 
+- Native AOT integer and SIMD semantics follow [Intel SDM Volume 2](https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html), with [x86-64 SysV ABI](https://gitlab.com/x86-psABIs/x86-64-ABI) to [Apple ARM64 ABI](https://developer.apple.com/documentation/xcode/writing-arm64-code-for-apple-platforms) reconstruction. The floating-point profile requires nearest-even rounding, preserved subnormals, masked exceptions and unobserved status flags/NaN payloads; FPCR is checked at entry. Division and aligned-access violations trap instead of reproducing guest exception delivery. Native tests and Rosetta SSE references do not qualify PS5 hardware behavior; AVX2 has independent integer-oracle tests but no x86 AVX2 execution oracle.
 Entries about one library or component are in [debt](debt/), one file per library or component, under the same sections as this page. Entries that belong to none stay here.
 
 - Guest-state lowering (`core/aot/guest_*.py`, `core/libs/native/NativeAotGuest.cpp`) converts whole x86-64 PIE images by keeping the guest register state and stack. The C++ profile admits naturally aligned locked RMW/CAS, raw x87 80-bit moves, variant-II static TLS and validated exception resume points. AVX, general x87 arithmetic, dynamic TLS/module loading, cancellation and a general model for ordinary shared-memory accesses remain unsupported. Guest exception machinery included in the input is itself converted ahead of time; the runtime does not decode or compile x86 instructions. Indirect transfers check a finite entry table at run time; jump tables without a proven bound use an extent read from immutable data inside the unwind range and still trap on other targets. Float operations reproduce x86 NaN propagation and the indefinite NaN, but MXCSR exceptions and rounding modes other than the default are not modelled. `CMPXCHG` sets CF/PF/AF/SF/OF from accumulator minus destination as the Intel SDM, QEMU and Bochs describe; Rosetta reports destination minus accumulator, so the x86 lab compares only ZF for it.
@@ -7,6 +8,7 @@ Entries about one library or component are in [debt](debt/), one file per librar
 
 ### Build
 
+- The bundled [SPIRV-Tools build](../../core/shader/recompiler/PatchSpirvTools.cmake) replaces the redundancy-elimination source with a build-directory copy that releases processed traversal maps. Remove this patch when the pinned revision includes [SPIRV-Tools #6962](https://github.com/KhronosGroup/SPIRV-Tools/pull/6962). System-dependency builds need the fix in their installed SPIRV-Tools package.
 - Building on Windows requires a specific version of mingw - MinGW-w64 GCC 15.2.0 (`winlibs-gcc15`, `x86_64-ucrt-posix-seh`)
 - Even compiled prx libraries on Windows require nearby (static linking of these dependencies causes conflicts):
   - libgcc_s_seh-1.dll
