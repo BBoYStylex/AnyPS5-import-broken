@@ -27,7 +27,18 @@
 namespace {
 
 constexpr std::uint8_t GuestDirectoryType = 4;
+constexpr std::uint8_t GuestSymbolicLinkType = 10;
 constexpr std::uint8_t GuestRegularType = 8;
+
+std::uint8_t EntryType(const std::filesystem::directory_entry& entry) {
+    std::error_code error;
+    const auto type = entry.symlink_status(error).type();
+    if (error) return 0;
+    if (type == std::filesystem::file_type::directory) return GuestDirectoryType;
+    if (type == std::filesystem::file_type::symlink) return GuestSymbolicLinkType;
+    if (type == std::filesystem::file_type::regular) return GuestRegularType;
+    return 0;
+}
 
 struct DirectoryState {
     std::mutex mutex;
@@ -54,8 +65,7 @@ void Load(DirectoryState& state) {
     state.entries.emplace_back("..", GuestDirectoryType);
     std::error_code error;
     for (const auto& entry : std::filesystem::directory_iterator(state.path, error)) {
-        std::error_code typeError;
-        state.entries.emplace_back(entry.path().filename().string(), entry.is_directory(typeError) ? GuestDirectoryType : GuestRegularType);
+        state.entries.emplace_back(entry.path().filename().string(), EntryType(entry));
     }
 }
 

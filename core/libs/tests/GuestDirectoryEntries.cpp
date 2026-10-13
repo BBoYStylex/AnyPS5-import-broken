@@ -67,6 +67,8 @@ int main() {
     { std::ofstream stream(root / "b"); }
     { std::ofstream stream(root / longName); }
     Require(std::filesystem::create_directory(root / "sub"));
+    std::filesystem::create_symlink("data.bin", root / "file-link");
+    std::filesystem::create_directory_symlink("sub", root / "directory-link");
 
     const int directory = sceKernelOpen(root.string().c_str(), SCE_KERNEL_O_RDONLY | SCE_KERNEL_O_DIRECTORY, 0);
     Require(directory >= 0);
@@ -86,12 +88,14 @@ int main() {
         ++calls;
     }
     Require(calls >= 3);
-    Require(entries.size() == 6);
-    for (const char* name : {".", "..", "data.bin", "b", "sub"}) Require(entries.contains(name));
+    Require(entries.size() == 8);
+    for (const char* name : {".", "..", "data.bin", "b", "sub", "file-link", "directory-link"}) Require(entries.contains(name));
     Require(entries.contains(longName) && entries[longName].recordLength == 44);
     Require(entries["b"].recordLength == 12);
     Require(entries["sub"].type == 4 || entries["sub"].type == 0);
     Require(entries["data.bin"].type == 8 || entries["data.bin"].type == 0);
+    Require(entries["file-link"].type == 10);
+    Require(entries["directory-link"].type == 10);
 
     Require(sceKernelLseek(directory, 0, 0) == 0);
     std::array<char, 8> tooSmall{};
@@ -101,7 +105,7 @@ int main() {
     std::array<char, 4096> large{};
     std::map<std::string, Entry> all;
     const int readAll = sceKernelGetdents(directory, large.data(), static_cast<int>(large.size()));
-    Require(readAll > 0 && Collect(large.data(), readAll, all) == 6);
+    Require(readAll > 0 && Collect(large.data(), readAll, all) == 8);
     Require(sceKernelGetdents(directory, large.data(), static_cast<int>(large.size())) == 0);
 
     Require(sceKernelLseek(directory, 0, 0) == 0);
@@ -119,12 +123,12 @@ int main() {
     Require(sceKernelLseek(directory, 0, 0) == 0);
     std::map<std::string, Entry> posix;
     const int posixRead = getdirentries_nid_postfix(directory, large.data(), static_cast<int>(large.size()), &posixBase);
-    Require(posixRead == readAll && posixBase == 0 && Collect(large.data(), posixRead, posix) == 6);
+    Require(posixRead == readAll && posixBase == 0 && Collect(large.data(), posixRead, posix) == 8);
     Require(getdents_nid_postfix(directory, large.data(), static_cast<int>(large.size())) == 0);
     Require(sceKernelLseek(directory, 0, 0) == 0);
     std::map<std::string, Entry> dents;
     const int dentsRead = getdents_nid_postfix(directory, large.data(), static_cast<int>(large.size()));
-    Require(dentsRead == readAll && Collect(large.data(), dentsRead, dents) == 6);
+    Require(dentsRead == readAll && Collect(large.data(), dentsRead, dents) == 8);
     Require(sceKernelClose(directory) == 0);
     Require(getdents_nid_postfix(directory, large.data(), static_cast<int>(large.size())) == -1 && *__error_nid_postfix() == 9);
     *__error_nid_postfix() = 0;
