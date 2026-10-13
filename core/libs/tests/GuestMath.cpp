@@ -478,6 +478,18 @@ static void CheckIntegerConversions() {
             std::abort();
         }
     }
+    const auto checkNoConversion = [](auto parse) {
+        const char text[] = "abc";
+        char* end = nullptr;
+        *__error_nid_postfix() = 12345;
+        Require(parse(text, &end, 10) == 0 && end == text && *__error_nid_postfix() == 12345);
+    };
+    checkNoConversion(strtol_nid_postfix);
+    checkNoConversion(strtoll_nid_postfix);
+    checkNoConversion(strtoimax_nid_postfix);
+    checkNoConversion(strtoul_nid_postfix);
+    checkNoConversion(strtoull_nid_postfix);
+    checkNoConversion(strtoumax_nid_postfix);
     for (const int base : {0, 2}) {
         const char text[] = " -0B11";
         char* end = nullptr;
