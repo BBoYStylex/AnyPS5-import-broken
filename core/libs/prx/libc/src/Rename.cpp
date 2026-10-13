@@ -40,7 +40,7 @@ std::error_code RenameNative_nid_no_patch(const std::filesystem::path& source, c
     return error;
 }
 
-static int RenamePath_nid_no_patch(const std::filesystem::path& source, const std::filesystem::path& destination) {
+static int RenamePath_nid_no_patch(const std::filesystem::path& source, const std::filesystem::path& requested) {
     constexpr int GuestEnoent = 2;
     constexpr int GuestEio = 5;
     constexpr int GuestEnotdir = 20;
@@ -52,6 +52,8 @@ static int RenamePath_nid_no_patch(const std::filesystem::path& source, const st
     const auto sourceStatus = fs::symlink_status(source, error);
     if (error && error != std::errc::no_such_file_or_directory) return FilesystemError(error);
     if (sourceStatus.type() == fs::file_type::not_found) return GuestEnoent;
+    auto destination = requested;
+    if (fs::is_directory(sourceStatus)) while (!destination.has_filename() && destination.has_relative_path()) destination = destination.parent_path();
 
     const auto parent = destination.parent_path().empty() ? fs::path(".") : destination.parent_path();
     error.clear();
