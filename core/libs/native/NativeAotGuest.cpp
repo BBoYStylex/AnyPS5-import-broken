@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <mach/mach_time.h>
+#include <libkern/OSCacheControl.h>
 #include <string>
 #include <sys/mman.h>
 #include <unistd.h>
@@ -124,6 +125,16 @@ extern "C" [[noreturn]] void NativeAotGuestTrap(std::uint64_t kind, std::uint64_
     std::_Exit(128 + TrapSignal(kind));
 }
 
+extern "C" void NativeAotGuestFlushCacheLine(std::uint64_t address) {
+    const auto line = address & ~std::uint64_t{63};
+    const volatile auto value = *reinterpret_cast<const volatile std::uint8_t*>(address);
+    static_cast<void>(value);
+    std::atomic_thread_fence(std::memory_order_seq_cst);
+    if (sys_cache_control(kCacheFunctionFlushDcache, reinterpret_cast<void*>(line), 64) != 0)
+        NativeAotGuestTrap(NativeAotGuest::UnsupportedOperation, address, errno);
+    std::atomic_thread_fence(std::memory_order_seq_cst);
+}
+
 extern "C" NativeAotGuestFunction NativeAotGuestFind(std::uint64_t address) {
     if (loaded != nullptr && address >= imageBase && address - imageBase < loaded->Span) {
         const auto offset = address - imageBase;
@@ -191,7 +202,7 @@ std::uint64_t ProviderAddress(const char* name) {
 }
 
 std::uint64_t Load(const NativeAotGuestImage& image, Abi abi) {
-    if (image.Version != 5) Fail("unsupported guest image descriptor");
+    if (image.Version != 7) Fail("unsupported guest image descriptor");
     if (image.Abi != static_cast<std::uint64_t>(abi)) Fail("guest image startup ABI does not match the launcher");
     if (image.Concurrent > 1) Fail("unsupported guest memory model");
     if (loaded != nullptr) Fail("only one guest image is supported per process");

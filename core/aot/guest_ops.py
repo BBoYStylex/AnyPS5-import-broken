@@ -5,6 +5,7 @@ from capstone.x86 import X86_OP_IMM, X86_OP_MEM, X86_OP_REG
 GPR = ['rax', 'rcx', 'rdx', 'rbx', 'rsp', 'rbp', 'rsi', 'rdi', 'r8', 'r9', 'r10', 'r11', 'r12', 'r13', 'r14', 'r15']
 FLAGS = ['cf', 'pf', 'af', 'zf', 'sf', 'of']
 STATE_XMM = 128
+STATE_YMM_UPPER = 560
 STATE_FS = 384
 STATE_X87 = 400
 STATE_X87_TOP = 528
@@ -1207,6 +1208,132 @@ INDEFINITE = {32: 0xffc00000, 64: 0xfff8000000000000}
 
 
 class Vector(Integer):
+    def vex_register(self, operand):
+        if operand.type != X86_OP_REG:
+            self.unsupported('VEX destination must be a vector register')
+        name = self.ins.reg_name(operand.reg)
+        if not name.startswith(('xmm', 'ymm')) or int(name[3:]) >= 16:
+            self.unsupported(f'unsupported VEX register {name}')
+        return int(name[3:]), 256 if name.startswith('ymm') else 128
+
+    def vex_read(self, operand, bits, aligned=False):
+        if operand.type == X86_OP_MEM:
+            address = self.address(operand)
+            if aligned:
+                self.trap_if(self.v(f'icmp ne i64 {self.v(f"and i64 {address}, {bits // 8 - 1}")}, 0'), TRAP_ALIGNMENT)
+            return self.load(address, bits)
+        index, width = self.vex_register(operand)
+        if width != bits:
+            self.unsupported('VEX source width mismatch')
+        low = self.get_xmm(index)
+        if bits == 128:
+            return low
+        high = self.v(f'load i128, ptr %Y{index}')
+        return self.v(f'or i256 {self.zext(low, 128, 256)}, {self.v(f"shl i256 {self.zext(high, 128, 256)}, 128")}')
+
+    def vex_write(self, operand, value, bits, aligned=False):
+        if operand.type == X86_OP_MEM:
+            address = self.address(operand)
+            if aligned:
+                self.trap_if(self.v(f'icmp ne i64 {self.v(f"and i64 {address}, {bits // 8 - 1}")}, 0'), TRAP_ALIGNMENT)
+            self.store(address, value, bits)
+            return
+        index, width = self.vex_register(operand)
+        if width != bits:
+            self.unsupported('VEX destination width mismatch')
+        self.set_xmm(index, self.trunc(value, 128, bits))
+        upper = '0' if bits == 128 else self.trunc(self.v(f'lshr i256 {value}, 128'), 128, 256)
+        self.emit(f'store i128 {upper}, ptr %Y{index}')
+
+    def vex_move(self, aligned):
+        destination, source = self.operands()
+        register = source if destination.type == X86_OP_MEM else destination
+        _, bits = self.vex_register(register)
+        self.vex_write(destination, self.vex_read(source, bits, aligned), bits, aligned)
+
+    def op_vmovups(self):
+        self.vex_move(False)
+
+    op_vmovupd = op_vmovups
+    op_vmovdqu = op_vmovups
+
+    def op_vmovdqa(self):
+        self.vex_move(True)
+
+    op_vmovaps = op_vmovdqa
+    op_vmovapd = op_vmovdqa
+
+    def op_vmovd(self):
+        destination, source = self.operands()
+        bits = 32 if self.ins.mnemonic == 'vmovd' else 64
+        if self.is_xmm(destination):
+            value = self.low(source, bits) if self.is_xmm(source) else self.read(source, bits)
+            self.vex_write(destination, self.zext(value, bits, 128), 128)
+        else:
+            self.write(destination, self.trunc(self.vex_read(source, 128), bits, 128), bits)
+
+    op_vmovq = op_vmovd
+
+    def vex_logic(self, operation):
+        destination, left, right = self.operands()
+        _, bits = self.vex_register(destination)
+        a, b = self.vex_read(left, bits), self.vex_read(right, bits)
+        self.vex_write(destination, self.v(f'{operation} i{bits} {a}, {b}'), bits)
+
+    def op_vpand(self):
+        self.vex_logic('and')
+
+    def op_vpor(self):
+        self.vex_logic('or')
+
+    def op_vxorps(self):
+        self.vex_logic('xor')
+
+    op_vxorpd = op_vxorps
+    op_vpxor = op_vxorps
+    op_vandps = op_vpand
+    op_vandpd = op_vpand
+    op_vorps = op_vpor
+    op_vorpd = op_vpor
+
+    def op_vpbroadcastd(self):
+        destination, source = self.operands()
+        _, bits = self.vex_register(destination)
+        value = self.low(source, 32)
+        lanes = bits // 32
+        vector = self.v(f'insertelement <{lanes} x i32> poison, i32 {value}, i32 0')
+        result = self.v(f'shufflevector <{lanes} x i32> {vector}, <{lanes} x i32> poison, <{lanes} x i32> zeroinitializer')
+        self.vex_write(destination, self.v(f'bitcast <{lanes} x i32> {result} to i{bits}'), bits)
+
+    def op_vpsllvd(self):
+        destination, source, counts = self.operands()
+        _, bits = self.vex_register(destination)
+        lanes = bits // 32
+        kind = f'<{lanes} x i32>'
+        data = self.v(f'bitcast i{bits} {self.vex_read(source, bits)} to {kind}')
+        shift = self.v(f'bitcast i{bits} {self.vex_read(counts, bits)} to {kind}')
+        maximum = '<' + ', '.join('i32 31' for _ in range(lanes)) + '>'
+        safe = self.v(f'and {kind} {shift}, {maximum}')
+        result = self.v(f'shl {kind} {data}, {safe}')
+        valid = self.v(f'icmp ule {kind} {shift}, {maximum}')
+        result = self.v(f'select <{lanes} x i1> {valid}, {kind} {result}, {kind} zeroinitializer')
+        self.vex_write(destination, self.v(f'bitcast {kind} {result} to i{bits}'), bits)
+
+    def op_vpshufd(self):
+        destination, source, immediate = self.operands()
+        if immediate.type != X86_OP_IMM:
+            self.unsupported('VPSHUFD requires an immediate')
+        _, bits = self.vex_register(destination)
+        lanes = bits // 32
+        vector = self.v(f'bitcast i{bits} {self.vex_read(source, bits)} to <{lanes} x i32>')
+        mask_value = '<' + ', '.join(f'i32 {(index // 4) * 4 + ((immediate.imm >> (2 * (index % 4))) & 3)}' for index in range(lanes)) + '>'
+        result = self.v(f'shufflevector <{lanes} x i32> {vector}, <{lanes} x i32> poison, <{lanes} x i32> {mask_value}')
+        self.vex_write(destination, self.v(f'bitcast <{lanes} x i32> {result} to i{bits}'), bits)
+
+    def op_vzeroupper(self):
+        for index in range(16):
+            self.emit(f'store i128 0, ptr %Y{index}')
+
     def xmm_index(self, operand):
         name = self.ins.reg_name(operand.reg)
         if not name.startswith('xmm'):
