@@ -127,6 +127,12 @@ static void CheckAcceptedNonblocking(int family) {
     Require(sceNetBind_nid_postfix(listener, address.data(), addressSize) == 0 && sceNetListen(listener, 3) == 0);
     std::uint32_t size = address.size();
     Require(sceNetGetsockname(listener, address.data(), &size) == 0 && size == addressSize);
+    const int epoll = sceNetEpollCreate("accept-mode-ready", 0);
+    Require(epoll >= 0);
+    NetEpollEvent registration{};
+    registration.events = 1;
+    registration.ident = static_cast<std::uint64_t>(listener);
+    Require(sceNetEpollControl(epoll, 1, listener, &registration) == 0);
     std::array<int, 3> clients{};
     std::array<int, 3> accepted{};
     for (std::size_t i = 0; i < clients.size(); ++i) {
@@ -135,6 +141,8 @@ static void CheckAcceptedNonblocking(int family) {
         if (mode) Require(Failed(sceNetAccept(listener, nullptr, nullptr), 35));
         clients[i] = sceNetSocket("accept-mode-client", family, 1, 6);
         Require(clients[i] >= 0 && sceNetConnect(clients[i], address.data(), addressSize) == 0);
+        NetEpollEvent ready{};
+        Require(sceNetEpollWait(epoll, &ready, 1, 1000000) == 1 && (ready.events & 1) && ready.ident == static_cast<std::uint64_t>(listener));
         accepted[i] = sceNetAccept(listener, nullptr, nullptr);
         Require(accepted[i] >= 0);
         if (NonblockingMode(accepted[i]) != mode) {
@@ -156,6 +164,7 @@ static void CheckAcceptedNonblocking(int family) {
         Require(sceNetRecv(accepted[i], &received, 1, 0) == 1 && received == byte);
         Require(sceNetSocketClose(accepted[i]) == 0 && sceNetSocketClose(clients[i]) == 0);
     }
+    Require(sceNetEpollDestroy(epoll) == 0);
     Require(sceNetSocketClose(listener) == 0);
 }
 
