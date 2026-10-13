@@ -44,6 +44,8 @@ def main():
     compiled = time.monotonic()
     native = worktree / 'core/libs/native'
     runtime = sorted(native.glob('NativeAotGuest*.cpp')) + sorted(native.glob('NativeAotGlibc*.cpp')) + [worktree / 'core/libs/prx/libkernel/Pthread/src/GuestTlsMacOs.cpp']
+    runtime_inputs = runtime + sorted(native.glob('NativeAotGuest*.hpp')) + sorted(native.glob('NativeAotGlibc*.hpp')) + [worktree / 'core/libs/prx/libkernel/Pthread/include/GuestTlsMacOs.hpp']
+    compiler_inputs = sorted((worktree / 'core/aot').glob('*.py')) + sorted((worktree / 'core/aot/catalogs').glob('*.json'))
     binary = output / args.name
     subprocess.run(['xcrun', 'clang++', '-std=c++20', args.optimization, *lto, '-arch', 'arm64', f'-I{worktree / "core/libs"}', *map(str, runtime),
                     *[f'{module}.o' for module in modules], '-o', str(binary)], check=True)
@@ -54,8 +56,10 @@ def main():
     receipt = {'schema': 'anyps5.transfer.conversion-receipt.v1', 'input': str(args.input.resolve()), 'input_sha256': digest(args.input),
                'compiler_revision': head, 'compiler_dirty': bool(dirty), 'native_compiler': clang, 'optimization': args.optimization + ' '.join([''] + lto), 'profile': args.profile, 'optimized_calls': args.optimize_calls or args.profile == 'epochs', 'sealed_image': args.seal_image,
                'output': str(binary), 'output_sha256': digest(binary),
-               'runtime_sources': {str(path.relative_to(worktree)): digest(path) for path in runtime},
-               'lowering': {key: report[key] for key in ('units', 'instructions', 'jump_tables', 'imports')},
+               'compiler_sources': {str(path.relative_to(worktree)): digest(path) for path in compiler_inputs},
+               'builder_sha256': digest(__file__),
+               'runtime_sources': {str(path.relative_to(worktree)): digest(path) for path in runtime_inputs},
+               'lowering': {key: report[key] for key in ('units', 'instructions', 'jump_tables', 'imports', 'call_effects', 'native_leaf_values', 'native_leaf_candidates')},
                'obligations': report['obligations'], 'unsupported': report['unsupported'],
                'seconds': {'lowering': round(lowered - started, 3), 'native_compile': round(compiled - lowered, 3),
                            'link': round(linked - compiled, 3)},

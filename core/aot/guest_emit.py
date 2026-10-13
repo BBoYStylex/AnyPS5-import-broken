@@ -11,6 +11,7 @@ from capstone.x86 import X86_OP_IMM, X86_OP_MEM
 import guest_lift
 import guest_provider_calls
 import guest_regions
+import guest_value_leaves
 from guest_ops import (FLAGS, GPR, STATE_XMM, STATE_YMM_UPPER, TRAP_FALLTHROUGH, TRAP_HALT, TRAP_INVALID, TRAP_UNKNOWN_ENTRY,
                        Unsupported, Vector)
 
@@ -179,15 +180,21 @@ class Lowering(Vector):
             pointer = self.v(f'getelementptr i8, ptr %s, i64 {STATE_YMM_UPPER + 16 * index}')
             self.emit(f'store i128 {self.v(f"load i128, ptr %Y{index}")}, ptr {pointer}, align 16')
 
-    def reload(self):
+    def reload(self, effects=None):
         for index in range(16):
+            if effects is not None and index not in effects[0]:
+                continue
             pointer = self.v(f'getelementptr i8, ptr %s, i64 {8 * index}')
             self.emit(f'store i64 {self.v(f"load i64, ptr {pointer}")}, ptr %R{index}')
         for index in range(16):
+            if effects is not None and index not in effects[1]:
+                continue
             pointer = self.v(f'getelementptr i8, ptr %s, i64 {STATE_XMM + 16 * index}')
             self.emit(f'store i128 {self.v(f"load i128, ptr {pointer}, align 16")}, ptr %X{index}')
 
         for index in range(16):
+            if effects is not None and index not in effects[2]:
+                continue
             pointer = self.v(f'getelementptr i8, ptr %s, i64 {STATE_YMM_UPPER + 16 * index}')
             self.emit(f'store i128 {self.v(f"load i128, ptr {pointer}, align 16")}, ptr %Y{index}')
 
@@ -358,22 +365,25 @@ class Lowering(Vector):
         if mnemonic == 'call':
             operand = ins.operands[0]
             target = self.target_value()
+            native_leaf = operand.type == X86_OP_IMM and operand.imm in self.value_leaves
             slot = self.import_slot(operand.imm) if operand.type == X86_OP_IMM else None
-            function = self.call_target(operand.imm if operand.type == X86_OP_IMM else None, target) if slot is None else None
+            function = self.call_target(operand.imm if operand.type == X86_OP_IMM else None, target) if slot is None and not native_leaf else None
             back = self.absolute(following)
             rsp = self.v(f'sub i64 {self.get_gpr("rsp")}, 8')
             self.store(rsp, back, 64)
             self.set_gpr('rsp', rsp)
-            if slot is None:
+            if native_leaf:
+                result = guest_value_leaves.invoke(self, operand.imm)
+            elif slot is None:
                 result = self.invoke(function, target)
-                self.reload()
+                self.reload(self.call_effects.get(operand.imm) if operand.type == X86_OP_IMM else None)
             else:
                 result = self.invoke_import(slot)
             propagate = self.label()
             continuation = f'L{following:x}' if following in unit.instructions else self.label()
             self.emit(f'br i1 {self.v(f"icmp eq i64 {result}, {back}")}, label %{continuation}, label %{propagate}')
             self.place(propagate)
-            if slot is not None:
+            if slot is not None or native_leaf:
                 self.flush()
             if self.resume_points():
                 self.emit(f'store i64 {result}, ptr %Resume')
@@ -512,12 +522,14 @@ class Lowering(Vector):
             self.trap(TRAP_FALLTHROUGH)
 
 
-def lower_unit(unit, units, trace=False, concurrent=False, ordered_access="fenced", epoch_variant=None, writeback=None, seal_image=False):
+def lower_unit(unit, units, trace=False, concurrent=False, ordered_access="fenced", epoch_variant=None, writeback=None, seal_image=False, call_effects=None, effects_out=None, value_leaves=None):
     lowering = Lowering(unit, symbol(unit.start) + ('_' + epoch_variant if epoch_variant and epoch_variant != 'native' else ''))
     lowering.epoch_variant = epoch_variant
     lowering.sealed_tables = guest_regions.sealed_tables(unit) if seal_image else set()
     lowering.readonly_table_loads = {unit.tables[site]['selector_load'] for site in lowering.sealed_tables}
     lowering.writeback = writeback
+    lowering.call_effects = call_effects or {}
+    lowering.value_leaves = value_leaves or {}
     lowering.gpr_writes, lowering.xmm_writes, lowering.ymm_writes = set(), set(), set()
     lowering.units = units
     lowering.trace = trace
@@ -547,9 +559,34 @@ def lower_unit(unit, units, trace=False, concurrent=False, ordered_access="fence
         lowering.place(outside)
         lowering.leave_with(result)
     lowering.lines.append('}')
+    if effects_out is not None:
+        effects_out[unit.start] = (lowering.gpr_writes, lowering.xmm_writes, lowering.ymm_writes)
     if epoch_variant is not None and writeback is None:
-        return lower_unit(unit, units, trace, concurrent, ordered_access, epoch_variant, (lowering.gpr_writes, lowering.xmm_writes, lowering.ymm_writes), seal_image)
+        return lower_unit(unit, units, trace, concurrent, ordered_access, epoch_variant, (lowering.gpr_writes, lowering.xmm_writes, lowering.ymm_writes), seal_image, call_effects, effects_out, value_leaves)
     return '\n'.join(lowering.lines), lowering.declarations, errors
+
+
+def call_write_effects(units):
+    all_slots = (set(range(16)), set(range(16)), set(range(16)))
+    effects = {}
+    for address, unit in units.items():
+        targets = set(unit.calls.values()) | set(unit.tails.values())
+        if unit.indirect or not targets <= units.keys() or any(ins.mnemonic == 'cpuid' for ins in unit.instructions.values()):
+            effects[address] = tuple(set(slots) for slots in all_slots)
+            continue
+        _, _, errors = lower_unit(unit, units, epoch_variant='native', writeback=all_slots, effects_out=effects)
+        if errors:
+            effects[address] = tuple(set(slots) for slots in all_slots)
+    changed = True
+    while changed:
+        changed = False
+        for address, unit in units.items():
+            for target in set(unit.calls.values()) | set(unit.tails.values()):
+                for slots, written in zip(effects[address], effects.get(target, all_slots)):
+                    if not written <= slots:
+                        slots.update(written)
+                        changed = True
+    return effects
 
 
 def describe_image(program, units):
@@ -679,24 +716,31 @@ ordered:
 
 
 def lower_shard(arguments):
-    raw, starts, output, extra, trace, concurrent, abi, ordered_access, memory_epochs, seal_image, optimize_calls, namespace = arguments
+    raw, starts, output, extra, trace, concurrent, abi, ordered_access, memory_epochs, seal_image, optimize_calls, namespace, call_effects, value_leaves = arguments
     program = guest_lift.Program(raw, abi=abi)
     units, _, _ = guest_lift.discover(program, extra)
     texts, declarations, errors, called = [], set(), [], set()
+    value_leaves = value_leaves or {}
+    needed = {target for start in starts for target in units[start].calls.values() if target in value_leaves}
+    for address in sorted(needed):
+        for mode in ((False, True) if memory_epochs else (concurrent,)):
+            text, declared, _, _ = guest_value_leaves.emit(Lowering, units[address], units, value_leaves[address], mode, ordered_access)
+            texts.append(text)
+            declarations |= declared
     for start in starts:
         if memory_epochs:
-            text, declared, failures = lower_unit(units[start], units, trace, True, ordered_access, 'ordered', seal_image=seal_image)
+            text, declared, failures = lower_unit(units[start], units, trace, True, ordered_access, 'ordered', seal_image=seal_image, call_effects=call_effects, value_leaves=value_leaves)
             texts.append(text)
             declarations |= declared
             errors.extend(failures)
-            text, declared, failures = lower_unit(units[start], units, trace, False, ordered_access, 'private', seal_image=seal_image)
+            text, declared, failures = lower_unit(units[start], units, trace, False, ordered_access, 'private', seal_image=seal_image, call_effects=call_effects, value_leaves=value_leaves)
             texts.append(text)
             declarations |= declared
             errors.extend(failures)
             texts.append(epoch_dispatch(start))
         else:
             text, declared, failures = lower_unit(units[start], units, trace, concurrent, ordered_access,
-                                                  'native' if optimize_calls else None)
+                                                  'native' if optimize_calls else None, call_effects=call_effects, value_leaves=value_leaves)
             texts.append(text)
             declarations |= declared
             errors.extend(failures)
@@ -709,7 +753,7 @@ def lower_shard(arguments):
     return errors
 
 
-def build(input_path, output_dir, shards=16, jobs=8, extra=(), strict=True, trace=False, concurrent=False, abi="glibc", ordered_access=None, memory_epochs=False, seal_image=False, optimize_calls=False, namespace=""):
+def build(input_path, output_dir, shards=16, jobs=8, extra=(), strict=True, trace=False, concurrent=False, abi="glibc", ordered_access=None, memory_epochs=False, seal_image=False, optimize_calls=False, namespace="", call_effects=None, native_leaf_values=None):
     if ordered_access is None:
         ordered_access = 'atomic' if concurrent else 'fenced'
     guest_lift.require(ordered_access in ('fenced', 'atomic'), 'unknown ordered access implementation')
@@ -718,11 +762,19 @@ def build(input_path, output_dir, shards=16, jobs=8, extra=(), strict=True, trac
     guest_lift.require(not memory_epochs or (concurrent and abi == 'glibc'), 'memory epochs require the concurrent glibc profile')
     guest_lift.require(not memory_epochs or not trace, 'memory epoch tracing is not qualified')
     guest_lift.require(not optimize_calls or (abi == 'glibc' and not trace), 'optimized calls require an untraced glibc profile')
+    if call_effects is None:
+        call_effects = optimize_calls or memory_epochs
+    if native_leaf_values is None:
+        native_leaf_values = optimize_calls or memory_epochs
+    guest_lift.require(not call_effects or (abi == 'glibc' and not trace), 'call effects require an untraced glibc profile')
+    guest_lift.require(not native_leaf_values or (abi == 'glibc' and not trace), 'native leaf values require an untraced glibc profile')
     namespace_ir('', namespace)
     started = time.monotonic()
     raw = Path(input_path).read_bytes()
     program = guest_lift.Program(raw, abi=abi)
     units, failures, obligations = guest_lift.discover(program, extra)
+    effects = call_write_effects(units) if call_effects else None
+    value_leaves = guest_value_leaves.candidates(Lowering, units, ordered_access) if native_leaf_values else None
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
     image = describe_image(program, units)
@@ -734,7 +786,7 @@ def build(input_path, output_dir, shards=16, jobs=8, extra=(), strict=True, trac
         smallest = sizes.index(min(sizes))
         buckets[smallest].append(start)
         sizes[smallest] += len(units[start].instructions)
-    work = [(raw, sorted(bucket), str(output / f'shard{number:02}.ll'), tuple(extra), trace, concurrent, abi, ordered_access, memory_epochs, seal_image, optimize_calls, namespace) for number, bucket in enumerate(buckets) if bucket]
+    work = [(raw, sorted(bucket), str(output / f'shard{number:02}.ll'), tuple(extra), trace, concurrent, abi, ordered_access, memory_epochs, seal_image, optimize_calls, namespace, effects, value_leaves) for number, bucket in enumerate(buckets) if bucket]
     if jobs == 1:
         errors = [error for item in work for error in lower_shard(item)]
     else:
@@ -742,6 +794,11 @@ def build(input_path, output_dir, shards=16, jobs=8, extra=(), strict=True, trac
             errors = [error for result in pool.map(lower_shard, work) for error in result]
     report = {'schema': 'anyps5.aot.guest-lowering.v1', 'input_sha256': program.sha256, 'units': len(units),
               'startup_abi': abi, 'native_namespace': namespace, 'ordered_access': ordered_access, 'memory_epochs': memory_epochs, 'sealed_image': seal_image, 'optimized_calls': optimize_calls or memory_epochs,
+              'call_effects': call_effects,
+              'native_leaf_values': native_leaf_values,
+              'native_leaf_candidates': len(value_leaves or {}),
+              'native_leaf_contracts': [{'address': address, 'inputs': contract['inputs'], 'outputs': contract['outputs'], 'frame': contract['layout']['frame']}
+                                        for address, contract in sorted((value_leaves or {}).items())],
               'sealed_dispatch_tables': sum(len(guest_regions.sealed_tables(u)) for u in units.values()) if seal_image else 0,
               'memory_profile': 'ordered-normal-memory' if concurrent else 'single-thread',
               'instructions': sum(len(unit.instructions) for unit in units.values()),
