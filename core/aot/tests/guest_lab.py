@@ -201,17 +201,20 @@ def fixture_image(code):
 
 
 class Lab:
-    def __init__(self, directory):
+    def __init__(self, directory, memory_epochs=False):
         self.directory = Path(directory)
+        self.memory_epochs = memory_epochs
 
-    def lifted_binary(self, cases):
+    def lifted_binary(self, cases, memory_epochs=None):
+        if memory_epochs is None:
+            memory_epochs = self.memory_epochs
         code, offsets = assemble_elf_bodies(cases, self.directory)
         raw = fixture_image(code)
         image = self.directory / 'fixture.elf'
         image.write_bytes(raw)
         roots = [CODE + offset for offset in offsets]
         output = self.directory / 'lifted'
-        guest_emit.build(image, output, shards=1, jobs=1, extra=roots)
+        guest_emit.build(image, output, shards=1, jobs=1, extra=roots, concurrent=memory_epochs, memory_epochs=memory_epochs)
         harness = self.directory / 'lifted_harness.cpp'
         harness.write_text('#define LIFTED 1\n' + HARNESS % {'buffer': BUFFER_SIZE, 'code': CODE})
         objects = []
@@ -426,12 +429,12 @@ def program_image(code, labels, imports=(), data_imports=(), entry='_start', rel
     return bytes(image)
 
 
-def build_program(raw, directory, roots=(), strict=True, concurrent=False, abi="glibc", launcher=None, ordered_access=None):
+def build_program(raw, directory, roots=(), strict=True, concurrent=False, abi="glibc", launcher=None, ordered_access=None, memory_epochs=False, seal_image=False, optimize_calls=False):
     directory = Path(directory)
     image = directory / 'program.elf'
     image.write_bytes(raw)
     output = directory / 'converted'
-    report = guest_emit.build(image, output, shards=1, jobs=1, extra=roots, strict=strict, concurrent=concurrent, abi=abi, ordered_access=ordered_access)
+    report = guest_emit.build(image, output, shards=1, jobs=1, extra=roots, strict=strict, concurrent=concurrent, abi=abi, ordered_access=ordered_access, memory_epochs=memory_epochs, seal_image=seal_image, optimize_calls=optimize_calls)
     objects = []
     for module in sorted(output.glob('*.ll')):
         obj = module.with_suffix('.o')

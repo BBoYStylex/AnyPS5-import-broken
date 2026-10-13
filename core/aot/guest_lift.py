@@ -287,7 +287,10 @@ def jump_table(unit, ins):
     if base_ins is not None and entry not in written(base_ins):
         position += 1
     proven = bounded_table(unit, body, position, sources, block, index, base)
-    return proven if proven is not None else scanned_table(unit, ins, base, index)
+    result = proven if proven is not None else scanned_table(unit, ins, base, index)
+    if result is not None:
+        result['selector_load'] = load.address
+    return result
 
 
 def bounded_table(unit, body, position, sources, block, index, base):

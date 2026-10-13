@@ -75,6 +75,8 @@ struct NativeAotGuestImage {
 [[noreturn]] void NativeAotGuestTrap(std::uint64_t kind, std::uint64_t address, std::uint64_t detail);
 NativeAotGuestFunction NativeAotGuestLookup(std::uint64_t address);
 NativeAotGuestFunction NativeAotGuestFind(std::uint64_t address);
+extern std::uint8_t NativeAotGuestSharedMemory;
+bool NativeAotGuestSingleThreadEpoch();
 void NativeAotGuestCpuid(NativeAotGuestState* state);
 std::uint64_t NativeAotGuestReadTsc();
 }
@@ -103,11 +105,14 @@ enum SymbolFlag : std::uint64_t {
 enum class Abi : std::uint64_t { Glibc = 0, SceApplication = 1 };
 
 using Provider = void (*)(NativeAotGuestState&);
+Provider ImportedProvider(std::uint64_t address);
 
 struct ProviderBinding {
     const char* Name;
     Provider Function;
     void* Data;
+    bool QualifiedMemoryEpoch = false;
+    bool StableImageMapping = false;
 };
 
 void RegisterProviders(const ProviderBinding* bindings, std::size_t count);
@@ -130,6 +135,8 @@ std::uint64_t CreateThreadArea();
 void FreeThreadArea(std::uint64_t pointer);
 void FreeStack(std::uint64_t top, std::size_t bytes);
 bool ConcurrentMemory();
+void PromoteSharedMemory();
+void CheckImageMappingChange(std::uint64_t address, std::uint64_t bytes);
 [[noreturn]] void StartSceApplication(const NativeAotGuestImage& image, int argc, char** argv);
 [[noreturn]] void Start(const NativeAotGuestImage& image, int argc, char** argv, char** envp);
 

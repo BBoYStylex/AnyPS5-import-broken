@@ -153,7 +153,7 @@ class GuestProgramTests(unittest.TestCase):
         code, labels = guest_lab.assemble_program(source + slots, self.directory)
         raw = guest_lab.program_image(code, labels, [(name, f'{name}_slot') for name in imports],
                                       [(name, f'{name}_slot') for name in data_imports], relative=relative, unwind=unwind, tls=tls)
-        return guest_lab.build_program(raw, self.directory, strict=strict, concurrent=concurrent, abi=abi, launcher=launcher, ordered_access=ordered_access)
+        return guest_lab.build_program(raw, self.directory, strict=strict, concurrent=concurrent or getattr(self, "memory_epochs", False), abi=abi, launcher=launcher, ordered_access=ordered_access, memory_epochs=getattr(self, "memory_epochs", False), seal_image=getattr(self, "seal_image", False))
 
     def run_binary(self, binary):
         return subprocess.run([str(binary)], capture_output=True, timeout=20)
@@ -377,7 +377,7 @@ done:
 extern "C" const NativeAotGuestImage __aps5_guest_image;
 int main() {
     auto image = __aps5_guest_image;
-    image.Concurrent = 2;
+    image.Concurrent = 4;
     NativeAotGuest::Load(image);
 }
 """
@@ -700,6 +700,91 @@ destroy_end:
             result = self.run_binary(binary)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn(b'unsupported guest operation', result.stderr)
+
+    def test_memory_epochs_preserve_thread_creation_and_tls_destructors(self):
+        self.memory_epochs = True
+        self.test_tls_destructors_repeat_before_join_returns()
+
+    def test_memory_epoch_promotion_resumes_without_replaying_effects(self):
+        self.memory_epochs = True
+        launcher = r'''#include "native/NativeAotGuest.hpp"
+#include "native/NativeAotGlibc.hpp"
+extern "C" const NativeAotGuestImage __aps5_guest_image;
+extern char** environ;
+void Observe(NativeAotGuestState& state) { NativeAotGuest::Return(state, NativeAotGuestSingleThreadEpoch()); }
+void Foreign(NativeAotGuestState& state) { NativeAotGuest::Return(state, 0); }
+int main(int argc, char** argv) {
+    NativeAotGlibc::Register();
+    const NativeAotGuest::ProviderBinding providers[] = {{"observe", Observe, nullptr, true}, {"foreign", Foreign, nullptr}};
+    NativeAotGuest::RegisterProviders(providers, 2);
+    NativeAotGuest::Start(__aps5_guest_image, argc, argv, environ);
+}
+'''
+        binary, _ = self.program(PRELUDE + """
+    sub rsp, 16
+    mov r12, rsp
+    mov qword ptr [r12], 0
+    call qword ptr [rip + observe_slot]
+    cmp rax, 1
+    jne fail
+    add qword ptr [r12], 1
+    call qword ptr [rip + foreign_slot]
+    add qword ptr [r12], 1
+    call qword ptr [rip + observe_slot]
+    test rax, rax
+    jne fail
+    cmp qword ptr [r12], 2
+    jne fail
+    xor edi, edi
+    call qword ptr [rip + exit_slot]
+fail:
+    mov edi, 55
+    call qword ptr [rip + exit_slot]
+""", imports=('exit', 'observe', 'foreign'), concurrent=True, launcher=launcher)
+        result = self.run_binary(binary)
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, b'', b''))
+
+    def test_memory_epochs_reject_foreign_entry_before_owner_boundary(self):
+        self.memory_epochs = True
+        launcher = r'''#include "native/NativeAotGuest.hpp"
+#include "native/NativeAotGlibc.hpp"
+#include <thread>
+extern "C" const NativeAotGuestImage __aps5_guest_image;
+int main() {
+    NativeAotGlibc::Register();
+    const auto base = NativeAotGuest::Load(__aps5_guest_image);
+    std::thread other([&] { NativeAotGuestFind(base + __aps5_guest_image.EntryPoint); });
+    other.join();
+    return 99;
+}
+'''
+        binary, _ = self.program(PRELUDE + 'xor edi, edi\n' + EXIT, concurrent=True, launcher=launcher)
+        result = self.run_binary(binary)
+        self.assertEqual(result.returncode, 127)
+        self.assertIn(b'owning-thread call boundary', result.stderr)
+
+    def test_dense_dispatch_with_overwritten_selector_and_candidate_targets(self):
+        self.memory_epochs = True
+        self.test_bounded_and_scanned_jump_tables()
+        self.test_scanned_table_keeps_runtime_membership()
+
+    def test_sealed_dense_dispatch_uses_verified_readonly_table(self):
+        self.memory_epochs = True
+        self.seal_image = True
+        self.test_bounded_and_scanned_jump_tables()
+
+    def test_sealed_image_refuses_overlapping_mapping(self):
+        self.memory_epochs = True
+        self.seal_image = True
+        for operation in ('mmap', 'munmap'):
+            body = PRELUDE + 'anchor:\nlea rdi, [rip + anchor]\nand rdi, -16384\nmov esi, 16384\n'
+            if operation == 'mmap':
+                body += 'mov edx, 3\nmov ecx, 50\nmov r8, -1\nxor r9d, r9d\n'
+            body += f'call qword ptr [rip + {operation}_slot]\nxor edi, edi\n' + EXIT
+            binary, _ = self.program(body, imports=('exit', operation))
+            result = self.run_binary(binary)
+            self.assertEqual(result.returncode, 127)
+            self.assertIn(b'lifetime-qualified guest image', result.stderr)
 
     def test_provider_conversions(self):
         binary = self.directory / 'provider_checks'

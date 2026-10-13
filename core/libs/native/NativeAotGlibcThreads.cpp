@@ -194,6 +194,7 @@ void ThreadCreate(State& state) {
         std::lock_guard<std::mutex> lock(tableLock);
         thread->Id = nextThread++;
         threads.emplace(thread->Id, thread);
+        NativeAotGuest::PromoteSharedMemory();
         result = pthread_create(&thread->Host, nullptr, RunThread, thread.get());
         if (result != 0) threads.erase(thread->Id);
     }
@@ -332,27 +333,27 @@ void CondSignal(State& state) {
 }
 
 const NativeAotGuest::ProviderBinding Bindings[] = {
-    {"pthread_key_create", KeyCreate, nullptr},
-    {"pthread_key_delete", KeyDelete, nullptr},
-    {"pthread_getspecific", GetSpecific, nullptr},
-    {"pthread_setspecific", SetSpecific, nullptr},
-    {"pthread_create", ThreadCreate, nullptr},
-    {"pthread_join", ThreadJoin, nullptr},
-    {"pthread_self", ThreadSelf, nullptr},
-    {"pthread_equal", ThreadEqual, nullptr},
-    {"pthread_once", Once, nullptr},
-    {"pthread_mutex_init", MutexInit, nullptr},
-    {"pthread_mutex_destroy", MutexDestroy, nullptr},
-    {"pthread_cond_init", CondInit, nullptr},
-    {"pthread_cond_destroy", CondDestroy, nullptr},
-    {"pthread_cond_signal", CondSignal, nullptr},
-    {"pthread_mutex_lock", MutexLock, nullptr},
-    {"pthread_mutex_unlock", MutexUnlock, nullptr},
-    {"pthread_rwlock_rdlock", ReadLock, nullptr},
-    {"pthread_rwlock_wrlock", WriteLock, nullptr},
-    {"pthread_rwlock_unlock", RwUnlock, nullptr},
-    {"pthread_cond_broadcast", CondBroadcast, nullptr},
-    {"pthread_cond_wait", CondWait, nullptr},
+    {"pthread_key_create", KeyCreate, nullptr, true, true},
+    {"pthread_key_delete", KeyDelete, nullptr, true, true},
+    {"pthread_getspecific", GetSpecific, nullptr, true, true},
+    {"pthread_setspecific", SetSpecific, nullptr, true, true},
+    {"pthread_create", ThreadCreate, nullptr, true, true},
+    {"pthread_join", ThreadJoin, nullptr, true, true},
+    {"pthread_self", ThreadSelf, nullptr, true, true},
+    {"pthread_equal", ThreadEqual, nullptr, true, true},
+    {"pthread_once", Once, nullptr, true, true},
+    {"pthread_mutex_init", MutexInit, nullptr, true, true},
+    {"pthread_mutex_destroy", MutexDestroy, nullptr, true, true},
+    {"pthread_cond_init", CondInit, nullptr, true, true},
+    {"pthread_cond_destroy", CondDestroy, nullptr, true, true},
+    {"pthread_cond_signal", CondSignal, nullptr, true, true},
+    {"pthread_mutex_lock", MutexLock, nullptr, true, true},
+    {"pthread_mutex_unlock", MutexUnlock, nullptr, true, true},
+    {"pthread_rwlock_rdlock", ReadLock, nullptr, true, true},
+    {"pthread_rwlock_wrlock", WriteLock, nullptr, true, true},
+    {"pthread_rwlock_unlock", RwUnlock, nullptr, true, true},
+    {"pthread_cond_broadcast", CondBroadcast, nullptr, true, true},
+    {"pthread_cond_wait", CondWait, nullptr, true, true},
 };
 
 }

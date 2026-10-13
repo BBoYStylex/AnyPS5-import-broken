@@ -7,10 +7,17 @@
 #include <cstdlib>
 #include <cstring>
 #include <mach/mach_time.h>
+#include <pthread.h>
 #include <string>
 #include <sys/mman.h>
 #include <unistd.h>
 #include <vector>
+
+extern "C" {
+alignas(16) std::uint8_t NativeAotGuestSharedMemory = 1;
+}
+static_assert(std::atomic_ref<std::uint8_t>::is_always_lock_free);
+static_assert(std::atomic_ref<std::uint8_t>::required_alignment == 1);
 
 namespace {
 
@@ -28,6 +35,8 @@ std::uint64_t imageBase = 0;
 std::uint64_t importRegion = 0;
 std::uint64_t importRegionSize = 0;
 std::vector<NativeAotGuest::Provider> importProviders;
+std::vector<bool> qualifiedImports;
+pthread_t epochOwner{};
 std::vector<NativeAotGuest::ProviderBinding> registry;
 thread_local NativeAotGuestState* current = nullptr;
 
@@ -69,7 +78,7 @@ const NativeAotGuest::ProviderBinding* FindProvider(const char* name) {
 }
 
 void ProviderFence() {
-    if (loaded != nullptr && loaded->Concurrent != 0)
+    if (loaded != nullptr && loaded->Concurrent != 0 && std::atomic_ref<std::uint8_t>(NativeAotGuestSharedMemory).load(std::memory_order_acquire))
         std::atomic_thread_fence(std::memory_order_seq_cst);
 }
 
@@ -79,6 +88,7 @@ std::uint64_t ImportThunk(NativeAotGuestState* state, std::uint64_t address) {
         NativeAotGuestTrap(NativeAotGuest::MissingImport, address, index);
     auto* previous = current;
     current = state;
+    if (!qualifiedImports[index]) NativeAotGuest::PromoteSharedMemory();
     ProviderFence();
     importProviders[index](*state);
     ProviderFence();
@@ -124,7 +134,13 @@ extern "C" [[noreturn]] void NativeAotGuestTrap(std::uint64_t kind, std::uint64_
     std::_Exit(128 + TrapSignal(kind));
 }
 
+extern "C" bool NativeAotGuestSingleThreadEpoch() {
+    return !std::atomic_ref<std::uint8_t>(NativeAotGuestSharedMemory).load(std::memory_order_acquire);
+}
+
 extern "C" NativeAotGuestFunction NativeAotGuestFind(std::uint64_t address) {
+    if (loaded != nullptr && loaded->Concurrent >= 2 && !pthread_equal(epochOwner, pthread_self()))
+        NativeAotGuest::PromoteSharedMemory();
     if (loaded != nullptr && address >= imageBase && address - imageBase < loaded->Span) {
         const auto offset = address - imageBase;
         const auto* begin = loaded->Entries;
@@ -172,6 +188,12 @@ extern "C" std::uint64_t NativeAotGuestReadTsc() {
 
 namespace NativeAotGuest {
 
+Provider ImportedProvider(std::uint64_t address) {
+    if (address <= importRegion || address - importRegion >= importRegionSize || (address - importRegion) % 16 != 0) return nullptr;
+    const auto index = (address - importRegion) / 16 - 1;
+    return index < importProviders.size() ? importProviders[index] : nullptr;
+}
+
 void RegisterProviders(const ProviderBinding* bindings, std::size_t count) {
     registry.insert(registry.end(), bindings, bindings + count);
 }
@@ -191,9 +213,10 @@ std::uint64_t ProviderAddress(const char* name) {
 }
 
 std::uint64_t Load(const NativeAotGuestImage& image, Abi abi) {
-    if (image.Version != 5) Fail("unsupported guest image descriptor");
+    if (image.Version != 8) Fail("unsupported guest image descriptor");
     if (image.Abi != static_cast<std::uint64_t>(abi)) Fail("guest image startup ABI does not match the launcher");
-    if (image.Concurrent > 1) Fail("unsupported guest memory model");
+    if (image.Concurrent > 3) Fail("unsupported guest memory model");
+    if (image.Concurrent >= 2 && abi != Abi::Glibc) Fail("memory epochs require the glibc startup profile");
     if (loaded != nullptr) Fail("only one guest image is supported per process");
     const auto span = (image.Span + PageSize - 1) & ~(PageSize - 1);
     auto* memory = mmap(nullptr, span, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
@@ -211,6 +234,8 @@ std::uint64_t Load(const NativeAotGuestImage& image, Abi abi) {
     if (region == MAP_FAILED) Fail("cannot reserve guest import addresses");
     importRegion = reinterpret_cast<std::uint64_t>(region);
     importProviders.assign(image.SymbolCount, nullptr);
+    qualifiedImports.assign(image.SymbolCount, false);
+    bool privateEpoch = image.Concurrent >= 2;
     std::vector<std::uint64_t> values(image.SymbolCount, 0);
     std::string missing;
     for (std::uint64_t index = 0; index < image.SymbolCount; ++index) {
@@ -219,6 +244,10 @@ std::uint64_t Load(const NativeAotGuestImage& image, Abi abi) {
             if ((image.SymbolFlags[index] & Weak) == 0) missing += std::string(missing.empty() ? "" : ", ") + image.Symbols[index];
             continue;
         }
+        if (image.Concurrent == 3 && !binding->StableImageMapping)
+            Fail(std::string("unqualified image-mapping effects for provider: ") + image.Symbols[index]);
+        qualifiedImports[index] = binding->QualifiedMemoryEpoch;
+        if (binding->Data != nullptr && !binding->QualifiedMemoryEpoch) privateEpoch = false;
         if (binding->Function != nullptr) {
             importProviders[index] = binding->Function;
             values[index] = importRegion + 16 * (index + 1);
@@ -246,8 +275,24 @@ std::uint64_t Load(const NativeAotGuestImage& image, Abi abi) {
     }
     ProtectImage(image, span);
     *image.Base = imageBase;
+    epochOwner = pthread_self();
+    std::atomic_ref<std::uint8_t>(NativeAotGuestSharedMemory).store(!privateEpoch, std::memory_order_release);
     loaded = &image;
     return imageBase;
+}
+
+void CheckImageMappingChange(std::uint64_t address, std::uint64_t bytes) {
+    if (loaded == nullptr || loaded->Concurrent != 3 || bytes == 0) return;
+    const auto span = (loaded->Span + PageSize - 1) & ~(PageSize - 1);
+    if (address > UINT64_MAX - bytes || (address < imageBase + span && address + bytes > imageBase))
+        Fail("mapping change overlaps a lifetime-qualified guest image");
+}
+
+void PromoteSharedMemory() {
+    if (loaded != nullptr && !std::atomic_ref<std::uint8_t>(NativeAotGuestSharedMemory).load(std::memory_order_acquire) && !pthread_equal(epochOwner, pthread_self()))
+        Fail("a foreign guest entry requires promotion at an owning-thread call boundary");
+    std::atomic_thread_fence(std::memory_order_seq_cst);
+    std::atomic_ref<std::uint8_t>(NativeAotGuestSharedMemory).store(true, std::memory_order_release);
 }
 
 std::uint64_t ImageBase() {
