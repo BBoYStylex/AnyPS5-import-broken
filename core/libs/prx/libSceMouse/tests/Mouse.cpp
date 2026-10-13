@@ -11,6 +11,7 @@ int APS5_VABI sceMouseInit();
 int APS5_VABI sceMouseOpen(int, std::int32_t, std::int32_t, const void*);
 int APS5_VABI sceMouseClose(std::int32_t);
 int APS5_VABI sceMouseRead(std::int32_t, MouseData*, std::int32_t);
+int APS5_VABI sceMouseResetAbsolutePosition();
 }
 
 static void Require(bool value) { if (!value) std::abort(); }
@@ -97,6 +98,13 @@ int main() {
     Require(sceMouseRead(MOUSE_HANDLE, data, 64) == 64);
     Require(data[0].x_axis == 6 && data[63].x_axis == 69);
     Require(sceMouseRead(MOUSE_HANDLE, data, 1) == 0);
+    MouseInputEvent pending{};
+    pending.x = -8;
+    pending.y = 3;
+    MousePublishInput_nid_postfix(pending);
+    Require(sceMouseResetAbsolutePosition() == MOUSE_OK);
+    Require(sceMouseRead(MOUSE_HANDLE, data, 1) == 1);
+    Require(data[0].x_axis == -8 && data[0].y_axis == 3);
     Require(sceMouseClose(MOUSE_HANDLE) == MOUSE_OK);
     Require(sceMouseRead(MOUSE_HANDLE, data, 1) == MOUSE_ERROR_INVALID_HANDLE);
     Require(sceMouseClose(MOUSE_HANDLE) == MOUSE_ERROR_INVALID_HANDLE);
