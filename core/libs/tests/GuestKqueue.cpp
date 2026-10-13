@@ -52,6 +52,7 @@ static constexpr std::uint16_t EvClear = 0x0020;
 static constexpr std::uint16_t EvReceipt = 0x0040;
 static constexpr std::uint16_t EvError = 0x4000;
 static constexpr std::uint32_t NoteTrigger = 0x01000000;
+static constexpr std::uint32_t NoteLowat = 0x0001;
 static constexpr std::uint32_t NoteFfcopy = 0xc0000000;
 static constexpr std::uint32_t NoteFfor = 0x80000000;
 static constexpr std::uint32_t NoteUseconds = 0x0004;
@@ -211,6 +212,53 @@ static void SocketPair() {
     Require(Throws([kq, &pair] { Apply(kq, Change(static_cast<std::uintptr_t>(pair[1]), EvfiltRead, EvAdd | EvClear)); }));
     Require(close_nid_postfix(pair[0]) == 0);
     RequireFailure(Apply(kq, Change(static_cast<std::uintptr_t>(pair[0]), EvfiltRead, EvDelete)), GuestEbadf);
+    Require(close_nid_postfix(pair[1]) == 0);
+    Require(close_nid_postfix(kq) == 0);
+}
+
+static void LowWatermark() {
+    const int kq = kqueue_nid_postfix();
+    int pair[2];
+    Require(socketpair_nid_postfix(Unix, Stream, 0, pair) == 0);
+    const auto reader = static_cast<std::uintptr_t>(pair[0]);
+    int marker = 0;
+    KernelEvent events[4]{};
+    char buffer[8]{};
+
+    // NOTE_LOWAT holds the knote below the mark, where the socket is already readable for poll
+    Require(Apply(kq, Change(reader, EvfiltRead, EvAdd, NoteLowat, 4, &marker)) == 0);
+    Require(send_nid_postfix(pair[1], "ab", 2, 0) == 2);
+    Require(Poll(kq, events, 4) == 0);
+    Require(send_nid_postfix(pair[1], "cd", 2, 0) == 2);
+    Require(Poll(kq, events, 4) == 1);
+    Require(events[0].ident == reader && events[0].filter == EvfiltRead && events[0].data == 4 && events[0].udata == &marker);
+
+    // a change without NOTE_LOWAT drops the watermark, as kqueue_register copies the whole kevent
+    Require(Apply(kq, Change(reader, EvfiltRead, EvAdd)) == 0);
+    Require(recv_nid_postfix(pair[0], buffer, 4, 0) == 4);
+    Require(Poll(kq, events, 4) == 0);
+    Require(send_nid_postfix(pair[1], "e", 1, 0) == 1);
+    Require(Poll(kq, events, 4) == 1 && events[0].data == 1);
+
+    // raising it above what the socket holds holds the knote again
+    Require(Apply(kq, Change(reader, EvfiltRead, EvAdd, NoteLowat, 3, 0)) == 0);
+    Require(recv_nid_postfix(pair[0], buffer, 8, 0) == 1);
+    Require(send_nid_postfix(pair[1], "fg", 2, 0) == 2);
+    Require(Poll(kq, events, 4) == 0);
+    Require(send_nid_postfix(pair[1], "h", 1, 0) == 1);
+    Require(Poll(kq, events, 4) == 1 && events[0].data == 3);
+    Require(recv_nid_postfix(pair[0], buffer, 8, 0) == 3);
+
+    // the watermark belongs to the knote, not to the descriptor: the write filter of the other end
+    // keeps its own, and a mark above the send buffer size it reports never triggers
+    const auto writer = static_cast<std::uintptr_t>(pair[1]);
+    Require(Apply(kq, Change(writer, EvfiltWrite, EvAdd, NoteLowat, 1u << 30)) == 0);
+    Require(Poll(kq, events, 4) == 0);
+    Require(Apply(kq, Change(writer, EvfiltWrite, EvAdd, NoteLowat, 64)) == 0);
+    Require(Poll(kq, events, 4) == 1 && events[0].filter == EvfiltWrite && events[0].data >= 64);
+    Require(Apply(kq, Change(writer, EvfiltWrite, EvDelete)) == 0);
+
+    Require(close_nid_postfix(pair[0]) == 0);
     Require(close_nid_postfix(pair[1]) == 0);
     Require(close_nid_postfix(kq) == 0);
 }
@@ -416,6 +464,7 @@ int main() {
     Timers();
     UserEvents();
     SocketPair();
+    LowWatermark();
     Errors();
     FileWatch();
 #ifndef _WIN32

@@ -133,7 +133,38 @@ int main() {
 
     Require(sceKernelAddReadEvent(eq, client, 1, nullptr) == SCE_KERNEL_ERROR_EBADF);
     Require(Rejects(sceKernelAddReadEvent, eq, 0, 1));
-    Require(Rejects(sceKernelAddWriteEvent, eq, accepted, 64));
+    // the size is the low water mark: two bytes below it leave the event pending, the fourth byte
+    // reports it, and a re-add below the mark drops the watermark
+    Require(sceKernelDeleteReadEvent(eq, accepted) == SCE_OK);
+    const int lowClient = socket_nid_postfix(2, 1, 0);
+    Require(lowClient >= 0 && connect_nid_postfix(lowClient, address.data(), address.size()) == 0);
+    const int lowAccepted = accept_nid_postfix(listener, nullptr, nullptr);
+    Require(lowAccepted >= 0);
+    Require(sceKernelAddReadEvent(eq, lowAccepted, 4, nullptr) == SCE_OK);
+    const char half[] = "ab";
+    Require(send_nid_postfix(lowClient, half, 2, 0) == 2);
+    Require(sceKernelWaitEqueue(eq, events.data(), events.size(), &count, &shortTimeout) == SCE_KERNEL_ERROR_ETIMEDOUT);
+    Require(count == 0);
+    Require(send_nid_postfix(lowClient, half, 2, 0) == 2);
+    Require(sceKernelWaitEqueue(eq, events.data(), events.size(), &count, &timeout) == SCE_OK);
+    Require(count == 1 && events[0].ident == static_cast<std::uintptr_t>(lowAccepted) && events[0].data == 4);
+    Require(sceKernelAddReadEvent(eq, lowAccepted, 1, nullptr) == SCE_OK);
+    char drained[4]{};
+    Require(recv_nid_postfix(lowAccepted, drained, sizeof(drained), 0) == 4);
+    Require(send_nid_postfix(lowClient, "z", 1, 0) == 1);
+    Require(sceKernelWaitEqueue(eq, events.data(), events.size(), &count, &timeout) == SCE_OK);
+    Require(count == 1 && events[0].data == 1);
+
+    // a write event reports the send buffer size as its data, so a mark above it never reports
+    Require(sceKernelDeleteReadEvent(eq, lowAccepted) == SCE_OK);
+    Require(sceKernelAddWriteEvent(eq, lowClient, 1u << 30, nullptr) == SCE_OK);
+    Require(sceKernelWaitEqueue(eq, events.data(), events.size(), &count, &shortTimeout) == SCE_KERNEL_ERROR_ETIMEDOUT);
+    Require(count == 0);
+    Require(sceKernelAddWriteEvent(eq, lowClient, 64, nullptr) == SCE_OK);
+    Require(sceKernelWaitEqueue(eq, events.data(), events.size(), &count, &timeout) == SCE_OK);
+    Require(count == 1 && events[0].filter == EVFILT_WRITE && events[0].data >= 64);
+    Require(sceKernelDeleteWriteEvent(eq, lowClient) == SCE_OK);
+    Require(close_nid_postfix(lowAccepted) == 0 && close_nid_postfix(lowClient) == 0);
 
     Require(close_nid_postfix(accepted) == 0);
     Require(close_nid_postfix(listener) == 0);

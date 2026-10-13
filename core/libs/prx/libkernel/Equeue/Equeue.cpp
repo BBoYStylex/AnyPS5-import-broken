@@ -100,7 +100,7 @@ void KernelEqueuePrivate::WaitForDescriptors(std::unique_lock<std::mutex>& lock,
     std::vector<GuestSockets::Interest> interests;
     for (const auto& e : m_events) {
         if (e.filter.pollFunc != nullptr) {
-            interests.push_back({static_cast<int>(e.event.ident), e.event.filter == EVFILT_WRITE});
+            interests.push_back({static_cast<int>(e.event.ident), e.event.filter == EVFILT_WRITE, e.lowat});
         }
     }
     const auto waker = GuestSockets::CurrentWaker();
@@ -256,6 +256,7 @@ int KernelEqueuePrivate::AddEvent(const KernelEqueueEvent& event) {
         }
         it->deadlineNs = event.deadlineNs;
         it->intervalNs = event.intervalNs;
+        it->lowat = event.lowat;
         it->event.udata = event.event.udata;
         for (auto& pending : it->pendingEvents) {
             pending.udata = event.event.udata;
@@ -598,13 +599,12 @@ static int AddDescriptorEvent(KernelEqueue eq, int fd, std::size_t size, void* u
     if (!isSocket && DescriptorIsOpen_nid_no_patch(fd)) {
         NotImplemented_nid_no_patch(filter == EVFILT_READ ? "sceKernelAddReadEvent: non-socket descriptor" : "sceKernelAddWriteEvent: non-socket descriptor");
     }
-    if (size > 1) {
-        NotImplemented_nid_no_patch(filter == EVFILT_READ ? "sceKernelAddReadEvent: low watermark" : "sceKernelAddWriteEvent: low watermark");
-    }
     if (!isSocket) {
         return SCE_KERNEL_ERROR_EBADF;
     }
-    return EqueueAddEvent_nid_postfix(eq, EqueueDescriptorEvent(fd, filter, EV_ADD, udata));
+    // size is the low water mark the event waits for, as it is in sceKernelAddReadEvent and
+    // sceKernelAddWriteEvent; 0 and 1 are the readiness the default knote reports
+    return EqueueAddEvent_nid_postfix(eq, EqueueDescriptorEvent(fd, filter, EV_ADD, udata, size > 1 ? static_cast<std::int64_t>(size) : 0));
 }
 
 int APS5_VABI sceKernelAddReadEvent(KernelEqueue eq, int fd, std::size_t size, void* udata) {
@@ -625,12 +625,13 @@ int APS5_VABI sceKernelDeleteWriteEvent(KernelEqueue eq, int fd) {
 
 }
 
-KernelEqueueEvent EqueueDescriptorEvent(int descriptor, int16_t filter, uint16_t flags, void* udata) {
+KernelEqueueEvent EqueueDescriptorEvent(int descriptor, int16_t filter, uint16_t flags, void* udata, std::int64_t lowat) {
     KernelEqueueEvent event{};
     event.event.ident = static_cast<uintptr_t>(descriptor);
     event.event.filter = filter;
     event.event.flags = flags;
     event.event.udata = udata;
+    event.lowat = lowat;
     event.filter.pollFunc = [](KernelEqueueEvent* e) {
         std::int64_t data = 0;
         bool eof = false;
@@ -639,7 +640,9 @@ KernelEqueueEvent EqueueDescriptorEvent(int descriptor, int16_t filter, uint16_t
         }
         e->event.data = static_cast<intptr_t>(data);
         e->event.flags = static_cast<uint16_t>(eof ? (e->event.flags | EV_EOF) : (e->event.flags & ~EV_EOF));
-        return true;
+        // an end of file is reported whatever the watermark is, as filt_soread and filt_sowrite return
+        // before they compare kn_data against the low water mark
+        return eof || e->lowat <= 0 || data >= e->lowat;
     };
     event.filter.resetFunc = [](KernelEqueueEvent* e) {
         e->triggered = false;

@@ -21,6 +21,9 @@ int Poll(KernelSocketPoll::Entry* entries, int count, int timeoutMilliseconds);
 struct Interest {
     int descriptor;
     bool write;
+    // a low water mark poll cannot express (NOTE_LOWAT, the size of sceKernelAddReadEvent and
+    // sceKernelAddWriteEvent): the wait returns to its caller every millisecond while one is pending
+    std::int64_t minimum = 0;
 };
 std::uintptr_t CurrentWaker();
 void Wake(std::uintptr_t waker);

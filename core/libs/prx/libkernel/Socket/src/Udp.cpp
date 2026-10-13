@@ -334,17 +334,25 @@ bool GuestSockets::WaitAny(const std::vector<Interest>& interests, std::uint64_t
         if (now >= deadlineNanos) return true;
         remaining = deadlineNanos - now;
     }
+    // A low water mark cannot be expressed as poll readiness: a socket below the mark is already
+    // readable for poll, so the caller has to compare the count again. Return to it at most every
+    // millisecond while one is pending, as the pipe path does, so the wait does not spin.
+    const bool lowWatermark = std::any_of(interests.begin(), interests.end(),
+        [](const Interest& interest) { return interest.minimum > 1; });
+    if (lowWatermark) remaining = (remaining == 0 || remaining > 1000000) ? 1000000 : remaining;
 #ifdef _WIN32
     INT timeout = -1;
     if (deadlineNanos != 0) {
         if (remaining < 1000000) return false;
         timeout = static_cast<INT>(std::min<std::uint64_t>(remaining / 1000000, INT_MAX));
+    } else if (lowWatermark) {
+        timeout = 1;
     }
     if (WSAPoll(entries.data(), static_cast<ULONG>(entries.size()), timeout) == SOCKET_ERROR)
         throw std::runtime_error("equeue wait: WSAPoll failed, guest errno " + std::to_string(NativeError()));
 #else
     timespec timeout{static_cast<time_t>(remaining / 1000000000), static_cast<long>(remaining % 1000000000)};
-    if (::ppoll(entries.data(), entries.size(), deadlineNanos != 0 ? &timeout : nullptr, nullptr) < 0 && errno != EINTR)
+    if (::ppoll(entries.data(), entries.size(), deadlineNanos != 0 || lowWatermark ? &timeout : nullptr, nullptr) < 0 && errno != EINTR)
         throw std::runtime_error("equeue wait: ppoll failed, guest errno " + std::to_string(NativeError()));
 #endif
     char drained[16];

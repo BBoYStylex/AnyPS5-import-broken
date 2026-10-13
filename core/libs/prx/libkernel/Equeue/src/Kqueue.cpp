@@ -138,13 +138,14 @@ int AddDescriptorKnote(const KernelEqueueRef& queue, KernelEvent& change, std::u
     if (!GuestSockets::IsOpen(descriptor)) {
         NotImplemented_nid_no_patch(change.filter == EVFILT_READ ? "kevent: EVFILT_READ on a non-socket descriptor" : "kevent: EVFILT_WRITE on a non-socket descriptor");
     }
-    if ((change.fflags & NOTE_LOWAT) != 0) {
-        NotImplemented_nid_no_patch("kevent: NOTE_LOWAT");
-    }
     if ((flags & EV_CLEAR) != 0) {
         NotImplemented_nid_no_patch("kevent: EV_CLEAR on a socket");
     }
-    auto event = EqueueDescriptorEvent(descriptor, change.filter, flags, change.udata);
+    // NOTE_LOWAT holds the knote until the socket has data (or free space) instead of reporting every
+    // readiness. The value is kn_sdata of the change and stays apart from kn_data, which the filter
+    // writes on every poll.
+    const std::int64_t lowat = (change.fflags & NOTE_LOWAT) != 0 ? change.data : 0;
+    auto event = EqueueDescriptorEvent(descriptor, change.filter, flags, change.udata, lowat);
     change.fflags = 0;
     change.data = 0;
     return GuestErrno(queue->AddEvent(event));
@@ -215,9 +216,6 @@ int ModifyKnote(const KernelEqueueRef& queue, KernelEvent& change) {
     if (change.filter == EVFILT_TIMER) {
         NotImplemented_nid_no_patch("kevent: changing an existing EVFILT_TIMER");
     }
-    if ((change.filter == EVFILT_READ || change.filter == EVFILT_WRITE) && (change.fflags & NOTE_LOWAT) != 0) {
-        NotImplemented_nid_no_patch("kevent: NOTE_LOWAT");
-    }
     if (change.filter == EVFILT_VNODE) {
         RequireVnodeNotes(change.fflags);
     }
@@ -227,6 +225,10 @@ int ModifyKnote(const KernelEqueueRef& queue, KernelEvent& change) {
             TouchUserKnote(event, change);
         } else if (change.filter == EVFILT_VNODE) {
             SetVnodeNotes(event, change.fflags);
+        } else if (change.filter == EVFILT_READ || change.filter == EVFILT_WRITE) {
+            // kqueue_register copies the whole kevent over the knote it re-adds, so a change without
+            // NOTE_LOWAT clears the watermark
+            event.lowat = (change.fflags & NOTE_LOWAT) != 0 ? change.data : 0;
         }
     }));
 }

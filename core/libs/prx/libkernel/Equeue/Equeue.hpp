@@ -60,6 +60,7 @@ struct KernelEqueueEvent {
     bool triggered = false;
     uint64_t deadlineNs = 0;
     uint64_t intervalNs = 0;
+    int64_t lowat = 0;
     KernelEvent event;
     KernelFilter filter;
     std::deque<KernelEvent> pendingEvents;
@@ -111,7 +112,7 @@ using KernelEqueueRef = std::shared_ptr<KernelEqueuePrivate>;
 void EqueueDescriptorClosed(int descriptor);
 void KqueueDescriptorClosed(int descriptor);
 bool IsKqueueDescriptor(int descriptor);
-KernelEqueueEvent EqueueDescriptorEvent(int descriptor, int16_t filter, uint16_t flags, void* udata);
+KernelEqueueEvent EqueueDescriptorEvent(int descriptor, int16_t filter, uint16_t flags, void* udata, std::int64_t lowat = 0);
 void RequireVnodeNotes(uint32_t fflags);
 void SetVnodeNotes(KernelEqueueEvent& event, uint32_t fflags);
 int AddVnodeEvent(const KernelEqueueRef& queue, int descriptor, uint32_t fflags, uint16_t flags, void* udata);
