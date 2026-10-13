@@ -39,7 +39,7 @@ class Lowering(Vector):
     def string_operation(self, kind, bits):
         if self.ins.addr_size != 8:
             self.unsupported('32-bit string addressing is not qualified')
-        if self.epoch_variant != 'private' or 0xf3 not in self.ins.prefix or (kind == 'stos' and bits != 8):
+        if (self.epoch_variant != 'private' and not (self.epoch_variant == 'native' and not self.concurrent)) or 0xf3 not in self.ins.prefix or (kind == 'stos' and bits != 8):
             return super().string_operation(kind, bits)
         count, destination = self.get_gpr('rcx'), self.get_gpr('rdi')
         step = bits // 8
@@ -461,7 +461,7 @@ class Lowering(Vector):
 
 
 def lower_unit(unit, units, trace=False, concurrent=False, ordered_access="fenced", epoch_variant=None, writeback=None, seal_image=False):
-    lowering = Lowering(unit, symbol(unit.start) + ('_' + epoch_variant if epoch_variant else ''))
+    lowering = Lowering(unit, symbol(unit.start) + ('_' + epoch_variant if epoch_variant and epoch_variant != 'native' else ''))
     lowering.epoch_variant = epoch_variant
     lowering.sealed_tables = guest_regions.sealed_tables(unit) if seal_image else set()
     lowering.readonly_table_loads = {unit.tables[site]['selector_load'] for site in lowering.sealed_tables}
@@ -610,7 +610,7 @@ ordered:
 
 
 def lower_shard(arguments):
-    raw, starts, output, extra, trace, concurrent, abi, ordered_access, memory_epochs, seal_image = arguments
+    raw, starts, output, extra, trace, concurrent, abi, ordered_access, memory_epochs, seal_image, optimize_calls = arguments
     program = guest_lift.Program(raw, abi=abi)
     units, _, _ = guest_lift.discover(program, extra)
     texts, declarations, errors, called = [], set(), [], set()
@@ -626,7 +626,8 @@ def lower_shard(arguments):
             errors.extend(failures)
             texts.append(epoch_dispatch(start))
         else:
-            text, declared, failures = lower_unit(units[start], units, trace, concurrent, ordered_access)
+            text, declared, failures = lower_unit(units[start], units, trace, concurrent, ordered_access,
+                                                  'native' if optimize_calls else None)
             texts.append(text)
             declarations |= declared
             errors.extend(failures)
@@ -637,7 +638,7 @@ def lower_shard(arguments):
     return errors
 
 
-def build(input_path, output_dir, shards=16, jobs=8, extra=(), strict=True, trace=False, concurrent=False, abi="glibc", ordered_access=None, memory_epochs=False, seal_image=False):
+def build(input_path, output_dir, shards=16, jobs=8, extra=(), strict=True, trace=False, concurrent=False, abi="glibc", ordered_access=None, memory_epochs=False, seal_image=False, optimize_calls=False):
     if ordered_access is None:
         ordered_access = 'atomic' if concurrent else 'fenced'
     guest_lift.require(ordered_access in ('fenced', 'atomic'), 'unknown ordered access implementation')
@@ -645,6 +646,7 @@ def build(input_path, output_dir, shards=16, jobs=8, extra=(), strict=True, trac
     guest_lift.require(not seal_image or memory_epochs, 'sealed image requires memory epochs')
     guest_lift.require(not memory_epochs or (concurrent and abi == 'glibc'), 'memory epochs require the concurrent glibc profile')
     guest_lift.require(not memory_epochs or not trace, 'memory epoch tracing is not qualified')
+    guest_lift.require(not optimize_calls or (abi == 'glibc' and not trace), 'optimized calls require an untraced glibc profile')
     started = time.monotonic()
     raw = Path(input_path).read_bytes()
     program = guest_lift.Program(raw, abi=abi)
@@ -660,14 +662,14 @@ def build(input_path, output_dir, shards=16, jobs=8, extra=(), strict=True, trac
         smallest = sizes.index(min(sizes))
         buckets[smallest].append(start)
         sizes[smallest] += len(units[start].instructions)
-    work = [(raw, sorted(bucket), str(output / f'shard{number:02}.ll'), tuple(extra), trace, concurrent, abi, ordered_access, memory_epochs, seal_image) for number, bucket in enumerate(buckets) if bucket]
+    work = [(raw, sorted(bucket), str(output / f'shard{number:02}.ll'), tuple(extra), trace, concurrent, abi, ordered_access, memory_epochs, seal_image, optimize_calls) for number, bucket in enumerate(buckets) if bucket]
     if jobs == 1:
         errors = [error for item in work for error in lower_shard(item)]
     else:
         with ProcessPoolExecutor(jobs) as pool:
             errors = [error for result in pool.map(lower_shard, work) for error in result]
     report = {'schema': 'anyps5.aot.guest-lowering.v1', 'input_sha256': program.sha256, 'units': len(units),
-              'startup_abi': abi, 'ordered_access': ordered_access, 'memory_epochs': memory_epochs, 'sealed_image': seal_image,
+              'startup_abi': abi, 'ordered_access': ordered_access, 'memory_epochs': memory_epochs, 'sealed_image': seal_image, 'optimized_calls': optimize_calls or memory_epochs,
               'sealed_dispatch_tables': sum(len(guest_regions.sealed_tables(u)) for u in units.values()) if seal_image else 0,
               'memory_profile': 'ordered-normal-memory' if concurrent else 'single-thread',
               'instructions': sum(len(unit.instructions) for unit in units.values()),
@@ -691,10 +693,11 @@ def main():
     parser.add_argument('--concurrent', action='store_true')
     parser.add_argument('--memory-epochs', action='store_true')
     parser.add_argument('--seal-image', action='store_true')
+    parser.add_argument('--optimize-calls', action='store_true')
     parser.add_argument('--ordered-access', choices=('fenced', 'atomic'))
     parser.add_argument('--abi', choices=('glibc', 'sce-app'), default='glibc')
     args = parser.parse_args()
-    report = build(args.input, args.output, args.shards, strict=not args.inventory, trace=args.trace, concurrent=args.concurrent, abi=args.abi, ordered_access=args.ordered_access, memory_epochs=args.memory_epochs, seal_image=args.seal_image)
+    report = build(args.input, args.output, args.shards, strict=not args.inventory, trace=args.trace, concurrent=args.concurrent, abi=args.abi, ordered_access=args.ordered_access, memory_epochs=args.memory_epochs, seal_image=args.seal_image, optimize_calls=args.optimize_calls)
     print(json.dumps({key: report[key] for key in ('units', 'instructions', 'jump_tables', 'seconds')}))
     print(f'{len(report["unsupported"])} unsupported instruction sites')
 

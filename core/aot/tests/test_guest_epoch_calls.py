@@ -8,7 +8,7 @@ import guest_lab
 
 
 class EpochCallTests(unittest.TestCase):
-    def execute(self, body, stub='jmp qword ptr [rip + strlen_slot]', writable=False, launcher=None, relative=()):
+    def execute(self, body, stub='jmp qword ptr [rip + strlen_slot]', writable=False, launcher=None, relative=(), concurrent=True, optimize_calls=False):
         with tempfile.TemporaryDirectory() as directory:
             directory = Path(directory)
             source = '''.globl _start
@@ -39,9 +39,22 @@ text: .asciz "abcd"
             raw = bytearray(guest_lab.program_image(code, labels, [('strlen', 'strlen_slot'), ('memcpy', 'memcpy_slot'), ('free', 'free_slot'), ('exit', 'exit_slot')], relative=relative))
             if writable:
                 struct.pack_into('<I', raw, 68, 7)
-            binary, report = guest_lab.build_program(raw, directory, concurrent=True, memory_epochs=True, launcher=launcher)
+            binary, report = guest_lab.build_program(raw, directory, concurrent=concurrent, memory_epochs=not optimize_calls, optimize_calls=optimize_calls, launcher=launcher)
             result = subprocess.run([str(binary)], capture_output=True, timeout=10)
             self.assertEqual((result.returncode, result.stdout, result.stderr), (0, b'', b''))
+
+    def test_single_thread_qualified_calls(self):
+        self.execute("""
+    mov r13, 789
+    lea rdi, [rip + text]
+    call stub
+    cmp rax, 4
+    jne fail
+    cmp r13, 789
+    jne fail
+    cmp rsp, r12
+    jne fail
+""", concurrent=False, optimize_calls=True)
 
     def test_exact_thunk_preserves_caller_state_and_result(self):
         self.execute('''

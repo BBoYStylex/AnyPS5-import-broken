@@ -429,12 +429,12 @@ def program_image(code, labels, imports=(), data_imports=(), entry='_start', rel
     return bytes(image)
 
 
-def build_program(raw, directory, roots=(), strict=True, concurrent=False, abi="glibc", launcher=None, ordered_access=None, memory_epochs=False, seal_image=False):
+def build_program(raw, directory, roots=(), strict=True, concurrent=False, abi="glibc", launcher=None, ordered_access=None, memory_epochs=False, seal_image=False, optimize_calls=False):
     directory = Path(directory)
     image = directory / 'program.elf'
     image.write_bytes(raw)
     output = directory / 'converted'
-    report = guest_emit.build(image, output, shards=1, jobs=1, extra=roots, strict=strict, concurrent=concurrent, abi=abi, ordered_access=ordered_access, memory_epochs=memory_epochs, seal_image=seal_image)
+    report = guest_emit.build(image, output, shards=1, jobs=1, extra=roots, strict=strict, concurrent=concurrent, abi=abi, ordered_access=ordered_access, memory_epochs=memory_epochs, seal_image=seal_image, optimize_calls=optimize_calls)
     objects = []
     for module in sorted(output.glob('*.ll')):
         obj = module.with_suffix('.o')
