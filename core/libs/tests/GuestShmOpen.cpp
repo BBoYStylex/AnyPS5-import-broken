@@ -10,6 +10,7 @@ int APS5_VABI ftruncate_nid_postfix(int, std::int64_t);
 std::int64_t APS5_VABI pread_nid_postfix(int, void*, std::size_t, std::int64_t);
 std::int64_t APS5_VABI pwrite_nid_disambig1_nid_postfix(int, const void*, std::size_t, std::int64_t);
 int APS5_VABI close_nid_postfix(int);
+int APS5_VABI shm_unlink_nid_postfix(const char*);
 int* APS5_VABI __error_nid_postfix();
 }
 static void Require(bool value) { if (!value) std::abort(); }
@@ -51,15 +52,27 @@ int main() {
     RequireInvalid(anonymous, 0x2 | 0x4);
     RequireInvalid("/anyps5-shm", 0x1);
     RequireInvalid("/anyps5-shm", 0x202 | 0x8);
-#ifdef _WIN32
-    bool threw = false;
-    try {
-        shm_open_nid_postfix("/anyps5-shm", 0x202, 0600);
-    } catch (const std::runtime_error&) {
-        threw = true;
-    }
-    Require(threw);
-#else
     RequireInvalid("", 0x202);
-#endif
+    const char* const named = "/anyps5-shm-guest-file";
+    const int creator = shm_open_nid_postfix(named, 0x202, 0600);
+    Require(creator >= 0);
+    Require(ftruncate_nid_postfix(creator, 0x4000) == 0);
+    const char namedText[] = "named";
+    Require(pwrite_nid_disambig1_nid_postfix(creator, namedText, sizeof(namedText), 0x20) == static_cast<std::int64_t>(sizeof(namedText)));
+    const int reopened = shm_open_nid_postfix(named, 0x2, 0);
+    Require(reopened >= 0 && reopened != creator);
+    char namedBack[sizeof(namedText)] = {};
+    Require(pread_nid_postfix(reopened, namedBack, sizeof(namedBack), 0x20) == static_cast<std::int64_t>(sizeof(namedBack)));
+    Require(std::memcmp(namedBack, namedText, sizeof(namedText)) == 0);
+    *__error_nid_postfix() = 0;
+    Require(shm_open_nid_postfix(named, 0xA02, 0600) == -1);
+    Require(*__error_nid_postfix() == 17);
+    Require(close_nid_postfix(creator) == 0 && close_nid_postfix(reopened) == 0);
+    Require(shm_unlink_nid_postfix(named) == 0);
+    *__error_nid_postfix() = 0;
+    Require(shm_open_nid_postfix(named, 0x2, 0) == -1);
+    Require(*__error_nid_postfix() == 2);
+    *__error_nid_postfix() = 0;
+    Require(shm_unlink_nid_postfix("/anyps5-shm-guest-absent") == -1);
+    Require(*__error_nid_postfix() == 2);
 }

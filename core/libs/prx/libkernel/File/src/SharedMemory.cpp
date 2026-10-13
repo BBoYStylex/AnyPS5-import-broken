@@ -15,15 +15,18 @@
 #include <optional>
 #include <atomic>
 
+#include "nid/Sha1.hpp"
+
 #ifdef _WIN32
+#include <chrono>
 #include <fcntl.h>
 #include <io.h>
 #include <share.h>
+#include <windows.h>
 #include <sys/stat.h>
 #include <filesystem>
 #include <random>
 #else
-#include "nid/Sha1.hpp"
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -107,6 +110,33 @@ int GuestError(int error) {
     }
 }
 
+std::string NamedHostObject(const char* path, int& error) {
+    if (path == nullptr) { error = EFAULT; return {}; }
+    std::size_t length = 0;
+    while (length < 1024 && path[length] != '\0') ++length;
+    if (length == 1024) { error = ENAMETOOLONG; return {}; }
+    if (length == 0 || path[0] != '/') { error = EINVAL; return {}; }
+    const auto digest = Nid::Sha1(std::vector<std::uint8_t>(path, path + length));
+    std::string hostName = "anyps5-shm-";
+    for (const auto byte : digest) {
+        hostName += "0123456789abcdef"[byte >> 4];
+        hostName += "0123456789abcdef"[byte & 15];
+    }
+    error = 0;
+    return hostName;
+}
+
+int NamedValidationGuestError(int error) {
+    switch (error) {
+    case EFAULT:
+        return 14;
+    case ENAMETOOLONG:
+        return 63;
+    default:
+        return GuestInvalid;
+    }
+}
+
 #ifndef _WIN32
 int NamedGuestError(int error) {
     switch (error) {
@@ -134,19 +164,9 @@ int NamedGuestError(int error) {
 }
 
 std::string NamedHostPath(const char* path, int& error) {
-    if (path == nullptr) { error = EFAULT; return {}; }
-    std::size_t length = 0;
-    while (length < 1024 && path[length] != '\0') ++length;
-    if (length == 1024) { error = ENAMETOOLONG; return {}; }
-    if (length == 0 || path[0] != '/') { error = EINVAL; return {}; }
-    const auto digest = Nid::Sha1(std::vector<std::uint8_t>(path, path + length));
-    std::string hostName = "/anyps5-shm-";
-    for (const auto byte : digest) {
-        hostName += "0123456789abcdef"[byte >> 4];
-        hostName += "0123456789abcdef"[byte & 15];
-    }
-    error = 0;
-    return hostName;
+    const auto object = NamedHostObject(path, error);
+    if (error != 0) return {};
+    return "/" + object;
 }
 
 int OpenNamedFile(const char* path, int flags, int mode) {
@@ -186,6 +206,89 @@ int OpenNamedFile(const char* path, int flags, int mode) {
     const int error = errno;
     if (const int guest = NamedGuestError(error)) return Fail(guest);
     throw std::runtime_error("shm_open: opening the host named object failed, errno=" + std::to_string(error));
+}
+#endif
+
+#ifdef _WIN32
+int WindowsNamedError(DWORD code) {
+    switch (code) {
+    case ERROR_FILE_NOT_FOUND:
+    case ERROR_PATH_NOT_FOUND:
+        return 2;
+    case ERROR_ACCESS_DENIED:
+    case ERROR_SHARING_VIOLATION:
+        return 13;
+    case ERROR_FILE_EXISTS:
+    case ERROR_ALREADY_EXISTS:
+        return 17;
+    case ERROR_INVALID_PARAMETER:
+        return GuestInvalid;
+    case ERROR_DISK_FULL:
+    case ERROR_HANDLE_DISK_FULL:
+        return 28;
+    case ERROR_WRITE_PROTECT:
+        return 30;
+    case ERROR_FILENAME_EXCED_RANGE:
+        return 63;
+    case ERROR_TOO_MANY_OPEN_FILES:
+        return GuestTooManyFiles;
+    default:
+        return 0;
+    }
+}
+
+std::filesystem::path NamedWindowsDirectory() {
+    static const std::filesystem::path directory = [] {
+        std::error_code error;
+        const auto base = std::filesystem::temp_directory_path(error) / "anyps5-shm";
+        const auto boot = std::filesystem::file_time_type::clock::now() - std::chrono::milliseconds(::GetTickCount64());
+        if (std::filesystem::is_directory(base, error)) {
+            const auto stamp = std::filesystem::last_write_time(base, error);
+            if (!error && stamp < boot)
+                for (const auto& entry : std::filesystem::directory_iterator(base, error))
+                    std::filesystem::remove_all(entry.path(), error);
+        }
+        std::filesystem::create_directories(base, error);
+        return base;
+    }();
+    return directory;
+}
+
+int OpenNamedFileWindows(const char* path, int flags, int mode) {
+    (void)mode;
+    int validationError = 0;
+    const auto object = NamedHostObject(path, validationError);
+    if (validationError != 0) return Fail(NamedValidationGuestError(validationError));
+    const auto hostPath = NamedWindowsDirectory() / object;
+    const bool writable = (flags & SCE_KERNEL_O_ACCMODE) == SCE_KERNEL_O_RDWR;
+    const DWORD access = GENERIC_READ | (writable ? GENERIC_WRITE : 0);
+    const bool truncate = writable && (flags & SCE_KERNEL_O_TRUNC) != 0;
+    DWORD creation;
+    if (flags & SCE_KERNEL_O_CREAT) {
+        if (flags & SCE_KERNEL_O_EXCL) creation = CREATE_NEW;
+        else if (truncate) creation = CREATE_ALWAYS;
+        else creation = OPEN_ALWAYS;
+    } else if (truncate) {
+        creation = TRUNCATE_EXISTING;
+    } else {
+        creation = OPEN_EXISTING;
+    }
+    const HANDLE handle = CreateFileW(hostPath.wstring().c_str(), access,
+                                      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, creation,
+                                      FILE_ATTRIBUTE_TEMPORARY, nullptr);
+    if (handle == INVALID_HANDLE_VALUE) {
+        const DWORD code = GetLastError();
+        if (const int guest = WindowsNamedError(code)) return Fail(guest);
+        throw std::runtime_error("shm_open: opening the host named object failed, GetLastError=" + std::to_string(code));
+    }
+    const int descriptor = ::_open_osfhandle(reinterpret_cast<intptr_t>(handle), _O_BINARY | _O_NOINHERIT);
+    if (descriptor < 0) {
+        const int error = errno;
+        ::CloseHandle(handle);
+        if (const int guest = GuestError(error)) return Fail(guest);
+        throw std::runtime_error("shm_open: registering the host named descriptor failed, errno=" + std::to_string(error));
+    }
+    return descriptor;
 }
 #endif
 
@@ -456,7 +559,7 @@ extern "C" int APS5_VABI shm_open_nid_postfix(const char* path, int flags, int m
     if ((flags & ~AcceptedFlags) != 0) return Fail(GuestInvalid);
     if (path != anonymousObject) {
 #ifdef _WIN32
-        NotImplemented_nid_no_patch("shm_open of a named object");
+        return OpenNamedFileWindows(path, flags, mode);
 #else
         return OpenNamedFile(path, flags, mode);
 #endif
@@ -471,9 +574,14 @@ extern "C" int APS5_VABI shm_open_nid_postfix(const char* path, int flags, int m
 
 extern "C" int APS5_VABI shm_unlink_nid_postfix(const char* path) {
 #ifdef _WIN32
-    (void)path;
-    NotImplemented_nid_no_patch("shm_unlink of a named object");
-    return 0;
+    int validationError = 0;
+    const auto object = NamedHostObject(path, validationError);
+    if (validationError != 0) return Fail(NamedValidationGuestError(validationError));
+    const auto hostPath = NamedWindowsDirectory() / object;
+    if (::DeleteFileW(hostPath.wstring().c_str())) return 0;
+    const DWORD code = GetLastError();
+    if (const int guest = WindowsNamedError(code)) return Fail(guest);
+    throw std::runtime_error("shm_unlink: removing the host named object failed, GetLastError=" + std::to_string(code));
 #else
     int validationError = 0;
     const auto hostName = NamedHostPath(path, validationError);
