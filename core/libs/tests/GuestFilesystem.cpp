@@ -359,6 +359,12 @@ int main() {
     Require(access_nid_postfix(beneathAbsent.c_str(), 0) == -1 && *__error_nid_postfix() == 2);
     Require(remove_nid_postfix(beneathAbsent.c_str()) == -1 && *__error_nid_postfix() == 2);
     Require(std::filesystem::is_regular_file(file));
+    for (const auto& name : {beneathFile, deepBeneathFile}) {
+        Require(opendir_nid_postfix(name.c_str()) == nullptr && *__error_nid_postfix() == 20);
+        Require(chdir_nid_postfix(name.c_str()) == -1 && *__error_nid_postfix() == 20);
+    }
+    Require(opendir_nid_postfix(beneathAbsent.c_str()) == nullptr && *__error_nid_postfix() == 2);
+    Require(chdir_nid_postfix(beneathAbsent.c_str()) == -1 && *__error_nid_postfix() == 2);
     Require(remove_nid_postfix("") == -1 && *__error_nid_postfix() == 2);
     Require(remove_nid_postfix(nullptr) == -1 && *__error_nid_postfix() == 14);
     const auto readOnly = root / "read-only.txt";
