@@ -123,7 +123,10 @@ int main() {
 
     Require(sceHttpUriParse(&element, nullptr, pool, nullptr, sizeof(pool)) == invalidUrl);
     Require(sceHttpUriParse(nullptr, url, nullptr, nullptr, 0) == invalidValue);
-    Require(sceHttpUriParse(nullptr, "http://host:65536/", nullptr, &required, 0) == invalidUrl);
+    Require(sceHttpUriParse(&element, "http://host:65536/", pool, nullptr, sizeof(pool)) == 0 && element.port == 0 && Equal(element.hostname, "host"));
+    Require(sceHttpUriParse(&element, "https://host:65535/", pool, nullptr, sizeof(pool)) == 0 && element.port == 65535);
+    Require(sceHttpUriParse(nullptr, "http://host:65537/", nullptr, &required, 0) == invalidUrl);
+    Require(sceHttpUriParse(nullptr, "http://host:70000/", nullptr, &required, 0) == invalidUrl);
     Require(sceHttpUriParse(nullptr, "http://host:80a/", nullptr, &required, 0) == invalidUrl);
     Require(sceHttpUriParse(nullptr, "http://[::1/", nullptr, &required, 0) == invalidUrl);
     Require(sceHttpUriParse(nullptr, "http://bad host/", nullptr, &required, 0) == invalidUrl);
@@ -140,8 +143,7 @@ int main() {
 
     constexpr const char* unescapeCases[][2] = {
         {"", ""}, {"plain+text", "plain+text"}, {"a%20b%2F~%c3%a9", "a b/~\xC3\xA9"},
-        {"%41%4a%4F%ff", "AJO\xFF"}, {"%2520", "%20"},
-        {"%", "%"}, {"%1", "%1"}, {"%1g%gg%+1%-1", "%1g%gg%+1%-1"}
+        {"%41%4a%4F%ff", "AJO\xFF"}, {"%2520", "%20"}
     };
     for (const auto& row : unescapeCases) {
         const std::size_t size = std::strlen(row[1]) + 1;
@@ -151,6 +153,13 @@ int main() {
         for (char c : escaped) Require(c == 'Z');
         Require(sceHttpUriUnescape(escaped, nullptr, size, row[0]) == 0);
         Require(Equal(escaped, row[1]) && escaped[size] == 'Z');
+    }
+    for (const char* malformed : {"%", "%1", "abc%", "%zz", "%G1", "%%41", "x%4Gy", "%-1", "% 1", "%1 ", "ok%20then%2", "%41%"}) {
+        required = 123;
+        std::memset(escaped, 'Z', sizeof(escaped));
+        Require(sceHttpUriUnescape(nullptr, &required, 0, malformed) == invalidUrl && required == 123);
+        Require(sceHttpUriUnescape(escaped, &required, sizeof(escaped), malformed) == invalidUrl && required == 123);
+        for (char c : escaped) Require(c == 'Z');
     }
     Require(sceHttpUriUnescape(escaped, &required, sizeof(escaped), "a%00b") == 0);
     Require(required == 4 && std::memcmp(escaped, "a\0b", 4) == 0);
