@@ -19,6 +19,15 @@ const IrValue* maskedOperand(const IrValue* value, IrOpcode opcode, std::uint32_
     return nullptr;
 }
 
+bool setsExponentBit(const IrValue& value) {
+    if (value.ArgumentCount() != 2u) return false;
+    for (std::size_t index = 0; index < 2u; ++index) {
+        const IrValue* operand = value.Argument(index)->Resolve();
+        if (operand->HasImmediate() && (operand->ImmediateU32() & 0x7f800000u) != 0u) return true;
+    }
+    return false;
+}
+
 IrValue* flushedSource(const IrValue& value) {
     if (value.Opcode() != IrOpcode::SelectU32 || value.ArgumentCount() != 3u) return nullptr;
     IrValue* source = value.Argument(2)->Resolve();
@@ -51,6 +60,10 @@ private:
             case IrOpcode::ConvertF32S32:
             case IrOpcode::ConvertF32U32:
             case IrOpcode::ConvertF32F16:
+            case IrOpcode::FPTrunc32:
+            case IrOpcode::FPRoundEven32:
+            case IrOpcode::FPSqrt:
+            case IrOpcode::FPRecipSqrt32:
                 return true;
             case IrOpcode::BitCastU32F32:
             case IrOpcode::BitCastF32U32:
@@ -62,8 +75,11 @@ private:
                 if (const IrValue* operand = maskedOperand(&value, IrOpcode::BitwiseXor32, 0x80000000u)) return Contains(operand);
                 return false;
             case IrOpcode::BitwiseAnd32:
+                if (maskedOperand(&value, IrOpcode::BitwiseAnd32, 0x80000000u) != nullptr) return true;
                 if (const IrValue* operand = maskedOperand(&value, IrOpcode::BitwiseAnd32, 0x7fffffffu)) return Contains(operand);
                 return false;
+            case IrOpcode::BitwiseOr32:
+                return setsExponentBit(value);
             case IrOpcode::SelectU32:
             case IrOpcode::SelectF32:
                 return Contains(value.Argument(1)) && Contains(value.Argument(2));
