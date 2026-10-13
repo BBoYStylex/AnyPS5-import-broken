@@ -191,4 +191,53 @@ int APS5_VABI sceNetCtlUnregisterCallback(int cid) {
     return 0;
 }
 
+int APS5_VABI sceNetCtlApCpCheckCallback() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlApCpClearEvent() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlApCpGetConnectInfo() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlApCpGetInfo() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlApCpGetResult() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlApCpGetState() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlApCpRegisterCallback() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlApCpStartWithRetry() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlApCpUnregisterCallback() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlGetIfStatIpcInt() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
 }

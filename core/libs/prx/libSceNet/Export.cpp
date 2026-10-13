@@ -1417,4 +1417,33 @@ int APS5_VABI sceNetShowIfconfig() {
 extern const std::uint8_t in6addr_any_nid_postfix[16] = {};
 extern const std::uint8_t in6addr_loopback_nid_postfix[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1};
 
+int APS5_VABI sceNetConfigAddRoute6WithInterface() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetConfigDelRoute6WithInterface() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetConfigDelRouteWithInterface() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetDevSocket() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetGetsockoptEx() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetSetsockoptEx() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
 }
