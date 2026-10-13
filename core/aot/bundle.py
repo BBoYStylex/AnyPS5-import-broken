@@ -1,3 +1,4 @@
+from elf_segments import runtime_segments
 import copy
 import hashlib
 import json
@@ -75,7 +76,7 @@ def plan_bundle(specification, root):
         tls = module_tls.layout(elf, raw, tls_contract)
         modules[name] = {'tls': tls, 'record': record, 'source': source, 'contracts': contracts, 'dynamic': dynamic,
                          'namespace': 'aps5_' + name + '_', 'exports': {},
-                         'relro': [(seg['p_vaddr'], seg['p_vaddr'] + seg['p_memsz']) for seg in elf.iter_segments()
+                         'relro': [(seg['p_vaddr'], seg['p_vaddr'] + seg['p_memsz']) for seg in runtime_segments(elf)
                                    if seg['p_type'] == 'PT_GNU_RELRO']}
     require(specification['main'] in modules, 'bundle main module is absent')
     visited, active, ordered = set(), set(), []

@@ -1,3 +1,4 @@
+from elf_segments import runtime_segments
 import argparse
 import hashlib
 import io
@@ -98,7 +99,7 @@ class Image:
             raise Rejected(str(error)) from error
         self.segments = []
         self.process_parameters = []
-        for segment in self.elf.iter_segments():
+        for segment in runtime_segments(self.elf):
             if segment['p_type'] == 0x61000001:
                 self.process_parameters.append((segment['p_vaddr'], segment['p_filesz']))
             if segment['p_type'] == 'PT_TLS':

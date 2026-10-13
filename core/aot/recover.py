@@ -1,3 +1,4 @@
+from elf_segments import runtime_segments
 import argparse
 import hashlib
 import io
@@ -34,7 +35,7 @@ def load_elf(path):
 
 
 def read_address(elf, address, size):
-    segments = [s for s in elf.iter_segments() if s['p_type'] == 'PT_LOAD'
+    segments = [s for s in runtime_segments(elf) if s['p_type'] == 'PT_LOAD'
                 and s['p_vaddr'] <= address and address + size <= s['p_vaddr'] + s['p_filesz']]
     require(len(segments) == 1, f'not one file-backed segment for 0x{address:x}+{size}')
     segment = segments[0]

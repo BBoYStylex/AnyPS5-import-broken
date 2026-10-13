@@ -1,3 +1,4 @@
+from elf_segments import runtime_segments
 import re
 import struct
 
@@ -12,7 +13,7 @@ def require(condition, message):
 
 
 def layout(elf, raw, contracts):
-    segments = [s for s in elf.iter_segments() if s['p_type'] == 'PT_TLS' and s['p_memsz']]
+    segments = [s for s in runtime_segments(elf) if s['p_type'] == 'PT_TLS' and s['p_memsz']]
     require(len(segments) <= 1, 'multiple nonempty TLS segments')
     if not segments:
         require('tls_model' not in contracts, 'TLS model declared without a TLS segment')
