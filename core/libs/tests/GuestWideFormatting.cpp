@@ -9,6 +9,7 @@
 #include <string>
 
 extern "C" int APS5_VABI vswprintf_nid_postfix(char16_t*, std::size_t, const char16_t*, VaList*);
+extern "C" int APS5_VABI vsscanf_nid_postfix(const char*, const char*, VaList*);
 extern "C" int APS5_VABI snwprintf_s_nid_postfix(char16_t*, std::size_t, const char16_t*, ...);
 extern "C" int APS5_VABI swprintf_nid_postfix(char16_t*, std::size_t, const char16_t*, ...);
 extern "C" std::size_t APS5_VABI strftime_nid_postfix(char*, std::size_t, const char*, const GuestTm*);
@@ -32,6 +33,23 @@ static int APS5_VABI Format(char16_t* buffer, std::size_t size, const char16_t* 
     return result;
 }
 
+static int APS5_VABI Scan(const char* input, const char* format, ...) {
+#ifdef _WIN32
+    __builtin_sysv_va_list args;
+    __builtin_sysv_va_start(args, format);
+#else
+    std::va_list args;
+    va_start(args, format);
+#endif
+    const int result = vsscanf_nid_postfix(input, format, reinterpret_cast<VaList*>(args));
+#ifdef _WIN32
+    __builtin_sysv_va_end(args);
+#else
+    va_end(args);
+#endif
+    return result;
+}
+
 static void Check(const char16_t* format, const char* input, const char16_t* expected) {
     char16_t buffer[32]{};
     const int result = Format(buffer, 32, format, input);
@@ -47,6 +65,40 @@ static void Require(bool condition, const char* message) {
         std::fprintf(stderr, "snwprintf_s: %s\n", message);
         std::abort();
     }
+}
+
+static void CheckScanning() {
+    char16_t first[16] = {};
+    char16_t second[16] = {};
+    Require(Scan("hello world", "%ls %ls", first, second) == 2, "wide strings");
+    Require(std::u16string(first) == u"hello" && std::u16string(second) == u"world", "wide string values");
+
+    int number = 0;
+    char16_t after[16] = {};
+    Require(Scan("42 abc", "%d %ls", &number, after) == 2 && number == 42, "mixed scan");
+    Require(std::u16string(after) == u"abc", "mixed wide value");
+
+    char16_t limited[16] = {};
+    Require(Scan("abcdef", "%3ls", limited) == 1 && std::u16string(limited) == u"abc", "wide width");
+
+    char16_t unit = 0;
+    Require(Scan("Z", "%lc", &unit) == 1 && unit == u'Z', "wide char scan");
+
+    int position = -1;
+    char16_t counted[16] = {};
+    Require(Scan("xy", "%ls%n", counted, &position) == 1 && position == 2, "wide count");
+    Require(std::u16string(counted) == u"xy", "wide count value");
+
+    char16_t skipped[16] = {};
+    Require(Scan("   trim", "%ls", skipped) == 1 && std::u16string(skipped) == u"trim", "wide leading whitespace");
+
+#ifndef _WIN32
+    char16_t accented[8] = {};
+    Require(Scan("\xc3\xa9\xc3\xa8", "%ls", accented) == 1 && std::u16string(accented) == u"\u00e9\u00e8", "wide accented");
+    char16_t emoji[8] = {};
+    Require(Scan("\xf0\x9f\x98\x80!", "%ls", emoji) == 1, "wide surrogate scan");
+    Require(emoji[0] == 0xD83D && emoji[1] == 0xDE00 && emoji[2] == 0, "wide surrogate value");
+#endif
 }
 
 static void CheckBounded() {
@@ -240,6 +292,7 @@ static void CheckWcsftime() {
 
 int main() {
     CheckBounded();
+    CheckScanning();
     CheckPositional();
     CheckPointer();
     CheckCount();
