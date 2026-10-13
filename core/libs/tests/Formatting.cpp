@@ -6,7 +6,9 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <iterator>
 #include <stdexcept>
+#include <string_view>
 #include <cstdint>
 #include <cstdio>
 
@@ -239,20 +241,43 @@ __attribute__((noinline)) static void APS5_VABI RunChecks() {
     Require(sscanf_nid_postfix("  ", "%*d%d", &scanned) == EOF);
     Require(sscanf_nid_postfix("", "%d", &scanned) == EOF);
 #else
-    char16_t wide[4] = {u'!', u'!', u'!', u'!'};
-    const auto rejects = [&](const char* format) {
-        try { sscanf_nid_postfix("ab cd", format, wide); } catch (const std::runtime_error&) { return wide[0] == u'!'; }
-        return false;
-    };
-    Require(rejects("%ls") && rejects("%*s %3lc") && rejects("%l[a-z]") && rejects("%S") && rejects("%2$C") && rejects("%'ls"));
-    const auto secureRejects = [&](const char* format) {
-        try { ScanListS("ab cd", format, wide, 4u); } catch (const std::runtime_error&) { return wide[0] == u'!'; }
-        return false;
-    };
-    Require(secureRejects("%ls") && secureRejects("%lc"));
     char narrow[8] = {};
     Require(sscanf_nid_postfix("ab%", "%7[^%ls]", narrow) == 1 && std::strcmp(narrow, "ab") == 0);
 #endif
+    char16_t wide[8];
+    const auto resetWide = [&] { std::fill(std::begin(wide), std::end(wide), u'!'); };
+    const auto wideEquals = [&](std::u16string_view expected) {
+        return std::u16string_view(wide, expected.size()) == expected;
+    };
+    resetWide();
+    Require(sscanf_nid_postfix(" ab cd", "%ls", wide) == 1 && wideEquals(std::u16string_view(u"ab\0", 3)));
+#ifndef _WIN32
+    resetWide();
+    Require(sscanf_nid_postfix("ab cd", "%*s %S", wide) == 1 && wideEquals(std::u16string_view(u"cd\0", 3)));
+    resetWide();
+    Require(sscanf_nid_postfix(" q", "%C", wide) == 1 && wideEquals(u" !"));
+#endif
+    resetWide();
+    Require(sscanf_nid_postfix("\xe9z", "%ls", wide) == 1 && wideEquals(std::u16string_view(u"\u00e9z\0", 3)));
+    resetWide();
+    Require(sscanf_nid_postfix("xyzw", "%3lc", wide) == 1 && wideEquals(u"xyz!"));
+    resetWide();
+    int number = 0;
+    Require(ScanList("abcd 7", "%2l[a-c]%*s %d", wide, &number) == 2 && wideEquals(std::u16string_view(u"ab\0", 3)) && number == 7);
+    resetWide();
+    Require(ScanListS("abc", "%ls", wide, 4u) == 1 && wideEquals(std::u16string_view(u"abc\0", 4)));
+    resetWide();
+    Require(ScanListS("abcd", "%ls", wide, 4u) == 0 && wide[0] == u'\0');
+    resetWide();
+    Require(ScanListS("xy", "%2lc", wide, 2u) == 1 && wideEquals(u"xy!"));
+    resetWide();
+    Require(sscanf_nid_postfix("", "%ls", wide) == EOF && wide[0] == u'!');
+    const auto rejects = [&](const char* format) {
+        resetWide();
+        try { sscanf_nid_postfix("ab cd", format, wide); } catch (const std::runtime_error&) { return wide[0] == u'!'; }
+        return false;
+    };
+    Require(rejects("%1$ls") && rejects("%'ls"));
     long long count = -1;
     int smallCount = -1;
     Require(snprintf_nid_postfix(buffer, 3, "abcd%lnEF%n", &count, &smallCount) == 6);
