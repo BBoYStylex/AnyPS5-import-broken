@@ -16,6 +16,7 @@ int APS5_VABI pipe_nid_postfix(int*);
 int APS5_VABI socketpair_nid_postfix(int, int, int, int*);
 std::int64_t APS5_VABI send_nid_postfix(int, const void*, std::uint64_t, int);
 std::int64_t APS5_VABI recv_nid_postfix(int, void*, std::uint64_t, int);
+std::int64_t APS5_VABI read_nid_postfix(int, void*, std::int64_t);
 int APS5_VABI open_nid_postfix(const char*, int, int);
 int APS5_VABI mkdir_nid_postfix(const char*, unsigned short);
 int APS5_VABI rmdir_nid_postfix(const char*);
@@ -51,6 +52,7 @@ static constexpr std::uint16_t EvOneshot = 0x0010;
 static constexpr std::uint16_t EvClear = 0x0020;
 static constexpr std::uint16_t EvReceipt = 0x0040;
 static constexpr std::uint16_t EvError = 0x4000;
+static constexpr std::uint16_t EvEof = 0x8000;
 static constexpr std::uint32_t NoteTrigger = 0x01000000;
 static constexpr std::uint32_t NoteLowat = 0x0001;
 static constexpr std::uint32_t NoteFfcopy = 0xc0000000;
@@ -263,6 +265,49 @@ static void LowWatermark() {
     Require(close_nid_postfix(kq) == 0);
 }
 
+static std::string TemporaryName(const char* stem);
+
+static void PipeEvents() {
+    const int kq = kqueue_nid_postfix();
+    int pipe[2];
+    Require(pipe_nid_postfix(pipe) == 0);
+    const auto reader = static_cast<std::uintptr_t>(pipe[0]);
+    const auto writer = static_cast<std::uintptr_t>(pipe[1]);
+    int marker = 0;
+    KernelEvent events[4]{};
+    char buffer[8]{};
+
+    // a pipe is not a socket, so the filters fall back on filt_piperead and filt_pipewrite: an empty
+    // pipe is not readable, while a writable one is, and it reports the free space it has
+    Require(Apply(kq, Change(reader, EvfiltRead, EvAdd, 0, 0, &marker)) == 0);
+    Require(Poll(kq, events, 4) == 0);
+    Require(Apply(kq, Change(writer, EvfiltWrite, EvAdd)) == 0);
+    Require(Poll(kq, events, 4) == 1);
+    Require(events[0].ident == writer && events[0].filter == EvfiltWrite && events[0].data > 0);
+    Require(Apply(kq, Change(writer, EvfiltWrite, EvDelete)) == 0);
+
+    // the read filter reports the bytes in the buffer, not just one
+    const char bytes[] = "hello";
+    Require(write_nid_postfix(pipe[1], bytes, 5) == 5);
+    Require(Poll(kq, events, 4) == 1);
+    Require(events[0].ident == reader && events[0].data == 5 && events[0].udata == &marker);
+    Require(read_nid_postfix(pipe[0], buffer, 5) == 5);
+
+    // a mark holds it while the buffer is below it, as it does on a socket
+    Require(Apply(kq, Change(reader, EvfiltRead, EvAdd, NoteLowat, 4)) == 0);
+    Require(write_nid_postfix(pipe[1], bytes, 3) == 3);
+    Require(Poll(kq, events, 4) == 0);
+    Require(write_nid_postfix(pipe[1], bytes, 2) == 2);
+    Require(Poll(kq, events, 4) == 1 && events[0].data == 5);
+    Require(read_nid_postfix(pipe[0], buffer, 5) == 5);
+
+    // the last writer closing is an end of file, which is reported with the buffer drained
+    Require(close_nid_postfix(pipe[1]) == 0);
+    Require(Poll(kq, events, 4) == 1 && (events[0].flags & EvEof) != 0 && events[0].data == 0);
+    Require(close_nid_postfix(pipe[0]) == 0);
+    Require(close_nid_postfix(kq) == 0);
+}
+
 static void Errors() {
     const int kq = kqueue_nid_postfix();
     KernelEvent events[4]{};
@@ -284,8 +329,17 @@ static void Errors() {
     Require(Throws([kq] { Apply(kq, Change(1, EvfiltUser, EvAdd | EvDisable)); }));
     int pipe[2];
     Require(pipe_nid_postfix(pipe) == 0);
-    Require(Throws([kq, &pipe] { Apply(kq, Change(static_cast<std::uintptr_t>(pipe[0]), EvfiltRead, EvAdd)); }));
     Require(close_nid_postfix(pipe[0]) == 0 && close_nid_postfix(pipe[1]) == 0);
+    // a closed descriptor is none of the three kinds
+    RequireFailure(Apply(kq, Change(static_cast<std::uintptr_t>(pipe[0]), EvfiltRead, EvAdd)), GuestEbadf);
+    // a file only carries the vnode filter, so its read and write filters answer EINVAL
+    const std::string plain = TemporaryName("plain");
+    const int file = open_nid_postfix(plain.c_str(), ReadWrite | Create, 0600);
+    Require(file >= 0);
+    RequireFailure(Apply(kq, Change(static_cast<std::uintptr_t>(file), EvfiltRead, EvAdd)), GuestEinval);
+    RequireFailure(Apply(kq, Change(static_cast<std::uintptr_t>(file), EvfiltWrite, EvAdd)), GuestEinval);
+    Require(close_nid_postfix(file) == 0);
+    Require(unlink_nid_postfix(plain.c_str()) == 0);
     const KernelEvent skipped = Change(1, 0, EvAdd);
     const KernelTimespec zero{0, 0};
     Require(kevent_nid_postfix(kq, &skipped, 1, events, 4, &zero) == 0);
@@ -465,6 +519,7 @@ int main() {
     UserEvents();
     SocketPair();
     LowWatermark();
+    PipeEvents();
     Errors();
     FileWatch();
 #ifndef _WIN32

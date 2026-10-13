@@ -18,6 +18,14 @@ std::int64_t Read(int descriptor, void* buffer, std::size_t length);
 std::int64_t Write(int descriptor, const void* buffer, std::size_t length);
 bool Ready(int descriptor, bool write, std::int64_t* data, bool* eof);
 int Poll(KernelSocketPoll::Entry* entries, int count, int timeoutMilliseconds);
+// what a guest descriptor is, for the calls whose filters FreeBSD answers with EINVAL: a socket and
+// a pipe have read and write filters, a file and a directory only have vnode ones, the rest has none
+enum class DescriptorKind { Socket, Pipe, File, Other };
+DescriptorKind Kind(int descriptor);
+// polls a socket or a pipe: data is the bytes available for a read or the free space for a write, and
+// eof is set when the other end is closed, as filt_soread, filt_sowrite, filt_piperead and
+// filt_pipewrite report them
+bool FilterReady(int descriptor, bool write, std::int64_t* data, bool* eof);
 struct Interest {
     int descriptor;
     bool write;

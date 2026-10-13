@@ -3,7 +3,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
-#include <stdexcept>
+#include <string>
 #include <thread>
 
 extern "C" {
@@ -15,6 +15,10 @@ int APS5_VABI connect_nid_postfix(int, const void*, std::uint32_t);
 int APS5_VABI accept_nid_postfix(int, void*, std::uint32_t*);
 std::int64_t APS5_VABI send_nid_postfix(int, const void*, std::uint64_t, int);
 std::int64_t APS5_VABI recv_nid_postfix(int, void*, std::uint64_t, int);
+std::int64_t APS5_VABI write_nid_postfix(int, const char*, std::int64_t);
+int APS5_VABI pipe_nid_postfix(int*);
+int APS5_VABI open_nid_postfix(const char*, int, int);
+int APS5_VABI unlink_nid_postfix(const char*);
 int APS5_VABI close_nid_postfix(int);
 int APS5_VABI sceKernelCreateEqueue(KernelEqueue* eq, const char* name);
 int APS5_VABI sceKernelDeleteEqueue(KernelEqueue eq);
@@ -32,17 +36,9 @@ static constexpr int SCE_KERNEL_ERROR_ETIMEDOUT = static_cast<int>(0x8002003c);
 static constexpr int EVFILT_READ = -1;
 static constexpr int EVFILT_WRITE = -2;
 static constexpr std::uint16_t EV_EOF = 0x8000;
+static constexpr int SCE_KERNEL_ERROR_EINVAL = static_cast<int>(0x80020016);
 
 static void Require(bool value) { if (!value) std::abort(); }
-
-static bool Rejects(int (APS5_VABI *add)(KernelEqueue, int, std::size_t, void*), KernelEqueue eq, int fd, std::size_t size) {
-    try {
-        add(eq, fd, size, nullptr);
-    } catch (const std::exception&) {
-        return true;
-    }
-    return false;
-}
 
 int main() {
     const int listener = socket_nid_postfix(2, 1, 6);
@@ -132,7 +128,27 @@ int main() {
     Require(sceKernelDeleteEqueue(blocking) == SCE_OK);
 
     Require(sceKernelAddReadEvent(eq, client, 1, nullptr) == SCE_KERNEL_ERROR_EBADF);
-    Require(Rejects(sceKernelAddReadEvent, eq, 0, 1));
+    // a file only carries the vnode filter, so the call answers EINVAL for it, as kevent does
+    const std::string plain = "anyps5-equeue-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+    const int file = open_nid_postfix(plain.c_str(), 0x0002 | 0x0200, 0600);
+    Require(file >= 0);
+    Require(sceKernelAddReadEvent(eq, file, 1, nullptr) == SCE_KERNEL_ERROR_EINVAL);
+    Require(sceKernelAddWriteEvent(eq, file, 1, nullptr) == SCE_KERNEL_ERROR_EINVAL);
+    Require(close_nid_postfix(file) == 0);
+    Require(unlink_nid_postfix(plain.c_str()) == 0);
+    // a pipe carries them, and a wait blocked on one has to wake once its data arrives; its own
+    // equeue, since the registered socket events of the one above are still in the queue
+    int pipe[2];
+    Require(pipe_nid_postfix(pipe) == 0);
+    KernelEqueue pipes = 0;
+    Require(sceKernelCreateEqueue(&pipes, "pipe") == SCE_OK);
+    Require(sceKernelAddReadEvent(pipes, pipe[0], 5, nullptr) == SCE_OK);
+    std::thread pipeWriter([&pipe] { Require(write_nid_postfix(pipe[1], "hello", 5) == 5); });
+    Require(sceKernelWaitEqueue(pipes, events.data(), events.size(), &count, &timeout) == SCE_OK);
+    pipeWriter.join();
+    Require(count == 1 && events[0].ident == static_cast<std::uintptr_t>(pipe[0]) && events[0].filter == EVFILT_READ && events[0].data == 5);
+    Require(sceKernelDeleteEqueue(pipes) == SCE_OK);
+    Require(close_nid_postfix(pipe[0]) == 0 && close_nid_postfix(pipe[1]) == 0);
     // the size is the low water mark: two bytes below it leave the event pending, the fourth byte
     // reports it, and a re-add below the mark drops the watermark
     Require(sceKernelDeleteReadEvent(eq, accepted) == SCE_OK);

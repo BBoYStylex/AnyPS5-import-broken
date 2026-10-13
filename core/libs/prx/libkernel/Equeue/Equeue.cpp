@@ -1,4 +1,5 @@
 #include "Equeue.hpp"
+#include "prx/libkernel/File/include/File.hpp"
 #include "prx/libkernel/Time/include/Time.hpp"
 #include "prx/libc/include/General.hpp"
 #include "prx/libkernel/Socket/include/SocketRuntime.hpp"
@@ -595,12 +596,17 @@ int APS5_VABI sceKernelDeleteAmprSystemEvent(KernelEqueue eq, int id) {
 }
 
 static int AddDescriptorEvent(KernelEqueue eq, int fd, std::size_t size, void* udata, int16_t filter) {
-    const bool isSocket = GuestSockets::IsOpen(fd);
-    if (!isSocket && DescriptorIsOpen_nid_no_patch(fd)) {
-        NotImplemented_nid_no_patch(filter == EVFILT_READ ? "sceKernelAddReadEvent: non-socket descriptor" : "sceKernelAddWriteEvent: non-socket descriptor");
+    // a socket and a pipe carry the read and write filters, while a file only carries the vnode one,
+    // which is why the call answers EINVAL for it, as kevent does
+    const auto kind = GuestSockets::Kind(fd);
+    if (kind == GuestSockets::DescriptorKind::File) {
+        return SCE_KERNEL_ERROR_EINVAL;
     }
-    if (!isSocket) {
-        return SCE_KERNEL_ERROR_EBADF;
+    if (kind == GuestSockets::DescriptorKind::Other) {
+        if (!DescriptorIsOpen_nid_no_patch(fd)) {
+            return SCE_KERNEL_ERROR_EBADF;
+        }
+        NotImplemented_nid_no_patch(filter == EVFILT_READ ? "sceKernelAddReadEvent: descriptor that is neither a socket, a pipe nor a file" : "sceKernelAddWriteEvent: descriptor that is neither a socket, a pipe nor a file");
     }
     // size is the low water mark the event waits for, as it is in sceKernelAddReadEvent and
     // sceKernelAddWriteEvent; 0 and 1 are the readiness the default knote reports
@@ -635,7 +641,7 @@ KernelEqueueEvent EqueueDescriptorEvent(int descriptor, int16_t filter, uint16_t
     event.filter.pollFunc = [](KernelEqueueEvent* e) {
         std::int64_t data = 0;
         bool eof = false;
-        if (!GuestSockets::Ready(static_cast<int>(e->event.ident), e->event.filter == EVFILT_WRITE, &data, &eof)) {
+        if (!GuestSockets::FilterReady(static_cast<int>(e->event.ident), e->event.filter == EVFILT_WRITE, &data, &eof)) {
             return false;
         }
         e->event.data = static_cast<intptr_t>(data);

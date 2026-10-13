@@ -318,15 +318,28 @@ bool GuestSockets::WaitAny(const std::vector<Interest>& interests, std::uint64_t
     constexpr short ReadMask = POLLIN;
     constexpr short WriteMask = POLLOUT;
 #endif
+    std::vector<std::pair<int, bool>> nonSockets;
     {
         std::lock_guard lock(socketsMutex);
         for (const auto& interest : interests) {
             const auto found = sockets.find(interest.descriptor);
-            if (found == sockets.end()) continue;
+            if (found == sockets.end()) {
+                nonSockets.emplace_back(interest.descriptor, interest.write);
+                continue;
+            }
             held.push_back(found->second);
             entries.push_back({found->second->value, interest.write ? WriteMask : ReadMask, 0});
         }
     }
+#ifndef _WIN32
+    // a pipe is an ordinary host descriptor, so poll waits on it directly: a knote above the waker
+    // would never be seen otherwise. WSAPoll only takes sockets, so Windows leaves it to the slice.
+    for (const auto& [descriptor, write] : nonSockets) {
+        if (Kind(descriptor) == DescriptorKind::Pipe) {
+            entries.push_back({descriptor, write ? WriteMask : ReadMask, 0});
+        }
+    }
+#endif
     entries.push_back({waker, ReadMask, 0});
     std::uint64_t remaining = 0;
     if (deadlineNanos != 0) {
@@ -337,22 +350,25 @@ bool GuestSockets::WaitAny(const std::vector<Interest>& interests, std::uint64_t
     // A low water mark cannot be expressed as poll readiness: a socket below the mark is already
     // readable for poll, so the caller has to compare the count again. Return to it at most every
     // millisecond while one is pending, as the pipe path does, so the wait does not spin.
-    const bool lowWatermark = std::any_of(interests.begin(), interests.end(),
+    bool slice = std::any_of(interests.begin(), interests.end(),
         [](const Interest& interest) { return interest.minimum > 1; });
-    if (lowWatermark) remaining = (remaining == 0 || remaining > 1000000) ? 1000000 : remaining;
+#ifdef _WIN32
+    slice = slice || !nonSockets.empty();
+#endif
+    if (slice) remaining = (remaining == 0 || remaining > 1000000) ? 1000000 : remaining;
 #ifdef _WIN32
     INT timeout = -1;
     if (deadlineNanos != 0) {
         if (remaining < 1000000) return false;
         timeout = static_cast<INT>(std::min<std::uint64_t>(remaining / 1000000, INT_MAX));
-    } else if (lowWatermark) {
+    } else if (slice) {
         timeout = 1;
     }
     if (WSAPoll(entries.data(), static_cast<ULONG>(entries.size()), timeout) == SOCKET_ERROR)
         throw std::runtime_error("equeue wait: WSAPoll failed, guest errno " + std::to_string(NativeError()));
 #else
     timespec timeout{static_cast<time_t>(remaining / 1000000000), static_cast<long>(remaining % 1000000000)};
-    if (::ppoll(entries.data(), entries.size(), deadlineNanos != 0 || lowWatermark ? &timeout : nullptr, nullptr) < 0 && errno != EINTR)
+    if (::ppoll(entries.data(), entries.size(), deadlineNanos != 0 || slice ? &timeout : nullptr, nullptr) < 0 && errno != EINTR)
         throw std::runtime_error("equeue wait: ppoll failed, guest errno " + std::to_string(NativeError()));
 #endif
     char drained[16];
@@ -445,18 +461,23 @@ constexpr int FileAccessInformationClass = 8;
 constexpr int FilePipeLocalInformationClass = 24;
 constexpr ULONG PipeClosingState = 4;
 constexpr ULONG PipeAtomicBytes = 512;
-bool PipeReadiness(int descriptor, short events, short& revents) {
+bool QueryPipe(int descriptor, ACCESS_MASK* access, PipeLocalInformation* pipe) {
     const auto handle = reinterpret_cast<HANDLE>(::_get_osfhandle(descriptor));
     if (handle == INVALID_HANDLE_VALUE || GetFileType(handle) != FILE_TYPE_PIPE) return false;
     static const auto query = reinterpret_cast<QueryInformationFile>(
         reinterpret_cast<void*>(GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtQueryInformationFile")));
     if (!query) throw std::runtime_error("poll: NtQueryInformationFile is unavailable");
     PipeIoStatus status{};
+    if (query(handle, &status, access, sizeof(*access), FileAccessInformationClass) < 0 ||
+        query(handle, &status, pipe, sizeof(*pipe), FilePipeLocalInformationClass) < 0)
+        throw std::runtime_error("poll: querying pipe descriptor " + std::to_string(descriptor) + " failed");
+    return true;
+}
+
+bool PipeReadiness(int descriptor, short events, short& revents) {
     ACCESS_MASK access = 0;
     PipeLocalInformation pipe{};
-    if (query(handle, &status, &access, sizeof(access), FileAccessInformationClass) < 0 ||
-        query(handle, &status, &pipe, sizeof(pipe), FilePipeLocalInformationClass) < 0)
-        throw std::runtime_error("poll: querying pipe descriptor " + std::to_string(descriptor) + " failed");
+    if (!QueryPipe(descriptor, &access, &pipe)) return false;
     if ((events & GuestPollWritable) && !(access & FILE_WRITE_DATA)) ThrowReadEndWritable(descriptor);
     const bool closed = pipe.state == PipeClosingState;
     revents = 0;
@@ -681,6 +702,69 @@ int GuestSockets::Poll(KernelSocketPoll::Entry* entries, int count, int timeoutM
         if (revents != 0) ++ready;
     }
     return ready;
+}
+
+GuestSockets::DescriptorKind GuestSockets::Kind(int descriptor) {
+    if (IsOpen(descriptor)) return DescriptorKind::Socket;
+#ifdef _WIN32
+    const auto handle = reinterpret_cast<HANDLE>(::_get_osfhandle(descriptor));
+    if (handle == INVALID_HANDLE_VALUE) return DescriptorKind::Other;
+    const DWORD type = GetFileType(handle);
+    if (type == FILE_TYPE_PIPE) return DescriptorKind::Pipe;
+    if (type == FILE_TYPE_DISK) return DescriptorKind::File;
+    return DescriptorKind::Other;
+#else
+    if (descriptor < 0) return DescriptorKind::Other;
+    struct stat status{};
+    if (::fstat(descriptor, &status) != 0) return DescriptorKind::Other;
+    if (S_ISFIFO(status.st_mode)) return DescriptorKind::Pipe;
+    if (S_ISREG(status.st_mode) || S_ISDIR(status.st_mode)) return DescriptorKind::File;
+    return DescriptorKind::Other;
+#endif
+}
+
+bool GuestSockets::FilterReady(int descriptor, bool write, std::int64_t* data, bool* eof) {
+    if (IsOpen(descriptor)) return Ready(descriptor, write, data, eof);
+    if (Kind(descriptor) != DescriptorKind::Pipe) return false;
+#ifdef _WIN32
+    ACCESS_MASK access = 0;
+    PipeLocalInformation pipe{};
+    if (!QueryPipe(descriptor, &access, &pipe)) return false;
+    const bool closed = pipe.state == PipeClosingState;
+    if (write) {
+        // filt_pipewrite reports the free space and returns 1 at end of file, when the read end is
+        // gone; the host only exposes the outbound quota, so that stands in for the free space
+        *data = closed ? 0 : static_cast<std::int64_t>(pipe.writeQuotaAvailable);
+        *eof = closed;
+        return *eof || *data >= PipeAtomicBytes;
+    }
+    *data = static_cast<std::int64_t>(pipe.readDataAvailable);
+    // filt_piperead only sets EV_EOF once the buffer is drained
+    *eof = closed && *data == 0;
+    return *eof || *data > 0;
+#else
+    pollfd entry{descriptor, static_cast<short>(write ? POLLOUT : POLLIN), 0};
+    const int result = ::poll(&entry, 1, 0);
+    if (result < 0) throw std::runtime_error("equeue: polling pipe descriptor " + std::to_string(descriptor) + " failed, errno " + std::to_string(errno));
+    // a read end reports POLLHUP once the last writer is gone, which filt_piperead sees as PIPE_EOF
+    const bool hangup = result > 0 && (entry.revents & (POLLHUP | POLLERR)) != 0;
+    const bool ready = result > 0 && (entry.revents & (write ? POLLOUT : POLLIN)) != 0;
+    if (write) {
+        const int capacity = ::fcntl(descriptor, F_GETPIPE_SZ);
+        int buffered = 0;
+        if (capacity < 0 || ::ioctl(descriptor, FIONREAD, &buffered) != 0)
+            throw std::runtime_error("equeue: querying pipe descriptor " + std::to_string(descriptor) + " failed, errno " + std::to_string(errno));
+        *data = hangup ? 0 : capacity - buffered;
+        *eof = hangup;
+        return *eof || ready;
+    }
+    int buffered = 0;
+    if (::ioctl(descriptor, FIONREAD, &buffered) != 0)
+        throw std::runtime_error("equeue: querying pipe descriptor " + std::to_string(descriptor) + " failed, errno " + std::to_string(errno));
+    *data = buffered;
+    *eof = hangup && buffered == 0;
+    return *eof || ready;
+#endif
 }
 
 extern "C" {

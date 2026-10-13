@@ -135,11 +135,17 @@ int AddDescriptorKnote(const KernelEqueueRef& queue, KernelEvent& change, std::u
         }
         NotImplemented_nid_no_patch("kevent: EVFILT_READ on a kqueue descriptor");
     }
-    if (!GuestSockets::IsOpen(descriptor)) {
-        NotImplemented_nid_no_patch(change.filter == EVFILT_READ ? "kevent: EVFILT_READ on a non-socket descriptor" : "kevent: EVFILT_WRITE on a non-socket descriptor");
+    // a socket and a pipe carry the read and write filters, while a file only carries the vnode one,
+    // which answers EINVAL here; the descriptor number does not tell them apart
+    const auto kind = GuestSockets::Kind(descriptor);
+    if (kind == GuestSockets::DescriptorKind::File) {
+        return GUEST_EINVAL;
+    }
+    if (kind == GuestSockets::DescriptorKind::Other) {
+        NotImplemented_nid_no_patch(change.filter == EVFILT_READ ? "kevent: EVFILT_READ on a descriptor that is neither a socket, a pipe nor a file" : "kevent: EVFILT_WRITE on a descriptor that is neither a socket, a pipe nor a file");
     }
     if ((flags & EV_CLEAR) != 0) {
-        NotImplemented_nid_no_patch("kevent: EV_CLEAR on a socket");
+        NotImplemented_nid_no_patch(kind == GuestSockets::DescriptorKind::Socket ? "kevent: EV_CLEAR on a socket" : "kevent: EV_CLEAR on a pipe");
     }
     // NOTE_LOWAT holds the knote until the socket has data (or free space) instead of reporting every
     // readiness. The value is kn_sdata of the change and stays apart from kn_data, which the filter
