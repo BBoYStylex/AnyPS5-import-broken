@@ -1,8 +1,10 @@
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <cstdlib>
+#include <limits>
 #include <thread>
 struct Timeval {
     std::int64_t tv_sec;
@@ -14,7 +16,23 @@ struct ResourceUsage {
     std::int64_t rest[14];
 };
 extern "C" int APS5_VABI getrusage_nid_postfix(int who, ResourceUsage* usage);
+extern "C" int* APS5_VABI __error_nid_postfix();
+constexpr int GUEST_EFAULT = 14;
+constexpr int GUEST_EINVAL = 22;
 static void Require(bool value) { if (!value) std::abort(); }
+static void RequireError(int who, ResourceUsage* usage, int error) {
+    *__error_nid_postfix() = 0;
+    Require(getrusage_nid_postfix(who, usage) == -1);
+    Require(*__error_nid_postfix() == error);
+}
+static void RequireInvalidWho(int who) {
+    ResourceUsage usage;
+    std::memset(&usage, 0xa5, sizeof(usage));
+    RequireError(who, &usage, GUEST_EINVAL);
+    const unsigned char* bytes = reinterpret_cast<const unsigned char*>(&usage);
+    for (std::size_t i = 0; i < sizeof(usage); ++i) Require(bytes[i] == 0xa5);
+    RequireError(who, nullptr, GUEST_EINVAL);
+}
 static std::int64_t CpuMicros(int who) {
     ResourceUsage usage{};
     Require(getrusage_nid_postfix(who, &usage) == 0);
@@ -45,4 +63,11 @@ int main() {
     });
     worker.join();
     Require(CpuMicros(0) >= 500000);
+    RequireInvalidWho(2);
+    RequireInvalidWho(5);
+    RequireInvalidWho(-2);
+    RequireInvalidWho(std::numeric_limits<int>::min());
+    RequireError(0, nullptr, GUEST_EFAULT);
+    RequireError(1, nullptr, GUEST_EFAULT);
+    RequireError(-1, nullptr, GUEST_EFAULT);
 }
