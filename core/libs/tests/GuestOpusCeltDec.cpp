@@ -1,9 +1,9 @@
 #include "prx/libc/include/general/VabiMacros.hpp"
+#include <algorithm>
+#include <array>
 #include <cstdint>
-#include <cstdio>
-#include <functional>
+#include <cstdlib>
 #include <stdexcept>
-#include <string>
 
 extern "C" {
 int APS5_VABI sceOpusCeltDecInitialize(std::uint32_t*);
@@ -14,31 +14,60 @@ int APS5_VABI sceOpusCeltDecDecode(void*, const std::uint8_t*, int, std::int16_t
 int APS5_VABI sceOpusCeltDecDestroy(void*);
 }
 
-static int failures = 0;
+namespace {
 
-static void RequireNotImplemented(const char* name, const std::function<void()>& call) {
-    try {
-        call();
-    } catch (const std::runtime_error& error) {
-        if (std::string(error.what()) == std::string(name) + " not implemented") return;
-        std::fprintf(stderr, "%s threw: %s\n", name, error.what());
-        ++failures;
-        return;
-    }
-    std::fprintf(stderr, "%s returned instead of reporting that it is not implemented\n", name);
-    ++failures;
+void Require(bool value) { if (!value) std::abort(); }
+
+template <typename TFunction>
+void RequireThrows(TFunction function) {
+    try { function(); } catch (const std::runtime_error&) { return; }
+    std::abort();
 }
 
+} // namespace
+
 int main() {
-    std::uint32_t context = 0;
-    std::uint8_t state[64] = {};
-    std::int16_t pcm[16] = {};
-    const std::uint8_t packet[] = {0xFC, 0x00};
-    RequireNotImplemented("sceOpusCeltDecInitialize", [&] { sceOpusCeltDecInitialize(&context); });
-    RequireNotImplemented("sceOpusCeltDecTerminate", [&] { sceOpusCeltDecTerminate(&context); });
-    RequireNotImplemented("sceOpusCeltDecGetSize", [] { sceOpusCeltDecGetSize(2); });
-    RequireNotImplemented("sceOpusCeltDecCreateEx", [&] { sceOpusCeltDecCreateEx(&context, state, 48000, 2); });
-    RequireNotImplemented("sceOpusCeltDecDecode", [&] { sceOpusCeltDecDecode(state, packet, sizeof(packet), pcm, sizeof(pcm)); });
-    RequireNotImplemented("sceOpusCeltDecDestroy", [&] { sceOpusCeltDecDestroy(state); });
-    return failures == 0 ? 0 : 1;
+    std::uint32_t context = 0, otherContext = 0;
+    Require(sceOpusCeltDecInitialize(&context) == 0);
+    Require(sceOpusCeltDecInitialize(&otherContext) == 0 && context != otherContext);
+    RequireThrows([&] { sceOpusCeltDecInitialize(&context); });
+    Require(sceOpusCeltDecGetSize(1) == 640 && sceOpusCeltDecGetSize(2) == 640);
+    RequireThrows([&] { sceOpusCeltDecGetSize(0); });
+    RequireThrows([&] { sceOpusCeltDecGetSize(3); });
+    std::array<std::uint8_t, 640> state{}, otherState{}, monoState{};
+    Require(sceOpusCeltDecCreateEx(&context, state.data(), 48000, 2) == 0);
+    Require(sceOpusCeltDecCreateEx(&otherContext, otherState.data(), 48000, 2) == 0);
+    Require(sceOpusCeltDecCreateEx(&context, monoState.data(), 48000, 1) == 0);
+    RequireThrows([&] { sceOpusCeltDecTerminate(&context); });
+    RequireThrows([&] { sceOpusCeltDecCreateEx(&context, state.data(), 48000, 2); });
+    std::array<std::uint8_t, 640> unsupported{};
+    for (int rate : {8000, 12000, 16000, 24000})
+        RequireThrows([&] { sceOpusCeltDecCreateEx(&context, unsupported.data(), rate, 2); });
+    RequireThrows([&] { sceOpusCeltDecCreateEx(&context, nullptr, 48000, 2); });
+    RequireThrows([&] { sceOpusCeltDecCreateEx(nullptr, unsupported.data(), 48000, 2); });
+    std::array<std::int16_t, 1922> pcm{};
+    pcm.fill(12345);
+    const std::uint8_t truncated[] = {0x7f};
+    RequireThrows([&] { sceOpusCeltDecDecode(state.data(), truncated, 1, pcm.data() + 1, 3840); });
+    RequireThrows([&] { sceOpusCeltDecDecode(state.data(), nullptr, 0, pcm.data() + 1, 3840); });
+    RequireThrows([&] { sceOpusCeltDecDecode(nullptr, truncated, 1, pcm.data() + 1, 3840); });
+    Require(std::all_of(pcm.begin(), pcm.end(), [](auto value) { return value == 12345; }));
+    std::array<std::uint8_t, 640> unknown{};
+    RequireThrows([&] { sceOpusCeltDecDecode(unknown.data(), truncated, 1, pcm.data(), 3840); });
+    RequireThrows([&] { sceOpusCeltDecDestroy(unknown.data()); });
+    const std::uint8_t invalidFraming[] = {0x7d, 1};
+    std::array<std::int16_t, 3842> rejected;
+    rejected.fill(12345);
+    RequireThrows([&] { sceOpusCeltDecDecode(state.data(), invalidFraming, 2, rejected.data() + 1, 7680); });
+    Require(std::all_of(rejected.begin(), rejected.end(), [](auto value) { return value == 12345; }));
+    Require(sceOpusCeltDecDestroy(state.data()) == 0);
+    RequireThrows([&] { sceOpusCeltDecDestroy(state.data()); });
+    Require(sceOpusCeltDecCreateEx(&context, state.data(), 48000, 2) == 0);
+    Require(sceOpusCeltDecDestroy(state.data()) == 0);
+    Require(sceOpusCeltDecDestroy(monoState.data()) == 0);
+    Require(sceOpusCeltDecTerminate(&context) == 0);
+    RequireThrows([&] { sceOpusCeltDecTerminate(&context); });
+    RequireThrows([&] { sceOpusCeltDecCreateEx(&context, state.data(), 48000, 2); });
+    Require(sceOpusCeltDecDestroy(otherState.data()) == 0);
+    Require(sceOpusCeltDecTerminate(&otherContext) == 0);
 }
