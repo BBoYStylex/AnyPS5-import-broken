@@ -2137,6 +2137,54 @@ void multisampleTests() {
     state = DecodeState(queue);
     Require(state.samples == 8 && !state.customSampleLocations && state.colors.size() == 1 && state.colors[0].samples == 8, "the standard 8x pattern (sample 7 at (7, -7), PPSA99902's registers) did not decode as standard");
     AgcDriver::Graphics::ValidateSampleLocations({}, state);
+    for (const auto log2 : {0u, 1u, 2u, 3u}) {
+        queue = log2 == 0 ? makeState() : multisampled();
+        queue.context[0x1b3] = 2u;
+        queue.context[0x1b4] = 2u;
+        queue.context[0x2f8] = (log2 << 20u) | log2 | 0x20000000u;
+        queue.context[0x31d] = (log2 << 12u) | (log2 << 15u);
+        for (std::uint32_t pixel = 0; pixel < 4; ++pixel) {
+            queue.context[0x2fe + pixel * 4u] = log2 == 3 ? 0xbd153fd1u : log2 == 2 ? 0x622ae6aeu : 0xcc44u;
+            queue.context[0x2ff + pixel * 4u] = log2 == 3 ? 0x9773f95bu : 0u;
+        }
+        std::vector<AgcDriver::Graphics::RegisterRead> sampleReads;
+        AgcDriver::Graphics::RegisterReadLog() = &sampleReads;
+        const auto coveredCenter = DecodeState(queue);
+        const auto coveredRejection = AgcDriver::Graphics::DrawRejection(queue, false);
+        AgcDriver::Graphics::RegisterReadLog() = nullptr;
+        Require(coveredCenter.samples == (1u << log2) && !coveredCenter.customSampleLocations, "covered-centroid mode changed the sample count or locations without centroid inputs");
+        for (const auto read : sampleReads) Require(AgcDriver::Graphics::DrawKeyCovers(read), "DrawKeyRegisters lacks a covered-centroid register");
+        Require(coveredRejection.empty(), "covered-centroid mode without centroid inputs was refused: " + coveredRejection);
+        for (const auto centroid : {4u, 64u, 68u}) {
+            queue.context[0x1b3] = 2u | centroid;
+            queue.context[0x1b4] = 2u | centroid;
+            expectFailure([&] { DecodeState(queue); }, "COVERED_CENTROID_IS_CENTER with active or unspecified centroid inputs");
+            Require(AgcDriver::Graphics::DrawRejection(queue, false).find("COVERED_CENTROID_IS_CENTER with active or unspecified centroid inputs") != std::string::npos, "the precheck accepted active covered-centroid interpolation");
+            queue.context[0x1b4] = 2u;
+            Require(DecodeState(queue).samples == (1u << log2) && AgcDriver::Graphics::DrawRejection(queue, false).empty(), "an unaddressed centroid input changed covered-centroid mode");
+            queue.context[0x1b3] = 2u;
+            queue.context[0x1b4] = 2u | centroid;
+            Require(DecodeState(queue).samples == (1u << log2) && AgcDriver::Graphics::DrawRejection(queue, false).empty(), "a disabled centroid input changed covered-centroid mode");
+        }
+        queue.context[0x1b3] = 2u;
+        queue.context[0x1b4] = 2u;
+        for (const auto offset : {0x1b3u, 0x1b4u}) {
+            queue.context.erase(offset);
+            expectFailure([&] { DecodeState(queue); }, "COVERED_CENTROID_IS_CENTER with active or unspecified centroid inputs");
+            Require(AgcDriver::Graphics::DrawRejection(queue, false).find("COVERED_CENTROID_IS_CENTER with active or unspecified centroid inputs") != std::string::npos, "the precheck accepted unspecified centroid inputs");
+            queue.context[offset] = 2u;
+        }
+        const auto withProgram = queue;
+        queue.shader[0x008] = 0;
+        queue.context[0x8e] = 0;
+        queue.context.erase(0x1b3);
+        queue.context.erase(0x1b4);
+        Require(DecodeState(queue).samples == (1u << log2) && AgcDriver::Graphics::DrawRejection(queue, false).empty(), "covered-centroid mode was refused with no pixel program");
+        queue = withProgram;
+        queue.context[0x2f8] |= 0x10u;
+        expectFailure([&] { DecodeState(queue); }, "coverage conversion or nonstandard multisampling");
+        Require(AgcDriver::Graphics::DrawRejection(queue, false).find("coverage conversion or nonstandard multisampling") != std::string::npos, "covered-centroid handling admitted unrelated AA bits");
+    }
     queue = multisampled();
     queue.context[0x31d] = 0x1000;
     expectFailure([&] { DecodeState(queue); }, "fewer fragments than samples");
@@ -5074,6 +5122,7 @@ void validationTests() {
         logoAttribute.resource.fields = {0x4bf1bd60u, 0x004c0002u, 4u, 0x0004a3acu};
         const auto logoReadBytes = AgcDriver::Graphics::VertexBufferReadSize(logoAttribute, 3, 1);
         Require(logoReadBytes == 240 && AgcDriver::Graphics::VertexBufferAllocationSize(logoAttribute, logoReadBytes) == 304, "DREDGE logo final vertex record bounds regressed");
+        Require(AgcDriver::Graphics::VertexBufferReadOffset(attribute, 2, 7) == 64, "vertex range includes records before the first vertex");
         Require(AgcDriver::Graphics::VertexBufferReadSize(attribute, 3, 1) == 112, "an index past the records still spans its fetch");
         {
             auto wider = attribute;
@@ -5096,6 +5145,7 @@ void validationTests() {
             Require(AgcDriver::Graphics::ClampDrawIndices(std::as_writable_bytes(std::span(narrow)), 2, false, 4u) == 4u && narrow[0] == 4u && narrow[1] == 1u, "clamping 16-bit indices failed");
         }
         attribute.fetchIndex = 1;
+        Require(AgcDriver::Graphics::VertexBufferReadOffset(attribute, 2, 7) == 224, "instance range includes records before the first instance");
         Require(AgcDriver::Graphics::VertexBufferReadSize(attribute, 100, 2) == 48, "instance attributes used the vertex index");
         Require(AgcDriver::Graphics::VertexBufferReadSize(attribute, 100, 2, 1) == 80, "first instance was ignored");
         Require(AgcDriver::Graphics::VertexBufferReadSize(attribute, 0, 2, 2) == 112, "a first instance past the records still spans its fetch");
@@ -5114,6 +5164,7 @@ void validationTests() {
         attribute.resource.fields[2] = 16;
         Require(AgcDriver::Graphics::VertexBufferReadSize(attribute, 100, 2) == 16, "zero stride must repeat one value");
         Require(AgcDriver::Graphics::VertexBufferAllocationSize(attribute, 16) == 16, "zero stride vertex allocation must remain unchanged");
+        Require(AgcDriver::Graphics::VertexBufferReadOffset(attribute, 100, 7) == 0, "zero-stride input skipped its repeated value");
         attribute.resource.fields[2] = 8;
         expectFailure([&] { AgcDriver::Graphics::VertexBufferReadSize(attribute, 0, 1); }, "byte range");
         Require(!AgcDriver::Graphics::VertexFetchOutOfRange(attribute), "a structured zero-stride fetch was treated as out of range");
@@ -5622,6 +5673,11 @@ int main(int argc, char** argv) {
             descriptorPoolResetFailureTest();
             std::cerr << "descriptor pool reset failure did not terminate\n";
             return 1;
+        }
+        if (argc == 2 && std::string_view(argv[1]) == "--covered-centroid-state") {
+            multisampleTests();
+            std::cout << "Covered-centroid and multisample state checks passed\n";
+            return 0;
         }
         {
             const AgcDriver::Graphics::Context context{};

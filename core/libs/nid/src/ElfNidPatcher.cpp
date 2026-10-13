@@ -36,6 +36,18 @@ GnuHashLayout ReadGnuHashLayout(const std::vector<std::uint8_t>& elf, std::size_
     return layout;
 }
 
+void ValidateGnuHash(const std::vector<std::uint8_t>& elf, std::size_t offset, std::size_t size, std::size_t symCount) {
+    if (offset > elf.size() || size > elf.size() - offset || size < 16u)
+        throw std::runtime_error("invalid gnu.hash section range");
+    const auto layout = ReadGnuHashLayout(elf, offset);
+    if (layout.SymOffset > symCount || !layout.BloomSize || (layout.BloomSize & (layout.BloomSize - 1u)) ||
+        layout.BloomShift >= 32u || (!layout.NBuckets && layout.SymOffset != symCount))
+        throw std::runtime_error("invalid gnu.hash geometry");
+    const std::uint64_t required = 16u + std::uint64_t{layout.BloomSize} * 8u +
+        std::uint64_t{layout.NBuckets} * 4u + (symCount - layout.SymOffset) * 4u;
+    if (required > size) throw std::runtime_error("gnu.hash section too small to rebuild in place");
+}
+
 void ReorderDynSymForGnuHash(
     std::vector<std::uint8_t>& elf,
     std::size_t dynSymOffset,
@@ -333,7 +345,6 @@ void ElfNidPatcher::PatchNids(std::vector<std::uint8_t>& elf, const std::string&
         if (shdr.sh_type == kShtGnuHash) {
             gnuHashOffset = static_cast<std::size_t>(shdr.sh_offset);
             gnuHashSize = static_cast<std::size_t>(shdr.sh_size);
-            gnuHashSymOffset = Read<std::uint32_t>(elf, gnuHashOffset + 4u);
         }
         if (shdr.sh_type == kShtGnuVersym)
             versymOffset = static_cast<std::size_t>(shdr.sh_offset);
@@ -345,6 +356,10 @@ void ElfNidPatcher::PatchNids(std::vector<std::uint8_t>& elf, const std::string&
 
     const std::size_t symCount = dynSymSize / sizeof(Elf64_Sym);
     if (symCount == 0u) throw std::runtime_error(".dynsym is empty");
+    if (gnuHashOffset != 0u) {
+        ValidateGnuHash(elf, gnuHashOffset, gnuHashSize, symCount);
+        gnuHashSymOffset = Read<std::uint32_t>(elf, gnuHashOffset + 4u);
+    }
 
     const std::size_t dynStrSectionLink = [&]() -> std::size_t {
         for (std::uint16_t i = 0u; i < ehdr.e_shnum; ++i) {
@@ -427,7 +442,7 @@ void ElfNidPatcher::PatchNids(std::vector<std::uint8_t>& elf, const std::string&
     const auto addName = [&](std::uint32_t oldOffset, std::string value) {
         const auto existing = std::find_if(
             names.begin(), names.end(),
-            [&](const auto& entry) { return entry.first == oldOffset; }
+            [&](const auto& entry) { return entry.first == oldOffset && entry.second == value; }
         );
         if (existing == names.end()) names.emplace_back(oldOffset, std::move(value));
     };
@@ -463,8 +478,9 @@ void ElfNidPatcher::PatchNids(std::vector<std::uint8_t>& elf, const std::string&
         newDynStr.push_back(0u);
     }
 
-    std::vector<std::pair<std::uint32_t, std::uint32_t>> oldToNewOffset;
-    for (const auto& name : names) oldToNewOffset.emplace_back(name.first, valueOffsets.at(name.second));
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> preservedToNewOffset;
+    for (const auto offset : preservedOffsets)
+        preservedToNewOffset.emplace_back(offset, valueOffsets.at(ReadCStr(origDynStr, offset)));
 
     if (newDynStr.size() > dynStrSize) {
         throw std::runtime_error(
@@ -475,25 +491,15 @@ void ElfNidPatcher::PatchNids(std::vector<std::uint8_t>& elf, const std::string&
     newDynStr.resize(dynStrSize, 0u);
 
     std::vector<std::string> newSymbolNames(symCount);
-    for (std::size_t i = 1u; i < symCount; ++i) {
-        const std::size_t symOffset = dynSymOffset + i * sizeof(Elf64_Sym);
-        const auto sym = Read<Elf64_Sym>(elf, symOffset);
-        if (sym.st_name == 0u) continue;
-
-        const auto mapped = std::find_if(
-            oldToNewOffset.begin(), oldToNewOffset.end(),
-            [&](const auto& entry) { return entry.first == sym.st_name; }
-        );
-        if (mapped == oldToNewOffset.end()) continue;
-
-        newSymbolNames[i] = ReadCStr(newDynStr, mapped->second);
-        Write(elf, symOffset + offsetof(Elf64_Sym, st_name), mapped->second);
+    for (const auto& use : uses) {
+        newSymbolNames[use.symIndex] = use.newValue;
+        Write(elf, dynSymOffset + use.symIndex * sizeof(Elf64_Sym) + offsetof(Elf64_Sym, st_name), valueOffsets.at(use.newValue));
     }
 
     std::memcpy(elf.data() + dynStrOffset, newDynStr.data(), newDynStr.size());
 
-    RemapDynamicNeededOffsets(elf, ehdr, oldToNewOffset);
-    RemapVerneedOffsets(elf, ehdr, oldToNewOffset);
+    RemapDynamicNeededOffsets(elf, ehdr, preservedToNewOffset);
+    RemapVerneedOffsets(elf, ehdr, preservedToNewOffset);
 
     if (gnuHashOffset != 0u) {
         const auto bucketCount = Read<std::uint32_t>(elf, gnuHashOffset);
