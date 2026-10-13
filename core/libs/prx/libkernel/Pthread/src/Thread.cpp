@@ -6,6 +6,7 @@
 #include "prx/libkernel/KernelErrors.hpp"
 #include "prx/libc/include/CpuTopology.hpp"
 #include <algorithm>
+#include <cfenv>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -45,7 +46,9 @@ struct ThreadArgs {
     PthreadEntry entry;
     void* arg;
     PthreadPrivate* self;
-#ifndef _WIN32
+#ifdef _WIN32
+    std::fenv_t environment;
+#else
     sigset_t signalMask;
 #endif
 };
@@ -402,11 +405,16 @@ static void RunThread(std::unique_ptr<ThreadArgs> args) {
     TimedWait::BindThreadWaitState(&self->waitCount);
     CurrentGuestState().current = self;
     RegisterStack(self);
-#ifndef _WIN32
+#ifdef _WIN32
+    const std::fenv_t environment = args->environment;
+#else
     const sigset_t signalMask = args->signalMask;
 #endif
     args.reset();
-#ifndef _WIN32
+#ifdef _WIN32
+    if (std::fesetenv(&environment) != 0)
+        throw std::runtime_error("Restoring guest thread floating-point environment");
+#else
     pthread_sigmask(SIG_SETMASK, &signalMask, nullptr);
 #endif
     finishThread(self, entry(arg));
@@ -545,6 +553,11 @@ extern "C" {
 
 int APS5_VABI scePthreadCreate(Pthread* thread, const PthreadAttr* attr, PthreadEntry entry, void* arg, const char* name) {
     if (!thread || !entry) throw std::runtime_error("scePthreadCreate: null arg");
+#ifdef _WIN32
+    std::fenv_t environment;
+    if (std::fegetenv(&environment) != 0)
+        throw std::runtime_error("Capturing guest thread floating-point environment");
+#endif
     if (attr && !*attr) attr = nullptr;
     auto p = std::make_unique<PthreadPrivate>(attr ? *attr : nullptr);
     bool detached = false;
@@ -564,6 +577,7 @@ int APS5_VABI scePthreadCreate(Pthread* thread, const PthreadAttr* attr, Pthread
     std::promise<bool> start;
     auto args = std::make_unique<ThreadArgs>(ThreadArgs{entry, arg, p.get()});
 #ifdef _WIN32
+    args->environment = environment;
     SYSTEM_INFO system{};
     GetSystemInfo(&system);
     if (p->stackSize < 16384 || p->stackSize > std::numeric_limits<unsigned>::max() - HOST_STACK_MARGIN - system.dwPageSize)
