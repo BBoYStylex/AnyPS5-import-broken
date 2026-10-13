@@ -867,7 +867,7 @@ int APS5_VABI sceKernelAprGetFileStat(uint32_t id, FileStat* stat) {
 
 int APS5_VABI sceKernelAprSubmitCommandBuffer(const Apr::CommandBufferObject* buffer, uint32_t priority) {
     (void)priority;
-    if (!buffer) return _fail(GUEST_EINVAL);
+    if (!buffer || buffer->offset > buffer->size) return _fail(GUEST_EINVAL);
     _submit(buffer->base, buffer->offset, false);
     return 0;
 }
@@ -875,7 +875,7 @@ int APS5_VABI sceKernelAprSubmitCommandBuffer(const Apr::CommandBufferObject* bu
 int APS5_VABI sceKernelAprSubmitCommandBufferAndGetId(const Apr::CommandBufferObject* buffer, uint32_t priority, uint32_t* id) {
     if (!id) return _fail(GUEST_EINVAL);
     (void)priority;
-    if (!buffer) return _fail(GUEST_EINVAL);
+    if (!buffer || buffer->offset > buffer->size) return _fail(GUEST_EINVAL);
     *id = _submit(buffer->base, buffer->offset, false);
     return 0;
 }

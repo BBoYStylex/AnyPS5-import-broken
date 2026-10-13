@@ -41,6 +41,7 @@ std::uint64_t APS5_VABI sceAmprMeasureCommandSizeSetMarker(const char*);
 std::uint64_t APS5_VABI sceAmprMeasureCommandSizeSetMarkerWithColor(const char*, std::uint32_t);
 int APS5_VABI sceKernelAprSubmitCommandBuffer(const Apr::CommandBufferObject*, std::uint32_t);
 int APS5_VABI sceKernelAprSubmitCommandBufferAndGetId(const Apr::CommandBufferObject*, std::uint32_t, std::uint32_t*);
+int APS5_VABI sceKernelAprSubmitCommandBufferAndGetResult(const Apr::CommandBufferObject*, std::uint32_t, std::uint32_t*, std::uint32_t*);
 int APS5_VABI sceKernelAprWaitCommandBuffer(std::uint32_t);
 int APS5_VABI sceAmprCommandBufferWaitOnAddress(Apr::CommandBufferObject*, volatile std::uint64_t*, std::uint64_t, std::uint8_t, std::uint8_t);
 int APS5_VABI sceAmprCommandBufferWaitOnCounter(Apr::CommandBufferObject*, std::uint8_t, std::uint32_t, std::uint8_t, std::uint8_t);
@@ -309,6 +310,74 @@ void TestSubmission() {
     Require(recorder.Commands() == 8);
     Require(sceKernelAprSubmitCommandBuffer(&recorder.buffer, 0) == 0);
     Require(first == 0x1111 && second == 0x2222);
+}
+
+int SubmitApr(const Apr::CommandBufferObject* buffer, unsigned variant, std::uint32_t* result, std::uint32_t* id) {
+    if (variant == 0) return sceKernelAprSubmitCommandBuffer(buffer, 0);
+    if (variant == 1) return sceKernelAprSubmitCommandBufferAndGetId(buffer, 0, id);
+    return sceKernelAprSubmitCommandBufferAndGetResult(buffer, 0, result, id);
+}
+
+void TestSubmissionCapacity(bool queued, unsigned variant) {
+    Recorder recorder;
+    alignas(8) std::uint64_t first = 0;
+    alignas(8) std::uint64_t second = 0;
+    Require(sceAmprCommandBufferWriteAddressOnCompletion(&recorder.buffer, &first, 0x1111) == 0);
+    const auto capacity = recorder.Offset();
+    Require(sceAmprCommandBufferWriteAddressOnCompletion(&recorder.buffer, &second, 0x2222) == 0);
+    recorder.buffer.size = capacity;
+    const auto before = recorder.buffer;
+    const auto memory = recorder.memory;
+
+    Recorder preceding;
+    Recorder following;
+    alignas(8) std::uint64_t release = 0;
+    if (queued) Require(sceAmprCommandBufferWaitOnAddress(&preceding.buffer, &release, 1, 0, 0) == 0);
+    std::uint32_t precedingId = 0;
+    Require(sceKernelAprSubmitCommandBufferAndGetId(&preceding.buffer, 0, &precedingId) == 0);
+    std::uint32_t id = 0xAABBCCDDu;
+    std::uint32_t result = 0x11223344u;
+    *__error_nid_postfix() = 0;
+    const int status = SubmitApr(&recorder.buffer, variant, &result, &id);
+    const int error = *__error_nid_postfix();
+    std::uint32_t followingId = 0;
+    const int followingStatus = sceKernelAprSubmitCommandBufferAndGetId(&following.buffer, 0, &followingId);
+    std::atomic_ref<std::uint64_t>(release).store(1, std::memory_order_release);
+    Require(sceKernelAprWaitCommandBuffer(precedingId) == 0);
+    Require(followingStatus == 0 && sceKernelAprWaitCommandBuffer(followingId) == 0);
+
+    if (status != -1 || error != 22 || first != 0 || second != 0) {
+        std::fprintf(stderr, "APR capacity: queued=%u variant=%u status=%d errno=%d first=%llu second=%llu\n",
+            unsigned(queued), variant, status, error, static_cast<unsigned long long>(first), static_cast<unsigned long long>(second));
+    }
+    Require(status == -1 && error == 22);
+    Require(first == 0 && second == 0);
+    Require(id == 0xAABBCCDDu && result == 0x11223344u);
+    Require(followingId == precedingId + 1);
+    Require(recorder.memory == memory);
+    Require(recorder.buffer.base == before.base && recorder.buffer.size == before.size);
+    Require(recorder.buffer.offset == before.offset && recorder.buffer.numCommands == before.numCommands);
+    Require(recorder.buffer.type == before.type && recorder.buffer.recording == before.recording);
+}
+
+void TestSubmissionCapacityBoundaries() {
+    for (unsigned variant = 0; variant < 3; ++variant) {
+        Recorder recorder;
+        alignas(8) std::uint64_t done = 0;
+        Require(sceAmprCommandBufferWriteAddressOnCompletion(&recorder.buffer, &done, 0x1234) == 0);
+        recorder.buffer.size = recorder.Offset();
+        std::uint32_t id = 0;
+        std::uint32_t result = 0x11223344u;
+        Require(SubmitApr(&recorder.buffer, variant, &result, &id) == 0);
+        if (variant != 0) Require(sceKernelAprWaitCommandBuffer(id) == 0);
+        Require(done == 0x1234);
+        if (variant == 2) Require(result == 0);
+
+        Apr::CommandBufferObject empty{};
+        Require(SubmitApr(&empty, variant, &result, &id) == 0);
+        if (variant != 0) Require(sceKernelAprWaitCommandBuffer(id) == 0);
+        Require(SubmitApr(nullptr, variant, &result, &id) == -1 && *__error_nid_postfix() == 22);
+    }
 }
 
 void TestKernelEventQueue() {
@@ -1391,6 +1460,11 @@ int main() {
     TestFullBuffer();
     TestOffsetPastBuffer();
     TestSubmission();
+    for (unsigned variant = 0; variant < 3; ++variant) {
+        TestSubmissionCapacity(false, variant);
+        TestSubmissionCapacity(true, variant);
+    }
+    TestSubmissionCapacityBoundaries();
     TestKernelEventQueue();
     TestWaits();
     TestWaitSatisfiedAfterSubmission();
