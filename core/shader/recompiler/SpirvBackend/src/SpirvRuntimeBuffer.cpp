@@ -299,21 +299,12 @@ std::uint32_t storeSource(SpirvEmitterState& state, const std::array<std::uint32
     return source;
 }
 
-std::uint32_t unsettledStoreSelectors(SpirvEmitterState& state, std::uint32_t word3, std::uint32_t componentCount) {
-    const auto u32 = TypeU32(state);
+std::uint32_t unsettledStoreSelectors(SpirvEmitterState& state, std::uint32_t word3, const SpirvBufferFormatInfo& info) {
     const auto boolean = TypeBool(state);
-    std::array<std::uint32_t, 4> selectors{};
-    auto unsettled = ConstantBool(state, false);
-    for (std::uint32_t slot = 0; slot < 4u; ++slot) {
-        selectors[slot] = field(state, word3, slot * 3u, 3u);
-        unsettled = Binary(state, spv::OpLogicalOr, boolean, unsettled, Binary(state, spv::OpLogicalOr, boolean, equal(state, selectors[slot], ConstantU32(state, 2u)), equal(state, selectors[slot], ConstantU32(state, 3u))));
-    }
-    for (std::uint32_t component = 0; component < componentCount; ++component) {
-        auto names = ConstantU32(state, 0u);
-        for (std::uint32_t slot = 0; slot < 4u; ++slot) names = EmitAddU32(state, names, Select(state, u32, equal(state, selectors[slot], ConstantU32(state, 4u + component)), ConstantU32(state, 1u), ConstantU32(state, 0u)));
-        unsettled = Binary(state, spv::OpLogicalOr, boolean, unsettled, Binary(state, spv::OpINotEqual, boolean, names, ConstantU32(state, 1u)));
-    }
-    return unsettled;
+    auto settled = ConstantBool(state, true);
+    for (std::uint32_t component = 0; component < info.componentCount; ++component) settled = both(state, settled, equal(state, field(state, word3, component * 3u, 3u), ConstantU32(state, 4u + component)));
+    if (const auto swizzle = SettledFormattedStoreSwizzle(info.format)) settled = Binary(state, spv::OpLogicalOr, boolean, settled, equal(state, field(state, word3, 0u, 12u), ConstantU32(state, *swizzle)));
+    return Unary(state, spv::OpLogicalNot, boolean, settled);
 }
 
 std::uint32_t formatted(SpirvValueEmitContext& context, const IrValue& instruction, const RuntimeDescriptor& resource, const SpirvBufferFormatInfo& info, std::uint32_t components, bool store, std::uint32_t data) {
@@ -345,7 +336,7 @@ std::uint32_t formatted(SpirvValueEmitContext& context, const IrValue& instructi
         const auto values = storeValues(state, data, components);
         auto writes = inBounds;
         if (memory.gpuDescriptor && !memory.typed) {
-            const auto unsettled = both(state, nonzero(state, resource.records), unsettledStoreSelectors(state, resource.word3, info.componentCount));
+            const auto unsettled = both(state, nonzero(state, resource.records), unsettledStoreSelectors(state, resource.word3, info));
             faultIf(context, instruction, unsettled, resource.base, 0u, BdaAbi::FaultReason::InvalidDescriptor);
             writes = both(state, writes, Unary(state, spv::OpLogicalNot, TypeBool(state), unsettled));
         }

@@ -1,6 +1,7 @@
 #include "prx/libSceAgcDriver/Execution/include/VulkanDevice.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Draw.hpp"
 #include "Recompiler.hpp"
+#include "SpirvBackend/SpirvBufferFormat.hpp"
 #include "VulkanTestDevice.hpp"
 #include <algorithm>
 #include <array>
@@ -10,12 +11,12 @@
 #include <span>
 #include <stdexcept>
 #include <string>
-#include <string_view>
 #include <vector>
 
 namespace {
 
 using AgcDriver::Graphics::Require;
+using ShaderRecompiler::IrBufferFormat;
 using ShaderRecompiler::ShaderStage;
 
 constexpr std::uint32_t Threads = 64;
@@ -25,12 +26,13 @@ alignas(256) std::array<std::uint32_t, Threads * LaneDwords> Input{};
 alignas(256) std::array<std::uint32_t, Threads * LaneDwords> Output{};
 alignas(256) std::array<std::uint32_t, Threads * LaneDwords> Scratch{};
 
-alignas(256) constexpr std::array<std::uint32_t, 39> Code{
+alignas(256) constexpr std::array<std::uint32_t, 41> Code{
     0x34020086, 0xe0381000, 0x80000401, 0xe0341010, 0x80000801, 0xe0381020, 0x80000c01, 0xe0381030,
     0x80001001, 0xbf8c3f70, 0xe01c1000, 0x80020401, 0xe21c1004, 0x80020801, 0xe0101008, 0x80020401,
     0xe01c1010, 0x80031001, 0xe01c1018, 0x80040c01, 0xe010101c, 0x80040c01, 0xe01c1020, 0x80050c01,
-    0xbbfd0000, 0xe00c1000, 0x80021401, 0xe00c1010, 0x80031801, 0xe00c1018, 0x80041c01, 0xbf8c3f70,
-    0xe0781000, 0x80011401, 0xe0781010, 0x80011801, 0xe0781020, 0x80011c01, 0xbf810000,
+    0xe01c1024, 0x80061001, 0xbbfd0000, 0xe00c1000, 0x80021401, 0xe00c1010, 0x80031801, 0xe00c1018,
+    0x80041c01, 0xbf8c3f70, 0xe0781000, 0x80011401, 0xe0781010, 0x80011801, 0xe0781020, 0x80011c01,
+    0xbf810000,
 };
 
 alignas(256) constexpr std::array<std::uint32_t, 6> StoreCode{
@@ -42,12 +44,25 @@ alignas(256) constexpr std::array<std::uint32_t, 5> GpuSelectedStoreCode{
 };
 
 constexpr std::uint32_t Unorm8888ZyxwWord3 = 0x31038f2eu;
-constexpr std::uint32_t Uint16x4YzxwWord3 = 0x31045f35u;
+constexpr std::uint32_t Uint16x4ZyxwWord3 = 0x31045f2eu;
 constexpr std::uint32_t Uint8AlphaWord3 = 0x31005800u;
 constexpr std::uint32_t Uint32RedWord3 = 0x31014204u;
+constexpr std::uint32_t Uint16x4IdentityWord3 = 0x31045facu;
+constexpr std::size_t FourComponentWord3 = 11;
+constexpr std::size_t OneComponentWord3 = 23;
+
+constexpr std::uint32_t IdentityDstSel = 0xfacu;
+constexpr std::uint32_t ZyxwDstSel = 0xf2eu;
+constexpr std::uint32_t AlphaDstSel = 0x800u;
+constexpr std::uint32_t RedDstSel = 0x204u;
+constexpr std::uint32_t RedReservedDstSel = 0x404u;
+constexpr std::array<IrBufferFormat, 2> ZyxwFormats{IrBufferFormat::Format8_8_8_8UNorm, IrBufferFormat::Format16_16_16_16UInt};
+constexpr std::array<IrBufferFormat, 2> AlphaFormats{IrBufferFormat::Format8UNorm, IrBufferFormat::Format8UInt};
 
 constexpr std::array<std::uint32_t, 4> ZyxwChannelSlots{2, 1, 0, 3};
-constexpr std::array<std::uint32_t, 4> YzxwChannelSlots{2, 0, 1, 3};
+constexpr std::array<std::uint32_t, 4> ShortBases{0x1234u, 0x5678u, 0x9abcu, 0xdef0u};
+constexpr std::array<std::uint32_t, 2> Gfx1036Uint16x4ZyxwLane0{0x56789abcu, 0xdef01234u};
+constexpr std::array<std::uint32_t, 2> Gfx1036Uint16x4IdentityLane0{0x56781234u, 0xdef09abcu};
 
 constexpr std::array<std::uint32_t, 8> UnormInputs{0x00000000u, 0x3f800000u, 0x3e800000u, 0x3f000000u, 0x3f400000u, 0x40000000u, 0xbf800000u, 0x3e4ccccdu};
 constexpr std::array<std::uint32_t, 8> HalfInputs{0x0000u, 0x3c00u, 0x3400u, 0x3800u, 0x3a00u, 0x4000u, 0xbc00u, 0x3266u};
@@ -67,7 +82,7 @@ std::uint32_t Byte(std::uint32_t lane, std::uint32_t slot) {
 }
 
 std::uint32_t Short(std::uint32_t lane, std::uint32_t slot) {
-    return (lane * 0x0101u + slot * 0x3c51u + 0x1234u) & 0xffffu;
+    return (ShortBases[slot] + lane * 0x0101u) & 0xffffu;
 }
 
 std::array<std::uint32_t, 4> BufferDescriptor(const void* data, std::uint32_t bytes, std::uint32_t word3) {
@@ -82,14 +97,15 @@ std::string Hex(std::uint32_t value) {
 }
 
 std::vector<std::uint32_t> UserData() {
-    std::vector<std::uint32_t> userData(24u, 0u);
-    const std::array<std::array<std::uint32_t, 4>, 6> descriptors{
+    std::vector<std::uint32_t> userData(28u, 0u);
+    const std::array<std::array<std::uint32_t, 4>, 7> descriptors{
         BufferDescriptor(Input.data(), sizeof(Input), 0x31016facu),
         BufferDescriptor(Output.data(), sizeof(Output), 0x31016facu),
         BufferDescriptor(Scratch.data(), sizeof(Scratch), Unorm8888ZyxwWord3),
-        BufferDescriptor(Scratch.data(), sizeof(Scratch), Uint16x4YzxwWord3),
+        BufferDescriptor(Scratch.data(), sizeof(Scratch), Uint16x4ZyxwWord3),
         BufferDescriptor(Scratch.data(), sizeof(Scratch), Uint8AlphaWord3),
         BufferDescriptor(Scratch.data(), sizeof(Scratch), Uint32RedWord3),
+        BufferDescriptor(Scratch.data(), sizeof(Scratch), Uint16x4IdentityWord3),
     };
     for (std::size_t index = 0; index < descriptors.size(); ++index) std::copy(descriptors[index].begin(), descriptors[index].end(), userData.begin() + 4 * index);
     return userData;
@@ -145,45 +161,109 @@ void Check(std::uint32_t waveSize) {
         Expect(waveSize, lane, scratch[1], half, "buffer_store_format_d16_xyzw 8_8_8_8_UNORM Z,Y,X,W");
         Expect(waveSize, lane, scratch[2], UnormBytes[UnormIndex(lane, 0u)] << 16u, "buffer_store_format_x 8_8_8_8_UNORM Z,Y,X,W");
         Expect(waveSize, lane, scratch[3], Fill, "scratch dword 3");
-        Expect(waveSize, lane, scratch[4], Short(lane, YzxwChannelSlots[0]) | Short(lane, YzxwChannelSlots[1]) << 16u, "buffer_store_format_xyzw 16_16_16_16_UINT Y,Z,X,W low");
-        Expect(waveSize, lane, scratch[5], Short(lane, YzxwChannelSlots[2]) | Short(lane, YzxwChannelSlots[3]) << 16u, "buffer_store_format_xyzw 16_16_16_16_UINT Y,Z,X,W high");
+        Expect(waveSize, lane, scratch[4], Short(lane, ZyxwChannelSlots[0]) | Short(lane, ZyxwChannelSlots[1]) << 16u, "buffer_store_format_xyzw 16_16_16_16_UINT Z,Y,X,W low");
+        Expect(waveSize, lane, scratch[5], Short(lane, ZyxwChannelSlots[2]) | Short(lane, ZyxwChannelSlots[3]) << 16u, "buffer_store_format_xyzw 16_16_16_16_UINT Z,Y,X,W high");
         Expect(waveSize, lane, scratch[6], (Fill & ~0xffu) | Byte(lane, 3u), "buffer_store_format_xyzw 8_UINT 0,0,0,X");
         Expect(waveSize, lane, scratch[7], Fill & ~0xffu, "buffer_store_format_x 8_UINT 0,0,0,X");
         Expect(waveSize, lane, scratch[8], Byte(lane, 0u), "buffer_store_format_xyzw 32_UINT X,0,0,1");
-        for (std::uint32_t dword = 9; dword < LaneDwords; ++dword) Expect(waveSize, lane, scratch[dword], Fill, "scratch dword " + std::to_string(dword));
+        Expect(waveSize, lane, scratch[9], Short(lane, 0u) | Short(lane, 1u) << 16u, "buffer_store_format_xyzw 16_16_16_16_UINT X,Y,Z,W low");
+        Expect(waveSize, lane, scratch[10], Short(lane, 2u) | Short(lane, 3u) << 16u, "buffer_store_format_xyzw 16_16_16_16_UINT X,Y,Z,W high");
+        if (lane == 0u) {
+            Expect(waveSize, lane, scratch[4], Gfx1036Uint16x4ZyxwLane0[0], "buffer_store_format_xyzw 16_16_16_16_UINT Z,Y,X,W low as measured on gfx1036");
+            Expect(waveSize, lane, scratch[5], Gfx1036Uint16x4ZyxwLane0[1], "buffer_store_format_xyzw 16_16_16_16_UINT Z,Y,X,W high as measured on gfx1036");
+            Expect(waveSize, lane, scratch[9], Gfx1036Uint16x4IdentityLane0[0], "buffer_store_format_xyzw 16_16_16_16_UINT X,Y,Z,W low as measured on gfx1036");
+            Expect(waveSize, lane, scratch[10], Gfx1036Uint16x4IdentityLane0[1], "buffer_store_format_xyzw 16_16_16_16_UINT X,Y,Z,W high as measured on gfx1036");
+        }
+        for (std::uint32_t dword = 11; dword < LaneDwords; ++dword) Expect(waveSize, lane, scratch[dword], Fill, "scratch dword " + std::to_string(dword));
         for (std::uint32_t slot = 0; slot < 4u; ++slot) {
             const auto component = std::string(1, "xyzw"[slot]);
             Expect(waveSize, lane, output[slot], UnormLoads[UnormIndex(lane, slot)], "buffer_load_format_xyzw 8_8_8_8_UNORM Z,Y,X,W " + component);
-            Expect(waveSize, lane, output[4u + slot], Short(lane, slot), "buffer_load_format_xyzw 16_16_16_16_UINT Y,Z,X,W " + component);
+            Expect(waveSize, lane, output[4u + slot], Short(lane, slot), "buffer_load_format_xyzw 16_16_16_16_UINT Z,Y,X,W " + component);
             Expect(waveSize, lane, output[8u + slot], slot == 3u ? Byte(lane, 3u) : 0u, "buffer_load_format_xyzw 8_UINT 0,0,0,X " + component);
         }
     }
 }
 
+std::string DstSelName(std::uint32_t dstSel) {
+    std::string name;
+    for (std::uint32_t slot = 0; slot < 4u; ++slot) name += std::string(slot == 0u ? "" : ",") + "01??XYZW"[(dstSel >> (slot * 3u)) & 7u];
+    return name;
+}
+
+void ExpectSettled(IrBufferFormat format, std::uint32_t dstSel, bool expected) {
+    const auto settled = ShaderRecompiler::IsSettledFormattedStoreDstSel(format, 0x31000000u | dstSel);
+    Require(settled == expected, "buffer store format dst_sel: DST_SEL " + DstSelName(dstSel) + " on FORMAT " + std::to_string(static_cast<std::uint32_t>(format)) + (settled ? " is accepted" : " is refused"));
+}
+
+void CheckSettledSet() {
+    std::array<std::uint32_t, 4> components{0, 1, 2, 3};
+    do {
+        std::uint32_t dstSel = 0;
+        for (std::uint32_t slot = 0; slot < 4u; ++slot) dstSel |= (4u + components[slot]) << (slot * 3u);
+        ExpectSettled(IrBufferFormat::Format16_16_16_16UInt, dstSel, dstSel == IdentityDstSel || dstSel == ZyxwDstSel);
+    } while (std::next_permutation(components.begin(), components.end()));
+    for (std::uint32_t value = 1; value <= static_cast<std::uint32_t>(IrBufferFormat::Format32_32_32_32Float); ++value) {
+        const auto format = static_cast<IrBufferFormat>(value);
+        const bool single = ShaderRecompiler::GetFormatInfo(format).componentCount == 1u;
+        ExpectSettled(format, IdentityDstSel, true);
+        ExpectSettled(format, ZyxwDstSel, std::find(ZyxwFormats.begin(), ZyxwFormats.end(), format) != ZyxwFormats.end());
+        ExpectSettled(format, AlphaDstSel, std::find(AlphaFormats.begin(), AlphaFormats.end(), format) != AlphaFormats.end());
+        ExpectSettled(format, RedDstSel, single);
+        ExpectSettled(format, RedReservedDstSel, single);
+    }
+    ExpectSettled(IrBufferFormat::Format8_8_8_8UNorm, 0xfa4u, false);
+    ExpectSettled(IrBufferFormat::Format8_8_8_8UNorm, 0x32eu, false);
+    ExpectSettled(IrBufferFormat::Format32UInt, 0x801u, false);
+}
+
+std::string CompileError(AgcDriver::VulkanDevice& device, std::span<const std::uint32_t> userData) {
+    try {
+        static_cast<void>(Compile(device, StoreCode, 32u, userData));
+    } catch (const std::runtime_error& error) {
+        return error.what();
+    }
+    return {};
+}
+
+struct Case {
+    std::size_t word3;
+    std::uint32_t value;
+    const char* name;
+};
+
 void CheckThrows(AgcDriver::VulkanDevice& device) {
-    struct Case {
-        std::size_t word3;
-        std::uint32_t value;
-        const char* name;
-    };
-    constexpr std::array<Case, 3> cases{{
-        {11, 0x31038fa4u, "X,X,Z,W on 8_8_8_8_UNORM"},
-        {11, 0x3103832eu, "Z,Y,X,1 on 8_8_8_8_UNORM"},
-        {23, 0x31014404u, "X,0,0 and the reserved selector 2 on 32_UINT"},
+    constexpr std::array<Case, 7> refused{{
+        {FourComponentWord3, 0x31045f35u, "Y,Z,X,W on 16_16_16_16_UINT"},
+        {FourComponentWord3, 0x31045fa5u, "Y,X,Z,W on 16_16_16_16_UINT"},
+        {FourComponentWord3, 0x31045bbcu, "X,W,Z,Y on 16_16_16_16_UINT"},
+        {FourComponentWord3, 0x31047f2eu, "Z,Y,X,W on 16_16_16_16_FLOAT"},
+        {FourComponentWord3, 0x3103cf2eu, "Z,Y,X,W on 8_8_8_8_UINT"},
+        {FourComponentWord3, 0x31032f2eu, "Z,Y,X,W on 10_10_10_2_UNORM (FORMAT 50)"},
+        {OneComponentWord3, 0x31014800u, "0,0,0,X on 32_UINT"},
     }};
-    for (const auto& test : cases) {
+    for (const auto& test : refused) {
         auto userData = UserData();
         userData[test.word3] = test.value;
-        bool thrown = false;
-        try {
-            static_cast<void>(Compile(device, StoreCode, 32u, userData));
-        } catch (const std::runtime_error& error) {
-            thrown = std::string_view(error.what()).find("does not name each format component once") != std::string_view::npos;
-            Require(thrown, std::string("buffer store format dst_sel: ") + test.name + " failed with an unrelated error: " + error.what());
-        }
-        Require(thrown, std::string("buffer store format dst_sel: a store through DST_SEL ") + test.name + " compiled");
-        userData[test.word3 - 1u] = 0u;
-        static_cast<void>(Compile(device, StoreCode, 32u, userData));
+        const auto error = CompileError(device, userData);
+        Require(!error.empty(), std::string("buffer store format dst_sel: a store through DST_SEL ") + test.name + " compiled");
+        Require(error.find("formatted buffer store through a V# whose DST_SEL") != std::string::npos, std::string("buffer store format dst_sel: ") + test.name + " failed with an unrelated error: " + error);
+    }
+    for (const auto word3 : {FourComponentWord3, OneComponentWord3}) {
+        auto userData = UserData();
+        userData[word3] = word3 == FourComponentWord3 ? 0x31045f35u : 0x31014800u;
+        userData[word3 - 1u] = 0u;
+        const auto error = CompileError(device, userData);
+        Require(error.empty(), "buffer store format dst_sel: a refused DST_SEL with NUM_RECORDS 0 failed: " + error);
+    }
+    constexpr std::array<Case, 2> accepted{{
+        {OneComponentWord3, 0x31001800u, "0,0,0,X on 8_UNORM"},
+        {OneComponentWord3, 0x31014404u, "X,0,0 and the reserved selector 2 on 32_UINT"},
+    }};
+    for (const auto& test : accepted) {
+        auto userData = UserData();
+        userData[test.word3] = test.value;
+        const auto error = CompileError(device, userData);
+        Require(error.empty(), std::string("buffer store format dst_sel: a store through DST_SEL ") + test.name + " was refused: " + error);
     }
 }
 
@@ -197,6 +277,7 @@ int main() {
             Run(*device, waveSize);
             Check(waveSize);
         }
+        CheckSettledSet();
         CheckThrows(*device);
         static_cast<void>(Compile(*device, GpuSelectedStoreCode, 32u, UserData()));
         std::puts("buffer store format dst_sel tests passed");
