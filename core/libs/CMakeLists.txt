@@ -184,6 +184,7 @@ if(BUILD_TESTING)
     endif()
     if(APPLE)
         add_subdirectory(tests/write_watch)
+        add_subdirectory(tests/guest_arena)
     endif()
 
     add_test_executable(guest_offline_imports_tests tests/GuestOfflineImports.cpp)
