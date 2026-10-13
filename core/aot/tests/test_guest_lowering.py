@@ -17,6 +17,15 @@ class GuestSemanticsTests(unittest.TestCase):
             failures = guest_lab.Lab(directory).compare(cases, samples=samples, seed=11)
         self.assertEqual(failures[:3], [])
 
+    def test_narrow_double_shifts_preserve_partial_registers(self):
+        cases = []
+        for operation in ('shld', 'shrd'):
+            for count in (0, 1, 2, 8, 15, 16, 32, 33):
+                for target in ('ax', 'word ptr [rsi]'):
+                    cases.append({'asm': [f'{operation} {target}, dx, {count}'],
+                                  'pointers': {'rsi': 64}, 'flags': guest_lab.ALL_FLAGS if count in (0, 32) else 0x8c5 if count & 31 == 1 else 0xc5})
+        self.compare(cases, samples=32)
+
     def test_packed_truncation_and_extended_loads(self):
         cases = [
             {'asm': ['cvttpd2dq xmm0, xmm1']},
@@ -684,6 +693,13 @@ destroy_end:
             unwind=(('worker', 'worker_end'), ('destroy', 'destroy_end')), concurrent=True)
         result = self.run_binary(binary)
         self.assertEqual((result.returncode, result.stdout, result.stderr), (0, b'', b''))
+
+    def test_narrow_double_shift_undefined_counts_trap(self):
+        for operation in ('shld', 'shrd'):
+            binary, _ = self.program(PRELUDE + f"mov ax, 1\nmov dx, 2\n{operation} ax, dx, 17\nxor edi, edi\n" + EXIT)
+            result = self.run_binary(binary)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(b'unsupported guest operation', result.stderr)
 
     def test_provider_conversions(self):
         binary = self.directory / 'provider_checks'
