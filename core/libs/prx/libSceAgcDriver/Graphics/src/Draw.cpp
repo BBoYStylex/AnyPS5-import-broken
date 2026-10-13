@@ -338,8 +338,10 @@ TileMipLayout ColorTargetMip(const ColorTarget& color, const ColorTargetLayout& 
 
 // APS5_PROFILE_DRAW: per-draw phase timers in microseconds (a recorded draw's phases are far below
 // the millisecond the old print rounded to), totalled over 10 s in the [draws] line.
-enum DrawPhase : std::size_t { PhaseValidate, PhaseVertex, PhaseSetup, PhaseReadTarget, PhasePrepare, PhaseLookup, PhaseResources, PhasePipeline, PhaseRecord, PhaseKeep, PhaseSync, PhaseWriteBack, PhaseDescribe, PhaseCount };
-constexpr std::array<const char*, PhaseCount> DrawPhaseNames{"validate", "vertex", "setup", "readTarget", "prepare", "lookup", "resources", "pipeline", "record", "keep", "sync", "writeBack", "describe"};
+enum DrawPhase : std::size_t { PhaseValidate, PhaseVertex, PhaseSetup, PhaseReadTarget, PhasePrepare, PhaseLookup, PhaseResources, PhasePipeline, PhaseRecord, PhaseKeep, PhaseSync, PhaseWriteBack, PhaseDescribe,
+    // Sub-phases for detailed profiling (APS5_PROFILE_DRAW)
+    PhaseRefreshTarget, PhaseResolveResources, PhaseRecordDraw, PhaseRecipe, PhaseCount };
+constexpr std::array<const char*, PhaseCount> DrawPhaseNames{"validate", "vertex", "setup", "readTarget", "prepare", "lookup", "resources", "pipeline", "record", "keep", "sync", "writeBack", "describe", "refreshTarget", "resolveResources", "recordDraw", "recipe"};
 enum InputPhase : std::size_t { InputIndexAlloc, InputIndexRead, InputIndexScan, InputLayout, InputVertexCheck, InputVertexAlloc, InputVertexRead, InputPhaseCount };
 constexpr std::array<const char*, InputPhaseCount> InputPhaseNames{"indexAlloc", "indexRead", "indexScan", "layout", "vertexCheck", "vertexAlloc", "vertexRead"};
 
@@ -2138,7 +2140,7 @@ void Draw(const Context& context, const State& state, const Pm4::DrawParameters&
             // UnchangedSince). The page walk is skipped while the worker's collect epoch lasts
             // (GuestMemory::BumpCollectEpoch: ordering points of the queue, or every packet under
             // APS5_PACKET_EPOCH=1); the key scan runs on every lookup regardless. Lookups of a
-            // millisecond or more are counted apart; the [texture] line says how many uploaded.
+            timer.phase(PhaseRefreshTarget);
             binding.resident = refreshResidentTarget(context, state, color, outcome, profile, [&] {
                 auto resident = CachedStorageSurface(context, SurfaceForTarget(color));
                 Require(resident->Attachable(), "storage format cannot be a color attachment");
@@ -2192,6 +2194,7 @@ void Draw(const Context& context, const State& state, const Pm4::DrawParameters&
     const bool recordDraws = RecordDraws();
     auto* recorder = Recorder::Active();
     const bool recordable = recordDraws && recorder != nullptr && dumpLimit == 0 && std::all_of(targets.begin(), targets.end(), [](const TargetBinding& binding) { return binding.resident != nullptr; });
+    timer.phase(PhaseResolveResources);
     auto resolved = resolveDrawResources(context, state, draw, shaders, snapshots, indexBytes, recordable, outcome, timer);
     auto& resources = resolved.resources;
     const auto& contentKey = resolved.contentKey;
