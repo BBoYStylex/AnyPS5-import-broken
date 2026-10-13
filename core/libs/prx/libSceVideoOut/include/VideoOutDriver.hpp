@@ -18,6 +18,7 @@
 #include "prx/libSceAgcDriver/Execution/include/VideoOutput.hpp"
 #include "prx/libSceAgcDriver/Execution/include/DisplayBuffer.hpp"
 #include "prx/libSceVideoOut/include/DisplayWindow.hpp"
+#include "prx/libSceVideoOut/include/PresentThread.hpp"
 #include "prx/libSceVideoOut/include/BufferReuseTracker.hpp"
 #include "prx/libc/include/Shutdown.hpp"
 #include "prx/libkernel/Time/include/TimedWait.hpp"
@@ -236,7 +237,7 @@ private:
 
     DisplayWindow window;
 
-    std::jthread presentThread;
+    PresentThread presentThread;
     std::jthread vblankThread;
 };
 

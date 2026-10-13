@@ -1,5 +1,6 @@
 #ifdef __APPLE__
 
+#include "prx/libc/include/HostMainThread.hpp"
 #include "prx/libc/include/general/AsmMacros.hpp"
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include <cstddef>
@@ -30,6 +31,12 @@ struct GuestTlsIndex {
 constexpr std::size_t ControlBlockBytes = 0x40;
 constexpr std::size_t StackGuardSlot = 0x28;
 constexpr std::size_t AllocationSlot = 0x38;
+constexpr std::size_t GuestMainStackBytes = std::size_t{64} << 20;
+
+struct GuestStart {
+    void* entry;
+    std::vector<std::uint64_t> parameters;
+};
 
 [[noreturn]] void Fail(const char* message) {
     const auto written = ::write(STDERR_FILENO, message, std::strlen(message));
@@ -95,12 +102,21 @@ void* APS5_VABI Aps5GuestTlsGetAddr_nid_no_patch(const GuestTlsIndex* index) {
     std::size_t words = 1 + argumentCount + 1;
     while (parameters[words] != 0) ++words;
     ++words;
-    auto* block = new std::vector<std::uint64_t>(parameters, parameters + words);
-    block->push_back(0);
-    block->push_back(0);
-    using GuestEntry = int APS5_VABI (*)(std::uint64_t*, void (*)());
-    const int result = reinterpret_cast<GuestEntry>(entry)(block->data(), nullptr);
-    std::exit(result);
+    auto* start = new GuestStart{entry, std::vector<std::uint64_t>(parameters, parameters + words)};
+    start->parameters.push_back(0);
+    start->parameters.push_back(0);
+    pthread_attr_t attributes;
+    if (pthread_attr_init(&attributes) != 0 || pthread_attr_setstacksize(&attributes, GuestMainStackBytes) != 0) Fail("guest start: thread attributes failed\n");
+    pthread_t thread;
+    const auto run = [](void* context) -> void* {
+        auto* start = static_cast<GuestStart*>(context);
+        using GuestEntry = int APS5_VABI (*)(std::uint64_t*, void (*)());
+        const int result = reinterpret_cast<GuestEntry>(start->entry)(start->parameters.data(), nullptr);
+        std::exit(result);
+    };
+    if (pthread_create(&thread, &attributes, run, start) != 0) Fail("guest start: pthread_create failed\n");
+    pthread_attr_destroy(&attributes);
+    HostMainThreadServe_nid_no_patch();
 }
 
 }
