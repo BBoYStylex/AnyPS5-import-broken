@@ -245,6 +245,7 @@ struct SpirvTarget {
     bool vertexSubgroups = true;
     bool float16DenormPreserve = false;
     bool fragmentBarycentricBuiltins = false;
+    bool pixelContraction = false;
 };
 
 struct BindingLayout {

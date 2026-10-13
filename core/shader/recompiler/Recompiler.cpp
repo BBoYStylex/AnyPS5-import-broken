@@ -453,6 +453,7 @@ CompiledVariant compileVariant(const RecompileRequest& request, IrProgram progra
     targetOptions.registrationModules = registration;
     targetOptions.fragmentDescriptorSet = request.target.registrationModules;
     targetOptions.float16DenormPreserve = request.target.float16DenormPreserve;
+    targetOptions.pixelContraction = request.target.pixelContraction;
 
     constexpr SpirvEmitter spirvEmitter;
     CompiledShaderArtifact result;
