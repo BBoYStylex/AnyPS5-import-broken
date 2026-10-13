@@ -775,7 +775,11 @@ std::shared_ptr<StorageTexture> cachedStorageTexture(const Context& context, std
         it = cache.entries.end();
     }
     if (it != cache.entries.end()) {
-        it->texture->Refresh();
+        // H1 candidate: skip refresh if no writes since last refresh (APS5_DRAW_SKIP_REFRESH)
+        static const bool skipRefreshIfUnchanged = std::getenv("APS5_DRAW_SKIP_REFRESH") != nullptr;
+        if (!skipRefreshIfUnchanged || !GuestMemory::UnchangedSince(resource.baseAddress, static_cast<std::size_t>(guestBytes), it->texture->Generation())) {
+            it->texture->Refresh();
+        }
         cache.entries.splice(cache.entries.begin(), cache.entries, it);
         counters.storageHits.fetch_add(1, std::memory_order_relaxed);
         if (profile) LookupOutcomes::Add(LookupOutcomes::StorageHit, start);
