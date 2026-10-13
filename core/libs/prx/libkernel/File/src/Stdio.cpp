@@ -105,7 +105,21 @@ static int NativeFchmod(int descriptor, int mode) {
 }
 static int NativeFtruncate(int descriptor, std::int64_t length) {
     const int result = File::TruncateSharedMemory_nid_no_patch(descriptor, length);
-    return result == -2 ? static_cast<int>(::_chsize_s(descriptor, length)) : result;
+    if (result != -2) return result;
+    const auto raw = WithoutParameterHandler([descriptor] { return ::_get_osfhandle(descriptor); });
+    if (raw == -1) return EBADF;
+    FILE_END_OF_FILE_INFO info{};
+    info.EndOfFile.QuadPart = length;
+    const auto handle = reinterpret_cast<HANDLE>(raw);
+    if (::SetFileInformationByHandle(handle, FileEndOfFileInfo, &info, sizeof(info))) return 0;
+    switch (::GetLastError()) {
+        case ERROR_ACCESS_DENIED: return EACCES;
+        case ERROR_DISK_FULL:
+        case ERROR_HANDLE_DISK_FULL: return ENOSPC;
+        case ERROR_FILE_TOO_LARGE: return EFBIG;
+        case ERROR_INVALID_PARAMETER: return ::GetFileType(handle) == FILE_TYPE_DISK ? EFBIG : EINVAL;
+        default: return EINVAL;
+    }
 }
 static int NativeTruncate(const std::filesystem::path& path, std::int64_t length) {
     const int descriptor = ::_wopen(path.c_str(), _O_WRONLY | _O_BINARY);
