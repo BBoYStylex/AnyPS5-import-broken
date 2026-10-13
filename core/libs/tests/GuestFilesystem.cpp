@@ -707,6 +707,15 @@ int main() {
     Require(sceKernelOpen(presentName.c_str(), 0x20402, 0) == static_cast<int>(0x80020014u));
     Require(std::filesystem::file_size(present) == 5);
     Require(sceKernelOpen(missingName.c_str(), 0x20000, 0) == static_cast<int>(0x80020002u));
+    const auto underPresent = (present / "leaf").generic_string();
+    const auto deepUnderPresent = (present / "middle" / "leaf").generic_string();
+    for (const auto& name : {underPresent, deepUnderPresent}) {
+        Require(sceKernelOpen(name.c_str(), 0, 0) == static_cast<int>(0x80020014u));
+        Require(sceKernelOpen(name.c_str(), 2, 0) == static_cast<int>(0x80020014u));
+        Require(sceKernelOpen(name.c_str(), 0x20000, 0) == static_cast<int>(0x80020014u));
+        Require(open_nid_postfix(name.c_str(), 0, 0) == -1 && *__error_nid_postfix() == 20);
+    }
+    Require(sceKernelOpen((missing / "leaf").generic_string().c_str(), 0, 0) == static_cast<int>(0x80020002u));
     Require(open_nid_postfix("", 0, 0) == -1 && *__error_nid_postfix() == 2);
     Require(_open_nid_postfix("", 0) == -1 && *__error_nid_postfix() == 2);
     Require(sceKernelOpen("", 0, 0) == static_cast<int>(0x80020002u));
