@@ -123,6 +123,8 @@ int main() {
     Require(towlower_nid_postfix(0xffffffff) == 0xffffffff && towupper_nid_postfix(0xffffffff) == 0xffffffff);
     Require(btowc_nid_postfix(-1) == 0xffffffff && btowc_nid_postfix(0) == 0);
     Require(btowc_nid_postfix('A') == 'A' && btowc_nid_postfix(0xe9) == 0xe9 && btowc_nid_postfix(-23) == 0xe9);
+    Require(btowc_nid_postfix(0x100) == 0xffffffff && btowc_nid_postfix(0x20ac) == 0xffffffff && btowc_nid_postfix(256) == 0xffffffff);
+    Require(btowc_nid_postfix(-129) == 0xffffffff && btowc_nid_postfix(-1000) == 0xffffffff);
     Require(wctob_nid_postfix('A') == 'A' && wctob_nid_postfix(0xe9) == 0xe9 && wctob_nid_postfix(0) == 0);
     Require(wctob_nid_postfix(0x100) == -1 && wctob_nid_postfix(0x20ac) == -1 && wctob_nid_postfix(0xffffffff) == -1);
     return 0;

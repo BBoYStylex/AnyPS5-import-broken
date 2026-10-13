@@ -147,7 +147,8 @@ std::uint32_t APS5_VABI towupper_nid_postfix(std::uint32_t c) {
 }
 
 std::uint32_t APS5_VABI btowc_nid_postfix(int c) {
-    return c == -1 ? GuestRune::Weof : static_cast<unsigned char>(c);
+    if (c == -1 || c < -128 || c > 255) return GuestRune::Weof;
+    return static_cast<unsigned char>(c);
 }
 
 int APS5_VABI wctob_nid_postfix(std::uint32_t c) {
