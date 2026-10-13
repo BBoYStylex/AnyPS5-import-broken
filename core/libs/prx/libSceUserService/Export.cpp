@@ -186,4 +186,23 @@ int APS5_VABI sceUserServiceGetNpAccountId(int user_id, uint64_t* account_id) {
  return USER_SERVICE_OK;
 }
 
+int APS5_VABI sceUserServiceGetGlsUserFlag() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceUserServiceGetHintShowFlag3() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceUserServiceSetGlsUserFlag() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceUserServiceSetHintShowFlag3() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
 }
