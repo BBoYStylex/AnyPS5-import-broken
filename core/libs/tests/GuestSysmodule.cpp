@@ -2,6 +2,7 @@
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include <cstdint>
 #include <cstdlib>
+#include <filesystem>
 #include <initializer_list>
 #include <stdexcept>
 #include <string>
@@ -22,6 +23,8 @@ int APS5_VABI sceSysmoduleLoadModuleInternalWithArg(std::uint32_t id, int argc, 
 int APS5_VABI sceSysmoduleGetModuleInfoForUnwind(std::uint64_t addr, int flags, ModuleInfoForUnwind* info);
 int APS5_VABI sceSysmoduleGetModuleHandleInternal(std::uint32_t id, std::int32_t* handle);
 int APS5_VABI sceKernelDlsym(std::int32_t handle, const char* symbol, void** addr);
+int APS5_VABI chdir_nid_postfix(const char* path);
+char* APS5_VABI getcwd_nid_postfix(char* buffer, std::size_t size);
 }
 
 namespace {
@@ -208,6 +211,9 @@ int main() {
     Require(audioPropagationHandle == -1);
 
     Require(sceSysmoduleIsLoaded(kAudioPropagationModuleId) == kModuleUnloaded);
+    const auto guestDirectory = std::filesystem::current_path() / "module-cwd";
+    std::filesystem::create_directories(guestDirectory);
+    Require(chdir_nid_postfix("/module-cwd") == 0);
     Require(sceSysmoduleLoadModule(kAudioPropagationModuleId) == 0);
     Require(sceSysmoduleIsLoaded(kAudioPropagationModuleId) == 0);
     Require(sceSysmoduleGetModuleHandleInternal(kAudioPropagationModuleId, &audioPropagationHandle) == 0);
@@ -215,6 +221,11 @@ int main() {
     void* audioPropagationSymbol = nullptr;
     Require(sceKernelDlsym(audioPropagationHandle, "sceAudioPropagationSystemCreate", &audioPropagationSymbol) == 0);
     Require(audioPropagationSymbol != nullptr);
+    char currentDirectory[32]{};
+    Require(getcwd_nid_postfix(currentDirectory, sizeof(currentDirectory)) == currentDirectory);
+    Require(std::string(currentDirectory) == "/module-cwd");
+    Require(chdir_nid_postfix("/") == 0);
+    std::filesystem::remove(guestDirectory);
 
     Require(sceSysmoduleUnloadModule(kAudioPropagationModuleId) == 0);
     Require(sceSysmoduleIsLoaded(kAudioPropagationModuleId) == kModuleUnloaded);

@@ -34,8 +34,8 @@ std::unordered_map<std::uint32_t, std::int32_t> gLoadCount;
 std::unordered_map<std::uint32_t, KernelModule> gHandles;
 
 void* openHostModule(const char* name) {
-    const std::string relative = std::string("libs/") + name + ".prx";
-    return dlopen_nid_postfix(relative.c_str(), kRtldNow);
+    const std::string path = std::string("/libs/") + name + ".prx";
+    return dlopen_nid_postfix(path.c_str(), kRtldNow);
 }
 
 bool fillModuleInfoForUnwind(std::uint64_t addr, ModuleInfoForUnwind* info) {
