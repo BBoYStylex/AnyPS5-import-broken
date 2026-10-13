@@ -334,6 +334,16 @@ int APS5_VABI sceKernelUnlink(const char* path) {
     if (*path == '\0') return SceErrorFromErrno(2);
     std::filesystem::path native;
     if (const int error = ResolvePathError_nid_no_patch(path, native)) return SceKernelError(error);
+#ifdef _WIN32
+    if (native.has_filename() && IsSymbolicLink(native)) {
+        const auto attributes = GetFileAttributesW(native.c_str());
+        if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+            if (!RemoveDirectoryW(native.c_str())) return SceErrorFromErrno(WindowsOpenError_nid_no_patch(GetLastError()));
+            RecordWrittenPath_nid_no_patch(native);
+            return 0;
+        }
+    }
+#endif
     constexpr int GuestEperm = 1;
     std::error_code error;
     if (std::filesystem::is_directory(std::filesystem::symlink_status(native, error))) return SceErrorFromErrno(GuestEperm);
