@@ -505,12 +505,7 @@ int APS5_VABI sigaltstack_nid_postfix(const GuestStack* stack, GuestStack* previ
 int APS5_VABI _sigprocmask_nid_postfix(int how, const GuestSignalSet* set, GuestSignalSet* previousSet) {
     {
         std::lock_guard lock(registration);
-        if (previousSet != nullptr) {
-            previousSet->bits[0] = blockedMask.load();
-            previousSet->bits[1] = 0;
-            previousSet->bits[2] = 0;
-            previousSet->bits[3] = 0;
-        }
+        const auto previous = blockedMask.load();
         if (set != nullptr) {
             switch (how) {
                 case 1: blockedMask.fetch_or(set->bits[0]); break;
@@ -518,6 +513,12 @@ int APS5_VABI _sigprocmask_nid_postfix(int how, const GuestSignalSet* set, Guest
                 case 3: blockedMask.store(set->bits[0]); break;
                 default: *__error_nid_postfix() = 22; return -1;
             }
+        }
+        if (previousSet != nullptr) {
+            previousSet->bits[0] = previous;
+            previousSet->bits[1] = 0;
+            previousSet->bits[2] = 0;
+            previousSet->bits[3] = 0;
         }
     }
     for (int guest = 1; guest <= MaxSignal; ++guest) {
