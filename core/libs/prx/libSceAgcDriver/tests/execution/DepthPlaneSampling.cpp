@@ -51,6 +51,7 @@ constexpr std::size_t IntegerOffset = 0xa0000;
 constexpr std::size_t DepthBitsOffset = 0xb0000;
 constexpr std::size_t OneSliceOffset = 0xd0000;
 constexpr std::size_t FirstSliceOffset = 0xe0000;
+constexpr std::size_t PaddedCubeOffset = 0x120000;
 constexpr float DrawnDepth = 0.25f;
 constexpr float DrawnD16Depth = 0.2f;
 constexpr std::uint32_t DrawnD16Bits = 13107;
@@ -316,6 +317,17 @@ void FirstSliceCase(AgcDriver::VulkanDevice& device, GuestBlock& block, std::spa
     Expect(output, Bits(DrawnDepth), "3-slice D32 2D array through a 2D shader image");
 }
 
+void PaddedCubeCase(AgcDriver::VulkanDevice& device, GuestBlock& block, std::span<std::uint32_t> output) {
+    auto* base = block.At(PaddedCubeOffset);
+    DrawDepth(device, reinterpret_cast<std::uintptr_t>(base), {128, 128}, VK_FORMAT_D16_UNORM, DrawnD16Depth);
+    for (std::uint32_t face = 1; face < 6u; ++face) FillSlice(base + face * SliceBytes, SliceBytes, 0x1000u + face, 2u);
+    const Shape shape{Format16Uint, 128, 128, TypeCube, 0, Swizzle64KbZX};
+    for (std::uint32_t face = 0; face < 6u; ++face) {
+        Load(device, base, shape, face, output);
+        Expect(output, face == 0 ? DrawnD16Bits : 0x1000u + face, "D16 cube with padded rows, face " + std::to_string(face));
+    }
+}
+
 // A plane array from a later base slice is still refused (its slice offsets are not modeled here).
 void RefusalCase(AgcDriver::VulkanDevice& device, GuestBlock& block, std::span<std::uint32_t> output) {
     bool refused = false;
@@ -343,6 +355,7 @@ int main() {
         IntegerCase(*device, block, output);
         DepthBitsArrayCase(*device, block, output);
         FirstSliceCase(*device, block, output);
+        PaddedCubeCase(*device, block, output);
         RefusalCase(*device, block, output);
         std::puts("depth plane sampling tests passed");
         return 0;
