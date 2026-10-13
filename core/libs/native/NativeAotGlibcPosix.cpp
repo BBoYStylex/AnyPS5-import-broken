@@ -120,24 +120,24 @@ void Pathconf(State& state) {
 }
 
 const NativeAotGuest::ProviderBinding Bindings[] = {
-    {"gmtime_r", BrokenTime<::gmtime_r>, nullptr},
-    {"localtime_r", BrokenTime<::localtime_r>, nullptr},
-    {"timegm", MakeTime<::timegm>, nullptr},
-    {"mktime", MakeTime<::mktime>, nullptr},
-    {"strptime", Strptime, nullptr}, {"strftime", Strftime, nullptr},
-    {"gettimeofday", Gettimeofday, nullptr}, {"time", Time, nullptr},
-    {"putchar", Putchar, nullptr}, {"getentropy", Getentropy, nullptr},
-    {"getpid", Getpid, nullptr}, {"strspn", Strspn, nullptr},
-    {"clearerr", Clearerr, nullptr}, {"dirname", Dirname, nullptr},
-    {"stpcpy", Stpcpy, nullptr}, {"pathconf", Pathconf, nullptr},
-    {"realpath", Realpath, nullptr}, {"memmem", Memmem, nullptr},
+    {"gmtime_r", BrokenTime<::gmtime_r>, nullptr, true, true},
+    {"localtime_r", BrokenTime<::localtime_r>, nullptr, true, true},
+    {"timegm", MakeTime<::timegm>, nullptr, true, true},
+    {"mktime", MakeTime<::mktime>, nullptr, true, true},
+    {"strptime", Strptime, nullptr, true, true}, {"strftime", Strftime, nullptr, true, true},
+    {"gettimeofday", Gettimeofday, nullptr, true, true}, {"time", Time, nullptr, true, true},
+    {"putchar", Putchar, nullptr, true, true}, {"getentropy", Getentropy, nullptr, true, true},
+    {"getpid", Getpid, nullptr, true, true}, {"strspn", Strspn, nullptr, true, true},
+    {"clearerr", Clearerr, nullptr, true, true}, {"dirname", Dirname, nullptr, true, true},
+    {"stpcpy", Stpcpy, nullptr, true, true}, {"pathconf", Pathconf, nullptr, true, true},
+    {"realpath", Realpath, nullptr, true, true}, {"memmem", Memmem, nullptr, true, true},
 };
 
 }
 
 namespace NativeAotGlibcSupport {
 void RegisterPosix() {
-    const NativeAotGuest::ProviderBinding environment{"environ", nullptr, _NSGetEnviron()};
+    const NativeAotGuest::ProviderBinding environment{"environ", nullptr, _NSGetEnviron(), true, true};
     Register(&environment, 1);
     Register(Bindings, sizeof(Bindings) / sizeof(Bindings[0]));
 }

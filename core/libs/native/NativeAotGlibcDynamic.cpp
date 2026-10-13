@@ -69,9 +69,9 @@ void Dlsym(State& state) {
 }
 
 const NativeAotGuest::ProviderBinding Bindings[] = {
-    {"dl_iterate_phdr", DlIteratePhdr, nullptr},
-    {"dladdr", Dladdr, nullptr},
-    {"dlsym", Dlsym, nullptr},
+    {"dl_iterate_phdr", DlIteratePhdr, nullptr, true, true},
+    {"dladdr", Dladdr, nullptr, true, true},
+    {"dlsym", Dlsym, nullptr, true, true},
 };
 
 }

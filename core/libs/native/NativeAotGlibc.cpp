@@ -24,6 +24,50 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <vector>
+#include <type_traits>
+
+extern "C" {
+std::uint64_t NativeAotGlibcFastMalloc(std::uint64_t a) {
+    NativeAotGlibcSupport::ErrnoScope scope;
+    return reinterpret_cast<std::uint64_t>(std::malloc(a));
+}
+
+std::uint64_t NativeAotGlibcFastCalloc(std::uint64_t a, std::uint64_t b) {
+    NativeAotGlibcSupport::ErrnoScope scope;
+    return reinterpret_cast<std::uint64_t>(std::calloc(a, b));
+}
+
+std::uint64_t NativeAotGlibcFastRealloc(std::uint64_t a, std::uint64_t b) {
+    NativeAotGlibcSupport::ErrnoScope scope;
+    return reinterpret_cast<std::uint64_t>(std::realloc(reinterpret_cast<void*>(a), b));
+}
+
+std::uint64_t NativeAotGlibcFastFree(std::uint64_t a) {
+    std::free(reinterpret_cast<void*>(a));
+    return 0;
+}
+
+std::uint64_t NativeAotGlibcFastMemcpy(std::uint64_t a, std::uint64_t b, std::uint64_t c) {
+    return reinterpret_cast<std::uint64_t>(std::memcpy(reinterpret_cast<void*>(a), reinterpret_cast<const void*>(b), c));
+}
+
+std::uint64_t NativeAotGlibcFastMemmove(std::uint64_t a, std::uint64_t b, std::uint64_t c) {
+    return reinterpret_cast<std::uint64_t>(std::memmove(reinterpret_cast<void*>(a), reinterpret_cast<const void*>(b), c));
+}
+
+std::uint64_t NativeAotGlibcFastMemset(std::uint64_t a, std::uint64_t b, std::uint64_t c) {
+    return reinterpret_cast<std::uint64_t>(std::memset(reinterpret_cast<void*>(a), static_cast<int>(static_cast<std::uint32_t>(b)), c));
+}
+
+std::uint64_t NativeAotGlibcFastMemcmp(std::uint64_t a, std::uint64_t b, std::uint64_t c) {
+    return static_cast<std::uint64_t>(static_cast<std::int64_t>(std::memcmp(reinterpret_cast<const void*>(a), reinterpret_cast<const void*>(b), c)));
+}
+
+std::uint64_t NativeAotGlibcFastStrlen(std::uint64_t a) {
+    return std::strlen(reinterpret_cast<const char*>(a));
+}
+
+}
 
 namespace NativeAotGlibcSupport {
 
@@ -579,6 +623,7 @@ void SignalTrampoline(int host) {
 }
 
 void SysvSignal(State& state) {
+    NativeAotGuest::PromoteSharedMemory();
     const auto guest = Integer(state, 0);
     const auto handler = Argument(state, 1);
     if (guest <= 0 || guest >= 65) {
@@ -619,24 +664,25 @@ void BacktraceSymbols(State&) {
     Unsupported("backtrace_symbols requires guest CFA unwinding");
 }
 
-void Calloc(State& state) {
-    ErrnoScope scope;
-    ReturnPointer(state, std::calloc(Argument(state, 0), Argument(state, 1)));
+template<auto Function, bool HasResult = true>
+void ScalarProvider(State& state) {
+    std::uint64_t value;
+    if constexpr (std::is_invocable_r_v<std::uint64_t, decltype(Function), std::uint64_t>)
+        value = Function(Argument(state, 0));
+    else if constexpr (std::is_invocable_r_v<std::uint64_t, decltype(Function), std::uint64_t, std::uint64_t>)
+        value = Function(Argument(state, 0), Argument(state, 1));
+    else
+        value = Function(Argument(state, 0), Argument(state, 1), Argument(state, 2));
+    if constexpr (HasResult) Return(state, value);
 }
 
-void Malloc(State& state) {
-    ErrnoScope scope;
-    ReturnPointer(state, std::malloc(Argument(state, 0)));
-}
 
-void Realloc(State& state) {
-    ErrnoScope scope;
-    ReturnPointer(state, std::realloc(Pointer<void>(state, 0), Argument(state, 1)));
-}
 
-void Free(State& state) {
-    std::free(Pointer<void>(state, 0));
-}
+
+
+
+
+
 
 void Chmod(State& state) {
     ErrnoScope scope;
@@ -821,21 +867,13 @@ void Isatty(State& state) {
     ReturnInteger(state, isatty(Integer(state, 0)));
 }
 
-void Memcmp(State& state) {
-    ReturnInteger(state, std::memcmp(Pointer<const void>(state, 0), Pointer<const void>(state, 1), Argument(state, 2)));
-}
 
-void Memcpy(State& state) {
-    ReturnPointer(state, std::memcpy(Pointer<void>(state, 0), Pointer<const void>(state, 1), Argument(state, 2)));
-}
 
-void Memmove(State& state) {
-    ReturnPointer(state, std::memmove(Pointer<void>(state, 0), Pointer<const void>(state, 1), Argument(state, 2)));
-}
 
-void Memset(State& state) {
-    ReturnPointer(state, std::memset(Pointer<void>(state, 0), Integer(state, 1), Argument(state, 2)));
-}
+
+
+
+
 
 void Mkdir(State& state) {
     ErrnoScope scope;
@@ -844,10 +882,14 @@ void Mkdir(State& state) {
 
 void Mmap(State& state) {
     const auto guestFlags = Integer(state, 3);
+    if ((guestFlags & 1) != 0 || (guestFlags & 0x20) == 0) NativeAotGuest::PromoteSharedMemory();
     int flags = 0;
     if (guestFlags & 1) flags |= MAP_SHARED;
     if (guestFlags & 2) flags |= MAP_PRIVATE;
-    if (guestFlags & 0x10) flags |= MAP_FIXED;
+    if (guestFlags & 0x10) {
+        NativeAotGuest::CheckImageMappingChange(Argument(state, 0), Argument(state, 1));
+        flags |= MAP_FIXED;
+    }
     if (guestFlags & 0x20) flags |= MAP_ANON;
     if (guestFlags & 0x4000) flags |= MAP_NORESERVE;
     if (guestFlags & ~(1 | 2 | 0x10 | 0x20 | 0x4000 | 0x8000)) Unsupported("unsupported glibc mmap flags");
@@ -857,6 +899,7 @@ void Mmap(State& state) {
 }
 
 void Munmap(State& state) {
+    NativeAotGuest::CheckImageMappingChange(Argument(state, 0), Argument(state, 1));
     ErrnoScope scope;
     ReturnInteger(state, munmap(Pointer<void>(state, 0), Argument(state, 1)));
 }
@@ -942,9 +985,7 @@ void Strerror(State& state) {
     ReturnPointer(state, std::strerror(host));
 }
 
-void Strlen(State& state) {
-    ReturnInteger(state, static_cast<std::int64_t>(std::strlen(Text(state, 0))));
-}
+
 
 void Strncmp(State& state) {
     ReturnInteger(state, std::strncmp(Text(state, 0), Text(state, 1), Argument(state, 2)));
@@ -979,6 +1020,7 @@ void Sysconf(State& state) {
 
 void Utimensat(State& state) {
     const auto guestFlags = Integer(state, 3);
+    if ((guestFlags & 1) != 0 || (guestFlags & 0x20) == 0) NativeAotGuest::PromoteSharedMemory();
     if (guestFlags & ~0x100) Unsupported("unsupported utimensat flags");
     timespec times[2];
     const auto* source = Pointer<const std::int64_t>(state, 2);
@@ -1266,123 +1308,139 @@ void Swprintf(State& state) {
 }
 
 const NativeAotGuest::ProviderBinding Bindings[] = {
-    {"printf", Printf, nullptr},
-    {"puts", Puts, nullptr},
-    {"strtoul", IntegerParse<unsigned long, std::strtoul>, nullptr},
-    {"strtoll", IntegerParse<long long, std::strtoll>, nullptr},
-    {"strtoull", IntegerParse<unsigned long long, std::strtoull>, nullptr},
-    {"strtod", Strtod, nullptr},
-    {"strtof", Strtof, nullptr},
-    {"strtold", ExtendedParse, nullptr},
-    {"wcstol", WideIntegerParse<long, std::wcstol>, nullptr},
-    {"wcstoul", WideIntegerParse<unsigned long, std::wcstoul>, nullptr},
-    {"wcstoll", WideIntegerParse<long long, std::wcstoll>, nullptr},
-    {"wcstoull", WideIntegerParse<unsigned long long, std::wcstoull>, nullptr},
-    {"wcstod", Wcstod, nullptr},
-    {"wcstof", Wcstof, nullptr},
-    {"wcstold", ExtendedParse, nullptr},
-    {"swprintf", Swprintf, nullptr},
-    {"aligned_alloc", AlignedAlloc, nullptr},
-    {"bcmp", Bcmp, nullptr},
-    {"memchr", Memchr, nullptr},
-    {"fseeko", Fseeko, nullptr},
-    {"ftello", Ftello, nullptr},
-    {"setbuf", Setbuf, nullptr},
-    {"ungetc", Ungetc, nullptr},
-    {"snprintf", Snprintf, nullptr},
-    {"vsnprintf", Vsnprintf, nullptr},
-    {"vfprintf", Vfprintf, nullptr},
-    {"vasprintf", Vasprintf, nullptr},
-    {"__isoc99_sscanf", Sscanf, nullptr},
-    {"__isoc99_vsscanf", Vsscanf, nullptr},
-    {"strerror_r", StrerrorR, nullptr},
-    {"syscall", Syscall, nullptr},
-    {"__cxa_atexit", CxaAtexit, nullptr},
-    {"wcslen", Wcslen, nullptr},
-    {"wmemchr", Wmemchr, nullptr},
-    {"fputwc", Fputwc, nullptr},
-    {"getwc", Getwc, nullptr},
-    {"ungetwc", Ungetwc, nullptr},
-    {"__errno_location", ErrnoLocation, nullptr},
-    {"__fxstat", FxStat, nullptr},
-    {"__xstat", XStat, nullptr},
-    {"__lxstat", LxStat, nullptr},
-    {"__libc_start_main", LibcStartMain, nullptr},
-    {"__sysv_signal", SysvSignal, nullptr},
-    {"abort", Abort, nullptr},
-    {"backtrace", Backtrace, nullptr},
-    {"backtrace_symbols", BacktraceSymbols, nullptr},
-    {"calloc", Calloc, nullptr},
-    {"chmod", Chmod, nullptr},
-    {"chown", Chown, nullptr},
-    {"clock", Clock, nullptr},
-    {"clock_gettime", ClockGettime, nullptr},
-    {"close", Close, nullptr},
-    {"closedir", Closedir, nullptr},
-    {"exit", ExitProvider, nullptr},
-    {"fchmod", Fchmod, nullptr},
-    {"fchown", Fchown, nullptr},
-    {"fclose", Fclose, nullptr},
-    {"fdopen", Fdopen, nullptr},
-    {"feof", Feof, nullptr},
-    {"ferror", Ferror, nullptr},
-    {"fflush", Fflush, nullptr},
-    {"fgets", Fgets, nullptr},
-    {"fileno", Fileno, nullptr},
-    {"fopen", Fopen, nullptr},
-    {"fprintf", Fprintf, nullptr},
-    {"fputc", Fputc, nullptr},
-    {"fputs", Fputs, nullptr},
-    {"fread", Fread, nullptr},
-    {"free", Free, nullptr},
-    {"fseek", Fseek, nullptr},
-    {"ftell", Ftell, nullptr},
-    {"fwrite", Fwrite, nullptr},
-    {"getc", Getc, nullptr},
-    {"getenv", Getenv, nullptr},
-    {"isatty", Isatty, nullptr},
-    {"malloc", Malloc, nullptr},
-    {"memcmp", Memcmp, nullptr},
-    {"memcpy", Memcpy, nullptr},
-    {"memmove", Memmove, nullptr},
-    {"memset", Memset, nullptr},
-    {"mkdir", Mkdir, nullptr},
-    {"mmap", Mmap, nullptr},
-    {"munmap", Munmap, nullptr},
-    {"open", Open, nullptr},
-    {"opendir", Opendir, nullptr},
-    {"perror", Perror, nullptr},
-    {"qsort", Qsort, nullptr},
-    {"qsort_r", QsortR, nullptr},
-    {"raise", Raise, nullptr},
-    {"readdir", Readdir, nullptr},
-    {"realloc", Realloc, nullptr},
-    {"remove", Remove, nullptr},
-    {"setpriority", Setpriority, nullptr},
-    {"setvbuf", Setvbuf, nullptr},
-    {"stderr", nullptr, &guestStderr},
-    {"stdin", nullptr, &guestStdin},
-    {"stdout", nullptr, &guestStdout},
-    {"strchr", Strchr, nullptr},
-    {"strcmp", Strcmp, nullptr},
-    {"strcpy", Strcpy, nullptr},
-    {"strdup", Strdup, nullptr},
-    {"strerror", Strerror, nullptr},
-    {"strlen", Strlen, nullptr},
-    {"strncmp", Strncmp, nullptr},
-    {"strrchr", Strrchr, nullptr},
-    {"strstr", Strstr, nullptr},
-    {"strtol", Strtol, nullptr},
-    {"sysconf", Sysconf, nullptr},
-    {"utimensat", Utimensat, nullptr},
+    {"printf", Printf, nullptr, true, true},
+    {"puts", Puts, nullptr, true, true},
+    {"strtoul", IntegerParse<unsigned long, std::strtoul>, nullptr, true, true},
+    {"strtoll", IntegerParse<long long, std::strtoll>, nullptr, true, true},
+    {"strtoull", IntegerParse<unsigned long long, std::strtoull>, nullptr, true, true},
+    {"strtod", Strtod, nullptr, true, true},
+    {"strtof", Strtof, nullptr, true, true},
+    {"strtold", ExtendedParse, nullptr, true, true},
+    {"wcstol", WideIntegerParse<long, std::wcstol>, nullptr, true, true},
+    {"wcstoul", WideIntegerParse<unsigned long, std::wcstoul>, nullptr, true, true},
+    {"wcstoll", WideIntegerParse<long long, std::wcstoll>, nullptr, true, true},
+    {"wcstoull", WideIntegerParse<unsigned long long, std::wcstoull>, nullptr, true, true},
+    {"wcstod", Wcstod, nullptr, true, true},
+    {"wcstof", Wcstof, nullptr, true, true},
+    {"wcstold", ExtendedParse, nullptr, true, true},
+    {"swprintf", Swprintf, nullptr, true, true},
+    {"aligned_alloc", AlignedAlloc, nullptr, true, true},
+    {"bcmp", Bcmp, nullptr, true, true},
+    {"memchr", Memchr, nullptr, true, true},
+    {"fseeko", Fseeko, nullptr, true, true},
+    {"ftello", Ftello, nullptr, true, true},
+    {"setbuf", Setbuf, nullptr, true, true},
+    {"ungetc", Ungetc, nullptr, true, true},
+    {"snprintf", Snprintf, nullptr, true, true},
+    {"vsnprintf", Vsnprintf, nullptr, true, true},
+    {"vfprintf", Vfprintf, nullptr, true, true},
+    {"vasprintf", Vasprintf, nullptr, true, true},
+    {"__isoc99_sscanf", Sscanf, nullptr, true, true},
+    {"__isoc99_vsscanf", Vsscanf, nullptr, true, true},
+    {"strerror_r", StrerrorR, nullptr, true, true},
+    {"syscall", Syscall, nullptr, true, true},
+    {"__cxa_atexit", CxaAtexit, nullptr, true, true},
+    {"wcslen", Wcslen, nullptr, true, true},
+    {"wmemchr", Wmemchr, nullptr, true, true},
+    {"fputwc", Fputwc, nullptr, true, true},
+    {"getwc", Getwc, nullptr, true, true},
+    {"ungetwc", Ungetwc, nullptr, true, true},
+    {"__errno_location", ErrnoLocation, nullptr, true, true},
+    {"__fxstat", FxStat, nullptr, true, true},
+    {"__xstat", XStat, nullptr, true, true},
+    {"__lxstat", LxStat, nullptr, true, true},
+    {"__libc_start_main", LibcStartMain, nullptr, true, true},
+    {"__sysv_signal", SysvSignal, nullptr, true, true},
+    {"abort", Abort, nullptr, true, true},
+    {"backtrace", Backtrace, nullptr, true, true},
+    {"backtrace_symbols", BacktraceSymbols, nullptr, true, true},
+    {"calloc", ScalarProvider<NativeAotGlibcFastCalloc>, nullptr, true, true},
+    {"chmod", Chmod, nullptr, true, true},
+    {"chown", Chown, nullptr, true, true},
+    {"clock", Clock, nullptr, true, true},
+    {"clock_gettime", ClockGettime, nullptr, true, true},
+    {"close", Close, nullptr, true, true},
+    {"closedir", Closedir, nullptr, true, true},
+    {"exit", ExitProvider, nullptr, true, true},
+    {"fchmod", Fchmod, nullptr, true, true},
+    {"fchown", Fchown, nullptr, true, true},
+    {"fclose", Fclose, nullptr, true, true},
+    {"fdopen", Fdopen, nullptr, true, true},
+    {"feof", Feof, nullptr, true, true},
+    {"ferror", Ferror, nullptr, true, true},
+    {"fflush", Fflush, nullptr, true, true},
+    {"fgets", Fgets, nullptr, true, true},
+    {"fileno", Fileno, nullptr, true, true},
+    {"fopen", Fopen, nullptr, true, true},
+    {"fprintf", Fprintf, nullptr, true, true},
+    {"fputc", Fputc, nullptr, true, true},
+    {"fputs", Fputs, nullptr, true, true},
+    {"fread", Fread, nullptr, true, true},
+    {"free", ScalarProvider<NativeAotGlibcFastFree, false>, nullptr, true, true},
+    {"fseek", Fseek, nullptr, true, true},
+    {"ftell", Ftell, nullptr, true, true},
+    {"fwrite", Fwrite, nullptr, true, true},
+    {"getc", Getc, nullptr, true, true},
+    {"getenv", Getenv, nullptr, true, true},
+    {"isatty", Isatty, nullptr, true, true},
+    {"malloc", ScalarProvider<NativeAotGlibcFastMalloc>, nullptr, true, true},
+    {"memcmp", ScalarProvider<NativeAotGlibcFastMemcmp>, nullptr, true, true},
+    {"memcpy", ScalarProvider<NativeAotGlibcFastMemcpy>, nullptr, true, true},
+    {"memmove", ScalarProvider<NativeAotGlibcFastMemmove>, nullptr, true, true},
+    {"memset", ScalarProvider<NativeAotGlibcFastMemset>, nullptr, true, true},
+    {"mkdir", Mkdir, nullptr, true, true},
+    {"mmap", Mmap, nullptr, true, true},
+    {"munmap", Munmap, nullptr, true, true},
+    {"open", Open, nullptr, true, true},
+    {"opendir", Opendir, nullptr, true, true},
+    {"perror", Perror, nullptr, true, true},
+    {"qsort", Qsort, nullptr, true, true},
+    {"qsort_r", QsortR, nullptr, true, true},
+    {"raise", Raise, nullptr, true, true},
+    {"readdir", Readdir, nullptr, true, true},
+    {"realloc", ScalarProvider<NativeAotGlibcFastRealloc>, nullptr, true, true},
+    {"remove", Remove, nullptr, true, true},
+    {"setpriority", Setpriority, nullptr, true, true},
+    {"setvbuf", Setvbuf, nullptr, true, true},
+    {"stderr", nullptr, &guestStderr, true, true},
+    {"stdin", nullptr, &guestStdin, true, true},
+    {"stdout", nullptr, &guestStdout, true, true},
+    {"strchr", Strchr, nullptr, true, true},
+    {"strcmp", Strcmp, nullptr, true, true},
+    {"strcpy", Strcpy, nullptr, true, true},
+    {"strdup", Strdup, nullptr, true, true},
+    {"strerror", Strerror, nullptr, true, true},
+    {"strlen", ScalarProvider<NativeAotGlibcFastStrlen>, nullptr, true, true},
+    {"strncmp", Strncmp, nullptr, true, true},
+    {"strrchr", Strrchr, nullptr, true, true},
+    {"strstr", Strstr, nullptr, true, true},
+    {"strtol", Strtol, nullptr, true, true},
+    {"sysconf", Sysconf, nullptr, true, true},
+    {"utimensat", Utimensat, nullptr, true, true},
 };
 
+}
+
+extern "C" bool NativeAotGlibcFastBinding(std::uint64_t address, std::uint64_t kind) {
+    const auto provider = NativeAotGuest::ImportedProvider(address);
+    switch (kind) {
+        case 1: return provider == ScalarProvider<NativeAotGlibcFastMalloc>;
+        case 2: return provider == ScalarProvider<NativeAotGlibcFastCalloc>;
+        case 3: return provider == ScalarProvider<NativeAotGlibcFastRealloc>;
+        case 4: return provider == ScalarProvider<NativeAotGlibcFastFree, false>;
+        case 5: return provider == ScalarProvider<NativeAotGlibcFastMemcpy>;
+        case 6: return provider == ScalarProvider<NativeAotGlibcFastMemmove>;
+        case 7: return provider == ScalarProvider<NativeAotGlibcFastMemset>;
+        case 8: return provider == ScalarProvider<NativeAotGlibcFastMemcmp>;
+        case 9: return provider == ScalarProvider<NativeAotGlibcFastStrlen>;
+        default: return false;
+    }
 }
 
 namespace NativeAotGlibc {
 
 void Register() {
-    NativeAotGuest::RegisterProviders(Bindings, sizeof(Bindings) / sizeof(Bindings[0]));
+    NativeAotGlibcSupport::Register(Bindings, sizeof(Bindings) / sizeof(Bindings[0]));
     NativeAotGlibcSupport::RegisterLocale();
     NativeAotGlibcSupport::RegisterThreads();
     NativeAotGlibcSupport::RegisterDynamic();

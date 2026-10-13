@@ -8,12 +8,14 @@ from pathlib import Path
 from capstone.x86 import X86_OP_IMM, X86_OP_MEM
 
 import guest_lift
+import guest_provider_calls
+import guest_regions
 from guest_ops import (FLAGS, GPR, STATE_XMM, TRAP_FALLTHROUGH, TRAP_HALT, TRAP_INVALID, TRAP_UNKNOWN_ENTRY,
                        Unsupported, Vector)
 
 TRAP_UNKNOWN_TARGET = 1
 TRIPLE = 'arm64-apple-macosx14.0.0'
-RUNTIME = ['declare void @NativeAotGuestTrap(i64, i64, i64) noreturn', 'declare ptr @NativeAotGuestLookup(i64)', 'declare ptr @NativeAotGuestFind(i64)',
+RUNTIME = ['@NativeAotGuestSharedMemory = external global i8', 'declare void @NativeAotGuestTrap(i64, i64, i64) noreturn', 'declare ptr @NativeAotGuestLookup(i64)', 'declare ptr @NativeAotGuestFind(i64)',
            'declare void @NativeAotGuestCpuid(ptr)', 'declare i64 @NativeAotGuestReadTsc()']
 
 
@@ -22,6 +24,56 @@ def symbol(address):
 
 
 class Lowering(Vector):
+    def set_gpr(self, name, value):
+        self.gpr_writes.add(GPR.index(name))
+        super().set_gpr(name, value)
+
+    def set_xmm(self, index, value):
+        self.xmm_writes.add(index)
+        super().set_xmm(index, value)
+
+    def private_epoch(self):
+        value = self.v('load atomic i8, ptr @NativeAotGuestSharedMemory acquire, align 1')
+        return self.v(f'icmp eq i8 {value}, 0')
+
+    def string_operation(self, kind, bits):
+        if self.ins.addr_size != 8:
+            self.unsupported('32-bit string addressing is not qualified')
+        if self.epoch_variant != 'private' or 0xf3 not in self.ins.prefix or (kind == 'stos' and bits != 8):
+            return super().string_operation(kind, bits)
+        count, destination = self.get_gpr('rcx'), self.get_gpr('rdi')
+        step = bits // 8
+        fits_count = self.v(f'icmp ule i64 {count}, {(1 << 64) // step - 1}')
+        size = self.v(f'mul i64 {count}, {step}')
+        destination_end = self.v(f'add i64 {destination}, {size}')
+        fits_destination = self.v(f'icmp uge i64 {destination_end}, {destination}')
+        valid = self.v(f'and i1 {fits_count}, {fits_destination}')
+        if kind == 'movs':
+            source = self.get_gpr('rsi')
+            source_end = self.v(f'add i64 {source}, {size}')
+            fits_source = self.v(f'icmp uge i64 {source_end}, {source}')
+            before = self.v(f'icmp ule i64 {destination_end}, {source}')
+            after = self.v(f'icmp ule i64 {source_end}, {destination}')
+            disjoint = self.v(f'or i1 {before}, {after}')
+            valid = self.v(f'and i1 {valid}, {self.v(f"and i1 {fits_source}, {disjoint}")}')
+        fast, fallback, done = self.label(), self.label(), self.label()
+        self.emit(f'br i1 {valid}, label %{fast}, label %{fallback}')
+        self.place(fast)
+        pointer = self.pointer(destination)
+        if kind == 'movs':
+            self.emit(f'call void @llvm.memcpy.p0.p0.i64(ptr align 1 {pointer}, ptr align 1 {self.pointer(source)}, i64 {size}, i1 false)')
+            self.set_gpr('rsi', source_end)
+        else:
+            value, _ = self.read_register('al')
+            self.emit(f'call void @llvm.memset.p0.i64(ptr align 1 {pointer}, i8 {value}, i64 {size}, i1 false)')
+        self.set_gpr('rdi', destination_end)
+        self.set_gpr('rcx', '0')
+        self.emit(f'br label %{done}')
+        self.place(fallback)
+        super().string_operation(kind, bits)
+        self.emit(f'br label %{done}')
+        self.place(done)
+
     def op_cpuid(self):
         if self.concurrent:
             self.emit('fence seq_cst')
@@ -66,7 +118,7 @@ class Lowering(Vector):
         self.place(done)
 
     def load(self, address, bits):
-        if not self.concurrent:
+        if not self.concurrent or (bits == 32 and self.ins.address in self.readonly_table_loads):
             return super().load(address, bits)
         if bits > 64:
             low = self.load(address, 64)
@@ -99,9 +151,13 @@ class Lowering(Vector):
 
     def flush(self):
         for index in range(16):
+            if self.writeback is not None and index not in self.writeback[0]:
+                continue
             pointer = self.v(f'getelementptr i8, ptr %s, i64 {8 * index}')
             self.emit(f'store i64 {self.v(f"load i64, ptr %R{index}")}, ptr {pointer}')
         for index in range(16):
+            if self.writeback is not None and index not in self.writeback[1]:
+                continue
             pointer = self.v(f'getelementptr i8, ptr %s, i64 {STATE_XMM + 16 * index}')
             self.emit(f'store i128 {self.v(f"load i128, ptr %X{index}")}, ptr {pointer}, align 16')
 
@@ -114,7 +170,7 @@ class Lowering(Vector):
             self.emit(f'store i128 {self.v(f"load i128, ptr {pointer}, align 16")}, ptr %X{index}')
 
     def prologue(self):
-        self.lines.append(f'define hidden i64 {symbol(self.unit.start)}(ptr noalias %s, i64 %entry) {{')
+        self.lines.append(f'define hidden i64 {self.symbol}(ptr noalias %s, i64 %entry) {{')
         self.lines.append('prologue:')
         for index in range(16):
             self.emit(f'%R{index} = alloca i64')
@@ -124,12 +180,22 @@ class Lowering(Vector):
             self.emit(f'%F{flag} = alloca i1')
             self.emit(f'store i1 false, ptr %F{flag}')
         self.emit('%Resume = alloca i64')
+        if self.epoch_variant is not None:
+            for site in self.unit.tables:
+                self.emit(f'%Selector{site:x} = alloca i64')
+                self.emit(f'store i64 0, ptr %Selector{site:x}')
         self.reload()
         self.emit('%base = load i64, ptr @__aps5_guest_base')
         expected = self.v(f'add i64 %base, {self.unit.start}')
         bad = self.label()
         first = f'L{self.unit.start:x}.trace' if self.trace else f'L{self.unit.start:x}'
-        self.emit(f'br i1 {self.v(f"icmp eq i64 %entry, {expected}")}, label %{first}, label %{bad}')
+        if self.epoch_variant == 'ordered':
+            offset = self.v('sub i64 %entry, %base')
+            entries = [f'i64 {self.unit.start}, label %{first}']
+            entries.extend(f'i64 {point}, label %L{point:x}' for point in self.resume_points() if point != self.unit.start)
+            self.emit(f'switch i64 {offset}, label %{bad} [ {" ".join(entries)} ]')
+        else:
+            self.emit(f'br i1 {self.v(f"icmp eq i64 %entry, {expected}")}, label %{first}, label %{bad}')
         self.place(bad)
         self.emit(f'call void @NativeAotGuestTrap(i64 {TRAP_UNKNOWN_ENTRY}, i64 %entry, i64 {expected})')
         self.emit('unreachable')
@@ -145,9 +211,93 @@ class Lowering(Vector):
             return self.absolute(operand.imm)
         return self.read(operand, 64)
 
+    def import_slot(self, address):
+        if self.epoch_variant is None or address not in self.units:
+            return None
+        unit = self.units[address]
+        if len(unit.instructions) != 1:
+            return None
+        ins = unit.instructions[address]
+        if ins.mnemonic != 'jmp' or ins.addr_size != 8 or len(ins.operands) != 1:
+            return None
+        operand = ins.operands[0]
+        if (operand.type != X86_OP_MEM or ins.reg_name(operand.mem.base) != 'rip' or operand.mem.index
+                or ins.reg_name(operand.mem.segment) not in ('', None, 'cs', 'ds', 'ss', 'es')):
+            return None
+        slot = ins.address + ins.size + operand.mem.disp
+        return slot if unit.program.import_name(slot) is not None else None
+
+    def invoke_import(self, slot):
+        contract = guest_provider_calls.CALLS.get(self.unit.program.import_name(slot))
+        if self.epoch_variant is None or contract is None:
+            return self.invoke_import_general(slot)
+        kind, name, count, returns = contract
+        target = self.load(self.absolute(slot), 64)
+        fast, fallback, done = self.label(), self.label(), self.label()
+        matches = self.v(f'call i1 @NativeAotGlibcFastBinding(i64 {target}, i64 {kind})')
+        self.emit(f'br i1 {matches}, label %{fast}, label %{fallback}')
+        self.place(fast)
+        arguments = ', '.join(f'i64 {self.get_gpr(register)}' for register in ['rdi', 'rsi', 'rdx'][:count])
+        if self.concurrent:
+            self.emit('fence seq_cst')
+        value = self.v(f'call i64 @NativeAotGlibcFast{name}({arguments})')
+        if self.concurrent:
+            self.emit('fence seq_cst')
+        if returns:
+            self.set_gpr('rax', value)
+        rsp = self.get_gpr('rsp')
+        fast_target = self.load(rsp, 64)
+        self.set_gpr('rsp', self.v(f'add i64 {rsp}, 8'))
+        self.flush()
+        fast_end = self.label()
+        self.emit(f'br label %{fast_end}')
+        self.place(fast_end)
+        self.emit(f'br label %{done}')
+        self.place(fallback)
+        slow_target = self.invoke_import_general(slot, target)
+        slow_end = self.label()
+        self.emit(f'br label %{slow_end}')
+        self.place(slow_end)
+        self.emit(f'br label %{done}')
+        self.place(done)
+        return self.v(f'phi i64 [ {fast_target}, %{fast_end} ], [ {slow_target}, %{slow_end} ]')
+
+    def invoke_import_general(self, slot, target=None):
+        self.flush()
+        if target is None:
+            target = self.load(self.absolute(slot), 64)
+        function = self.v(f'call ptr @NativeAotGuestFind(i64 {target})')
+        known, unknown, done = self.label(), self.label(), self.label()
+        self.emit(f'br i1 {self.v(f"icmp eq ptr {function}, null")}, label %{unknown}, label %{known}')
+        self.place(known)
+        called = self.v(f'call i64 {function}(ptr %s, i64 {target})')
+        self.emit(f'br label %{done}')
+        self.place(unknown)
+        self.emit(f'br label %{done}')
+        self.place(done)
+        result = self.v(f'phi i64 [ {called}, %{known} ], [ {target}, %{unknown} ]')
+        return self.finish_invoke(result)
+
     def invoke(self, function, target):
         self.flush()
-        return self.v(f'call i64 {function}(ptr %s, i64 {target})')
+        result = self.v(f'call i64 {function}(ptr %s, i64 {target})')
+        return self.finish_invoke(result)
+
+    def finish_invoke(self, result):
+        if self.epoch_variant == 'private':
+            private, promoted, resume, outside = self.label(), self.label(), self.label(), self.label()
+            self.emit(f'br i1 {self.private_epoch()}, label %{private}, label %{promoted}')
+            self.place(promoted)
+            offset = self.v(f'sub i64 {result}, %base')
+            cases = ' '.join(f'i64 {point}, label %{resume}' for point in self.resume_points())
+            self.emit(f'switch i64 {offset}, label %{outside} [ {cases} ]')
+            self.place(resume)
+            continued = self.v(f'tail call i64 {symbol(self.unit.start)}_ordered(ptr %s, i64 {result})')
+            self.leave_with(continued)
+            self.place(outside)
+            self.leave_with(result)
+            self.place(private)
+        return result
 
     def leave_with(self, value):
         if self.trace:
@@ -169,12 +319,13 @@ class Lowering(Vector):
         if mnemonic == 'call':
             operand = ins.operands[0]
             target = self.target_value()
-            function = self.call_target(operand.imm if operand.type == X86_OP_IMM else None, target)
+            slot = self.import_slot(operand.imm) if operand.type == X86_OP_IMM else None
+            function = self.call_target(operand.imm if operand.type == X86_OP_IMM else None, target) if slot is None else None
             back = self.absolute(following)
             rsp = self.v(f'sub i64 {self.get_gpr("rsp")}, 8')
             self.store(rsp, back, 64)
             self.set_gpr('rsp', rsp)
-            result = self.invoke(function, target)
+            result = self.invoke(function, target) if slot is None else self.invoke_import(slot)
             self.reload()
             propagate = self.label()
             continuation = f'L{following:x}' if following in unit.instructions else self.label()
@@ -211,7 +362,8 @@ class Lowering(Vector):
                 return
             target = self.target_value()
             if operand.type == X86_OP_IMM:
-                self.leave_with(self.invoke(self.call_target(operand.imm, target), target))
+                slot = self.import_slot(operand.imm)
+                self.leave_with(self.invoke(self.call_target(operand.imm, target), target) if slot is None else self.invoke_import(slot))
                 return
             function = self.v(f'call ptr @NativeAotGuestFind(i64 {target})')
             local, remote = self.label(), self.label()
@@ -232,7 +384,8 @@ class Lowering(Vector):
         if ins.address in unit.tails:
             self.place(taken)
             absolute = self.absolute(target)
-            self.leave_with(self.invoke(symbol(target), absolute))
+            slot = self.import_slot(target)
+            self.leave_with(self.invoke(symbol(target), absolute) if slot is None else self.invoke_import(slot))
 
     def resume_points(self):
         if not hasattr(self, '_resume'):
@@ -250,6 +403,27 @@ class Lowering(Vector):
         value = self.read(ins.operands[0], 64)
         offset = self.v(f'sub i64 {value}, %base')
         default = self.label()
+        if self.epoch_variant is not None and description.get('selector_load') is not None:
+            selector = self.v(f'load i64, ptr %Selector{ins.address:x}')
+            fallback = self.label()
+            if ins.address in self.sealed_tables:
+                dense = ' '.join(f'i64 {index}, label %L{target:x}' for index, target in enumerate(description['targets']))
+                self.emit(f'switch i64 {selector}, label %{fallback} [ {dense} ]')
+                self.place(fallback)
+                cases = ' '.join(f'i64 {target}, label %L{target:x}' for target in sorted(set(description['targets'])))
+                self.emit(f'switch i64 {offset}, label %{default} [ {cases} ]')
+                self.place(default)
+                self.emit(f'call void @NativeAotGuestTrap(i64 {TRAP_UNKNOWN_TARGET}, i64 {value}, i64 {self.absolute(ins.address)})')
+                self.emit('unreachable')
+                return
+            guards = {target: self.label() for target in sorted(set(description['targets']))}
+            dense = ' '.join(f'i64 {index}, label %{guards[target]}' for index, target in enumerate(description['targets']))
+            self.emit(f'switch i64 {selector}, label %{fallback} [ {dense} ]')
+            for target, label in guards.items():
+                self.place(label)
+                matches = self.v(f'icmp eq i64 {offset}, {target}')
+                self.emit(f'br i1 {matches}, label %L{target:x}, label %{fallback}')
+            self.place(fallback)
         cases = ' '.join(f'i64 {target}, label %L{target:x}' for target in sorted(set(description['targets'])))
         self.emit(f'switch i64 {offset}, label %{default} [ {cases} ]')
         self.place(default)
@@ -258,6 +432,10 @@ class Lowering(Vector):
 
     def instruction(self, ins):
         self.ins = ins
+        if self.epoch_variant is not None:
+            for site, description in self.unit.tables.items():
+                if description.get('selector_load') == ins.address:
+                    self.emit(f'store i64 {self.get_gpr(description["index"])}, ptr %Selector{site:x}')
         mnemonic = ins.mnemonic
         if mnemonic in ('call', 'ret', 'jmp', 'hlt', 'ud2', 'int3') or (mnemonic.startswith('j') and mnemonic[1:]):
             self.control(ins)
@@ -282,8 +460,13 @@ class Lowering(Vector):
             self.trap(TRAP_FALLTHROUGH)
 
 
-def lower_unit(unit, units, trace=False, concurrent=False, ordered_access="fenced"):
-    lowering = Lowering(unit, symbol(unit.start))
+def lower_unit(unit, units, trace=False, concurrent=False, ordered_access="fenced", epoch_variant=None, writeback=None, seal_image=False):
+    lowering = Lowering(unit, symbol(unit.start) + ('_' + epoch_variant if epoch_variant else ''))
+    lowering.epoch_variant = epoch_variant
+    lowering.sealed_tables = guest_regions.sealed_tables(unit) if seal_image else set()
+    lowering.readonly_table_loads = {unit.tables[site]['selector_load'] for site in lowering.sealed_tables}
+    lowering.writeback = writeback
+    lowering.gpr_writes, lowering.xmm_writes = set(), set()
     lowering.units = units
     lowering.trace = trace
     lowering.concurrent = concurrent
@@ -312,6 +495,8 @@ def lower_unit(unit, units, trace=False, concurrent=False, ordered_access="fence
         lowering.place(outside)
         lowering.leave_with(result)
     lowering.lines.append('}')
+    if epoch_variant is not None and writeback is None:
+        return lower_unit(unit, units, trace, concurrent, ordered_access, epoch_variant, (lowering.gpr_writes, lowering.xmm_writes), seal_image)
     return '\n'.join(lowering.lines), lowering.declarations, errors
 
 
@@ -352,7 +537,7 @@ def string_constant(name, text):
     return f'{name} = private unnamed_addr constant [{len(data)} x i8] c"{escaped}"'
 
 
-def descriptor_module(image, concurrent=False):
+def descriptor_module(image, concurrent=False, memory_epochs=False, seal_image=False):
     lines = [f'target triple = "{TRIPLE}"', '@__aps5_guest_base = hidden global i64 0']
     for address in image['entries']:
         lines.append(f'declare i64 {symbol(address)}(ptr, i64)')
@@ -378,18 +563,18 @@ def descriptor_module(image, concurrent=False):
         lines.append(string_constant(f'@__aps5_guest_export_{number}', name))
     lines.append(f'@__aps5_guest_exports = private constant [{max(len(exports), 1)} x {{ ptr, i64 }}] [' +
                  (', '.join(f'{{ ptr, i64 }} {{ ptr @__aps5_guest_export_{number}, i64 {address} }}' for number, (_, address) in enumerate(exports)) or '{ ptr, i64 } zeroinitializer') + ']')
-    fields = ['i64 5', 'ptr @__aps5_guest_bytes', f'i64 {len(blob)}', 'ptr @__aps5_guest_segments', f'i64 {len(image["segments"])}',
+    fields = ['i64 8', 'ptr @__aps5_guest_bytes', f'i64 {len(blob)}', 'ptr @__aps5_guest_segments', f'i64 {len(image["segments"])}',
               'ptr @__aps5_guest_relocations', f'i64 {len(image["relocations"])}', 'ptr @__aps5_guest_symbols',
               'ptr @__aps5_guest_symbol_flags', f'i64 {symbol_count}', 'ptr @__aps5_guest_entries', f'i64 {len(image["entries"])}',
               f'i64 {image["entry"]}', f'i64 {image["span"]}', f'i64 {image["relro"][0]}', f'i64 {image["relro"][1]}',
-              'ptr @__aps5_guest_base', *[f'i64 {value}' for value in image['tls']], 'ptr @__aps5_guest_exports', f'i64 {len(exports)}', f'i64 {int(concurrent)}', f'i64 {int(image.get("abi", "glibc") == "sce-app")}']
+              'ptr @__aps5_guest_base', *[f'i64 {value}' for value in image['tls']], 'ptr @__aps5_guest_exports', f'i64 {len(exports)}', f'i64 {3 if seal_image else 2 if memory_epochs else int(concurrent)}', f'i64 {int(image.get("abi", "glibc") == "sce-app")}']
     types = ', '.join(field.split(' ')[0] for field in fields)
     lines.append(f'@__aps5_guest_image = constant {{ {types} }} {{ {", ".join(fields)} }}')
     return '\n'.join(lines) + '\n'
 
 
 def shard_module(texts, declarations, defined, called):
-    lines = [f'target triple = "{TRIPLE}"', '@__aps5_guest_base = external hidden global i64', *RUNTIME, *sorted(declarations)]
+    lines = [f'target triple = "{TRIPLE}"', '@__aps5_guest_base = external hidden global i64', *RUNTIME, *guest_provider_calls.declarations(), *sorted(declarations)]
     for address in sorted(called - defined):
         lines.append(f'declare hidden i64 {symbol(address)}(ptr, i64)')
     lines.extend(texts)
@@ -400,16 +585,51 @@ def callees(unit, units):
     return {target for target in [*unit.calls.values(), *unit.tails.values()] if target in units}
 
 
+def epoch_dispatch(start):
+    name = symbol(start)
+    return f"""define hidden i64 {name}(ptr %s, i64 %entry) {{
+dispatch:
+  %base = load i64, ptr @__aps5_guest_base
+  %expected = add i64 %base, {start}
+  %valid = icmp eq i64 %expected, %entry
+  br i1 %valid, label %choose, label %bad
+bad:
+  call void @NativeAotGuestTrap(i64 4, i64 %entry, i64 %expected)
+  unreachable
+choose:
+  %epoch = load atomic i8, ptr @NativeAotGuestSharedMemory acquire, align 1
+  %private = icmp eq i8 %epoch, 0
+  br i1 %private, label %fast, label %ordered
+fast:
+  %a = tail call i64 {name}_private(ptr %s, i64 %entry)
+  ret i64 %a
+ordered:
+  %b = tail call i64 {name}_ordered(ptr %s, i64 %entry)
+  ret i64 %b
+}}"""
+
+
 def lower_shard(arguments):
-    raw, starts, output, extra, trace, concurrent, abi, ordered_access = arguments
+    raw, starts, output, extra, trace, concurrent, abi, ordered_access, memory_epochs, seal_image = arguments
     program = guest_lift.Program(raw, abi=abi)
     units, _, _ = guest_lift.discover(program, extra)
     texts, declarations, errors, called = [], set(), [], set()
     for start in starts:
-        text, declared, failures = lower_unit(units[start], units, trace, concurrent, ordered_access)
-        texts.append(text)
-        declarations |= declared
-        errors.extend(failures)
+        if memory_epochs:
+            text, declared, failures = lower_unit(units[start], units, trace, True, ordered_access, 'ordered', seal_image=seal_image)
+            texts.append(text)
+            declarations |= declared
+            errors.extend(failures)
+            text, declared, failures = lower_unit(units[start], units, trace, False, ordered_access, 'private', seal_image=seal_image)
+            texts.append(text)
+            declarations |= declared
+            errors.extend(failures)
+            texts.append(epoch_dispatch(start))
+        else:
+            text, declared, failures = lower_unit(units[start], units, trace, concurrent, ordered_access)
+            texts.append(text)
+            declarations |= declared
+            errors.extend(failures)
         called |= callees(units[start], units)
     if trace:
         declarations |= {'declare void @NativeAotGuestTraceEnter(ptr, i64)', 'declare void @NativeAotGuestTraceLeave(ptr, i64, i64)'}
@@ -417,11 +637,14 @@ def lower_shard(arguments):
     return errors
 
 
-def build(input_path, output_dir, shards=16, jobs=8, extra=(), strict=True, trace=False, concurrent=False, abi="glibc", ordered_access=None):
+def build(input_path, output_dir, shards=16, jobs=8, extra=(), strict=True, trace=False, concurrent=False, abi="glibc", ordered_access=None, memory_epochs=False, seal_image=False):
     if ordered_access is None:
         ordered_access = 'atomic' if concurrent else 'fenced'
     guest_lift.require(ordered_access in ('fenced', 'atomic'), 'unknown ordered access implementation')
     guest_lift.require(concurrent or ordered_access == 'fenced', 'atomic access requires --concurrent')
+    guest_lift.require(not seal_image or memory_epochs, 'sealed image requires memory epochs')
+    guest_lift.require(not memory_epochs or (concurrent and abi == 'glibc'), 'memory epochs require the concurrent glibc profile')
+    guest_lift.require(not memory_epochs or not trace, 'memory epoch tracing is not qualified')
     started = time.monotonic()
     raw = Path(input_path).read_bytes()
     program = guest_lift.Program(raw, abi=abi)
@@ -429,7 +652,7 @@ def build(input_path, output_dir, shards=16, jobs=8, extra=(), strict=True, trac
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
     image = describe_image(program, units)
-    (output / 'image.ll').write_text(descriptor_module(image, concurrent))
+    (output / 'image.ll').write_text(descriptor_module(image, concurrent, memory_epochs, seal_image))
     ordered = sorted(units, key=lambda start: -len(units[start].instructions))
     buckets = [[] for _ in range(shards)]
     sizes = [0] * shards
@@ -437,14 +660,15 @@ def build(input_path, output_dir, shards=16, jobs=8, extra=(), strict=True, trac
         smallest = sizes.index(min(sizes))
         buckets[smallest].append(start)
         sizes[smallest] += len(units[start].instructions)
-    work = [(raw, sorted(bucket), str(output / f'shard{number:02}.ll'), tuple(extra), trace, concurrent, abi, ordered_access) for number, bucket in enumerate(buckets) if bucket]
+    work = [(raw, sorted(bucket), str(output / f'shard{number:02}.ll'), tuple(extra), trace, concurrent, abi, ordered_access, memory_epochs, seal_image) for number, bucket in enumerate(buckets) if bucket]
     if jobs == 1:
         errors = [error for item in work for error in lower_shard(item)]
     else:
         with ProcessPoolExecutor(jobs) as pool:
             errors = [error for result in pool.map(lower_shard, work) for error in result]
     report = {'schema': 'anyps5.aot.guest-lowering.v1', 'input_sha256': program.sha256, 'units': len(units),
-              'startup_abi': abi, 'ordered_access': ordered_access,
+              'startup_abi': abi, 'ordered_access': ordered_access, 'memory_epochs': memory_epochs, 'sealed_image': seal_image,
+              'sealed_dispatch_tables': sum(len(guest_regions.sealed_tables(u)) for u in units.values()) if seal_image else 0,
               'memory_profile': 'ordered-normal-memory' if concurrent else 'single-thread',
               'instructions': sum(len(unit.instructions) for unit in units.values()),
               'jump_tables': {status: sum(1 for unit in units.values() for table in unit.tables.values() if table['status'] == status)
@@ -465,10 +689,12 @@ def main():
     parser.add_argument('--inventory', action='store_true')
     parser.add_argument('--trace', action='store_true')
     parser.add_argument('--concurrent', action='store_true')
+    parser.add_argument('--memory-epochs', action='store_true')
+    parser.add_argument('--seal-image', action='store_true')
     parser.add_argument('--ordered-access', choices=('fenced', 'atomic'))
     parser.add_argument('--abi', choices=('glibc', 'sce-app'), default='glibc')
     args = parser.parse_args()
-    report = build(args.input, args.output, args.shards, strict=not args.inventory, trace=args.trace, concurrent=args.concurrent, abi=args.abi, ordered_access=args.ordered_access)
+    report = build(args.input, args.output, args.shards, strict=not args.inventory, trace=args.trace, concurrent=args.concurrent, abi=args.abi, ordered_access=args.ordered_access, memory_epochs=args.memory_epochs, seal_image=args.seal_image)
     print(json.dumps({key: report[key] for key in ('units', 'instructions', 'jump_tables', 'seconds')}))
     print(f'{len(report["unsupported"])} unsupported instruction sites')
 
