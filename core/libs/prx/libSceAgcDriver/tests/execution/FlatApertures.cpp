@@ -391,12 +391,19 @@ ShaderRecompiler::RecompileRequest MakeRequest(AgcDriver::VulkanDevice& device, 
     };
 }
 
-void Run(AgcDriver::VulkanDevice& device, const Row& row, const GuestBlock& guest) {
+using Programs = std::map<std::pair<Words, std::uint32_t>, std::optional<ShaderRecompiler::RecompileResult>>;
+
+void Run(AgcDriver::VulkanDevice& device, const Row& row, const GuestBlock& guest, Programs& programs) {
     const auto lanes = row.waveSize;
     const auto guestSlot = row.atomic ? GuestAtomicSlot : GuestStoreSlot;
     const auto guestBase = static_cast<std::uint64_t>(guest.Address()) + guestSlot;
     const bool wideAtomic = row.atomic && row.width == 64u;
-    std::vector<std::uint32_t> table(lanes * 8u, 0u);
+    static std::array<std::vector<std::uint32_t>, 2> tables{std::vector<std::uint32_t>(32u * 8u), std::vector<std::uint32_t>(64u * 8u)};
+    static std::array<std::vector<std::uint32_t>, 2> outputs{std::vector<std::uint32_t>(32u * 8u), std::vector<std::uint32_t>(64u * 8u)};
+    auto& table = tables[lanes == 64u ? 1u : 0u];
+    auto& output = outputs[lanes == 64u ? 1u : 0u];
+    std::fill(table.begin(), table.end(), 0u);
+    std::fill(output.begin(), output.end(), 0xdeadbeefu);
     for (std::uint32_t lane = 0; lane < lanes; ++lane) {
         const auto address = LaneAddress(row, lane, guestBase);
         table[lane * 8u] = static_cast<std::uint32_t>(address);
@@ -417,21 +424,23 @@ void Run(AgcDriver::VulkanDevice& device, const Row& row, const GuestBlock& gues
             table[lane * 8u + 4u] = row.atomic ? InitValue(lane) : 0u;
         }
     }
-    std::vector<std::uint32_t> output(lanes * 8u, 0xdeadbeefu);
     std::vector<std::uint32_t> userData(8, 0u);
     const auto outputDescriptor = BufferDescriptor(output.data(), static_cast<std::uint32_t>(output.size() * 4u));
     const auto tableDescriptor = BufferDescriptor(table.data(), static_cast<std::uint32_t>(table.size() * 4u));
     std::copy(outputDescriptor.begin(), outputDescriptor.end(), userData.begin());
     std::copy(tableDescriptor.begin(), tableDescriptor.end(), userData.begin() + 4);
-    const auto code = Kernel(row);
+    const auto& code = programs.try_emplace(std::pair{Kernel(row), row.waveSize}).first->first.first;
     const std::span<const std::uint32_t> codeSpan(code);
     const std::array<ShaderRecompiler::MemoryRegion, 1> memory{{{reinterpret_cast<std::uintptr_t>(codeSpan.data()), std::as_bytes(codeSpan)}}};
     ShaderRecompiler::ShaderComputeStageInfo compute{{lanes, 1, 1}, LdsDwords, {false, false, false}, false, 1};
     compute.scratchDwords = ScratchDwords;
-    auto request = MakeRequest(device, codeSpan, memory, userData, compute, row.waveSize);
-    request.useCache = false;
-    const auto result = ShaderRecompiler::Recompile(request);
-    device.Dispatch(result, 1, 1, 1, {}, reinterpret_cast<std::uintptr_t>(codeSpan.data()));
+    auto& result = programs.at(std::pair{code, row.waveSize});
+    if (!result) {
+        auto request = MakeRequest(device, codeSpan, memory, userData, compute, row.waveSize);
+        request.useCache = false;
+        result = ShaderRecompiler::Recompile(request);
+    }
+    device.Dispatch(*result, 1, 1, 1, {}, reinterpret_cast<std::uintptr_t>(codeSpan.data()));
     device.WaitIdle();
     if (wideAtomic) {
         Check64(row, output);
@@ -497,6 +506,7 @@ int main(int argc, char** argv) {
         const bool wave64 = device->Target().subgroupSize >= 32u;
         const bool int64Atomics = TargetHasCapability(device->Target(), spv::CapabilityInt64Atomics);
         GuestBlock guest;
+        Programs programs;
         std::size_t checked = 0;
         std::map<std::pair<Words, std::uint32_t>, std::size_t> shaders;
         for (const Row& row : Rows()) {
@@ -504,7 +514,7 @@ int main(int argc, char** argv) {
             if (shader % parts != part) continue;
             if (row.waveSize == 64u && !wave64) continue;
             if (row.atomic && row.width == 64u && !int64Atomics) continue;
-            Run(*device, row, guest);
+            Run(*device, row, guest, programs);
             ++checked;
         }
         if (!wave64) std::printf("skipped the wave64 rows, subgroup size %u cannot hold a wave64 in two lanes\n", device->Target().subgroupSize);
