@@ -629,6 +629,62 @@ bad:
                 result = self.run_binary(binary)
                 self.assertIn(b'locked access crosses its natural alignment', result.stderr)
 
+    def test_tls_destructors_repeat_before_join_returns(self):
+        binary, _ = self.program(PRELUDE + """
+    sub rsp, 64
+    mov r12, rsp
+    mov qword ptr [r12 + 8], 0
+    lea rdi, [r12 + 0]
+    lea rsi, [rip + destroy]
+    call qword ptr [rip + pthread_key_create_slot]
+    test eax, eax
+    jne fail
+    lea rdi, [r12 + 16]
+    xor esi, esi
+    lea rdx, [rip + worker]
+    mov rcx, r12
+    call qword ptr [rip + pthread_create_slot]
+    test eax, eax
+    jne fail
+    mov rdi, qword ptr [r12 + 16]
+    lea rsi, [r12 + 24]
+    call qword ptr [rip + pthread_join_slot]
+    test eax, eax
+    jne fail
+    cmp qword ptr [r12 + 8], 4
+    jne fail
+    cmp qword ptr [r12 + 24], 73
+    jne fail
+    mov edi, dword ptr [r12]
+    call qword ptr [rip + pthread_key_delete_slot]
+    xor edi, edi
+    call qword ptr [rip + exit_slot]
+fail:
+    mov edi, 55
+    call qword ptr [rip + exit_slot]
+worker:
+    sub rsp, 8
+    mov rsi, rdi
+    mov edi, dword ptr [rdi]
+    call qword ptr [rip + pthread_setspecific_slot]
+    mov eax, 73
+    add rsp, 8
+    ret
+worker_end:
+destroy:
+    sub rsp, 8
+    add qword ptr [rdi + 8], 1
+    mov rsi, rdi
+    mov edi, dword ptr [rdi]
+    call qword ptr [rip + pthread_setspecific_slot]
+    add rsp, 8
+    ret
+destroy_end:
+""", imports=('exit', 'pthread_key_create', 'pthread_key_delete', 'pthread_setspecific', 'pthread_create', 'pthread_join'),
+            unwind=(('worker', 'worker_end'), ('destroy', 'destroy_end')), concurrent=True)
+        result = self.run_binary(binary)
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, b'', b''))
+
     def test_provider_conversions(self):
         binary = self.directory / 'provider_checks'
         native = guest_lab.NATIVE

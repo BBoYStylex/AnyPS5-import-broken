@@ -53,6 +53,8 @@ inline void ReturnInteger(State& state, std::int64_t value) {
 void RegisterLocale();
 void RegisterThreads();
 void RegisterDynamic();
+void RegisterMath();
+void RegisterPosix();
 
 }
 

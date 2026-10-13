@@ -1386,6 +1386,8 @@ void Register() {
     NativeAotGlibcSupport::RegisterLocale();
     NativeAotGlibcSupport::RegisterThreads();
     NativeAotGlibcSupport::RegisterDynamic();
+    NativeAotGlibcSupport::RegisterMath();
+    NativeAotGlibcSupport::RegisterPosix();
 }
 
 }

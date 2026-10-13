@@ -8,6 +8,7 @@
 #include <cstring>
 #include <pthread.h>
 #include <shared_mutex>
+#include <vector>
 
 namespace {
 
@@ -83,6 +84,69 @@ void CondWait(State& state) {
     ReturnResult(state, pthread_cond_wait(Condition(NativeAotGuest::Argument(state, 0)), Mutex(mutex)));
 }
 
+struct GuestKey {
+    std::uint64_t Destructor;
+};
+std::map<std::uint32_t, GuestKey> keys;
+std::uint64_t nextKey = 0;
+thread_local std::map<std::uint32_t, std::uint64_t> keyValues;
+
+void KeyCreate(State& state) {
+    const auto target = NativeAotGuest::Argument(state, 1);
+    if (target != 0 && NativeAotGuestFind(target) == nullptr) Unsupported("TLS destructor is not a converted entry");
+    std::lock_guard<std::mutex> lock(tableLock);
+    if (keys.size() >= 1024 || nextKey > UINT32_MAX) { ReturnResult(state, EAGAIN); return; }
+    const auto key = static_cast<std::uint32_t>(nextKey++);
+    keys.emplace(key, GuestKey{target});
+    std::memcpy(Pointer<void>(state, 0), &key, sizeof(key));
+    ReturnResult(state, 0);
+}
+
+void KeyDelete(State& state) {
+    std::lock_guard<std::mutex> lock(tableLock);
+    ReturnResult(state, keys.erase(static_cast<std::uint32_t>(NativeAotGuest::Argument(state, 0))) ? 0 : EINVAL);
+}
+
+void GetSpecific(State& state) {
+    const auto key = static_cast<std::uint32_t>(NativeAotGuest::Argument(state, 0));
+    std::lock_guard<std::mutex> lock(tableLock);
+    const auto found = keyValues.find(key);
+    NativeAotGuest::Return(state, keys.contains(key) && found != keyValues.end() ? found->second : 0);
+}
+
+void SetSpecific(State& state) {
+    const auto key = static_cast<std::uint32_t>(NativeAotGuest::Argument(state, 0));
+    std::lock_guard<std::mutex> lock(tableLock);
+    if (!keys.contains(key)) { ReturnResult(state, EINVAL); return; }
+    keyValues[key] = NativeAotGuest::Argument(state, 1);
+    ReturnResult(state, 0);
+}
+
+void DestroyKeys(State& state) {
+    for (unsigned pass = 0; pass < 4; ++pass) {
+        std::vector<std::uint32_t> pending;
+        for (const auto& [key, value] : keyValues) if (value != 0) pending.push_back(key);
+        bool invoked = false;
+        for (const auto key : pending) {
+            std::uint64_t target = 0, value = 0;
+            {
+                std::lock_guard<std::mutex> lock(tableLock);
+                const auto found = keys.find(key);
+                if (found != keys.end()) target = found->second.Destructor;
+                value = keyValues[key];
+                if (target != 0 && value != 0) keyValues[key] = 0;
+            }
+            if (target != 0 && value != 0) {
+                invoked = true;
+                state.Gpr[7] = value;
+                NativeAotGuest::Invoke(state, target);
+            }
+        }
+        if (!invoked) break;
+    }
+    keyValues.clear();
+}
+
 constexpr std::size_t StackBytes = 8 * 1024 * 1024;
 
 struct GuestThread {
@@ -104,6 +168,7 @@ void* RunThread(void* value) {
     threadId = thread.Id;
     thread.State.FsBase = NativeAotGuest::CreateThreadArea();
     thread.Result = NativeAotGuest::Invoke(thread.State, thread.Target);
+    DestroyKeys(thread.State);
     NativeAotGuest::FreeThreadArea(thread.State.FsBase);
     return nullptr;
 }
@@ -267,6 +332,10 @@ void CondSignal(State& state) {
 }
 
 const NativeAotGuest::ProviderBinding Bindings[] = {
+    {"pthread_key_create", KeyCreate, nullptr},
+    {"pthread_key_delete", KeyDelete, nullptr},
+    {"pthread_getspecific", GetSpecific, nullptr},
+    {"pthread_setspecific", SetSpecific, nullptr},
     {"pthread_create", ThreadCreate, nullptr},
     {"pthread_join", ThreadJoin, nullptr},
     {"pthread_self", ThreadSelf, nullptr},
