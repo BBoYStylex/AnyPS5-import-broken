@@ -184,7 +184,7 @@ std::shared_ptr<Socket> Lookup(int descriptor) {
     std::lock_guard lock(socketsMutex);
     const auto found = sockets.find(descriptor);
     if (found != sockets.end()) return found->second;
-    Fail(9);
+    Fail(descriptor >= 0 && DescriptorIsOpen_nid_no_patch(descriptor) ? 38 : 9);
     return {};
 }
 int Option(int guest) {
@@ -897,7 +897,7 @@ int APS5_VABI bind_nid_postfix(int descriptor, const void* address, std::uint32_
 }
 int APS5_VABI shutdown_nid_postfix(int descriptor, int how) {
     const auto socket = Lookup(descriptor);
-    if (!socket) return Fail(9);
+    if (!socket) return -1;
     if (how < 0 || how > 2) return Fail(22);
     return ::shutdown(socket->value, how) ? Fail(NativeError()) : 0;
 }
