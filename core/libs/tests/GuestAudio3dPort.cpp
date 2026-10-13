@@ -25,6 +25,10 @@ int APS5_VABI sceAudio3dAudioOutOpen(std::uint32_t port_id, int user_id, std::in
 int APS5_VABI sceAudio3dAudioOutClose(std::int32_t handle);
 int APS5_VABI sceAudio3dAudioOutOutput(std::int32_t handle, const void* ptr);
 int APS5_VABI sceAudio3dAudioOutOutputs(AudioOutOutputParam* param, std::uint32_t num);
+int APS5_VABI sceAudio3dObjectSetAttribute(std::uint32_t port_id, std::uint32_t object_id, std::uint32_t attribute_id, const void* attribute, std::uint64_t attribute_size);
+int APS5_VABI sceAudio3dPortGetParameters(std::uint32_t port_id, Audio3dOpenParameters* out);
+const char* APS5_VABI sceAudio3dStrError(int error_code);
+int APS5_VABI sceAudio3dPortGetAttributesSupported(std::uint32_t port_id, std::uint32_t* capabilities, std::uint32_t* num_capabilities);
 }
 
 namespace {
@@ -336,6 +340,37 @@ void CheckTerminate() {
     Require(sceAudio3dTerminate() == 0, "terminate after reinitialize");
 }
 
+void CheckRemainingExports() {
+    float value = 0.5f;
+    Require(sceAudio3dObjectSetAttribute(0, 1, 0x10001, &value, sizeof(value)) == INVALID_PORT, "object set attribute needs an open port");
+    Audio3dOpenParameters parameters = Defaults();
+    std::uint32_t id = 7;
+    Require(Open(parameters, &id) == 0 && id == 0, "open");
+    std::uint32_t object = 0;
+    Require(sceAudio3dObjectReserve(0, &object) == 0 && object == 1, "reserve");
+    Require(sceAudio3dObjectSetAttribute(1, 1, 0x10001, &value, sizeof(value)) == INVALID_PORT, "object set attribute on port 1");
+    Require(sceAudio3dObjectSetAttribute(0, 1, 0x10001, &value, sizeof(value)) == 0, "object set attribute on a reserved object");
+    Require(sceAudio3dObjectSetAttribute(0, 2, 0x10001, &value, sizeof(value)) == INVALID_OBJECT, "object set attribute on an unreserved object");
+    Require(sceAudio3dPortGetParameters(1, nullptr) == INVALID_PORT, "get parameters on port 1");
+    Require(sceAudio3dPortGetParameters(0, nullptr) == INVALID_PARAMETER, "get parameters needs an output");
+    Audio3dOpenParameters out{};
+    Require(sceAudio3dPortGetParameters(0, &out) == 0, "get parameters");
+    Require(out.size_this == 0x28, "the stored parameters use the full size");
+    Require(out.granularity == parameters.granularity && out.rate == parameters.rate, "the stored granularity and rate");
+    Require(out.max_objects == parameters.max_objects && out.queue_depth == parameters.queue_depth, "the stored object and queue limits");
+    Require(out.buffer_mode == parameters.buffer_mode && out.pad == 0 && out.num_beds == 2, "the stored buffer mode, padding and beds");
+    const char* invalid_port = sceAudio3dStrError(INVALID_PORT);
+    Require(invalid_port != nullptr && invalid_port[0] != '\0', "str error returns a non-empty string");
+    const char* unknown = sceAudio3dStrError(0);
+    Require(unknown != nullptr && unknown[0] != '\0', "str error returns a string for an unknown code");
+    std::uint32_t capabilities = 7;
+    std::uint32_t num_capabilities = 99;
+    Require(sceAudio3dPortGetAttributesSupported(1, &capabilities, &num_capabilities) == INVALID_PORT, "attributes supported on port 1");
+    Require(sceAudio3dPortGetAttributesSupported(0, &capabilities, nullptr) == INVALID_PARAMETER, "attributes supported needs a count");
+    Require(sceAudio3dPortGetAttributesSupported(0, nullptr, &num_capabilities) == 0 && num_capabilities == 0, "no object attribute capabilities");
+    Require(sceAudio3dPortClose(0) == 0, "close");
+}
+
 }
 
 int main() {
@@ -349,5 +384,6 @@ int main() {
     CheckAudioOutPorts();
     CheckObjectAttributes();
     CheckBed();
+    CheckRemainingExports();
     CheckTerminate();
 }
