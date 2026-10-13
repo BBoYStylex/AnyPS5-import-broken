@@ -108,6 +108,57 @@ static bool Failed(std::int64_t result, int error) {
     return result == static_cast<int>(0x80410100u | static_cast<unsigned>(error)) && *sceNetErrnoLoc() == error;
 }
 
+static int NonblockingMode(int socket) {
+    int mode = -1;
+    std::uint32_t size = sizeof(mode);
+    Require(sceNetGetsockopt(socket, 0xffff, 0x1200, &mode, &size) == 0 && size == sizeof(mode));
+    return mode;
+}
+
+static void CheckAcceptedNonblocking(int family) {
+    const std::uint32_t addressSize = family == 2 ? 16 : 28;
+    std::array<std::uint8_t, 28> address{};
+    address[0] = static_cast<std::uint8_t>(addressSize);
+    address[1] = static_cast<std::uint8_t>(family);
+    if (family == 2) { address[4] = 127; address[7] = 1; }
+    else address[23] = 1;
+    const int listener = sceNetSocket("accept-mode-listener", family, 1, 6);
+    Require(listener >= 0);
+    Require(sceNetBind_nid_postfix(listener, address.data(), addressSize) == 0 && sceNetListen(listener, 3) == 0);
+    std::uint32_t size = address.size();
+    Require(sceNetGetsockname(listener, address.data(), &size) == 0 && size == addressSize);
+    std::array<int, 3> clients{};
+    std::array<int, 3> accepted{};
+    for (std::size_t i = 0; i < clients.size(); ++i) {
+        const int mode = i == 1 ? 1 : 0;
+        Require(sceNetSetsockopt(listener, 0xffff, 0x1200, &mode, sizeof(mode)) == 0);
+        if (mode) Require(Failed(sceNetAccept(listener, nullptr, nullptr), 35));
+        clients[i] = sceNetSocket("accept-mode-client", family, 1, 6);
+        Require(clients[i] >= 0 && sceNetConnect(clients[i], address.data(), addressSize) == 0);
+        accepted[i] = sceNetAccept(listener, nullptr, nullptr);
+        Require(accepted[i] >= 0);
+        if (NonblockingMode(accepted[i]) != mode) {
+            std::fprintf(stderr, "sceNetAccept did not inherit listener nonblocking mode\n");
+            std::abort();
+        }
+    }
+    Require(NonblockingMode(listener) == 0 && NonblockingMode(accepted[0]) == 0 && NonblockingMode(accepted[1]) == 1);
+    char byte = 'x';
+    Require(Failed(sceNetRecv(accepted[1], &byte, 1, 0), 35) && byte == 'x');
+    const int enabled = 1;
+    Require(sceNetSetsockopt(listener, 0xffff, 0x1200, &enabled, sizeof(enabled)) == 0);
+    const int disabled = 0;
+    Require(sceNetSetsockopt(accepted[1], 0xffff, 0x1200, &disabled, sizeof(disabled)) == 0);
+    Require(NonblockingMode(listener) == 1 && NonblockingMode(accepted[1]) == 0 && NonblockingMode(accepted[2]) == 0);
+    for (std::size_t i = 0; i < clients.size(); ++i) {
+        Require(sceNetSend(clients[i], &byte, 1, 0) == 1);
+        char received = 0;
+        Require(sceNetRecv(accepted[i], &received, 1, 0) == 1 && received == byte);
+        Require(sceNetSocketClose(accepted[i]) == 0 && sceNetSocketClose(clients[i]) == 0);
+    }
+    Require(sceNetSocketClose(listener) == 0);
+}
+
 static void CheckStreamSender(int family) {
     const auto addressSize = family == 2 ? 16u : 28u;
     const int listener = sceNetSocket(nullptr, family, 1, 6);
@@ -775,6 +826,8 @@ int main() {
 
     CheckStreamSender(2);
     if (!ipv6Unavailable) CheckStreamSender(28);
+    CheckAcceptedNonblocking(2);
+    if (!ipv6Unavailable) CheckAcceptedNonblocking(28);
 
     int state = -1;
     Require(sceNetCtlGetState(&state) == 0);

@@ -733,7 +733,17 @@ int APS5_VABI sceNetAccept(int s, void* addr, uint32_t* addrlen) {
         close_socket(accepted);
         return fail(12);
     }
+    if (listener.nonblock) {
+#ifdef _WIN32
+        u_long enabled = 1;
+        if (ioctlsocket(accepted, FIONBIO, &enabled) != 0) return fail(native_error());
+#else
+        const int flags = fcntl(accepted, F_GETFL, 0);
+        if (flags < 0 || fcntl(accepted, F_SETFL, flags | O_NONBLOCK) != 0) return fail(native_error());
+#endif
+    }
     Sock connection;
+    connection.nonblock = listener.nonblock;
     connection.family = listener.family;
     connection.type = NET_SOCK_STREAM;
     connection.native = std::move(handle);
