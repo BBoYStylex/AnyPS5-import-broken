@@ -66,6 +66,13 @@ constexpr std::array<std::uint32_t, 9> SamplerCode(std::uint32_t word0) {
     };
 }
 
+constexpr std::array<std::uint32_t, 10> GatherCode(std::uint32_t dmask, float u) {
+    return {
+        0x34060084u, 0x7e2802ffu, std::bit_cast<std::uint32_t>(u), 0x7e2a0280u, 0xf11c0008u | (dmask << 8u), 0x00610a14u, 0xbf8c3f70u,
+        0xe0781000u, 0x80000a03u, 0xbf810000u,
+    };
+}
+
 constexpr std::array<std::uint32_t, 15> MixedSamplerCode(std::uint32_t word0) {
     return {
         0x34060084u, 0x7e280280u, 0x7e2a0280u, 0x7e2c0280u, 0xf0bc0108u, 0x00610a14u, 0xbf8c3f70u,
@@ -78,9 +85,8 @@ alignas(256) constexpr auto LoadXy = LoadCode(0x3u);
 alignas(256) constexpr auto StoreX = StoreCode(0x1u);
 alignas(256) constexpr auto StoreXy = StoreCode(0x3u);
 alignas(256) constexpr auto SampleLz = SamplerCode(0xf09c0f08u);
-alignas(256) constexpr auto Gather4Lz = SamplerCode(0xf11c0108u);
+alignas(256) constexpr auto Gather4CLz = SamplerCode(0xf13c0108u);
 alignas(256) constexpr auto MixedSampleLz = MixedSamplerCode(0xf09c0f08u);
-alignas(256) constexpr auto MixedGather4Lz = MixedSamplerCode(0xf11c0108u);
 
 class GuestBlock {
 public:
@@ -198,6 +204,21 @@ void CheckLoad(AgcDriver::VulkanDevice& device, std::span<const std::uint32_t> c
     Verify(dmask, format, swizzle, what);
 }
 
+void CheckGather(AgcDriver::VulkanDevice& device, std::uint32_t component, std::uint32_t format, std::uint32_t swizzle, std::uint32_t left, const std::string& what) {
+    Fill(format);
+    alignas(256) const auto code = GatherCode(1u << component, static_cast<float>(left + 1u) / Width);
+    Run(device, code, Texels.data(), format, swizzle, 1);
+    // The coordinate sits on the line between texels left and left + 1; the image is one row high, so both rows clamp to row 0.
+    const std::array<std::uint32_t, 4> texel{left, std::min(left + 1u, Width - 1u), std::min(left + 1u, Width - 1u), left};
+    const auto selector = (swizzle >> (component * 3u)) & 7u;
+    for (std::uint32_t lane = 0; lane < 4u; ++lane) {
+        const std::array<std::uint32_t, 4> channels{Linear(texel[lane]), format == Srgb8 ? 0u : Linear(255u - texel[lane]), 0u, One};
+        const auto expected = selector == 0u ? 0u : selector == 1u ? One : channels[selector - 4u];
+        const auto actual = Output[lane];
+        Require(actual == expected, what + ": left texel " + std::to_string(left) + " lane " + std::to_string(lane) + " is " + Hex(actual) + ", expected " + Hex(expected));
+    }
+}
+
 void CheckStoredLoad(AgcDriver::VulkanDevice& device, GuestBlock& block, std::span<const std::uint32_t> code, std::uint32_t dmask, std::uint32_t format, std::uint32_t swizzle, const std::string& what) {
     const auto address = reinterpret_cast<std::uintptr_t>(block.Data());
     const auto bytes = Width * (format == Srgb8 ? 1u : 2u);
@@ -210,7 +231,7 @@ void CheckStoredLoad(AgcDriver::VulkanDevice& device, GuestBlock& block, std::sp
     device.WaitIdle();
 }
 
-void RequireRefused(AgcDriver::VulkanDevice& device, std::span<const std::uint32_t> code, const std::string& what) {
+void RequireRefused(AgcDriver::VulkanDevice& device, std::span<const std::uint32_t> code, const std::string& what, const std::string& reason = "samples or gathers an sRGB image the device cannot sample") {
     Fill(Srgb8_8);
     for (const bool useCache : {false, true, true}) {
         std::string refusal;
@@ -219,7 +240,7 @@ void RequireRefused(AgcDriver::VulkanDevice& device, std::span<const std::uint32
         } catch (const std::exception& error) {
             refusal = error.what();
         }
-        Require(refusal.find("samples or gathers an sRGB image the device cannot sample") != std::string::npos, what + " of an 8_8_SRGB image read through its UNORM view was not refused: " + refusal);
+        Require(refusal.find(reason) != std::string::npos, what + " of an 8_8_SRGB image read through its UNORM view was not refused: " + refusal);
     }
 }
 
@@ -243,9 +264,16 @@ int main() {
         CheckStoredLoad(*device, block, LoadXyzw, 0xfu, Srgb8_8, SwizzleYX10, "8_8_SRGB image_load dmask:0xf Y X 1 0 of 8_8_UNORM image_stores");
         CheckStoredLoad(*device, block, LoadXyzw, 0xfu, Srgb8, SwizzleXXX1, "8_SRGB image_load dmask:0xf X X X 1 of 8_UNORM image_stores");
         RequireRefused(*device, SampleLz, "image_sample_lz");
-        RequireRefused(*device, Gather4Lz, "image_gather4_lz");
+        RequireRefused(*device, Gather4CLz, "image_gather4_c_lz", "incompatible with the static runtime image interface");
+        for (const std::uint32_t left : {0u, 1u, 100u, 254u, 255u}) {
+            CheckGather(*device, 0u, Srgb8_8, SwizzleXY01, left, "8_8_SRGB image_gather4_lz component 0 X Y 0 1");
+            CheckGather(*device, 1u, Srgb8_8, SwizzleXY01, left, "8_8_SRGB image_gather4_lz component 1 X Y 0 1");
+            CheckGather(*device, 0u, Srgb8_8, SwizzleYX10, left, "8_8_SRGB image_gather4_lz component 0 Y X 1 0");
+            CheckGather(*device, 2u, Srgb8_8, SwizzleXY01, left, "8_8_SRGB image_gather4_lz component 2 constant 0");
+            CheckGather(*device, 3u, Srgb8_8, SwizzleXY01, left, "8_8_SRGB image_gather4_lz component 3 constant 1");
+            CheckGather(*device, 0u, Srgb8, SwizzleXXX1, left, "8_SRGB image_gather4_lz component 0 X X X 1");
+        }
         RequireRefused(*device, MixedSampleLz, "image_sample_c_lz followed by image_sample_lz");
-        RequireRefused(*device, MixedGather4Lz, "image_sample_c_lz followed by image_gather4_lz");
         std::puts("image sRGB load tests passed");
         return 0;
     } catch (const std::exception& error) {

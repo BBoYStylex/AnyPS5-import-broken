@@ -622,6 +622,10 @@ std::uint32_t UnpackImageGather(SpirvValueEmitContext& ctx, const ImageEmitAcces
     if (info.format == IrBufferFormat::Invalid) {
         return gathered;
     }
+    const bool normalized = info.type == SpirvFormatComponentType::Unorm || info.type == SpirvFormatComponentType::Float;
+    if (normalized) {
+        RequireConvertedUnormAccess(ctx, access, info);
+    }
     const auto component = ImageGatherComponent(EffectiveDmask(access.mem));
     const auto selector = RuntimeImageSwizzle(state, access.mem.resource, component);
     std::uint32_t values[4] = {};
@@ -633,8 +637,14 @@ std::uint32_t UnpackImageGather(SpirvValueEmitContext& ctx, const ImageEmitAcces
             const auto physical = index % info.componentCount;
             components[index] = state.module.AllocateId();
             state.module.AddFunction(spv::OpBitFieldUExtract, TypeU32(state), components[index], packed, ConstantU32(state, info.componentBitOffset[physical]), ConstantU32(state, info.componentBits[physical]));
+            if (normalized) {
+                components[index] = NormalizeFormatComponent(state, info, physical, components[index]);
+            }
         }
         values[lane] = RuntimeSwizzledComponent(state, selector, components);
+        if (normalized) {
+            values[lane] = Select(state, TypeU32(state), Binary(state, spv::OpIEqual, TypeBool(state), selector, ConstantU32(state, 1u)), ConstantU32(state, FormattedConstantBits(info, SpirvFormattedSourceKind::One)), values[lane]);
+        }
     }
     const auto result = state.module.AllocateId();
     state.module.AddFunction(spv::OpCompositeConstruct, TypeU32Vector(state, 4), result, values[0], values[1], values[2], values[3]);
@@ -1069,10 +1079,10 @@ SampleSetup MakeSampleSetup(SpirvValueEmitContext& ctx, const ImageEmitAccess& a
     if (dref && access.image.conversionFormat != IrBufferFormat::Invalid) {
         ctx.Fail(access.inst, "uses depth comparison with a packed integer image");
     }
-    if (ImageConversionFormat(access.image).type == SpirvFormatComponentType::Unorm) {
+    if (ImageConversionFormat(access.image).type == SpirvFormatComponentType::Unorm && access.inst.Opcode() != IrOpcode::ImageGatherRaw) {
         ctx.Fail(access.inst, "samples or gathers a converted unorm image, which needs filtering in the shader and is not implemented");
     }
-    if (ImageConversionFormat(access.image).type == SpirvFormatComponentType::Float) {
+    if (ImageConversionFormat(access.image).type == SpirvFormatComponentType::Float && access.inst.Opcode() != IrOpcode::ImageGatherRaw) {
         ctx.Fail(access.inst, "samples or gathers a converted float image, which needs filtering in the shader and is not implemented");
     }
     const auto coord = CoordF32(ctx, access, layout.coord, dimensionInfo.coordinateComponents, AddressDimension(access).coordinateComponents);
@@ -1188,7 +1198,10 @@ void EmitGatherOp(SpirvValueEmitContext& ctx, const ImageEmitAccess& access, con
         if (setup.dref || !HasFlag(mem, RdnaImageSampleFlagLevelZero) || HasFlag(mem, RdnaImageSampleFlagGatherHorizontal)) {
             ctx.Fail(access.inst, "has an unsupported 1D gather variant");
         }
-        const auto sample = EmitOneDimensionalGatherLz(ctx, access, setup);
+        auto sample = EmitOneDimensionalGatherLz(ctx, access, setup);
+        if (access.image.srgbDecode) {
+            sample = DecodeSrgbTexel(state, sample);
+        }
         ctx.Define(access.inst, TableResult(ctx, access, ResultVector(ctx, access, UnpackImageGather(ctx, access, sample), setup.numericClass, false, true)));
         return;
     }
@@ -1227,6 +1240,9 @@ void EmitGatherOp(SpirvValueEmitContext& ctx, const ImageEmitAccess& access, con
         const auto component = integer ? ConstantU32(state, value) : ConstantF32(state, std::bit_cast<std::uint32_t>(static_cast<float>(value)));
         gathered = state.module.AllocateId();
         state.module.AddFunction(spv::OpCompositeConstruct, ImageVectorType(state, resultNumericClass, 4), gathered, component, component, component, component);
+    }
+    if (access.image.srgbDecode && !setup.dref) {
+        gathered = DecodeSrgbTexel(state, gathered);
     }
     ctx.Define(access.inst, TableResult(ctx, access, ResultVector(ctx, access, UnpackImageGather(ctx, access, gathered), resultNumericClass, false, true)));
 }
@@ -1567,7 +1583,7 @@ void EmitSamplingOp(SpirvValueEmitContext& ctx, const ImageEmitAccess& access) {
         EmitConstantSwizzleSample(ctx, access);
         return;
     }
-    if (access.image.srgbDecode) {
+    if (access.image.srgbDecode && (access.inst.Opcode() != IrOpcode::ImageGatherRaw || HasFlag(access.mem, RdnaImageSampleFlagCompare))) {
         ctx.Fail(access.inst, "samples or gathers an sRGB image the device cannot sample, which is not implemented");
     }
     if (access.mem.imagePacked) {

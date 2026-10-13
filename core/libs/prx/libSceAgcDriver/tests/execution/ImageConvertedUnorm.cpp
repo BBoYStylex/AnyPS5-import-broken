@@ -73,6 +73,22 @@ constexpr std::array<std::uint32_t, 9> SamplerCode(std::uint32_t word0) {
     };
 }
 
+constexpr std::array<std::uint32_t, 10> GatherCode(std::uint32_t dmask, float u) {
+    return {
+        0x34060084u, 0x7e2802ffu, std::bit_cast<std::uint32_t>(u), 0x7e2a0280u, 0xf11c0008u | (dmask << 8u), 0x00610a14u, 0xbf8c3f70u,
+        0xe0781000u, 0x80000a03u, 0xbf810000u,
+    };
+}
+
+constexpr std::array<std::uint32_t, 12> GatherCodeV(std::uint32_t dmask, float u, float v) {
+    return {
+        0x34060084u, 0x7e2802ffu, std::bit_cast<std::uint32_t>(u), 0x7e2a02ffu, std::bit_cast<std::uint32_t>(v), 0xf11c0008u | (dmask << 8u), 0x00610a14u, 0xbf8c3f70u,
+        0xe0781000u, 0x80000a03u, 0xbf810000u, 0u,
+    };
+}
+
+alignas(256) constexpr auto Gather4CLz = SamplerCode(0xf13c0108u);
+
 alignas(256) constexpr std::array<std::uint32_t, 10> RoundTrip{
     0x7e080218u, 0x343c0885u, 0x4a3c3d00u, 0x7e3e0280u, 0xf0001708u, 0x00010a1eu, 0xbf8c3f70u, 0xf0201708u,
     0x00040a1eu, 0xbf810000u,
@@ -86,7 +102,6 @@ alignas(256) constexpr auto StoreXyz = StoreCode(0x7u, 0u);
 alignas(256) constexpr auto StoreXz = StoreCode(0x5u, 0u);
 alignas(256) constexpr auto StoreD16 = StoreCode(0x7u, D16);
 alignas(256) constexpr auto SampleLz = SamplerCode(0xf09c0f08u);
-alignas(256) constexpr auto Gather4Lz = SamplerCode(0xf11c0108u);
 alignas(256) constexpr auto GetLod = SamplerCode(0xf1800308u);
 
 constexpr std::array<std::uint32_t, 11> StoreValues{
@@ -135,12 +150,12 @@ std::array<std::uint32_t, 4> BufferDescriptor(const void* data, std::uint32_t by
     return {static_cast<std::uint32_t>(address), static_cast<std::uint32_t>((address >> 32u) & 0xffffu), bytes, 0x31016facu};
 }
 
-std::array<std::uint32_t, 8> TextureDescriptor(const void* data, std::uint32_t format, std::uint32_t swizzle, std::uint32_t width) {
+std::array<std::uint32_t, 8> TextureDescriptor(const void* data, std::uint32_t format, std::uint32_t swizzle, std::uint32_t width, std::uint32_t height = 1) {
     const auto address = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(data));
     return {
         static_cast<std::uint32_t>(address >> 8u),
         static_cast<std::uint32_t>((address >> 40u) & 0xffu) | (format << 20u) | (((width - 1u) & 3u) << 30u),
-        (width - 1u) >> 2u,
+        ((width - 1u) >> 2u) | ((height - 1u) << 14u),
         swizzle | (Type2D << 28u),
         0u,
         0u,
@@ -212,6 +227,40 @@ void CheckLoad(AgcDriver::VulkanDevice& device, const std::uint8_t* texels, std:
             const auto distance = actual > expected.bits ? actual - expected.bits : expected.bits - actual;
             Require(distance <= expected.ulps, what + ": texel " + std::to_string(index) + " component " + std::to_string(component) + " is " + Hex(actual) + ", expected " + Hex(expected.bits) + " within " + std::to_string(expected.ulps) + " ULP");
         }
+    }
+}
+
+// The coordinate sits on the line between texels left and left + 1 and the image is one row high, so both rows clamp
+// to row 0 and the four lanes are texels left, left + 1, left + 1, left.
+void RunGather(AgcDriver::VulkanDevice& device, const std::uint8_t* texels, std::uint32_t format, std::uint32_t swizzle, std::uint32_t component, std::uint32_t left) {
+    alignas(256) const auto code = GatherCode(1u << component, static_cast<float>(left + 1u) / LoadWidth);
+    Run(device, code, TextureDescriptor(texels, format, swizzle, LoadWidth), {}, 1);
+}
+
+void CheckGather(AgcDriver::VulkanDevice& device, const std::uint8_t* texels, std::uint32_t swizzle, std::uint32_t component, std::uint32_t left, const std::string& what) {
+    RunGather(device, texels, UnormFormat, swizzle, component, left);
+    const auto right = std::min(left + 1u, LoadWidth - 1u);
+    const std::array<std::uint32_t, 4> index{left, right, right, left};
+    for (std::uint32_t lane = 0; lane < 4u; ++lane) {
+        const auto expected = Selected(LoadTexel(index[lane]), swizzle, component, true);
+        const auto actual = Output[lane];
+        const auto distance = actual > expected.bits ? actual - expected.bits : expected.bits - actual;
+        Require(distance <= expected.ulps, what + ": left texel " + std::to_string(left) + " lane " + std::to_string(lane) + " is " + Hex(actual) + ", expected " + Hex(expected.bits) + " within " + std::to_string(expected.ulps) + " ulps");
+    }
+}
+
+// Two rows of 1024 texels: the coordinate sits on the corner between texels left, left + 1 of row 0 and row 1, so the lanes
+// are (x0,y1), (x1,y1), (x1,y0), (x0,y0) of the 2x2 footprint.
+void CheckGatherRows(AgcDriver::VulkanDevice& device, const std::uint8_t* texels, std::uint32_t component, std::uint32_t left, const std::string& what) {
+    constexpr std::uint32_t RowWidth = LoadWidth / 2u;
+    alignas(256) const auto code = GatherCodeV(1u << component, static_cast<float>(left + 1u) / RowWidth, 0.5f);
+    Run(device, code, TextureDescriptor(texels, UnormFormat, SwizzleXYZ1, RowWidth, 2), {}, 1);
+    const std::array<std::uint32_t, 4> index{RowWidth + left, RowWidth + left + 1u, left + 1u, left};
+    for (std::uint32_t lane = 0; lane < 4u; ++lane) {
+        const auto expected = Selected(LoadTexel(index[lane]), SwizzleXYZ1, component, true);
+        const auto actual = Output[lane];
+        const auto distance = actual > expected.bits ? actual - expected.bits : expected.bits - actual;
+        Require(distance <= expected.ulps, what + ": left texel " + std::to_string(left) + " lane " + std::to_string(lane) + " is " + Hex(actual) + ", expected " + Hex(expected.bits));
     }
 }
 
@@ -298,6 +347,18 @@ void CheckFloatLoad(AgcDriver::VulkanDevice& device, std::uint8_t* texels) {
     }
 }
 
+void CheckFloatGather(AgcDriver::VulkanDevice& device, const std::uint8_t* texels, std::uint32_t swizzle, std::uint32_t component, std::uint32_t left, const std::string& what) {
+    RunGather(device, texels, FloatFormat, swizzle, component, left);
+    const auto right = std::min(left + 1u, LoadWidth - 1u);
+    const std::array<std::uint32_t, 4> index{left, right, right, left};
+    const auto selector = (swizzle >> (component * 3u)) & 7u;
+    for (std::uint32_t lane = 0; lane < 4u; ++lane) {
+        const auto expected = selector == 0u ? 0u : selector == 1u ? std::bit_cast<std::uint32_t>(1.0f) : std::bit_cast<std::uint32_t>(FloatValues[(index[lane] + (selector - 4u) * 4u) % 11u]);
+        const auto actual = Output[lane];
+        Require(actual == expected, what + ": left texel " + std::to_string(left) + " lane " + std::to_string(lane) + " is " + Hex(actual) + ", expected " + Hex(expected));
+    }
+}
+
 void CheckFloatStore(AgcDriver::VulkanDevice& device, std::uint8_t* texels) {
     std::fill(texels, texels + Threads * 4u, static_cast<std::uint8_t>(0xa5u));
     Input.fill(0u);
@@ -356,7 +417,21 @@ int main() {
         CheckFloatLoad(*device, texels + FloatOffset);
         RequireRefused(*device, SampleLz, texels + FloatOffset, SwizzleXYZ1, PointSampler, "samples or gathers a converted float image", "image_sample_lz of R10_G11_B11_FLOAT", FloatFormat);
         RequireRefused(*device, SampleLz, texels, SwizzleXYZ1, PointSampler, "sampling, gathering or querying LOD of a converted unorm image", "image_sample_lz");
-        RequireRefused(*device, Gather4Lz, texels, SwizzleXYZ1, PointSampler, "sampling, gathering or querying LOD of a converted unorm image", "image_gather4_lz");
+        RequireRefused(*device, Gather4CLz, texels, SwizzleXYZ1, PointSampler, "sampled image descriptor uses an unsupported format", "image_gather4_c_lz");
+        for (const std::uint32_t left : {0u, 5u, 500u, 1022u}) {
+            for (std::uint32_t component = 0; component < 3u; ++component) {
+                CheckGatherRows(*device, texels, component, left, "two-row image_gather4_lz of R10_G11_B11_UNORM component " + std::to_string(component));
+            }
+        }
+        for (const std::uint32_t left : {3u, 4u, 100u, 1023u, 2046u}) {
+            for (std::uint32_t component = 0; component < 4u; ++component) {
+                CheckGather(*device, texels, SwizzleXYZ1, component, left, "image_gather4_lz of R10_G11_B11_UNORM X Y Z 1 component " + std::to_string(component));
+                CheckFloatGather(*device, texels + FloatOffset, SwizzleXYZ1, component, left, "image_gather4_lz of R10_G11_B11_FLOAT X Y Z 1 component " + std::to_string(component));
+            }
+            CheckGather(*device, texels, SwizzleZYX1, 0u, left, "image_gather4_lz of R10_G11_B11_UNORM Z Y X 1 component 0");
+            CheckGather(*device, texels, SwizzleX011, 1u, left, "image_gather4_lz of R10_G11_B11_UNORM X 0 1 1 component 1");
+            CheckFloatGather(*device, texels + FloatOffset, SwizzleZYX1, 0u, left, "image_gather4_lz of R10_G11_B11_FLOAT Z Y X 1 component 0");
+        }
         RequireRefused(*device, GetLod, texels, SwizzleXYZ1, PointSampler, "sampling, gathering or querying LOD of a converted unorm image", "image_get_lod");
         RequireRefused(*device, LoadD16, texels, SwizzleXYZ1, {}, "converted unorm image with 16-bit data", "image_load d16");
         RequireRefused(*device, StoreD16, texels + StoreOffset, SwizzleXYZ1, BufferDescriptor(Input.data(), static_cast<std::uint32_t>(Input.size() * 4u)), "converted unorm image with 16-bit data", "image_store d16");
