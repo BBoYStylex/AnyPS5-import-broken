@@ -18,6 +18,7 @@
 - [sceVideoOutOpen](../../../core/libs/prx/libSceVideoOut/src/Output.cpp) (libSceVideoOut) - the open param's first word is unknown (PPSA21564 passes 16; it is not the byte size, since the affinity mask is at offset 16); only 16 is accepted. Whether the param continues past offset 24 is also unknown
 - [GPU flips](../../../core/libs/prx/libSceVideoOut/src/VideoOutDriver.cpp) (libSceVideoOut) - a command-buffer flip of a buffer index with no registered buffer when the GPU reaches it presents black and completes like any flip (flip event, count, `flipPendingNum`). The console's behaviour is unknown; PPSA05684 requires that it completes: its renderer submits a flip of buffer 0 while another thread waits for `sceVideoOutIsFlipPending` to reach 0 before registering the buffers, and `flipPendingNum` counts that flip from its submission as in shadPS4
 - [sceVideoOutAddPreVblankStartEvent](../../../core/libs/prx/libSceVideoOut/src/Event.cpp) (libSceVideoOut) - how long before the vblank the console signals pre-vblank start is unknown. The event is triggered on each emulated vblank tick immediately before the vblank event, with its own count as the event data
+- Declared without parameters, signatures unknown, no title known to import them yet: `sceVideoOutDebugReadCrc2` in [libSceVideoOut](../../../core/libs/prx/libSceVideoOut/Unimplemented.cpp) (libSceVideoOut). Names from the zecoxao/sce_symbols NID list, each verified against its NID
 
 ### Functional
 
