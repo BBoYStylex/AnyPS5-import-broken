@@ -10,7 +10,7 @@
 namespace Cli {
 
 const char* Usage() {
-    return "Usage: relinker [--help] [--windows | --macos] [--windows-diagnostics] [--windows-gui] [--icon <path.ico>] [--windows-fixed-base <address>] [--skip-syscall-check | --trap-sdk-syscall-stubs] [--skip-sce-module | --sce-module-path <path>] [--exclude-sce-module <file>]... [--module-dir <dir>]... [--executable <path>]... [--to-intel] [--to-rosetta] [unused-filter=0|1|2] [--registry] [--rpath <path>] [--lazy-binding] [--autorun] <input.elf> <output.elf>\n"
+    return "Usage: relinker [--help] [--windows | --macos] [--windows-diagnostics] [--windows-gui] [--trace-imports] [--icon <path.ico>] [--windows-fixed-base <address>] [--skip-syscall-check | --trap-sdk-syscall-stubs] [--skip-sce-module | --sce-module-path <path>] [--exclude-sce-module <file>]... [--module-dir <dir>]... [--executable <path>]... [--to-intel] [--to-rosetta] [unused-filter=0|1|2] [--registry] [--rpath <path>] [--lazy-binding] [--autorun] <input.elf> <output.elf>\n"
 
            "Example: relinker input.elf output.elf";
 }
@@ -91,6 +91,8 @@ Args ParseArgs(int argc, char* argv[]) {
             if (i + 1 >= argc)
                 throw std::runtime_error("--icon requires a value");
             args.iconPath = argv[++i];
+        } else if (arg == "--trace-imports") {
+            args.traceImports = true;
         } else if (arg.rfind("--", 0) == 0 || arg == "unused-filter") {
             throw std::runtime_error("unknown option: " + arg);
         } else if (arg.empty()) {
@@ -132,6 +134,10 @@ Args ParseArgs(int argc, char* argv[]) {
 
     if (args.windowsFixedBase && !args.toWindows)
         throw std::runtime_error("--windows-fixed-base requires --windows");
+    if (args.traceImports && !args.toWindows)
+        throw std::runtime_error("--trace-imports requires --windows");
+    if (args.traceImports && args.lazyBinding)
+        throw std::runtime_error("--trace-imports conflicts with --lazy-binding");
 
 
     if (!args.showHelp && (args.inputPath.empty() || args.outputPath.empty()))
