@@ -1,13 +1,10 @@
 # libSceNet technical debt
 
-### Silent stubs
-
-- [sceNetShowIfconfig](../../../core/libs/prx/libSceNet/Export.cpp) (libSceNet) - returns 0; debug-output function (prints interface configuration), silent no-op acceptable per [shadPS4](https://github.com/shadps4-emu/shadPS4/blob/811bfcd7d17ed8ae975c477d9ff28abc744e1ca8/src/core/libraries/net/net.cpp#L1061) (STUBBED, returns ORBIS_OK). Imported by PPSA01530 and PPSA13356.
-- [sceNetShowNetstat](../../../core/libs/prx/libSceNet/Export.cpp) (libSceNet) - returns 0; debug-output function (prints network statistics), silent no-op acceptable per [shadPS4](https://github.com/shadps4-emu/shadPS4/blob/811bfcd7d17ed8ae975c477d9ff28abc744e1ca8/src/core/libraries/net/net.cpp#L1071) (STUBBED, returns ORBIS_OK). Imported by PPSA11386.
-
 ### Unknown function info
 
+- PPSA01530 and PPSA13356 imports declared without parameters, signatures unknown, added without an implementation because the titles fail to load without them: [sceNetShowIfconfig](../../../core/libs/prx/libSceNet/Export.cpp) (libSceNet), [sce::Json::Value::setNullAccessCallBack](../../../core/libs/prx/libSceJson2/Export.cpp) (libSceJson2), and [scePadUnknown_n3kSX62fgNo](../../../core/libs/prx/libScePad/Export.cpp) (libScePad), whose real name is unknown. [_sceUltWaitingQueueResourcePoolCreate, _sceUltSemaphoreCreate, _sceUltMutexOptParamInitialize, _sceUltMutexCreate, _sceUltQueueDataResourcePoolCreate and _sceUltQueueCreate](../../../core/libs/prx/libSceUlt/Export.cpp) (libSceUlt) forward to the exports without the underscore; that their argument lists match is inferred from the other underscore Ult exports, not measured.
 - [sceHttp2GetMemoryPoolStats, sceSslGetMemoryPoolStats, sceNetGetMemoryPoolStats](../../../core/libs/prx/libSceNet/Export.cpp) (libSceHttp2, libSceSsl, libSceNet) - the signatures `(int id, stats*)`, the layouts (pool size, peak and current use, and for Http2 and Ssl a 32-bit reserved field) and the error codes were measured on a PS5 (firmware 13.60). The pool size is the one given at init or pool creation; nothing is allocated from these pools, so the peak and current use are 0, where the console already reports use right after initialization (0x15C0 bytes for Ssl, 0x1640 for Http2 and 4 for a Net pool)
+- [sceNetShowNetstat](../../../core/libs/prx/libSceNet/Export.cpp) (libSceNet) - imported by PPSA11386 and not called during its start-up; unknown signature, declared without parameters
 
 ### Functional
 

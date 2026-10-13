@@ -13,29 +13,17 @@ int APS5_VABI _ZN3sce4Json5Value21setNullAccessCallBackEPFRKS1_NS0_9ValueTypeEPS
 
 namespace {
 
-struct SilentStub {
-    const char* name;
-    int (APS5_VABI *function)();
-};
-
-const SilentStub silent_stubs[] = {
-    {"sceNetShowIfconfig", sceNetShowIfconfig},
-    {"sceNetShowNetstat", sceNetShowNetstat},
-};
-
 struct Export {
     const char* name;
     int (APS5_VABI *function)();
 };
 
 const Export exports[] = {
+    {"sceNetShowIfconfig", sceNetShowIfconfig},
+    {"sceNetShowNetstat", sceNetShowNetstat},
     {"scePadUnknown_n3kSX62fgNo", scePadUnknown_n3kSX62fgNo},
     {"_ZN3sce4Json5Value21setNullAccessCallBackEPFRKS1_NS0_9ValueTypeEPS2_PvES6_", _ZN3sce4Json5Value21setNullAccessCallBackEPFRKS1_NS0_9ValueTypeEPS2_PvES6_},
 };
-
-bool CheckSilentStub(const SilentStub& entry) {
-    return entry.function() == 0;
-}
 
 bool ReportsNotImplemented(const Export& entry) {
     try {
@@ -53,7 +41,6 @@ bool ReportsNotImplemented(const Export& entry) {
 
 int main() {
     bool correct = true;
-    for (const auto& entry : silent_stubs) correct &= CheckSilentStub(entry);
     for (const auto& entry : exports) correct &= ReportsNotImplemented(entry);
     return correct ? 0 : 1;
 }
