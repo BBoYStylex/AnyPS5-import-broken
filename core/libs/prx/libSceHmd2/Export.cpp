@@ -161,4 +161,53 @@ int APS5_VABI sceHmd2SetVibration() {
     return 0;
 }
 
+int APS5_VABI sceHmd2GazeGetEnabledEye() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceHmd2GazeGetUserCalibrationId() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceHmd2GazeInsertRawData() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceHmd2GazeStartTrace() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceHmd2GazeStopTrace() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceHmd2InternalGenDataReadData() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceHmd2InternalLedDetectorReadData() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceHmd2InternalLedDetectorSetConfig() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceHmd2InternalSlamTraceReadData() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceHmd2InternalVrTraceSetConfig() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
 }

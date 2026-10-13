@@ -55,4 +55,53 @@ int APS5_VABI sceVrTracker2UnregisterDevice() {
     return 0;
 }
 
+int APS5_VABI sceVrTracker2GetControllerLedInfo() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceVrTracker2GetCurrentPlayAreaId() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceVrTracker2GetMapQualityEx() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceVrTracker2GetPlayAreaOrientedBoundingBoxEx() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceVrTracker2GetRelocalizerDebugResult() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceVrTracker2GetResultForPlayAreaEx() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceVrTracker2GetVrTraceResult() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceVrTracker2LocateCoordinateSystemEx() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceVrTracker2VrTraceGetStatus() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceVrTracker2VrTraceSetData() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
 }
