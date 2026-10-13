@@ -190,6 +190,17 @@ static int OpenNative(const std::filesystem::path& native, int flags, std::uint1
             else fd = File::OpenDirectoryDescriptor(directory);
         }
     }
+    if (fd < 0 && errno == ENOENT) {
+        bool underFile = false;
+        std::error_code error;
+        for (auto prefix = native.parent_path(); prefix.has_relative_path(); prefix = prefix.parent_path()) {
+            const auto status = std::filesystem::status(prefix, error);
+            if (!std::filesystem::exists(status)) continue;
+            underFile = !std::filesystem::is_directory(status);
+            break;
+        }
+        errno = underFile ? ENOTDIR : ENOENT;
+    }
 #endif
     if (fd < 0) {
         return SceErrorFromErrno(errno);
