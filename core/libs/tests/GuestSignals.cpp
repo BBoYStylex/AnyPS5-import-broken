@@ -76,6 +76,14 @@ int main() {
     Require(sigprocmask_nid_postfix(2, &blocked, nullptr) == 0);
     Require(sigprocmask_nid_postfix(1, nullptr, &previous) == 0);
     Require(previous.bits[0] == 0);
+    for (int how : {0, 4, -1}) {
+        previous.bits[0] = 0xffff;
+        *__error_nid_postfix() = 0;
+        Require(sigprocmask_nid_postfix(how, &blocked, &previous) == -1 && *__error_nid_postfix() == 22);
+        Require(previous.bits[0] == 0);
+    }
+    Require(sigprocmask_nid_postfix(0, nullptr, &previous) == 0 && previous.bits[0] == 0);
+    Require(sigprocmask_nid_postfix(1, nullptr, &previous) == 0 && previous.bits[0] == 0);
     *__error_nid_postfix() = 0;
     Require(pthread_sigmask_nid_postfix(1, &blocked, nullptr) == 0);
     Require(pthread_sigmask_nid_postfix(0, &blocked, &previous) == 22);

@@ -516,7 +516,7 @@ int APS5_VABI _sigprocmask_nid_postfix(int how, const GuestSignalSet* set, Guest
                 case 1: blockedMask.fetch_or(set->bits[0]); break;
                 case 2: blockedMask.fetch_and(~set->bits[0]); break;
                 case 3: blockedMask.store(set->bits[0]); break;
-                default: throw std::invalid_argument("_sigprocmask: invalid how");
+                default: *__error_nid_postfix() = 22; return -1;
             }
         }
     }
