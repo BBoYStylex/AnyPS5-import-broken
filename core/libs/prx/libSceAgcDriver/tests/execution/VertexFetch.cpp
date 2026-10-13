@@ -20,7 +20,6 @@ alignas(256) std::array<std::byte, 256> movedVertices{};
 constexpr std::array<std::array<float, 4>, 3> positions{{{-1.0f, -1.0f, 0.0f, 1.0f}, {3.0f, -1.0f, 0.0f, 1.0f}, {-1.0f, 3.0f, 0.0f, 1.0f}}};
 constexpr std::array<std::uint32_t, 11> vertexCode{0xf4080100u, 0xfa000000u, 0x4a0a0a02u, 0x4a0a0b08u, 0x4a0a0a03u, 0xe00c2000u, 0x80010005u, 0xbf8c3f70u, 0xf80008cfu, 0x03020100u, 0xbf810000u};
 constexpr std::array<std::uint32_t, 5> pixelCode{0x7e0002f2u, 0x7e020280u, 0xf800180fu, 0x00010100u, 0xbf810000u};
-
 void Run(AgcDriver::VulkanDevice& device) {
     ShaderRecompiler::RecompileResult incompatible;
     incompatible.runtimeAbiVersion = ShaderRecompiler::RuntimeAbi::Version + 1u;
@@ -38,6 +37,42 @@ void Run(AgcDriver::VulkanDevice& device) {
     rejectAbi([&] { device.DispatchIndirect(incompatible, 0u); });
     const std::array<AgcDriver::Graphics::CompiledShader, 1> incompatibleShaders{{{ShaderStage::Vertex, &incompatible, 0u}}};
     rejectAbi([&] { device.Draw({}, {}, incompatibleShaders); });
+    ShaderRecompiler::RecompileResult invalidSpirv;
+    invalidSpirv.spirv = {0, 1, 2};
+    invalidSpirv.variantId = 999;
+    auto invalidPrepared = device.PrepareDispatch(invalidSpirv, {});
+    Require(invalidPrepared == nullptr, "PrepareDispatch should return nullptr for invalid SPIR-V");
+    Require(!device.HasComputePipeline(invalidSpirv.PipelineVariantId()), "invalid SPIR-V should not be cached in compute pipelines");
+    ShaderRecompiler::RecompileResult computeShader;
+    computeShader.spirv = {
+        0x07230203u, 0x00010000u, 0u, 7u, 0u,
+        0x00020011u, 1u,
+        0x0003000eu, 0u, 1u,
+        0x0005000fu, 5u, 3u, 0x6e69616du, 0u,
+        0x00060010u, 3u, 17u, 1u, 1u, 1u,
+        0x00040047u, 6u, 1u, 7u,
+        0x00020013u, 1u,
+        0x00030021u, 2u, 1u,
+        0x00040015u, 5u, 32u, 0u,
+        0x00040032u, 5u, 6u, 1u,
+        0x00050036u, 1u, 3u, 0u, 2u,
+        0x000200f8u, 4u,
+        0x000100fdu,
+        0x00010038u
+    };
+    computeShader.variantId = 42;
+    computeShader.specialization = {{7u, 1u}};
+    const auto countBefore = device.ComputePipelineCount();
+    Require(!device.HasComputePipeline(computeShader.PipelineVariantId()), "pipeline should not be cached before prewarm");
+    auto prepared1 = device.PrepareDispatch(computeShader, {});
+    Require(prepared1 != nullptr, "PrepareDispatch returned null");
+    Require(device.HasComputePipeline(computeShader.PipelineVariantId()), "PrepareDispatch did not pre-warm compute pipeline");
+    Require(device.ComputePipelineCount() == countBefore + 1, "unexpected pipeline count after prewarm");
+    auto prepared2 = device.PrepareDispatch(computeShader, {});
+    Require(prepared2 != nullptr, "PrepareDispatch returned null on cached variant");
+    Require(device.ComputePipelineCount() == countBefore + 1, "PrepareDispatch re-created warmed pipeline");
+    device.PrewarmComputePipeline(computeShader);
+    Require(device.ComputePipelineCount() == countBefore + 1, "PrewarmComputePipeline re-created warmed pipeline");
     std::array<std::uint32_t, 4> descriptor{};
     const auto tableAddress = reinterpret_cast<std::uintptr_t>(descriptor.data());
     std::array<std::uint32_t, 4> userData{static_cast<std::uint32_t>(tableAddress), static_cast<std::uint32_t>(tableAddress >> 32u), 1u, 1u};

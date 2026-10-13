@@ -21,6 +21,7 @@ namespace AgcDriver {
 
 namespace Graphics {
 class StorageTexture;
+class ShaderResources;
 }
 
 // Stage A of a dispatch's resource build (see VulkanDevice::PrepareDispatch); opaque to callers.
@@ -29,6 +30,7 @@ struct PreparedDispatch;
 struct RecipeHit;
 // The record tail shared by an ordinary dispatch and a recipe hit (VulkanDevice::recordDispatch).
 struct RecordedDispatch;
+struct ComputePipelineObjects;
 
 class VulkanDevice {
 public:
@@ -303,10 +305,14 @@ public:
     IndirectDrawSupport DrawIndirectSupport() const;
     void EnqueueDraw(const Graphics::State& graphics, const Pm4::DrawParameters& draw, std::span<const Graphics::CompiledShader> shaders, std::span<const Graphics::GuestMemorySnapshot> snapshots = {});
     bool PrebuildGraphicsLibraries(const Graphics::ShaderStages& stages, std::span<const Graphics::CompiledShader> shaders);
+    void PrewarmComputePipeline(const ShaderRecompiler::RecompileResult& shader);
+    std::size_t ComputePipelineCount() const;
+    bool HasComputePipeline(std::uint64_t variantId, bool pushes = false) const;
 
 private:
     VulkanDevice(const PresentationWindow* window, bool compileOnly);
     friend struct VulkanDeviceTestAccess;
+    std::shared_ptr<ComputePipelineObjects> createComputePipeline(const ShaderRecompiler::RecompileResult& shader, const Graphics::ShaderResources& resources, std::uint32_t pushStages, std::uint64_t programAddress);
     // The device's Graphics::Context: a copy of the one built at setup (its instance functions
     // resolved then, its function table filled then), or with APS5_NO_CONTEXT_CACHE=1 built anew.
     Graphics::Context graphicsContext() const;

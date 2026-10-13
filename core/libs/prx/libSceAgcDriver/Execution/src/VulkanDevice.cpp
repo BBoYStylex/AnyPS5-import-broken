@@ -3281,6 +3281,7 @@ struct PreparedDispatch {
     std::shared_ptr<Graphics::ShaderResources> resources;
     std::shared_ptr<Graphics::ShaderResources> cached;
     ResourceCache::Key key;
+    std::shared_ptr<ComputePipelineObjects> pipelineObjects;
     // APS5_PROFILE_DRAW: stage A's time, added to the [dispatch] phase totals by the dispatch, and
     // the prepare's parts for the driver's 'prepare:' rows (PreparePhase order).
     double prepareMs = 0;
@@ -3781,6 +3782,32 @@ std::shared_ptr<PreparedDispatch> VulkanDevice::PrepareDispatch(const ShaderReco
         prepared->presyncSerial = presync(surfaces);
         phase(PreparedDispatch::PreparePresync);
     }
+    static const bool noComputePrewarm = std::getenv("APS5_NO_COMPUTE_PREWARM") != nullptr;
+    if (!noComputePrewarm) {
+        const std::array<Graphics::CompiledShader, 1> shaders{{{ShaderRecompiler::ShaderStage::Compute, &shader, 0}}};
+        const auto pushStages = Graphics::PushConstantStages(shaders);
+        const std::uint64_t pipelineKey = shader.PipelineVariantId() != 0 ? (shader.PipelineVariantId() << 1u) | (pushStages != 0 ? 1u : 0u) : 0u;
+        if (pipelineKey != 0) {
+            std::lock_guard pipelines(state->computePipelinesMutex);
+            if (const auto found = state->computePipelines.find(pipelineKey); found != state->computePipelines.end()) {
+                prepared->pipelineObjects = found->second;
+            }
+        }
+        if (prepared->pipelineObjects == nullptr) {
+            const auto* res = cached != nullptr ? cached.get() : prepared->resources.get();
+            if (res != nullptr && res->Layout() != VK_NULL_HANDLE) {
+                try {
+                    auto created = createComputePipeline(shader, *res, pushStages, 0);
+                    if (pipelineKey != 0) {
+                        std::lock_guard pipelines(state->computePipelinesMutex);
+                        created = state->computePipelines.try_emplace(pipelineKey, created).first->second;
+                    }
+                    prepared->pipelineObjects = std::move(created);
+                } catch (...) {
+                }
+            }
+        }
+    }
     if (profile) prepared->prepareMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
     return prepared;
 }
@@ -4058,6 +4085,82 @@ void VulkanDevice::recordDispatch(RecordedDispatch& record) {
     recordStep(PhaseRecordCompletion);
 }
 
+std::shared_ptr<ComputePipelineObjects> VulkanDevice::createComputePipeline(const ShaderRecompiler::RecompileResult& shader, const Graphics::ShaderResources& resources, std::uint32_t pushStages, std::uint64_t programAddress) {
+    auto objects = std::make_shared<ComputePipelineObjects>();
+    objects->device = state->device;
+    objects->destroyModule = state->DeviceFunction<PFN_vkDestroyShaderModule>("vkDestroyShaderModule");
+    objects->destroyLayout = state->DeviceFunction<PFN_vkDestroyPipelineLayout>("vkDestroyPipelineLayout");
+    objects->destroyPipeline = state->DeviceFunction<PFN_vkDestroyPipeline>("vkDestroyPipeline");
+    VkShaderModuleCreateInfo moduleInfo{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
+    moduleInfo.codeSize = shader.spirv.size() * sizeof(std::uint32_t);
+    moduleInfo.pCode = shader.spirv.data();
+    check(state->DeviceFunction<PFN_vkCreateShaderModule>("vkCreateShaderModule")(state->device, &moduleInfo, nullptr, &objects->module), "vkCreateShaderModule");
+    const auto resourceLayout = resources.Layout();
+    if (resourceLayout == VK_NULL_HANDLE) throw std::runtime_error("cannot create compute pipeline with uninitialized descriptor layout");
+    const std::array<VkDescriptorSetLayout, 2> setLayouts{resourceLayout, shader.workgroupMemoryDwords != 0 ? state->workgroupMemoryLayout : VK_NULL_HANDLE};
+    const VkPushConstantRange push{VK_SHADER_STAGE_COMPUTE_BIT, 0, Graphics::ComputePushConstantBytes};
+    VkPipelineLayoutCreateInfo layoutInfo{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+    layoutInfo.setLayoutCount = shader.workgroupMemoryDwords != 0 ? ShaderRecompiler::WorkgroupMemoryDescriptorSet + 1 : 1;
+    layoutInfo.pSetLayouts = setLayouts.data();
+    layoutInfo.pushConstantRangeCount = pushStages != 0 ? 1 : 0;
+    layoutInfo.pPushConstantRanges = pushStages != 0 ? &push : nullptr;
+    check(state->DeviceFunction<PFN_vkCreatePipelineLayout>("vkCreatePipelineLayout")(state->device, &layoutInfo, nullptr, &objects->layout), "vkCreatePipelineLayout");
+    const auto context = graphicsContext();
+    const VkPipelineCreateFlags pipelineFlags = (context.pipelineExecutableInfo ? VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR : 0) | VK_PIPELINE_CREATE_DISPATCH_BASE_BIT;
+    const Graphics::PipelineSpecialization specialization(shader);
+    const auto subgroupSize = state->computeWave32 && (shader.hostSubgroupSize == 32u || shader.hostSubgroupSize > state->maxComputeSubgroupSize) ? std::min(shader.hostSubgroupSize, state->maxComputeSubgroupSize) : 0u;
+    if (const char* directory = std::getenv("APS5_DUMP_COMPUTE_PIPELINES"); directory != nullptr && *directory != '\0' && CaptureComputePipeline(shader.spirv.size())) {
+        ComputePipelineCapture capture;
+        capture.spirv = shader.spirv;
+        ComputeDescriptorSetLayout resourcesLayout;
+        resourcesLayout.flags = resources.LayoutUpdateAfterBind() ? VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT : 0;
+        const auto layoutBindings = resources.LayoutBindings();
+        const auto bindingFlags = resources.LayoutBindingFlags();
+        require(layoutBindings.size() == bindingFlags.size(), "compute capture binding flag count differs from layout");
+        for (std::size_t index = 0; index < layoutBindings.size(); ++index) {
+            const auto& binding = layoutBindings[index];
+            require(binding.pImmutableSamplers == nullptr, "compute capture does not support immutable samplers");
+            resourcesLayout.bindings.push_back({binding.binding, binding.descriptorType, binding.descriptorCount, binding.stageFlags, bindingFlags[index]});
+        }
+        capture.sets.push_back(std::move(resourcesLayout));
+        if (shader.workgroupMemoryDwords != 0) capture.sets.push_back({0, {{0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, 0}}});
+        if (pushStages != 0) capture.pushConstants.push_back(push);
+        for (const auto& value : shader.specialization) capture.specialization.push_back({value.id, value.value});
+        capture.requiredSubgroupSize = subgroupSize;
+        capture.flags = pipelineFlags;
+        capture.deviceName = state->properties.deviceName;
+        capture.vendorId = state->properties.vendorID;
+        capture.deviceId = state->properties.deviceID;
+        capture.driverVersion = state->properties.driverVersion;
+        capture.apiVersion = state->properties.apiVersion;
+        std::copy_n(state->properties.pipelineCacheUUID, VK_UUID_SIZE, capture.pipelineCacheUuid.begin());
+        const auto path = capture.Write(directory);
+        std::fprintf(stderr, "[compute-capture] %s\n", path.string().c_str());
+    }
+    static const bool profile = std::getenv("APS5_PROFILE_DRAW") != nullptr;
+    if (profile && shader.spirv.size() > 100000) std::fprintf(stderr, "[dispatch] creating a pipeline for %zu SPIR-V words (program 0x%llx)\n", shader.spirv.size(), static_cast<unsigned long long>(programAddress));
+    CreateComputePipeline(state->device, state->DeviceFunction<PFN_vkCreateComputePipelines>("vkCreateComputePipelines"), context.pipelineCache, objects->module, objects->layout, pipelineFlags, 0, specialization.Info(), subgroupSize, &objects->pipeline);
+    objects->destroyModule(objects->device, objects->module, nullptr);
+    objects->module = VK_NULL_HANDLE;
+    Graphics::LogPipelineStatistics_nid_no_patch(context, objects->pipeline);
+    return objects;
+}
+
+void VulkanDevice::PrewarmComputePipeline(const ShaderRecompiler::RecompileResult& shader) {
+    PrepareDispatch(shader, {});
+}
+
+std::size_t VulkanDevice::ComputePipelineCount() const {
+    std::lock_guard pipelines(state->computePipelinesMutex);
+    return state->computePipelines.size();
+}
+
+bool VulkanDevice::HasComputePipeline(std::uint64_t variantId, bool pushes) const {
+    const std::uint64_t pipelineKey = (variantId << 1u) | (pushes ? 1u : 0u);
+    std::lock_guard pipelines(state->computePipelinesMutex);
+    return state->computePipelines.contains(pipelineKey);
+}
+
 VulkanDevice::IndirectOutcome VulkanDevice::dispatch(const ShaderRecompiler::RecompileResult& shader, std::uint32_t x, std::uint32_t y, std::uint32_t z, std::uint64_t arguments, std::span<const Graphics::GuestMemorySnapshot> snapshots, std::uint64_t programAddress, std::shared_ptr<PreparedDispatch> prepared, std::shared_ptr<const Recipe>* recipeOut) {
     state->recorder->BoundKeptBytes();
     ShaderRecompiler::RuntimeAbi::RequireVersion(shader.runtimeAbiVersion);
@@ -4082,7 +4185,9 @@ VulkanDevice::IndirectOutcome VulkanDevice::dispatch(const ShaderRecompiler::Rec
     // same bindings are compatible, so the pipeline layout of the first dispatch serves them all.
     const std::uint64_t pipelineKey = shader.PipelineVariantId() != 0 ? (shader.PipelineVariantId() << 1u) | (pushStages != 0 ? 1u : 0u) : 0u;
     std::shared_ptr<ComputePipelineObjects> objects;
-    if (pipelineKey != 0) {
+    if (prepared != nullptr && prepared->pipelineObjects != nullptr) {
+        objects = prepared->pipelineObjects;
+    } else if (pipelineKey != 0) {
         std::lock_guard pipelines(state->computePipelinesMutex);
         if (const auto found = state->computePipelines.find(pipelineKey); found != state->computePipelines.end()) objects = found->second;
     }
@@ -4225,64 +4330,9 @@ VulkanDevice::IndirectOutcome VulkanDevice::dispatch(const ShaderRecompiler::Rec
     timing.Mark("shader_resources");
     timer.phase(PhaseResources);
     if (objects == nullptr) {
-        objects = std::make_shared<ComputePipelineObjects>();
-        objects->device = state->device;
-        objects->destroyModule = state->DeviceFunction<PFN_vkDestroyShaderModule>("vkDestroyShaderModule");
-        objects->destroyLayout = state->DeviceFunction<PFN_vkDestroyPipelineLayout>("vkDestroyPipelineLayout");
-        objects->destroyPipeline = state->DeviceFunction<PFN_vkDestroyPipeline>("vkDestroyPipeline");
-        VkShaderModuleCreateInfo moduleInfo{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
-        moduleInfo.codeSize = shader.spirv.size() * sizeof(std::uint32_t);
-        moduleInfo.pCode = shader.spirv.data();
-        check(state->DeviceFunction<PFN_vkCreateShaderModule>("vkCreateShaderModule")(state->device, &moduleInfo, nullptr, &objects->module), "vkCreateShaderModule");
-        timing.Mark("validate_shader_module");
-        const std::array<VkDescriptorSetLayout, 2> setLayouts{resources->Layout(), shader.workgroupMemoryDwords != 0 ? state->workgroupMemoryLayout : VK_NULL_HANDLE};
-        const VkPushConstantRange push{VK_SHADER_STAGE_COMPUTE_BIT, 0, Graphics::ComputePushConstantBytes};
-        VkPipelineLayoutCreateInfo layoutInfo{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
-        layoutInfo.setLayoutCount = shader.workgroupMemoryDwords != 0 ? ShaderRecompiler::WorkgroupMemoryDescriptorSet + 1 : 1;
-        layoutInfo.pSetLayouts = setLayouts.data();
-        layoutInfo.pushConstantRangeCount = pushStages != 0 ? 1 : 0;
-        layoutInfo.pPushConstantRanges = pushStages != 0 ? &push : nullptr;
-        check(state->DeviceFunction<PFN_vkCreatePipelineLayout>("vkCreatePipelineLayout")(state->device, &layoutInfo, nullptr, &objects->layout), "vkCreatePipelineLayout");
-        const VkPipelineCreateFlags pipelineFlags = (context.pipelineExecutableInfo ? VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR : 0) | VK_PIPELINE_CREATE_DISPATCH_BASE_BIT;
-        const Graphics::PipelineSpecialization specialization(shader);
-        const auto subgroupSize = state->computeWave32 && (shader.hostSubgroupSize == 32u || shader.hostSubgroupSize > state->maxComputeSubgroupSize) ? std::min(shader.hostSubgroupSize, state->maxComputeSubgroupSize) : 0u;
-        if (const char* directory = std::getenv("APS5_DUMP_COMPUTE_PIPELINES"); directory != nullptr && *directory != '\0' && CaptureComputePipeline(shader.spirv.size())) {
-            ComputePipelineCapture capture;
-            capture.spirv = shader.spirv;
-            ComputeDescriptorSetLayout resourcesLayout;
-            resourcesLayout.flags = resources->LayoutUpdateAfterBind() ? VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT : 0;
-            const auto layoutBindings = resources->LayoutBindings();
-            const auto bindingFlags = resources->LayoutBindingFlags();
-            require(layoutBindings.size() == bindingFlags.size(), "compute capture binding flag count differs from layout");
-            for (std::size_t index = 0; index < layoutBindings.size(); ++index) {
-                const auto& binding = layoutBindings[index];
-                require(binding.pImmutableSamplers == nullptr, "compute capture does not support immutable samplers");
-                resourcesLayout.bindings.push_back({binding.binding, binding.descriptorType, binding.descriptorCount, binding.stageFlags, bindingFlags[index]});
-            }
-            capture.sets.push_back(std::move(resourcesLayout));
-            if (shader.workgroupMemoryDwords != 0) capture.sets.push_back({0, {{0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, 0}}});
-            if (pushStages != 0) capture.pushConstants.push_back(push);
-            for (const auto& value : shader.specialization) capture.specialization.push_back({value.id, value.value});
-            capture.requiredSubgroupSize = subgroupSize;
-            capture.flags = pipelineFlags;
-            capture.deviceName = state->properties.deviceName;
-            capture.vendorId = state->properties.vendorID;
-            capture.deviceId = state->properties.deviceID;
-            capture.driverVersion = state->properties.driverVersion;
-            capture.apiVersion = state->properties.apiVersion;
-            std::copy_n(state->properties.pipelineCacheUUID, VK_UUID_SIZE, capture.pipelineCacheUuid.begin());
-            const auto path = capture.Write(directory);
-            std::fprintf(stderr, "[compute-capture] %s\n", path.string().c_str());
-        }
-        if (profile && shader.spirv.size() > 100000) std::fprintf(stderr, "[dispatch] creating a pipeline for %zu SPIR-V words (program 0x%llx)\n", shader.spirv.size(), static_cast<unsigned long long>(programAddress));
-        CreateComputePipeline(state->device, state->DeviceFunction<PFN_vkCreateComputePipelines>("vkCreateComputePipelines"), context.pipelineCache, objects->module, objects->layout, pipelineFlags, 0, specialization.Info(), subgroupSize, &objects->pipeline);
-        objects->destroyModule(objects->device, objects->module, nullptr);
-        objects->module = VK_NULL_HANDLE;
-        Graphics::LogPipelineStatistics_nid_no_patch(context, objects->pipeline);
+        objects = createComputePipeline(shader, *resources, pushStages, programAddress);
         timing.Mark("pipeline_create");
         if (pipelineKey != 0) {
-            // Find-or-insert: objects another dispatch of the variant mapped meanwhile serve this
-            // one too (this call's go with the batch that keeps them).
             std::lock_guard pipelines(state->computePipelinesMutex);
             objects = state->computePipelines.try_emplace(pipelineKey, objects).first->second;
         }
