@@ -243,7 +243,11 @@ static void CheckLineBuffering() {
     const auto filename = "anyps5-line-buffer-test-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
     FileStream* stream = fopen_nid_postfix(filename.c_str(), "w");
     Require(stream != nullptr && setvbuf_nid_postfix(stream, nullptr, 1, 1) == 0);
+#ifdef _WIN32
     Require(stream->IsLineBuffered());
+#else
+    Require(!stream->IsLineBuffered());
+#endif
     Require(fputc_nid_postfix('x', stream) == 'x' && ReadHostFile(filename).empty());
     Require(fputc_nid_postfix('\n', stream) == '\n');
     Require(ReadHostFile(filename) == "x\n");
@@ -261,6 +265,25 @@ static void CheckLineBuffering() {
     Require(setvbuf_nid_postfix(stream, nullptr, 3, 0) == -1 && !stream->IsLineBuffered());
     Require(fclose_nid_postfix(stream) == 0);
     Require(ReadHostFile(filename) == "x\nab\ncdef\nghghh\nijmnkl\n");
+    Require(std::filesystem::remove(filename));
+    stream = fopen_nid_postfix(filename.c_str(), "w");
+    Require(stream != nullptr && setvbuf_nid_postfix(stream, nullptr, 1, 0) == 0);
+    Require(freopen_nid_postfix(filename.c_str(), "w", stream) == stream && !stream->IsLineBuffered());
+    Require(fputs_nid_postfix("k\nl", stream) >= 0 && ReadHostFile(filename).empty());
+    Require(fclose_nid_postfix(stream) == 0);
+    Require(std::filesystem::remove(filename));
+    stream = fopen_nid_postfix(filename.c_str(), "w");
+    Require(stream != nullptr && setvbuf_nid_postfix(stream, nullptr, 1, 0) == 0);
+    constexpr int units = 20000;
+    std::thread first([&] { for (int index = 0; index < units; ++index) Require(fputs_nid_postfix("AAAA\nAAAA", stream) >= 0); });
+    std::thread second([&] { for (int index = 0; index < units; ++index) Require(fputs_nid_postfix("BBBB\nBBBB", stream) >= 0); });
+    first.join();
+    second.join();
+    Require(fclose_nid_postfix(stream) == 0);
+    const std::string written = ReadHostFile(filename);
+    Require(written.size() == 9u * 2 * units);
+    for (std::size_t offset = 0; offset < written.size(); offset += 9)
+        Require(written.compare(offset, 9, written[offset] == 'A' ? "AAAA\nAAAA" : "BBBB\nBBBB") == 0);
     Require(std::filesystem::remove(filename));
 }
 
