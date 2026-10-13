@@ -36,18 +36,18 @@ int APS5_VABI scePadClose_nid_postfix(int handle) {
 }
 
 int APS5_VABI scePadVrControllerSetVibration() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    // Imported by PPSA99177 (PS VR2); console returns DEVICE_NOT_CONNECTED.
+    return PAD_ERROR_DEVICE_NOT_CONNECTED;
 }
 
 int APS5_VABI scePadVrControllerSetVibrationMode() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    // Imported by PPSA99177 (PS VR2); console returns DEVICE_NOT_CONNECTED.
+    return PAD_ERROR_DEVICE_NOT_CONNECTED;
 }
 
 int APS5_VABI scePadVrControllerReadCombinedState() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    // Imported by PPSA99177 (PS VR2); console returns DEVICE_NOT_CONNECTED.
+    return PAD_ERROR_DEVICE_NOT_CONNECTED;
 }
 
 int APS5_VABI scePadDeviceClassGetExtendedInformation(int handle, PadDeviceClassExtendedInformation* info) {
@@ -160,17 +160,32 @@ int APS5_VABI scePadOpenExt(int userId, int type, int index, const void* param) 
  if (!ValidPort(userId, type, index) || param == nullptr) {
   return PAD_ERROR_INVALID_ARG;
  }
- if (type != PAD_PORT_TYPE_SPECIAL) NotImplemented_nid_no_patch(__func__);
+ // The host has no special controller at any port type; every call returns DEVICE_NOT_CONNECTED.
+ // PPSA01317 passes a 16-byte param naming the device by vendor/product id and skips the user on
+ // any negative result (PPSA25971). Non-special ports are accepted rather than thrown, matching
+ // console behaviour where scePadOpenExt only opens special-port devices.
  return PAD_ERROR_DEVICE_NOT_CONNECTED;
 }
 
-int APS5_VABI scePadReadExt() { NotImplemented_nid_no_patch(__func__); return 0; }
+int APS5_VABI scePadReadExt() {
+    // Imported by PPSA01317 with unknown signature; the console returns DEVICE_NOT_CONNECTED.
+    return PAD_ERROR_DEVICE_NOT_CONNECTED;
+}
 
-int APS5_VABI scePadGetFeatureReport() { NotImplemented_nid_no_patch(__func__); return 0; }
+int APS5_VABI scePadGetFeatureReport() {
+    // Imported by PPSA01317; console returns DEVICE_NOT_CONNECTED.
+    return PAD_ERROR_DEVICE_NOT_CONNECTED;
+}
 
-int APS5_VABI scePadSetFeatureReport() { NotImplemented_nid_no_patch(__func__); return 0; }
+int APS5_VABI scePadSetFeatureReport() {
+    // Imported by PPSA01317; console returns DEVICE_NOT_CONNECTED.
+    return PAD_ERROR_DEVICE_NOT_CONNECTED;
+}
 
-int APS5_VABI scePadOutputReport() { NotImplemented_nid_no_patch(__func__); return 0; }
+int APS5_VABI scePadOutputReport() {
+    // Imported by PPSA01317; console returns DEVICE_NOT_CONNECTED.
+    return PAD_ERROR_DEVICE_NOT_CONNECTED;
+}
 
 int APS5_VABI scePadRead_nid_postfix(int handle, PadData* data, int num) {
  if (handle != PAD_HANDLE) return PAD_ERROR_INVALID_HANDLE;
@@ -263,35 +278,35 @@ int APS5_VABI scePadSetVibrationTriggerEffectWeakWhileEmbeddedMicInUse(bool enab
 }
 
 int APS5_VABI scePadVrControllerGetDeviceInformation() {
- NotImplemented_nid_no_patch(__func__);
- return 0;
+    // Imported by PPSA99177 (PS VR2); console returns DEVICE_NOT_CONNECTED.
+    return PAD_ERROR_DEVICE_NOT_CONNECTED;
 }
 
 int APS5_VABI scePadVrControllerRead() {
- NotImplemented_nid_no_patch(__func__);
- return 0;
+    // Imported by PPSA99177 (PS VR2); console returns DEVICE_NOT_CONNECTED.
+    return PAD_ERROR_DEVICE_NOT_CONNECTED;
 }
 
 int APS5_VABI scePadVrControllerGetTriggerEffectState() {
- NotImplemented_nid_no_patch(__func__);
- return 0;
+    // Imported by PPSA99177 (PS VR2); console returns DEVICE_NOT_CONNECTED.
+    return PAD_ERROR_DEVICE_NOT_CONNECTED;
 }
 
 int APS5_VABI scePadVrControllerReadState(int handle, void* state) {
- (void)handle;
- (void)state;
- NotImplemented_nid_no_patch(__func__);
- return 0;
+    (void)handle;
+    (void)state;
+    // Imported by PPSA99177 (PS VR2); console returns DEVICE_NOT_CONNECTED.
+    return PAD_ERROR_DEVICE_NOT_CONNECTED;
 }
 
 int APS5_VABI scePadVrControllerSetTriggerEffect() {
- NotImplemented_nid_no_patch(__func__);
- return 0;
+    // Imported by PPSA99177 (PS VR2); console returns DEVICE_NOT_CONNECTED.
+    return PAD_ERROR_DEVICE_NOT_CONNECTED;
 }
 
 int APS5_VABI scePadVrControllerSetTriggerEffects() {
- NotImplemented_nid_no_patch(__func__);
- return 0;
+    // Imported by PPSA99177 (PS VR2); console returns DEVICE_NOT_CONNECTED.
+    return PAD_ERROR_DEVICE_NOT_CONNECTED;
 }
 
 int APS5_VABI scePadIsRemoteController(int handle, bool* remote) {
@@ -303,20 +318,21 @@ int APS5_VABI scePadIsRemoteController(int handle, bool* remote) {
 
 
 int APS5_VABI scePadSetAngularVelocityBiasCorrectionState(int handle, bool enabled) {
- if (handle != PAD_HANDLE) return PAD_ERROR_INVALID_HANDLE;
- if (enabled) NotImplemented_nid_no_patch(__func__);
- return PAD_OK;
+    if (handle != PAD_HANDLE) return PAD_ERROR_INVALID_HANDLE;
+    // Bias correction is not modelled; accept the value without applying it.
+    (void)enabled;
+    return PAD_OK;
 }
 
 APS5_EXPORT("n3kSX62fgNo", scePadUnknown_n3kSX62fgNo);
 int APS5_VABI scePadUnknown_n3kSX62fgNo() {
-    NotImplemented_nid_no_patch(__func__);
+    // Imported by PPSA01317; console returns 0.
     return 0;
 }
 
 int APS5_VABI scePadVrControllerGetTriggerEffectStates(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    // Imported by PPSA99177 (PS VR2); console returns DEVICE_NOT_CONNECTED.
+    return PAD_ERROR_DEVICE_NOT_CONNECTED;
 }
 
 }
