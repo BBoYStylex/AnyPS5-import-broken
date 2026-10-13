@@ -20,7 +20,8 @@ extern "C" int APS5_VABI access_nid_postfix(const char* path, int mode) {
 #ifdef _WIN32
         const DWORD attributes = GetFileAttributesW(resolved.c_str());
         if (attributes == INVALID_FILE_ATTRIBUTES) {
-            errno = FilesystemError(std::error_code(static_cast<int>(GetLastError()), std::system_category()));
+            const int failure = FilesystemError(std::error_code(static_cast<int>(GetLastError()), std::system_category()));
+            errno = failure == 2 && UnderRegularFile_nid_no_patch(resolved) ? 20 : failure;
             return -1;
         }
         if (mode == 0) return 0;

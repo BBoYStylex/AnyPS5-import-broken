@@ -34,6 +34,7 @@ extern "C" void BlockPathAlias_nid_no_patch(const char* guestPrefix);
 extern "C" int WindowsOpenError_nid_no_patch(unsigned long error);
 extern "C" void* HostStandardHandle_nid_no_patch(int descriptor);
 extern "C" void KeepStandardHandle_nid_no_patch(int descriptor, void* handle);
+extern "C" bool UnderRegularFile_nid_no_patch(const std::filesystem::path& host);
 #endif
 
 #define APS5_INVALID_ARG_EX throw std::invalid_argument(std::string(__func__) + ": invalid argument")

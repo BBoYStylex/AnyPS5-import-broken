@@ -408,6 +408,17 @@ extern "C" bool FinalPathComponentIsDot_nid_no_patch(const char* path) {
     return component == ".";
 }
 
+#ifdef _WIN32
+extern "C" bool UnderRegularFile_nid_no_patch(const std::filesystem::path& host) {
+    std::error_code error;
+    for (auto prefix = host.parent_path(); prefix.has_relative_path(); prefix = prefix.parent_path()) {
+        const auto status = std::filesystem::status(prefix, error);
+        if (std::filesystem::exists(status)) return !std::filesystem::is_directory(status);
+    }
+    return false;
+}
+#endif
+
 extern "C" int APS5_VABI chdir_nid_postfix(const char* path) {
     if (!path) { errno = 14; return -1; }
     if (!*path) { errno = 2; return -1; }
