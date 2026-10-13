@@ -110,7 +110,14 @@ void* APS5_VABI opendir_nid_postfix(const char* path) {
         auto directory = std::make_unique<Directory>();
         if (const int error = ResolvePathError_nid_no_patch(path, directory->path)) { errno = error; return nullptr; }
         directory->native = OpenNative(directory->path);
-        if (!directory->native) { errno = DirectoryError(errno); return nullptr; }
+        if (!directory->native) {
+            int failure = DirectoryError(errno);
+#ifdef _WIN32
+            if (failure == 2 && UnderRegularFile_nid_no_patch(directory->path)) failure = 20;
+#endif
+            errno = failure;
+            return nullptr;
+        }
         return directory.release();
     } catch (const std::bad_alloc&) { errno = 12; return nullptr; }
       catch (const std::filesystem::filesystem_error&) { errno = 5; return nullptr; }
