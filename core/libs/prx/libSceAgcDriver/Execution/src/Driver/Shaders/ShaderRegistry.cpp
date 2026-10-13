@@ -807,6 +807,7 @@ public:
     void Submit(std::function<void()> task, const PreparedShaders* prepared = nullptr) {
         {
             std::unique_lock lock(mutex);
+            if (!closed) start();
             if (threads != 0 && !closed) {
                 if (prepared != nullptr && prepared->demanded.load()) tasks.push_front({std::move(task), prepared});
                 else tasks.push_back({std::move(task), prepared});
@@ -833,11 +834,15 @@ public:
     }
 
 private:
-    explicit RegistrationPreparePool(unsigned count) {
+    explicit RegistrationPreparePool(unsigned count) : capacity(count) {}
+
+    void start() {
+        if (started) return;
+        started = true;
         pthread_attr_t attributes;
         pthread_attr_init(&attributes);
         pthread_attr_setstacksize(&attributes, 64u << 20u);
-        for (unsigned index = 0; index < count; ++index) {
+        for (unsigned index = 0; index < capacity; ++index) {
             pthread_t thread;
             if (pthread_create(&thread, &attributes, &RegistrationPreparePool::Main, this) == 0) {
                 pthread_detach(thread);
@@ -879,8 +884,10 @@ private:
     std::condition_variable ready;
     std::condition_variable idle;
     std::deque<Task> tasks;
+    const unsigned capacity;
     unsigned threads = 0;
     unsigned running = 0;
+    bool started = false;
     bool closed = false;
 };
 
