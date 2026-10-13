@@ -19,9 +19,10 @@ void Register(const NativeAotGuest::ProviderBinding* bindings, std::size_t count
 
 struct ErrnoScope {
     int before;
-    ErrnoScope() : before(errno) {}
+    ErrnoScope() : before(errno) { errno = 0; }
     ~ErrnoScope() {
-        if (errno != before) SetGuestErrno(GuestErrno(errno));
+        if (errno != 0) SetGuestErrno(GuestErrno(errno));
+        errno = before;
     }
 };
 

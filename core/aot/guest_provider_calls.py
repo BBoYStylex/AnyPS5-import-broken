@@ -8,10 +8,12 @@ CALLS = {
     'memset': (7, 'Memset', 3, True),
     'memcmp': (8, 'Memcmp', 3, True),
     'strlen': (9, 'Strlen', 1, True),
+    'pthread_getspecific': (10, 'GetSpecific', 1, True),
+    'pthread_once': (11, 'Once', 2, True),
 }
 
 
 def declarations():
-    return ['declare i1 @NativeAotGlibcFastBinding(i64, i64)'] + [
+    return ['declare i1 @NativeAotGlibcFastBinding(i64, i64)', 'declare i1 @NativeAotGlibcOnceReady(i64)'] + [
         f'declare i64 @NativeAotGlibcFast{name}({", ".join(["i64"] * count)})'
-        for _, name, count, _ in CALLS.values()]
+        for kind, name, count, _ in CALLS.values() if kind != 11]

@@ -10,6 +10,8 @@
 #include <shared_mutex>
 #include <vector>
 
+extern "C" std::uint64_t NativeAotGlibcFastGetSpecific(std::uint64_t value);
+
 namespace {
 
 using namespace NativeAotGlibcSupport;
@@ -89,6 +91,8 @@ struct GuestKey {
 };
 std::map<std::uint32_t, GuestKey> keys;
 std::uint64_t nextKey = 0;
+std::atomic<std::uint64_t> keyGeneration{0};
+thread_local std::uint64_t observedKeyGeneration = UINT64_MAX;
 thread_local std::map<std::uint32_t, std::uint64_t> keyValues;
 
 void KeyCreate(State& state) {
@@ -98,20 +102,30 @@ void KeyCreate(State& state) {
     if (keys.size() >= 1024 || nextKey > UINT32_MAX) { ReturnResult(state, EAGAIN); return; }
     const auto key = static_cast<std::uint32_t>(nextKey++);
     keys.emplace(key, GuestKey{target});
+    keyGeneration.fetch_add(1, std::memory_order_release);
     std::memcpy(Pointer<void>(state, 0), &key, sizeof(key));
     ReturnResult(state, 0);
 }
 
 void KeyDelete(State& state) {
     std::lock_guard<std::mutex> lock(tableLock);
-    ReturnResult(state, keys.erase(static_cast<std::uint32_t>(NativeAotGuest::Argument(state, 0))) ? 0 : EINVAL);
+    const auto removed = keys.erase(static_cast<std::uint32_t>(NativeAotGuest::Argument(state, 0)));
+    if (removed) keyGeneration.fetch_add(1, std::memory_order_release);
+    ReturnResult(state, removed ? 0 : EINVAL);
+}
+
+std::uint64_t SpecificValue(std::uint32_t key) {
+    if (observedKeyGeneration != keyGeneration.load(std::memory_order_acquire)) {
+        std::lock_guard<std::mutex> lock(tableLock);
+        std::erase_if(keyValues, [](const auto& value) { return !keys.contains(value.first); });
+        observedKeyGeneration = keyGeneration.load(std::memory_order_relaxed);
+    }
+    const auto found = keyValues.find(key);
+    return found != keyValues.end() ? found->second : 0;
 }
 
 void GetSpecific(State& state) {
-    const auto key = static_cast<std::uint32_t>(NativeAotGuest::Argument(state, 0));
-    std::lock_guard<std::mutex> lock(tableLock);
-    const auto found = keyValues.find(key);
-    NativeAotGuest::Return(state, keys.contains(key) && found != keyValues.end() ? found->second : 0);
+    NativeAotGuest::Return(state, NativeAotGlibcFastGetSpecific(NativeAotGuest::Argument(state, 0)));
 }
 
 void SetSpecific(State& state) {
@@ -356,6 +370,20 @@ const NativeAotGuest::ProviderBinding Bindings[] = {
     {"pthread_cond_wait", CondWait, nullptr, true, true},
 };
 
+}
+
+extern "C" std::uint64_t NativeAotGlibcFastGetSpecific(std::uint64_t value) {
+    return SpecificValue(static_cast<std::uint32_t>(value));
+}
+
+extern "C" bool NativeAotGlibcOnceReady(std::uint64_t address) {
+    if (address % std::atomic_ref<std::uint32_t>::required_alignment != 0) return false;
+    return std::atomic_ref<std::uint32_t>(*reinterpret_cast<std::uint32_t*>(address)).load(std::memory_order_acquire) == 2;
+}
+
+extern "C" bool NativeAotGlibcThreadFastBinding(std::uint64_t address, std::uint64_t kind) {
+    const auto provider = NativeAotGuest::ImportedProvider(address);
+    return (kind == 10 && provider == GetSpecific) || (kind == 11 && provider == Once);
 }
 
 namespace NativeAotGlibcSupport {

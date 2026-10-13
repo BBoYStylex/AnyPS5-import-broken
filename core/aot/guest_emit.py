@@ -192,7 +192,8 @@ class Lowering(Vector):
             self.emit(f'store i128 {self.v(f"load i128, ptr {pointer}, align 16")}, ptr %Y{index}')
 
     def prologue(self):
-        self.lines.append(f'define hidden i64 {self.symbol}(ptr noalias %s, i64 %entry) uwtable {{')
+        extra = ', i64 %base' if self.epoch_variant in ('private', 'ordered') else ''
+        self.lines.append(f'define hidden i64 {self.symbol}(ptr noalias %s, i64 %entry{extra}) uwtable {{')
         self.lines.append('prologue:')
         for index in range(16):
             self.emit(f'%R{index} = alloca i64')
@@ -208,11 +209,14 @@ class Lowering(Vector):
                 self.emit(f'%Selector{site:x} = alloca i64')
                 self.emit(f'store i64 0, ptr %Selector{site:x}')
         self.reload()
-        self.emit('%base = load i64, ptr @__aps5_guest_base')
+        if self.epoch_variant not in ('private', 'ordered'):
+            self.emit('%base = load i64, ptr @__aps5_guest_base')
         expected = self.v(f'add i64 %base, {self.unit.start}')
         bad = self.label()
         first = f'L{self.unit.start:x}.trace' if self.trace else f'L{self.unit.start:x}'
-        if self.epoch_variant == 'ordered':
+        if self.epoch_variant == 'private':
+            self.emit(f'br label %{first}')
+        elif self.epoch_variant == 'ordered':
             offset = self.v('sub i64 %entry, %base')
             entries = [f'i64 {self.unit.start}, label %{first}']
             entries.extend(f'i64 {point}, label %L{point:x}' for point in self.resume_points() if point != self.unit.start)
@@ -258,12 +262,19 @@ class Lowering(Vector):
         target = self.load(self.absolute(slot), 64)
         fast, fallback, done = self.label(), self.label(), self.label()
         matches = self.v(f'call i1 @NativeAotGlibcFastBinding(i64 {target}, i64 {kind})')
+        if kind == 11:
+            check = self.label()
+            self.emit(f'br i1 {matches}, label %{check}, label %{fallback}')
+            self.place(check)
+            if self.concurrent:
+                self.emit('fence seq_cst')
+            matches = self.v(f'call i1 @NativeAotGlibcOnceReady(i64 {self.get_gpr("rdi")})')
         self.emit(f'br i1 {matches}, label %{fast}, label %{fallback}')
         self.place(fast)
         arguments = ', '.join(f'i64 {self.get_gpr(register)}' for register in ['rdi', 'rsi', 'rdx'][:count])
-        if self.concurrent:
+        if self.concurrent and kind != 11:
             self.emit('fence seq_cst')
-        value = self.v(f'call i64 @NativeAotGlibcFast{name}({arguments})')
+        value = '0' if kind == 11 else self.v(f'call i64 @NativeAotGlibcFast{name}({arguments})')
         if self.concurrent:
             self.emit('fence seq_cst')
         if returns:
@@ -271,7 +282,6 @@ class Lowering(Vector):
         rsp = self.get_gpr('rsp')
         fast_target = self.load(rsp, 64)
         self.set_gpr('rsp', self.v(f'add i64 {rsp}, 8'))
-        self.flush()
         fast_end = self.label()
         self.emit(f'br label %{fast_end}')
         self.place(fast_end)
@@ -299,11 +309,14 @@ class Lowering(Vector):
         self.emit(f'br label %{done}')
         self.place(done)
         result = self.v(f'phi i64 [ {called}, %{known} ], [ {target}, %{unknown} ]')
-        return self.finish_invoke(result)
+        result = self.finish_invoke(result)
+        self.reload()
+        return result
 
     def invoke(self, function, target):
         self.flush()
-        result = self.v(f'call i64 {function}(ptr %s, i64 {target})')
+        extra = ', i64 %base' if function.startswith('@__aps5_g_') and function.endswith(('_private', '_ordered')) else ''
+        result = self.v(f'call i64 {function}(ptr %s, i64 {target}{extra})')
         return self.finish_invoke(result)
 
     def finish_invoke(self, result):
@@ -315,7 +328,7 @@ class Lowering(Vector):
             cases = ' '.join(f'i64 {point}, label %{resume}' for point in self.resume_points())
             self.emit(f'switch i64 {offset}, label %{outside} [ {cases} ]')
             self.place(resume)
-            continued = self.v(f'tail call i64 {symbol(self.unit.start)}_ordered(ptr %s, i64 {result})')
+            continued = self.v(f'tail call i64 {symbol(self.unit.start)}_ordered(ptr %s, i64 {result}, i64 %base)')
             self.leave_with(continued)
             self.place(outside)
             self.leave_with(result)
@@ -328,7 +341,10 @@ class Lowering(Vector):
         self.emit(f'ret i64 {value}')
 
     def direct(self, address):
-        return symbol(address) if address in self.units else None
+        if address not in self.units:
+            return None
+        suffix = '_' + self.epoch_variant if self.epoch_variant in ('private', 'ordered') else ''
+        return symbol(address) + suffix
 
     def call_target(self, target_address, target):
         function = self.direct(target_address) if target_address is not None else None
@@ -348,12 +364,17 @@ class Lowering(Vector):
             rsp = self.v(f'sub i64 {self.get_gpr("rsp")}, 8')
             self.store(rsp, back, 64)
             self.set_gpr('rsp', rsp)
-            result = self.invoke(function, target) if slot is None else self.invoke_import(slot)
-            self.reload()
+            if slot is None:
+                result = self.invoke(function, target)
+                self.reload()
+            else:
+                result = self.invoke_import(slot)
             propagate = self.label()
             continuation = f'L{following:x}' if following in unit.instructions else self.label()
             self.emit(f'br i1 {self.v(f"icmp eq i64 {result}, {back}")}, label %{continuation}, label %{propagate}')
             self.place(propagate)
+            if slot is not None:
+                self.flush()
             if self.resume_points():
                 self.emit(f'store i64 {result}, ptr %Resume')
                 self.emit('br label %resume')
@@ -386,7 +407,10 @@ class Lowering(Vector):
             target = self.target_value()
             if operand.type == X86_OP_IMM:
                 slot = self.import_slot(operand.imm)
-                self.leave_with(self.invoke(self.call_target(operand.imm, target), target) if slot is None else self.invoke_import(slot))
+                result = self.invoke(self.call_target(operand.imm, target), target) if slot is None else self.invoke_import(slot)
+                if slot is not None:
+                    self.flush()
+                self.leave_with(result)
                 return
             function = self.v(f'call ptr @NativeAotGuestFind(i64 {target})')
             local, remote = self.label(), self.label()
@@ -408,7 +432,10 @@ class Lowering(Vector):
             self.place(taken)
             absolute = self.absolute(target)
             slot = self.import_slot(target)
-            self.leave_with(self.invoke(symbol(target), absolute) if slot is None else self.invoke_import(slot))
+            result = self.invoke(self.call_target(target, absolute), absolute) if slot is None else self.invoke_import(slot)
+            if slot is not None:
+                self.flush()
+            self.leave_with(result)
 
     def resume_points(self):
         if not hasattr(self, '_resume'):
@@ -643,10 +670,10 @@ choose:
   %private = icmp eq i8 %epoch, 0
   br i1 %private, label %fast, label %ordered
 fast:
-  %a = tail call i64 {name}_private(ptr %s, i64 %entry)
+  %a = tail call i64 {name}_private(ptr %s, i64 %entry, i64 %base)
   ret i64 %a
 ordered:
-  %b = tail call i64 {name}_ordered(ptr %s, i64 %entry)
+  %b = tail call i64 {name}_ordered(ptr %s, i64 %entry, i64 %base)
   ret i64 %b
 }}"""
 
@@ -674,6 +701,8 @@ def lower_shard(arguments):
             declarations |= declared
             errors.extend(failures)
         called |= callees(units[start], units)
+    if memory_epochs:
+        declarations |= {f'declare hidden i64 {symbol(address)}_{mode}(ptr, i64, i64)' for address in called - set(starts) for mode in ('private', 'ordered')}
     if trace:
         declarations |= {'declare void @NativeAotGuestTraceEnter(ptr, i64)', 'declare void @NativeAotGuestTraceLeave(ptr, i64, i64)'}
     Path(output).write_text(namespace_ir(shard_module(texts, declarations, set(starts), called), namespace))

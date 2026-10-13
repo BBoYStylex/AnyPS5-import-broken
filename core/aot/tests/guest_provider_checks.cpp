@@ -8,6 +8,7 @@
 #include <cfenv>
 #include <limits>
 #include <thread>
+#include <barrier>
 #include <fcntl.h>
 #include <string>
 #include <sys/stat.h>
@@ -264,9 +265,48 @@ void FileCompatibility() {
           Call("__lxstat64", {1, Address(link.c_str()), Address(large)}) == 0 && std::memcmp(normal, large, sizeof(normal)) == 0, "lstat64 preserves link");
     unlink(link.c_str());
     unlink(path);
+    auto* guestError = reinterpret_cast<int*>(Call("__errno_location", {}));
+    *guestError = 5;
+    errno = ENOENT;
     Check(Call("fopen64", {Address(path), Address("r")}) == 0 && *reinterpret_cast<int*>(Call("__errno_location", {})) == 2, "fopen64 missing file errno");
+    Check(errno == ENOENT, "provider restores host errno");
+    *guestError = 12345;
+    Check(Call("strtol", {Address("7"), 0, 10}) == 7 && *guestError == 12345,
+          "successful conversion preserves arbitrary guest errno");
     const auto previous = Call("signal", {13, 1});
     Check(Call("signal", {13, previous}) == 1, "signal ignore round trip");
+}
+
+void ConcurrentKeyDeletion() {
+    std::barrier phase(2);
+    std::uint32_t key = 0;
+    bool correct = true;
+    std::thread worker([&] {
+        for (unsigned iteration = 0; iteration < 64; ++iteration) {
+            phase.arrive_and_wait();
+            NativeAotGuestState local{};
+            local.Gpr[7] = key;
+            local.Gpr[6] = 123;
+            NativeAotGuest::FindProviderBinding("pthread_setspecific")->Function(local);
+            NativeAotGuest::FindProviderBinding("pthread_getspecific")->Function(local);
+            correct = correct && local.Gpr[0] == 123;
+            phase.arrive_and_wait();
+            phase.arrive_and_wait();
+            NativeAotGuest::FindProviderBinding("pthread_getspecific")->Function(local);
+            correct = correct && local.Gpr[0] == 0;
+            phase.arrive_and_wait();
+        }
+    });
+    for (unsigned iteration = 0; iteration < 64; ++iteration) {
+        Check(Call("pthread_key_create", {Address(&key), 0}) == 0, "concurrent key creation");
+        phase.arrive_and_wait();
+        phase.arrive_and_wait();
+        Check(Call("pthread_key_delete", {key}) == 0, "concurrent key deletion");
+        phase.arrive_and_wait();
+        phase.arrive_and_wait();
+    }
+    worker.join();
+    Check(correct, "thread-local value cannot survive completed key deletion");
 }
 
 void ThreadKeys() {
@@ -305,6 +345,7 @@ int main() {
     Mathematics();
     PosixData();
     ThreadKeys();
+    ConcurrentKeyDeletion();
     FileCompatibility();
     std::printf(failures == 0 ? "ok\n" : "failed\n");
     return failures == 0 ? 0 : 1;

@@ -27,6 +27,8 @@
 #include <vector>
 #include <type_traits>
 
+extern "C" bool NativeAotGlibcThreadFastBinding(std::uint64_t, std::uint64_t);
+
 extern "C" {
 std::uint64_t NativeAotGlibcFastMalloc(std::uint64_t a) {
     NativeAotGlibcSupport::ErrnoScope scope;
@@ -1458,6 +1460,7 @@ const NativeAotGuest::ProviderBinding Bindings[] = {
 }
 
 extern "C" bool NativeAotGlibcFastBinding(std::uint64_t address, std::uint64_t kind) {
+    if (kind == 10 || kind == 11) return NativeAotGlibcThreadFastBinding(address, kind);
     const auto provider = NativeAotGuest::ImportedProvider(address);
     switch (kind) {
         case 1: return provider == ScalarProvider<NativeAotGlibcFastMalloc>;
