@@ -25,6 +25,8 @@ extern "C" bool FinalPathComponentIsDot_nid_no_patch(const char* path);
 // directory instead of the run directory; the prefix matches whole path components only.
 extern "C" void AddPathAlias_nid_no_patch(const char* guestPrefix, const char* hostPath);
 extern "C" void RemovePathAlias_nid_no_patch(const char* guestPrefix);
+using PathProvider = std::filesystem::path (*)(const std::filesystem::path& root);
+extern "C" void AddPathProvider_nid_no_patch(const char* guestPath, PathProvider provide);
 extern "C" void RecordWrittenPath_nid_no_patch(const std::filesystem::path& path);
 extern "C" std::vector<std::filesystem::path> WrittenPaths_nid_no_patch();
 extern "C" void SyncWrittenPaths_nid_no_patch();
