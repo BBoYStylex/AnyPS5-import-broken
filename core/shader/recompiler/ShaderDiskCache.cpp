@@ -11,11 +11,10 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
-#endif
-#include "ShaderCacheVersion.hpp"
-#ifdef __APPLE__
+#elif defined(__APPLE__)
 #include <mach-o/dyld.h>
 #endif
+#include "ShaderCacheVersion.hpp"
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -57,13 +56,11 @@ std::filesystem::path ShaderCacheDirectory() {
     if (directory != nullptr && *directory != '\0') return std::filesystem::path(directory);
     std::error_code error;
 #ifdef __APPLE__
-    // No /proc on macOS: dyld knows the executable's path.
     std::uint32_t size = 0;
     _NSGetExecutablePath(nullptr, &size);
-    std::string path(size, '\0');
-    if (_NSGetExecutablePath(path.data(), &size) != 0) return {};
-    path.resize(std::strlen(path.c_str()));
-    const auto executable = std::filesystem::canonical(path, error);
+    std::vector<char> buffer(size);
+    if (_NSGetExecutablePath(buffer.data(), &size) != 0) return {};
+    const auto executable = std::filesystem::canonical(buffer.data(), error);
 #else
     const auto executable = std::filesystem::read_symlink("/proc/self/exe", error);
 #endif
@@ -559,6 +556,7 @@ void encodeInfo(Writer& writer, const CompiledShaderInfo& compiled) {
     writer.Value(info.bdaWrites);
     writer.Value(info.usesFaultBuffer);
     writer.Value(info.dispatchThreadLimit);
+    writer.Value(info.rasterPrimitive);
     encodeLayout(writer, compiled.bindings);
 }
 
@@ -668,6 +666,7 @@ void decodeInfo(Reader& reader, CompiledShaderInfo& compiled) {
     reader.Value(info.bdaWrites);
     reader.Value(info.usesFaultBuffer);
     reader.Value(info.dispatchThreadLimit);
+    reader.Value(info.rasterPrimitive);
     decodeLayout(reader, compiled.bindings);
 }
 
