@@ -1,5 +1,9 @@
 # libSceAjm.native technical debt
 
+### Silent stubs
+
+- [sceAjmStrError](../../../core/libs/prx/libSceAjm.native/Export.cpp) (libSceAjm.native) returns `"AJM"` for every error code: the console carries a different message per code, but those strings live in the firmware module, which title dumps do not ship, so the mapping cannot be derived here. The result is only used as a log-format argument, and a static non-null string keeps a guest `%s` formatter alive where a null would fault, as [prosper](https://github.com/mattias800/prosper/blob/main/prosper/src/hle/audio/hle_audio.cpp) does; the text itself is unverified.
+
 ### Unknown function info
 
 - [sceAjmDecWVorbisCreateHeaderPacket, sceAjmDecWVorbisCreateSetupPacket](../../../core/libs/prx/libSceAjm.native/Export.cpp) (libSceAjmWVorbis, implemented in libSceAjm.native) - unknown signatures
@@ -15,8 +19,6 @@
 - [sceAjmBatchJobSetResampleParameters, sceAjmBatchJobGetResampleInfo](../../../core/libs/prx/libSceAjm.native/src/Ajm.cpp) (libSceAjm) - the ratio is taken as decoded samples per output sample and num_samples as the decoded samples the resampler holds, both inferred from FMOD (Hades II); the console's interpolation is unknown, a 4-point Catmull-Rom is used. The flags argument is ignored, as in shadPS4 and Kyty
 
 ### Functional
-
-- [sceAjmStrError](../../../core/libs/prx/libSceAjm.native/Export.cpp) (libSceAjm.native) returns `"AJM"` for every error code, as [KytyPS5](https://github.com/KytyPS5/KytyPS5/blob/main/src/libs/ajm.cpp) does, not confirmed on a PS5 title
 
 - [sceAjmDecMp3ParseFrame](../../../core/libs/prx/libSceAjm.native/src/Ajm.cpp) (libSceAjm.native) throws when the original file length is requested (`parse_ofl` non-zero) for a layer other than III, for a CRC-protected frame, or for a VBRI header outside MPEG-1 stereo: shadPS4 looks for the tag after the CRC and after the side information, while LAME and FFmpeg place it without the CRC and VBRI always at byte 36.
 - [ATRAC9 gapless segments](../../../core/libs/prx/libSceAjm.native/src/Ajm.cpp) (libSceAjm.native) - a run job stops after the gapless total of output samples counted from the start of the segment, leaving the rest of its input unconsumed, and the next run starts the next segment with the decoder as it is and without a second skip. FMOD in PPSA29141 sets a total shorter than a sound's frames and reads the frames after it on later runs; with the output held at the total its stream reader waited for them forever and the last buffer repeated. The console's handling of the frames after the total is not documented; a reset (`SetGaplessDecode` with the reset flag, `ClearContext`, initialization) starts a new segment. An ATRAC9 run job without `RUN_MULTIPLE_FRAMES` decodes its whole input as one with it: FMOD in PPSA29141 puts two run jobs in one batch with the second's input right after the whole of the first's. Whether the console stops after one frame there is not verified; MP3 and Opus run jobs still stop after one frame
