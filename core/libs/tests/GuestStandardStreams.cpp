@@ -254,6 +254,30 @@ static void CheckFgetsSize() {
     stream.Close();
 }
 
+static void CheckStickyEndOfFile() {
+    const auto filename = "anyps5-sticky-eof-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+    FileStream* writer = fopen_nid_postfix(filename.c_str(), "wb");
+    Require(writer != nullptr && fwrite_nid_postfix("ab", 1, 2, writer) == 2 && fflush_nid_postfix(writer) == 0);
+    FileStream* reader = fopen_nid_postfix(filename.c_str(), "rb");
+    Require(reader != nullptr);
+    Require(fgetc_nid_postfix(reader) == 'a' && fgetc_nid_postfix(reader) == 'b');
+    Require(fgetc_nid_postfix(reader) == EOF && feof_nid_postfix(reader) != 0);
+    Require(fwrite_nid_postfix("cd", 1, 2, writer) == 2 && fflush_nid_postfix(writer) == 0);
+    char text[4]{};
+    Require(fgetc_nid_postfix(reader) == EOF && getc_unlocked_nid_postfix(reader) == EOF);
+    Require(fgets_nid_postfix(text, sizeof(text), reader) == nullptr && fread_nid_postfix(text, 1, 2, reader) == 0);
+    Require(fgets_nid_postfix(text, 1, reader) == text && text[0] == '\0');
+    Require(feof_nid_postfix(reader) != 0 && ferror_nid_postfix(reader) == 0);
+    clearerr_nid_postfix(reader);
+    Require(fgetc_nid_postfix(reader) == 'c' && ungetc_nid_postfix('z', reader) == 'z' && fgetc_nid_postfix(reader) == 'z');
+    Require(fgetc_nid_postfix(reader) == 'd' && fgetc_nid_postfix(reader) == EOF && feof_nid_postfix(reader) != 0);
+    Require(fwrite_nid_postfix("e", 1, 1, writer) == 1 && fflush_nid_postfix(writer) == 0);
+    Require(fread_nid_postfix(text, 1, 1, reader) == 0 && feof_nid_postfix(reader) != 0);
+    Require(fseeko_nid_postfix(reader, 4, SEEK_SET) == 0 && feof_nid_postfix(reader) == 0 && fgetc_nid_postfix(reader) == 'e');
+    Require(fclose_nid_postfix(reader) == 0 && fclose_nid_postfix(writer) == 0);
+    Require(std::filesystem::remove(filename));
+}
+
 static void CheckRewind() {
     FileStream stream(std::tmpfile());
     Require(fwrite_nid_postfix("ab", 1, 2, &stream) == 2);
@@ -639,6 +663,7 @@ int main() {
     Require(fgetc_nid_postfix(&locked) == 'A' && fgetc_nid_postfix(&locked) == 'B');
     locked.Close();
     CheckRewind();
+    CheckStickyEndOfFile();
     CheckFgetsSize();
     CheckUnlockedStreams();
     CheckUnlockedStreamLock(false);

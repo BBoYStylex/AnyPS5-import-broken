@@ -15,7 +15,8 @@ FileStream* __stderrp_nid_postfix = &_Stderr_nid_postfix;
 int __isthreaded_nid_postfix = 1;
 
 int APS5_VABI fgetc_nid_postfix(FileStream* stream) {
-    const int result = std::fgetc(GetNativeStream(stream));
+    auto* native = GetNativeStream(stream);
+    const int result = std::feof(native) ? EOF : std::fgetc(native);
     stream->SyncStatus();
     return result;
 }
@@ -36,10 +37,11 @@ std::int32_t APS5_VABI ungetwc_nid_postfix(std::int32_t value, FileStream* strea
 }
 int APS5_VABI getc_nid_postfix(FileStream* stream) { return fgetc_nid_postfix(stream); }
 int APS5_VABI getc_unlocked_nid_postfix(FileStream* stream) {
+    auto* native = GetNativeStream(stream);
 #ifdef _WIN32
-    const int result = _fgetc_nolock(GetNativeStream(stream));
+    const int result = std::feof(native) ? EOF : _fgetc_nolock(native);
 #else
-    const int result = ::getc_unlocked(GetNativeStream(stream));
+    const int result = ::feof_unlocked(native) ? EOF : ::getc_unlocked(native);
 #endif
     stream->SyncUnlockedStatus();
     return result;
@@ -74,7 +76,8 @@ char* APS5_VABI fgets_nid_postfix(char* buffer, int size, FileStream* stream) {
         errno = 22;
         return nullptr;
     }
-    auto* result = std::fgets(buffer, size, GetNativeStream(stream));
+    auto* native = GetNativeStream(stream);
+    auto* result = size > 1 && std::feof(native) ? nullptr : std::fgets(buffer, size, native);
     stream->SyncStatus();
     return result;
 }
