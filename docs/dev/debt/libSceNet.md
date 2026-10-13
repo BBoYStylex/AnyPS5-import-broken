@@ -2,8 +2,8 @@
 
 ### Silent stubs
 
-- [sceNetShowIfconfig](../../../core/libs/prx/libSceNet/Export.cpp) (libSceNet) - returns 0; debug-output function (prints interface configuration to stdout on FreeBSD), silent no-op acceptable. Imported by PPSA01530 and PPSA13356.
-- [sceNetShowNetstat](../../../core/libs/prx/libSceNet/Export.cpp) (libSceNet) - returns 0; debug-output function (prints network statistics to stdout on FreeBSD), silent no-op acceptable. Imported by PPSA11386.
+- [sceNetShowIfconfig](../../../core/libs/prx/libSceNet/Export.cpp) (libSceNet) - returns 0; debug-output function (prints interface configuration), silent no-op acceptable per [shadPS4](https://github.com/shadps4-emu/shadPS4/blob/811bfcd7d17ed8ae975c477d9ff28abc744e1ca8/src/core/libraries/net/net.cpp#L1061) (STUBBED, returns ORBIS_OK). Imported by PPSA01530 and PPSA13356.
+- [sceNetShowNetstat](../../../core/libs/prx/libSceNet/Export.cpp) (libSceNet) - returns 0; debug-output function (prints network statistics), silent no-op acceptable per [shadPS4](https://github.com/shadps4-emu/shadPS4/blob/811bfcd7d17ed8ae975c477d9ff28abc744e1ca8/src/core/libraries/net/net.cpp#L1071) (STUBBED, returns ORBIS_OK). Imported by PPSA11386.
 
 ### Unknown function info
 
