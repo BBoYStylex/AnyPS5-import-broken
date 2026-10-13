@@ -55,7 +55,7 @@ static void CheckGuardPage() {
     constexpr std::string_view text = "X: abc\r\n\tdef\r\n";
     char* header = pages + pageSize - text.size();
     std::memcpy(header, text.data(), text.size());
-    Check({header, text.size()}, "x", 3, "abc\r\n\tdef", static_cast<int>(text.size()));
+    Check({header, text.size()}, "x", 3, "abc\r\n\tdef\r\n", static_cast<int>(text.size()));
     Check({header, 6}, "x", 3, "abc", 6);
     const char* value = header;
     std::size_t length = 123;
@@ -75,17 +75,30 @@ int main() {
     constexpr int invalidResponse = static_cast<int>(0x80432060);
     constexpr int invalidValue = static_cast<int>(0x804321FE);
     constexpr int notFound = static_cast<int>(0x80432025);
-    Check("HTTP/1.1 200 OK\r\nX: \tvalue \t\r\nNext: no\r\n", "x", 21, "value \t", 30);
-    Check("X: first\r\nX: second\r\n", "X", 3, "first", 10);
-    Check("X: abc\n def\n\tghi\nY: no\n", "x", 3, "abc\n def\n\tghi", 17);
+    Check("HTTP/1.1 200 OK\r\nX: \tvalue \t\r\nNext: no\r\n", "x", 21, "value \t", 28);
+    Check("X: first\r\nX: second\r\n", "X", 3, "first", 8);
+    Check("X: abc\n def\n\tghi\nY: no\n", "x", 3, "abc\n def\n\tghi", 16);
     Check("X: no-newline", "X", 3, "no-newline", 13);
     Check("X: value\r", "X", 3, "value\r", 9);
     Check("X:", "X", 2, "", 0);
     Check("X: \t", "X", 4, "", 0);
     Check("X:\r\n\r\n", "X", 5, "", 0);
-    Check("X:\r\nnext\r\n", "X", 4, "next", 10);
-    Check("Prefix: wrong\n X: wrong\nXy: wrong\nX: right\n", "X", 37, "right", 43);
-    Check(std::string_view("X: a\0b\n", 7), "X", 3, std::string_view("a\0b", 3), 7);
+    Check("X:\r\nnext\r\n", "X", 4, "", 0);
+    Check("X:\n", "X", 3, "", 0);
+    Check("E:\r\nE: second\r\n", "E", 4, "", 0);
+    Check("Blank: \r\nTabs:\t\t\r\nAfter: x\r\n", "tabs", 0, "", 0);
+    Check("Prefix: wrong\n X: wrong\nXy: wrong\nX: right\n", "X", 37, "right\n", 43);
+    Check(std::string_view("X: a\0b\n", 7), "X", 3, std::string_view("a\0b\n", 4), 7);
+    Check("X: \r\n", "X", 4, "\n", 5);
+    Check("X:   \n Y\n", "X", 7, "Y\n", 9);
+    Check("X: \v1\r\n", "X", 4, "1\r\n", 7);
+    Check("X:\fv\r\n", "X", 3, "v\r\n", 6);
+    Check("X:\nY: z", "X", 3, "Y: z", 7);
+    Check("X:\nv\r\nY: z", "X", 3, "v", 4);
+    Check("X:v\r \nY: z", "X", 2, "v\r ", 5);
+    Check("X:\r\n \nY: z", "X", 3, "\n", 4);
+    Check("X:\n\r\n \nY: z", "X", 4, "\n", 5);
+    Check("X:\r\n v\nY: z", "X", 3, "\n ", 5);
 
     const char* marker = "unchanged";
     const char* value = marker;
@@ -104,6 +117,6 @@ int main() {
     std::string field(0xfff, 'A');
     std::string header = field + ": value\n";
     field += "ignored";
-    Check(header, field.c_str(), 0x1000 + 1, "value", static_cast<int>(header.size()));
+    Check(header, field.c_str(), 0x1000 + 1, "value\n", static_cast<int>(header.size()));
     CheckGuardPage();
 }

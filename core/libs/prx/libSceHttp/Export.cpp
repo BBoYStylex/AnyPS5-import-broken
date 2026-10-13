@@ -467,35 +467,31 @@ int APS5_VABI sceHttpParseResponseHeader(const char* header, std::size_t headerL
     }
     if (!found) return notFound;
 
-    while (start < headerLen && isSpace(input[start])) {
-        if (input[start++] == '\n') break;
-    }
+    while (start < headerLen && isSpace(input[start]) && !(input[start] == '\n' && input[start - 1] == '\r')) ++start;
     std::size_t end = headerLen;
-    std::size_t consumed = headerLen;
-    std::size_t scan = start;
-    while (scan < headerLen) {
-        const auto newline = input.find('\n', scan);
-        if (newline == std::string_view::npos) break;
-        const auto next = newline + 1;
-        if (next < headerLen && (input[next] == ' ' || input[next] == '\t')) {
-            scan = next;
-            continue;
+    bool crlf = false;
+    bool styleKnown = false;
+    for (std::size_t i = start; i < headerLen; ++i) {
+        if (input[i] != '\n') continue;
+        if (!styleKnown) {
+            crlf = input[i - 1] == '\r';
+            styleKnown = true;
         }
-        end = newline > start && input[newline - 1] == '\r' ? newline - 1 : newline;
-        consumed = next;
+        if (i + 1 >= headerLen || input[i + 1] == ' ' || input[i + 1] == '\t') continue;
+        end = crlf || input[i - 1] == '\r' ? i - 1 : i;
         break;
     }
-    if (end == start) {
+    if (end <= start) {
         *fieldValue = nullptr;
         *valueLen = 0;
         return 0;
     }
-    if (consumed > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
-        throw std::out_of_range("sceHttpParseResponseHeader: consumed byte count exceeds int");
+    if (end > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+        throw std::out_of_range("sceHttpParseResponseHeader: value end exceeds int");
     }
     *fieldValue = header + start;
     *valueLen = end - start;
-    return static_cast<int>(consumed);
+    return static_cast<int>(end);
 }
 
 int APS5_VABI sceHttpCreateRequest2(int conn_id, const char* method, const char* path, uint64_t content_length) {
