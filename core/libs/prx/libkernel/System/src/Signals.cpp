@@ -265,8 +265,10 @@ void ExpireAlarm(std::chrono::microseconds interval) {
         handler = dispositions[GuestSigalrm].handler;
     }
     if (handler == 1) return;
-    if ((blockedMask.load() & (1u << (GuestSigalrm - 1))) != 0)
-        throw std::runtime_error("ITIMER_REAL (it_interval " + DescribeInterval(interval) + ") expired while SIGALRM is blocked: pending signals are not implemented");
+    if (SignalBlocked(GuestSigalrm)) {
+        MarkPending(GuestSigalrm);
+        return;
+    }
     if (handler == 0) {
         std::fprintf(stderr, "SIGALRM: the alarm expired with the default disposition; the process terminates\n");
         std::fflush(stderr);

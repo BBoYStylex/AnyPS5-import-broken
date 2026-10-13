@@ -42,7 +42,12 @@ int APS5_VABI scePthreadCreate(Pthread* thread, const PthreadAttr* attr, Pthread
 int APS5_VABI scePthreadJoin(Pthread thread, void** retval);
 int APS5_VABI pthread_kill_nid_postfix(Pthread thread, int guest);
 int* APS5_VABI __error_nid_postfix();
+int APS5_VABI setitimer_nid_postfix(int, const void*, void*);
 }
+struct GuestItimerval {
+    KernelTimeval interval;
+    KernelTimeval value;
+};
 volatile int received = 0;
 void APS5_VABI Callback(int value) { received = value; }
 static void Require(bool value) { if (!value) std::abort(); }
@@ -167,4 +172,17 @@ int main() {
         JoinSender(senderThread, tight);
     }
     Require(_sigprocmask_nid_postfix(3, &previous, nullptr) == 0);
+
+    const GuestSignalSet alarm{{1u << 13, 0, 0, 0}};
+    const GuestItimerval soon{{0, 0}, {0, 50000}};
+    const GuestTimespec patience{5, 0};
+    Require(_sigprocmask_nid_postfix(1, &alarm, &previous) == 0);
+    Require(setitimer_nid_postfix(0, &soon, nullptr) == 0);
+    Require(sigtimedwait_nid_postfix(&alarm, nullptr, &patience) == 14);
+    Require(signal_nid_postfix(14, Callback) == nullptr);
+    Require(setitimer_nid_postfix(0, &soon, nullptr) == 0);
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    received = 0;
+    Require(_sigprocmask_nid_postfix(3, &previous, nullptr) == 0 && received == 14);
+    Require(signal_nid_postfix(14, nullptr) == Callback);
 }
