@@ -91,6 +91,15 @@ static int NativeUnlink(const std::filesystem::path& p) {
     errno = error;
     return -1;
 }
+static bool IsSymbolicLink(const std::filesystem::path& native) {
+    const auto handle = CreateFileW(native.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+        OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+    if (handle == INVALID_HANDLE_VALUE) return false;
+    FILE_ATTRIBUTE_TAG_INFO information{};
+    const bool read = GetFileInformationByHandleEx(handle, FileAttributeTagInfo, &information, sizeof(information)) != 0;
+    CloseHandle(handle);
+    return read && (information.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0 && information.ReparseTag == IO_REPARSE_TAG_SYMLINK;
+}
 static int MapFlags(int sceFlags) {
     int f = 0;
     const int acc = sceFlags & SCE_KERNEL_O_ACCMODE;
@@ -178,8 +187,12 @@ static int OpenNative(const std::filesystem::path& native, int flags, std::uint1
 #endif
     if ((flags & SCE_KERNEL_O_NOFOLLOW) != 0 && (flags & (SCE_KERNEL_O_CREAT | SCE_KERNEL_O_EXCL)) != (SCE_KERNEL_O_CREAT | SCE_KERNEL_O_EXCL)) {
         constexpr int GuestEmlink = 31;
+#ifdef _WIN32
+        if (IsSymbolicLink(native)) return SceErrorFromErrno(GuestEmlink);
+#else
         std::error_code error;
         if (std::filesystem::is_symlink(native, error)) return SceErrorFromErrno(GuestEmlink);
+#endif
     }
     int fd = NativeOpen(native, MapFlags(flags), mode);
 #ifdef _WIN32
