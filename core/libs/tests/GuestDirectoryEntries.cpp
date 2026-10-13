@@ -110,6 +110,11 @@ int main() {
     Require(getdents_nid_postfix(directory, nullptr, 64) == -1 && *__error_nid_postfix() == 14);
     *__error_nid_postfix() = 0;
     Require(getdirentries_nid_postfix(directory, small.data(), 0, nullptr) == -1 && *__error_nid_postfix() == 22);
+    Require(sceKernelLseek(directory, 0, 0) == 0);
+    std::int64_t failedBase = 1234;
+    Require(getdirentries_nid_postfix(directory, tooSmall.data(), static_cast<int>(tooSmall.size()), &failedBase) == -1);
+    Require(*__error_nid_postfix() == 22 && failedBase == 1234);
+    *__error_nid_postfix() = 0;
     std::int64_t posixBase = -1;
     *__error_nid_postfix() = 1234;
     const int firstPart = getdirentries_nid_postfix(directory, small.data(), static_cast<int>(small.size()), &posixBase);
