@@ -46,10 +46,11 @@ struct ThreadArgs {
     PthreadEntry entry;
     void* arg;
     PthreadPrivate* self;
+#ifndef _WIN32
+    sigset_t signalMask;
+#endif
 #ifdef _WIN32
     std::fenv_t environment;
-#else
-    sigset_t signalMask;
 #endif
 };
 
@@ -397,6 +398,9 @@ void ThreadCancel::EndWait() {
 }
 
 static void RunThread(std::unique_ptr<ThreadArgs> args) {
+#ifdef _WIN32
+    const std::fenv_t environment = args->environment;
+#endif
     APS5_LOG_OUT("RunThread entry=0x%llx arg=%p self=%p", static_cast<unsigned long long>(reinterpret_cast<std::uintptr_t>(args->entry)), args->arg, static_cast<void*>(args->self));
     const auto entry = args->entry;
     void* arg = args->arg;
@@ -405,16 +409,15 @@ static void RunThread(std::unique_ptr<ThreadArgs> args) {
     TimedWait::BindThreadWaitState(&self->waitCount);
     CurrentGuestState().current = self;
     RegisterStack(self);
-#ifdef _WIN32
-    const std::fenv_t environment = args->environment;
-#else
+#ifndef _WIN32
     const sigset_t signalMask = args->signalMask;
 #endif
     args.reset();
 #ifdef _WIN32
     if (std::fesetenv(&environment) != 0)
         throw std::runtime_error("Restoring guest thread floating-point environment");
-#else
+#endif
+#ifndef _WIN32
     pthread_sigmask(SIG_SETMASK, &signalMask, nullptr);
 #endif
     finishThread(self, entry(arg));
@@ -577,9 +580,9 @@ int APS5_VABI scePthreadCreate(Pthread* thread, const PthreadAttr* attr, Pthread
     std::promise<bool> start;
     auto args = std::make_unique<ThreadArgs>(ThreadArgs{entry, arg, p.get()});
 #ifdef _WIN32
-    args->environment = environment;
     SYSTEM_INFO system{};
     GetSystemInfo(&system);
+    args->environment = environment;
     if (p->stackSize < 16384 || p->stackSize > std::numeric_limits<unsigned>::max() - HOST_STACK_MARGIN - system.dwPageSize)
         throw std::runtime_error("scePthreadCreate: invalid Windows stack size");
     const std::size_t nativeStack = (p->stackSize + HOST_STACK_MARGIN + system.dwPageSize - 1) / system.dwPageSize * system.dwPageSize;
