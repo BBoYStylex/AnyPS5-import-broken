@@ -22,6 +22,7 @@ int APS5_VABI sysctl_nid_postfix(const int*, std::uint32_t, void*, std::size_t*,
 int APS5_VABI sysctlbyname_nid_postfix(const char*, void*, std::size_t*, const void*, std::size_t);
 int APS5_VABI sceKernelGetSystemSwVersion_nid_postfix(SceKernelSystemSwVersion*);
 int APS5_VABI getpid_nid_postfix();
+std::uint64_t APS5_VABI sceKernelGetTscFrequency();
 extern char** environ_nid_postfix;
 }
 static void Require(bool value) { if (!value) std::abort(); }
@@ -214,6 +215,22 @@ static void CheckSdkVersionSysctl() {
     length = sizeof(version);
     Require(sysctlbyname_nid_postfix("kern.sdk_version", &version, &length, &version, sizeof(version)) == -1 && *__error_nid_postfix() == 1);
 }
+static void CheckTscFrequencySysctl() {
+    *__error_nid_postfix() = 13;
+    std::size_t length = 0;
+    Require(sysctlbyname_nid_postfix("machdep.tsc_freq", nullptr, &length, nullptr, 0) == 0 && length == sizeof(std::uint64_t));
+    std::uint64_t frequency = 0;
+    length = sizeof(frequency);
+    Require(sysctlbyname_nid_postfix("machdep.tsc_freq", &frequency, &length, nullptr, 0) == 0 && length == sizeof(std::uint64_t));
+    Require(frequency != 0 && frequency == sceKernelGetTscFrequency());
+    Require(*__error_nid_postfix() == 13);
+    unsigned char bytes[8] = {0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa};
+    length = 4;
+    Require(sysctlbyname_nid_postfix("machdep.tsc_freq", bytes, &length, nullptr, 0) == -1 && *__error_nid_postfix() == 12);
+    Require(length == 4 && bytes[4] == 0xaa);
+    length = sizeof(frequency);
+    Require(sysctlbyname_nid_postfix("machdep.tsc_freq", &frequency, &length, &frequency, sizeof(frequency)) == -1 && *__error_nid_postfix() == 1);
+}
 static void CheckArandomSysctl() {
     const int mib[] = {1, 37};
     *__error_nid_postfix() = 13;
@@ -260,6 +277,7 @@ int main() {
     CheckSystemSwVersion();
     CheckPseudoRandomSysctl();
     CheckSdkVersionSysctl();
+    CheckTscFrequencySysctl();
     CheckArandomSysctl();
     *__error_nid_postfix() = 13;
     Require(sysconf_nid_postfix(47) == 0x4000);
