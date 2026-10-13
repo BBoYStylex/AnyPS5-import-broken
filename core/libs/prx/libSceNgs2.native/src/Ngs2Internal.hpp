@@ -101,6 +101,12 @@ struct Ngs2UserFx2 {
     std::uint32_t flags = 0;
 };
 
+struct Ngs2CustomLegacyUserFx {
+    Ngs2UserFxProcessHandler handler = nullptr;
+    std::array<std::uintptr_t, 3> data{};
+    std::uint32_t flags = 0;
+};
+
 struct Ngs2Voice {
     Ngs2Rack* rack = nullptr;
     Ngs2PlayState state = Ngs2PlayState::Empty;
@@ -128,6 +134,7 @@ struct Ngs2Voice {
     float fbwLevel = 1.0f;
     float lfeLevel = 1.0f;
     std::vector<Ngs2UserFx2> userFx;
+    std::vector<Ngs2CustomLegacyUserFx> customUserFx;
     Ngs2UserFxProcessHandler userFxHandler = nullptr;
     std::array<std::uintptr_t, 3> userFxData{};
     std::uint32_t userFxFlags = 0;
@@ -154,6 +161,7 @@ struct Ngs2Rack {
     Ngs2ContextBufferInfo bufferInfo{};
     Ngs2BufferAllocator allocator{};
     std::vector<Ngs2Voice> voices;
+    std::vector<std::uint32_t> customModuleIds;
     std::vector<Ngs2CustomUserFx2ModuleOption> userFx;
     std::vector<std::vector<std::uint8_t>> userFxCommon;
     std::vector<std::uint32_t> customModuleIds;
