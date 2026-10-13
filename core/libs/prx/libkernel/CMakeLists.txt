@@ -1095,6 +1095,17 @@ if(BUILD_TESTING)
         set_tests_properties(guest_memory PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libkernel>")
     endif()
+    if(WIN32)
+        add_test_executable(windows_prefault_tests ${LIBS_INCLUDE_DIR}/tests/WindowsPrefault.cpp)
+        target_include_directories(windows_prefault_tests PRIVATE ${LIBS_INCLUDE_DIR})
+        target_link_libraries(windows_prefault_tests PRIVATE libkernel libc psapi)
+        configure_windows_unwind(windows_prefault_tests)
+        add_test(NAME windows_prefault_enabled COMMAND windows_prefault_tests enabled)
+        add_test(NAME windows_prefault_disabled COMMAND windows_prefault_tests)
+        set_tests_properties(windows_prefault_enabled windows_prefault_disabled PROPERTIES
+            TIMEOUT 20
+            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:libkernel>")
+    endif()
     add_test_executable(guest_mlock_tests ${LIBS_INCLUDE_DIR}/tests/GuestMlock.cpp)
     target_include_directories(guest_mlock_tests PRIVATE ${LIBS_INCLUDE_DIR})
     target_link_libraries(guest_mlock_tests PRIVATE libkernel libc)
