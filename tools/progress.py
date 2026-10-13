@@ -19,7 +19,10 @@ STUB = "NotImplemented_nid_no_patch"
 CALL = re.compile(r"\b(\w+)\s*\(")
 CMAKE_SHARED = re.compile(r'^\s*include\(\s*"?\$\{CMAKE_CURRENT_SOURCE_DIR\}/\.\./([\w.-]+)/[\w.-]+\.cmake"?\s*\)', re.M)
 SOURCE_SHARED = re.compile(r'^\s*#\s*include\s*"prx/([\w.-]+)/[\w./-]+\.cpp"', re.M)
-STUB_WRAPPER = re.compile(r"\bstatic\s+(?:\[\[noreturn\]\]\s+)?[\w:<>,\s*&]+?\s+(\w+)\s*\([^;{]*\)\s*\{")
+STUB_WRAPPER = re.compile(
+    r"^[ \t]*(?:static\s+)?(?:\[\[noreturn\]\]\s+)?(?:(?!APS5_VABI)[\w:<>,\s*&])+?[\s*&]"
+    r"(?!(?:if|while|for|switch|catch|return|else)\b)(\w+)\s*\([^;{]*\)\s*"
+    r"(?:const\s*)?(?:noexcept\s*)?(?:->\s*[\w:<>*&\s]+?)?\{", re.M)
 NON_CODE = re.compile(r'"(?:\\.|[^"\\\n])*"|\'(?:\\.|[^\'\\\n])*\'|//[^\n]*|/\*.*?\*/', re.S)
 DISCARD = re.compile(r"\(void\)\s*\w+\s*;")
 EMPTY_RETURN = re.compile(r"return\s*;")
@@ -172,7 +175,7 @@ def scan_library(path):
              "done_names": sorted(done), "todo_names": sorted(todo), "inert_names": sorted(inert)}
     if not (done or todo):
         cmake = path / "CMakeLists.txt"
-        texts = [(CMAKE_SHARED, cmake.read_text())] if cmake.is_file() else []
+        texts = [(CMAKE_SHARED, cmake.read_text(encoding="utf-8", errors="ignore"))] if cmake.is_file() else []
         texts += [(SOURCE_SHARED, source.read_text(errors="ignore")) for source in sorted(path.glob("*.cpp"))]
         owners = [m[1] for pattern, content in texts for m in pattern.finditer(content)]
         owners = [o for o in owners if o != path.name and (path.parent / o).is_dir()]
@@ -205,12 +208,12 @@ def decoded_image_names():
 
 def collect_shaders():
     isa = {}
-    for line in ISA.read_text().splitlines():
+    for line in ISA.read_text(encoding="utf-8", errors="ignore").splitlines():
         if line and not line.startswith("#"):
             name, encoding = line.split()
             isa[name] = encoding
     by_camel = {camel(name): name for name in isa}
-    enum = re.search(r"enum class RdnaOpcode[^{]*\{(.*?)\};", OPCODES.read_text(), re.S).group(1)
+    enum = re.search(r"enum class RdnaOpcode[^{]*\{(.*?)\};", OPCODES.read_text(encoding="utf-8", errors="ignore"), re.S).group(1)
     opcodes = [o for o in re.findall(r"^\s*([A-Z]\w*)\s*[,=]", enum, re.M) if o not in OPCODE_SENTINELS]
     supported, extra = set(), []
     supported.update(name for name in decoded_image_names() if name in isa)
@@ -375,6 +378,7 @@ def summary(libraries, shaders):
         f'<p>The total is the AMD RDNA 1 + RDNA 2 instruction list (<a href="{SOURCE}/tools/rdna_isa.txt">tools/rdna_isa.txt</a>). '
         f'An instruction is implemented when the <a href="{SOURCE}/core/shader/recompiler/RdnaDecoder">decoder</a> recognizes it. '
         f"Decoded opcodes not present in AMD's public list are not counted: {extra}.</p>",
+        '<p><a href="history.html">Progress history</a> (one point per day).</p>',
         "</body></html>",
     ]) + "\n"
 
@@ -451,6 +455,6 @@ if __name__ == "__main__":
     (output / "badge-libraries.svg").write_text(badge("libraries*", libraries))
     (output / "badge-shaders.svg").write_text(badge("shaders", shaders))
     (output / "progress.svg").write_text(render(libraries, shaders))
-    (output / "index.html").write_text(summary(libraries, shaders))
+    (output / "progress.html").write_text(summary(libraries, shaders))
     print(f'libraries {libraries["done"]}/{libraries["total"]} ({libraries["percent"]}%)')
     print(f'shaders {shaders["done"]}/{shaders["total"]} ({shaders["percent"]}%)')
