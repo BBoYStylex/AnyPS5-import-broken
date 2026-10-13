@@ -77,12 +77,13 @@ void Check(const Api& api) {
     CheckArguments(nullptr, 22);
     Require(api.copy(output.data(), 3, nullptr) == 22 && firstCalls == 2, "null source callback count or result");
     CheckArguments(output.data(), 22);
+    Require(output[0] == 0 && output[1] == 0x5678, "null source did not clear the first destination element");
     Require(api.copy(output.data(), 0, text) == 22 && firstCalls == 3, "zero size callback count or result");
     CheckArguments(output.data(), 22);
-    Require(output[0] == 0x1234 && output[1] == 0x5678, "invalid input changed the output");
+    Require(output[0] == 0 && output[1] == 0x5678, "zero size changed the output");
     Require(api.copy(output.data() + 1, 2, text) == 34 && firstCalls == 4, "short buffer callback count or result");
     CheckArguments(output.data() + 1, 34);
-    Require(output[0] == 0x1234 && output[1] == 65 && output[2] == 0 && output[3] == 0xdef0,
+    Require(output[0] == 0 && output[1] == 0 && output[2] == 0x9abc && output[3] == 0xdef0,
         "short buffer output or guard changed");
     Require(api.copy(output.data() + 1, 3, text) == 0 && firstCalls == 4 && secondCalls == 0,
         "successful copy invoked a handler");
