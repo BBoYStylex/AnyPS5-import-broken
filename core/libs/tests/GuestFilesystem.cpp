@@ -506,6 +506,14 @@ int main() {
     Require(sceKernelCheckReachability("") == static_cast<int>(0x80020002u));
     Require(sceKernelRename("", presentName.c_str()) == static_cast<int>(0x80020002u));
     Require(sceKernelRename(presentName.c_str(), "") == static_cast<int>(0x80020002u));
+    const auto renamedFrom = root / "kernel-rename-from";
+    const auto renamedOnto = root / "kernel-rename-onto";
+    Require(std::filesystem::create_directory(renamedFrom) && std::filesystem::create_directory(renamedOnto));
+    { std::ofstream stream(renamedFrom / "child"); stream << "moved"; }
+    const auto renamedFromName = renamedFrom.generic_string();
+    Require(sceKernelRename(renamedFromName.c_str(), renamedOnto.generic_string().c_str()) == 0);
+    Require(!std::filesystem::exists(renamedFrom) && std::filesystem::file_size(renamedOnto / "child") == 5);
+    Require(std::filesystem::remove_all(renamedOnto) == 2);
     Require(sceKernelRmdir("") == static_cast<int>(0x80020002u));
     Require(sceKernelMkdir("", 0700) == static_cast<int>(0x80020002u));
     const auto cwdPermissions = std::filesystem::status(".").permissions();
