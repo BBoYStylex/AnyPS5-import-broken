@@ -14,6 +14,7 @@ PT_LOAD = 1
 PT_DYNAMIC = 2
 PT_INTERP = 3
 PT_PHDR = 6
+PT_GNU_STACK = 0x6474E551
 PT_OS_PROCPARAM = 0x61000001
 PT_SCE_VERSION = 0x6FFFFF01
 PAGE = 0x1000
@@ -106,6 +107,20 @@ def main():
         assert [h[3] for h in headers if h[0] == PT_LOAD][:3] == [TEXT[3], RODATA[3], DATA[3]], headers
         assert kinds_between_loads(headers) == [PT_OS_PROCPARAM], headers
         run_expecting_trap("unordered-loads", unordered)
+        for flags in (6, 7):
+            stack = (PT_GNU_STACK, flags, 0, 0, 0, 0, 16)
+            image = multi_load_fixture([TEXT, RODATA, DATA, stack])
+            code = bytes.fromhex("4883ec08c60424ccffe4")
+            image[TEXT[2]:TEXT[2] + len(code)] = code
+            output = convert(f"stack-{flags}", image)
+            headers = check_order(f"stack-{flags}", output.read_bytes())
+            retained = [header for header in headers if header[0] == PT_GNU_STACK]
+            assert len(retained) == 1 and retained[0][1] == flags and retained[0][7] == 16, retained
+            if sys.platform.startswith("linux") and platform.machine() in ("x86_64", "AMD64"):
+                output.chmod(0o755)
+                executed = subprocess.run([str(output)], capture_output=True, timeout=20)
+                expected = signal.SIGTRAP if flags & 1 else signal.SIGSEGV
+                assert executed.returncode == -expected, (flags, executed.returncode, executed.stderr)
     print("Linux program header order test passed")
 
 
