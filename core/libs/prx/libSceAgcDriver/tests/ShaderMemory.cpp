@@ -471,6 +471,61 @@ void verifySignedSrtComparison() {
     }
 }
 
+void verifyUnmappedUserDataRoot() {
+    using namespace ShaderRecompiler;
+    IrResourcePlan plan;
+    plan.srtPlanComplete = true;
+    plan.userDataBase = 8u;
+    plan.memoryInfo.push_back(MemoryInfo{.kind = ResourceKind::ScalarAddress});
+    IrValue lowRegister(IrOpcode::Void, IrType::ScalarReg, 0u);
+    IrValue highRegister(IrOpcode::Void, IrType::ScalarReg, 1u);
+    lowRegister.SetRegister({RegisterBank::Scalar, 8u});
+    highRegister.SetRegister({RegisterBank::Scalar, 9u});
+    IrValue low(IrOpcode::GetUserData, IrType::U32, 2u);
+    IrValue high(IrOpcode::GetUserData, IrType::U32, 3u);
+    low.AddArgument(&lowRegister);
+    high.AddArgument(&highRegister);
+    IrValue handle(IrOpcode::GetAddressResource, IrType::AddressResource, 4u);
+    handle.AddArgument(&low);
+    handle.AddArgument(&high);
+    IrValue offset(IrOpcode::Void, IrType::U32, 5u);
+    offset.SetImmediateU32(0u);
+    IrValue read(IrOpcode::LoadAddressU32, IrType::U32, 6u);
+    read.AddArgument(&handle);
+    read.AddArgument(&offset);
+    read.SetFlags(MemoryFlags{0u, 0x18u});
+    plan.srtReads.push_back({&read, 0u});
+    plan.pureFlatSlots.push_back(0u);
+    DescriptorSource source;
+    source.dwordCount = 1u;
+    source.dwords[0] = &read;
+    plan.descriptorSources.push_back(source);
+
+    const auto guarded = Detail::ComputeGuardedFlatSlots(plan);
+    require(guarded == std::vector<std::uint32_t>{0u}, "unmapped user-data root: the direct descriptor read has no SRT guard");
+
+    std::uint32_t readCalls = 0u;
+    SrtRuntime runtime;
+    const std::array<std::uint32_t, 2> userData{0x7u, 0x4dfacu};
+    runtime.userData = userData;
+    runtime.readMemory = [](void* context, std::uint64_t, std::uint32_t*) {
+        ++*static_cast<std::uint32_t*>(context);
+        return false;
+    };
+    runtime.userContext = &readCalls;
+    runtime.accessible = [](void*, std::uint64_t, std::uint64_t) { return false; };
+    runtime.poisonUnmappedUserDataRoots = true;
+    const std::array<std::uint32_t, 1> sources{0u};
+    std::vector<DescriptorValue> descriptors;
+    std::vector<std::uint32_t> flat;
+    std::vector<std::uint8_t> active;
+    std::vector<SrtReadPoison> poison;
+    require(Detail::EvaluateRuntimeSourcesImpl(plan, sources, runtime, descriptors, flat, true, {}, active, &poison), "unmapped user-data root: an inaccessible direct descriptor read aborted evaluation");
+    require(readCalls == 0u, "unmapped user-data root: the inaccessible address was dereferenced after the probe failed");
+    require(descriptors.size() == 1u && descriptors[0].dwords[0] == 0u, "unmapped user-data root: the inaccessible descriptor was not zeroed");
+    require(poison.size() == 1u && poison[0].pc == 0x18u && poison[0].address == 0xdfac00000004u, "unmapped user-data root: the direct read was not recorded as poisoned");
+}
+
 void verifyOutOfRangeConstantReads() {
     std::vector<std::uint32_t> code{0xf40c0200u, 0xfa000000u, 0xf4080500u, 0xfa000020u, 0xf4080600u, 0xfa000040u, 0xf4000400u, 0xfa000050u, 0xf4080a00u, 0xfa000080u, 0xbf8cc07fu, 0xf42c0814u, 0xfa000000u, 0xbf8cc07fu, 0xbf068010u, 0xbf850008u};
     for (std::uint32_t dword = 0; dword < 8u; dword++) {
@@ -777,9 +832,12 @@ void verifyBindlessTable() {
         }
         return true;
     };
-    const auto mappingOf = [&](const ResourceSnapshot& snapshot) {
-        require(snapshot.flattenedSrt.size() >= 1u + 2u * slots, "bindless: the mapping block is missing from the flattened SRT");
-        return std::vector<std::uint32_t>(snapshot.flattenedSrt.end() - static_cast<std::ptrdiff_t>(1u + 2u * slots), snapshot.flattenedSrt.end());
+    const auto mappingOf = [&](const ResourceCapture& capture) {
+        const auto guardWords = capture.plan->guardedSrtSlots.size();
+        require(capture.snapshot.flattenedSrt.size() >= guardWords + 1u + 2u * slots, "bindless: the mapping block is missing from the flattened SRT");
+        const auto end = capture.snapshot.flattenedSrt.size() - guardWords;
+        const auto begin = end - (1u + 2u * slots);
+        return std::vector<std::uint32_t>(capture.snapshot.flattenedSrt.begin() + static_cast<std::ptrdiff_t>(begin), capture.snapshot.flattenedSrt.begin() + static_cast<std::ptrdiff_t>(end));
     };
     const auto tableRoot = [&](const ResourceCapture& capture, std::uint32_t direct) {
         require(capture.snapshot.images.size() == direct + slots - 1u, "bindless: the snapshot does not hold the table slots");
@@ -819,9 +877,9 @@ void verifyBindlessTable() {
     const auto root = tableRoot(*capture, direct);
     require(capture->snapshot.images[root].dwords == heap[0] && capture->snapshot.images[direct].dwords == heap[1] && capture->snapshot.images[direct + 1u].dwords == heap[3], "bindless: the slots do not hold the keyed entries");
     for (std::uint32_t i = direct + 2u; i < capture->snapshot.images.size(); i++) require(capture->snapshot.images[i].dwords == heap[2], "bindless: a pad slot is not null");
-    const auto mapping = mappingOf(capture->snapshot);
+    const auto mapping = mappingOf(*capture);
     require(std::vector<std::uint32_t>(mapping.begin(), mapping.begin() + 7) == std::vector<std::uint32_t>{3u, 0u, 0u, 1u, 1u, 3u, 2u}, "bindless: the (key, slot) mapping is wrong");
-    require(capture->plan->srtReads.size() + mapping.size() == capture->snapshot.flattenedSrt.size(), "bindless: the mapping offset does not name the block");
+    require(capture->plan->srtReads.size() + mapping.size() + capture->plan->guardedSrtSlots.size() + 3u * capture->snapshot.srtPoison.size() == capture->snapshot.flattenedSrt.size(), "bindless: the mapping offset does not name the block");
     auto regions = memory.Regions();
     for (const auto& material : materials) require(covered(regions, &material[1], sizeof(std::uint32_t)), "bindless: a material key was not captured");
     for (const auto entry : {0u, 1u, 3u}) require(covered(regions, heap[entry].data(), 32u), "bindless: a table entry was not captured");
@@ -887,7 +945,7 @@ void verifyBindlessTable() {
         materials[2][1] = unmapped;
         AgcDriver::ShaderMemory rangeMemory({});
         const auto rangeCapture = rangeMemory.Capture(request);
-        const auto rangeMapping = mappingOf(rangeCapture->snapshot);
+        const auto rangeMapping = mappingOf(*rangeCapture);
         require(std::vector<std::uint32_t>(rangeMapping.begin(), rangeMapping.begin() + 5) == std::vector<std::uint32_t>{2u, 0u, 0u, 1u, 1u}, "bindless: an out-of-range key was kept");
         request.context.memory = rangeMemory.Regions();
         require(Recompile(request, *rangeCapture)->variantId == compiled->variantId, "bindless: the keys changed the variant");
@@ -895,7 +953,7 @@ void verifyBindlessTable() {
     materials[2][1] = 2u;
     AgcDriver::ShaderMemory nullMemory({});
     const auto nullCapture = nullMemory.Capture(request);
-    const auto nullMapping = mappingOf(nullCapture->snapshot);
+    const auto nullMapping = mappingOf(*nullCapture);
     require(std::vector<std::uint32_t>(nullMapping.begin(), nullMapping.begin() + 5) == std::vector<std::uint32_t>{2u, 0u, 0u, 1u, 1u}, "bindless: a null entry's key was mapped");
     require(nullCapture->snapshot.images[direct + 1u].dwords == heap[2], "bindless: a null entry's slot is not the pad");
     materials[2][1] = 3u;
@@ -909,7 +967,7 @@ void verifyBindlessTable() {
     const auto wholeCapture = wholeMemory.Capture(whole);
     const auto wholeDirect = static_cast<std::uint32_t>(wholePlan->info.images.size());
     const auto wholeRoot = tableRoot(*wholeCapture, wholeDirect);
-    const auto wholeMapping = mappingOf(wholeCapture->snapshot);
+    const auto wholeMapping = mappingOf(*wholeCapture);
     require(std::vector<std::uint32_t>(wholeMapping.begin(), wholeMapping.begin() + 7) == std::vector<std::uint32_t>{3u, 0u, 0u, 1u, 1u, 3u, 3u}, "bindless: mode T is not the identity mapping");
     require(wholeCapture->snapshot.images[wholeRoot].dwords == heap[0] && wholeCapture->snapshot.images[wholeDirect].dwords == heap[1] && wholeCapture->snapshot.images[wholeDirect + 1u].dwords == heap[2] && wholeCapture->snapshot.images[wholeDirect + 2u].dwords == heap[3], "bindless: mode T slots are wrong");
     whole.context.memory = wholeMemory.Regions();
@@ -932,7 +990,7 @@ void verifyBindlessTable() {
     heap = {};
     AgcDriver::ShaderMemory emptyMemory({});
     const auto emptyCapture = emptyMemory.Capture(request);
-    require(mappingOf(emptyCapture->snapshot).front() == 0u, "bindless: an empty table has mapped keys");
+    require(mappingOf(*emptyCapture).front() == 0u, "bindless: an empty table has mapped keys");
     request.context.memory = emptyMemory.Regions();
     require(Recompile(request, *emptyCapture)->variantId == compiled->variantId, "bindless: an empty table changed the artifact");
     heap = savedHeap;
@@ -3352,6 +3410,9 @@ void verifyGuardedNullPointers() {
     const std::vector<std::uint32_t> descriptorCode{0xf4040280u, 0xfa000018u, 0xbf8cc07fu, 0xf4080105u, 0xfa000000u, 0xbf8cc07fu, 0x34040082u, 0xe0701000u,
         0x80010002u, 0xbf810000u};
     const auto slotPc = [](const IrResourcePlan& plan, std::uint32_t slot) { return plan.srtReads.at(slot).value->Flags<MemoryFlags>().pc; };
+    const auto hasGuardAtPc = [&](const ResourceCapture& capture, std::uint32_t pc) {
+        return std::any_of(capture.plan->guardedSrtSlots.begin(), capture.plan->guardedSrtSlots.end(), [&](std::uint32_t slot) { return slotPc(*capture.plan, slot) == pc; });
+    };
     const auto faultBinding = [](const RecompileResult& result) {
         return std::any_of(result.bindings.begin(), result.bindings.end(), [](const DescriptorBinding& binding) { return binding.role == DescriptorRole::FaultBuffer; });
     };
@@ -3363,8 +3424,9 @@ void verifyGuardedNullPointers() {
     point(payloadAddress);
     AgcDriver::ShaderMemory validMemory({});
     const auto valid = validMemory.Capture(branch.request);
-    require(valid->snapshot.srtPoison.empty() && valid->plan->guardedSrtSlots.size() == 1u && slotPc(*valid->plan, valid->plan->guardedSrtSlots[0]) == 0x2cu && GuardRecords(*valid), "guarded pointer: a mapped nested pointer was poisoned, or its read has no guard");
-    require(valid->snapshot.flattenedSrt.at(valid->plan->guardedSrtSlots[0]) == payload, "guarded pointer: a mapped nested read does not hold its word");
+    require(valid->snapshot.srtPoison.empty() && hasGuardAtPc(*valid, 0x2cu) && GuardRecords(*valid), "guarded pointer: a mapped nested pointer was poisoned, or its read has no guard");
+    const auto nestedSlot = std::find_if(valid->plan->guardedSrtSlots.begin(), valid->plan->guardedSrtSlots.end(), [&](std::uint32_t slot) { return slotPc(*valid->plan, slot) == 0x2cu; });
+    require(nestedSlot != valid->plan->guardedSrtSlots.end() && valid->snapshot.flattenedSrt.at(*nestedSlot) == payload, "guarded pointer: a mapped nested read does not hold its word");
     branch.request.context.memory = validMemory.Regions();
     const auto validResult = Recompile(branch.request, *valid);
     require(validResult->poisonedSrtReads == 0u && faultBinding(*validResult) && validResult->bdaAbiVersion == BdaAbi::Version, "guarded pointer: a guarded program has no fault buffer");
@@ -3419,7 +3481,7 @@ void verifyGuardedNullPointers() {
     indirect = payloadAddress;
     AgcDriver::ShaderMemory mappedChainMemory({});
     const auto mappedChain = mappedChainMemory.Capture(chain.request);
-    require(mappedChain->snapshot.srtPoison.empty() && mappedChain->plan->guardedSrtSlots.size() == 3u && GuardRecords(*mappedChain), "guarded pointer: a mapped pointer chain was poisoned, or its reads have no guards");
+    require(mappedChain->snapshot.srtPoison.empty() && hasGuardAtPc(*mappedChain, 0x2cu) && hasGuardAtPc(*mappedChain, 0x38u) && GuardRecords(*mappedChain), "guarded pointer: a mapped pointer chain was poisoned, or its reads have no guards");
     chain.request.context.memory = mappedChainMemory.Regions();
     const auto mappedChainResult = Recompile(chain.request, *mappedChain);
     require(chainResult->poisonedSrtReads == 3u && nullChainResult->poisonedSrtReads == 1u && mappedChainResult->poisonedSrtReads == 0u, "guarded pointer: a chain result does not count its poisoned reads");
@@ -3563,6 +3625,7 @@ int main(int argc, char** argv) {
         verifyEvaluatedValues();
         verifyFrontendPair();
         verifySignedSrtComparison();
+        verifyUnmappedUserDataRoot();
         verifyOutOfRangeConstantReads();
         verifySignedMinimum();
         verifyPureFlatSlots();

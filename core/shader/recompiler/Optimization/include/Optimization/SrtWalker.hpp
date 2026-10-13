@@ -32,6 +32,7 @@ struct SrtRuntime {
     SrtMemoryReader readSpecializationMemory = nullptr;
     SrtReadTrace* readTrace = nullptr;
     SrtMemoryProbe accessible = nullptr;
+    bool poisonUnmappedUserDataRoots = false;
 };
 
 enum class RuntimeValueType {

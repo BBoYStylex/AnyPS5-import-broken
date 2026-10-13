@@ -158,7 +158,7 @@ bool Evaluator::EvaluateRawRead(IrValue& inst, std::uint64_t& result) {
         result = 0;
         return true;
     }
-    if (_inaccessible != nullptr && _runtime.accessible != nullptr && !_runtime.accessible(_runtime.userContext, address, sizeof(std::uint32_t)) && LoadedFromMemory(*handle)) {
+    if (_inaccessible != nullptr && _runtime.accessible != nullptr && !_runtime.accessible(_runtime.userContext, address, sizeof(std::uint32_t)) && ((_runtime.poisonUnmappedUserDataRoots && handle->Opcode() == IrOpcode::GetAddressResource) || LoadedFromMemory(*handle))) {
         *_inaccessible = {&inst, address};
         return false;
     }
