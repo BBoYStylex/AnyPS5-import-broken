@@ -457,6 +457,13 @@ static bool HasNonDirectoryPrefix(const std::filesystem::path& native) {
     }
     return false;
 }
+static int PathFailure([[maybe_unused]] const std::filesystem::path& native) {
+    int error = errno;
+#ifdef _WIN32
+    if (error == ENOENT && UnderRegularFile_nid_no_patch(native)) error = ENOTDIR;
+#endif
+    return SceErrorFromErrno(error);
+}
 
 extern "C" int APS5_VABI dup_nid_postfix(int d);
 extern "C" int APS5_VABI close_nid_postfix(int d);
@@ -484,7 +491,7 @@ int APS5_VABI chmod_nid_postfix(const char* path, int mode) {
     if (const int error = PathError(path)) return PosixFailure(error);
     std::filesystem::path native;
     if (const int error = ResolvePathError_nid_no_patch(path, native)) return PosixFailure(error);
-    if (NativeChmod(native, mode & 07777) != 0) return PosixResult(SceErrorFromErrno(errno));
+    if (NativeChmod(native, mode & 07777) != 0) return PosixResult(PathFailure(native));
     return 0;
 }
 
@@ -1167,7 +1174,7 @@ int APS5_VABI sceKernelChmod_nid_postfix(const char* path, std::uint16_t mode) {
     if (!*path) return SceErrorFromErrno(GUEST_ENOENT);
     std::filesystem::path native;
     if (const int error = ResolvePathError_nid_no_patch(path, native)) return SceKernelError(error);
-    if (NativeChmod(native, mode & 07777) != 0) return SceErrorFromErrno(errno);
+    if (NativeChmod(native, mode & 07777) != 0) return PathFailure(native);
     return 0;
 }
 
