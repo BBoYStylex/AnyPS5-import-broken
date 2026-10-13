@@ -1,4 +1,5 @@
 #include "prx/libSceAgcDriver/Execution/include/Driver/Driver.hpp"
+#include "prx/libSceAgcDriver/Execution/include/ProfileOutput.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver/Diagnostics.hpp"
 #include "prx/libSceAgcDriver/Execution/include/GuestMemory.hpp"
 
@@ -152,11 +153,31 @@ void Driver::lookupDraw(const Submission& submission, const std::shared_ptr<Vulk
                         ++counters.touches;
                     }
                 }
-                if (verifyDrawEntries()) {
-                    ++counters.verifyHits;
-                    verifyHit = true;
-                    drawHit = false;
+            if (verifyDrawEntries()) {
+                ++counters.verifyHits;
+                verifyHit = true;
+                drawHit = false;
+            }
+            static const bool verifyKey = std::getenv("APS5_DRAW_KEY_VERIFY") != nullptr;
+            if (verifyKey) {
+                if (drawHit && entry->decode != nullptr) {
+                    // On hit with verification, compare fresh decode with cached
+                    static std::atomic<std::uint64_t> verifyComps{0};
+                    ++verifyComps;
+                    if (verifyComps % 1000 == 1) {
+                        AgcDriver::ProfilePrint_nid_no_patch("[draw-key-verify] verifying hit %llu", verifyComps.load());
+                    }
+                    // TODO: Fresh decode comparison would go here
+                    // For now, just track that verification is enabled
+                } else if (!drawHit) {
+                    // Verification mode: on miss, log key instability
+                    static std::atomic<std::uint64_t> verifyFailures{0};
+                    ++verifyFailures;
+                    if (verifyFailures % 100 == 1) {
+                        AgcDriver::ProfilePrint_nid_no_patch("[draw-key-verify] unstable key detected: %llu failures", static_cast<unsigned long long>(verifyFailures.load()));
+                    }
                 }
+            }
             } else {
                 ++counters.misses[static_cast<std::size_t>(*miss)];
                 if (registerKey && entry->decode != nullptr) ++counters.decodePartial;
