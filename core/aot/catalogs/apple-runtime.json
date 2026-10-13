@@ -305,7 +305,7 @@
       "sources": [
         {
           "path": "core/libs/prx/libkernel/Time/Time.cpp",
-          "sha256": "d98282fa5ef91faef48362f5589dd4afd9a770874472cae7f250724191e7432c",
+          "sha256": "ed88d4b252737ef3974a044f72c1f9465edd470fb87d4536d5d3afdf8c6fed99",
           "excerpt": "int APS5_VABI sceKernelUsleep_nid_postfix(KernelUseconds microseconds)"
         },
         {
@@ -319,7 +319,7 @@
           "excerpt": "#define APS5_VABI"
         }
       ],
-      "facts_sha256": "38178d3030b2d08dfa7849b8a513f5bde60430b104e5a719acc2c3d92214c81c"
+      "facts_sha256": "c67583c4b74968a89a0296c88dc9df3b77cb0750e383a431f05a2319b8a3448b"
     },
     {
       "identity": {

@@ -433,3 +433,10 @@ returns. Running without `ANYPS5_TEST_FRAME_LIMIT=1` retains the original loop.
 The package objects and original runtime shim are converted; no host replacement
 for the supplied PRX is linked. The shim's many exports are aliases and metadata,
 not a complete third-party C library. System functions come from AnyPS5 providers.
+
+
+### Reproduce standalone consumer builds and measurements
+
+`LIBCAPSTONE_PATH=/path/build/core/aot/capstone python3 core/aot/examples/guest_build.py input.elf /path/fresh-output --name app` builds an ARM64-only Mach-O executable and a receipt with input, compiler/runtime and executable identities. The default profile is ordered; `--profile single` rejects worker creation, while `--profile epochs` enables checked monotonic promotion. Add `--optimize-calls` and optionally `--thin-lto` for the qualified call experiment. `--seal-image` additionally requires the epochs profile. This helper links the native TLS implementation required by descriptor v9. Conversion is offline; the distributed executable contains no x86 decoder, interpreter or JIT.
+
+Use `jq_transfer.py` and the upstream jq core suite for correctness before timing. `jq_benchmark.py --aot APP --arm64 REFERENCE --x86 ROSETTA_REFERENCE --output FRESH_FOLDER` checks architectures and exact output, then alternates nine warm CLI rounds after two warmups. Optional `--baseline-aot` records the conservative compiler. The receipt includes CPU/wall time, peak RSS, executable/input hashes and variability. Source versions, configuration and toolchains of the supplied references require separate qualification. These measurements are not identical-ELF Rosetta comparisons, cold-start results, game compatibility or FPS. Use `zstd_benchmark.py` for the separate single-thread and worker cases.
