@@ -28,8 +28,7 @@ int APS5_VABI sceAjmBatchJobEncode(AjmBatchInfo* info, uint32_t instance, const 
 
 const char* APS5_VABI sceAjmStrError(int error) {
  (void)error;
- AjmStub(__func__);
- return nullptr;
+ return "AJM";
 }
 
 int APS5_VABI sceAjmDecWVorbisCreateHeaderPacket(void) {
