@@ -1,6 +1,8 @@
 #include "prx/libSceFont/include/FontDriver.hpp"
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
+#include <exception>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -45,6 +47,9 @@ int APS5_VABI sceFontGetFontResolution(FontHandle, std::uint32_t*, float*);
 int APS5_VABI sceFontGetRenderScaledKerning(FontHandle, std::uint32_t, std::uint32_t, FontKerning*);
 int APS5_VABI sceFontGenerateCharGlyph(FontHandle, std::uint32_t, const FontGenerateGlyphDetail*, FontGlyph*);
 int APS5_VABI sceFontGlyphDefineAttribute(FontGlyph, std::uint32_t, std::uint64_t);
+FontTextCodes* APS5_VABI sceFontCharactersRefersTextCodes(const FontTextCharacter*, const FontTextCharacter*, FontTextCodes*);
+FontTextCodes* APS5_VABI sceFontTextCodesStepNext(FontTextCodes*);
+FontTextCodes* APS5_VABI sceFontTextCodesStepBack(FontTextCodes*);
 int APS5_VABI sceFontDeleteGlyph(const FontMemory*, FontGlyph*);
 int APS5_VABI sceFontTextSourceInit(FontTextSource*, const void*, std::uint32_t, FontTextParseFunction, void*);
 int APS5_VABI sceFontCreateString(const FontMemory*, FontTextSource*, const FontCreateStringDetail*, FontString*);
@@ -65,6 +70,68 @@ static void Check(bool value, int line) {
     }
 }
 #define Require(value) Check((value), __LINE__)
+
+template<typename F>
+static bool Throws(F&& call) {
+    try { call(); } catch (const std::exception&) { return true; }
+    return false;
+}
+
+struct CodesOutput {
+    std::uint64_t before = 0x0123456789ABCDEFu;
+    FontTextCodes codes{};
+    std::uint64_t after = 0xFEDCBA9876543210u;
+};
+
+static void CheckCodes(const CodesOutput& output, void* order, std::uint32_t code) {
+    Require(output.before == 0x0123456789ABCDEFu && output.after == 0xFEDCBA9876543210u);
+    Require(output.codes.textOrder == order && output.codes.textCode == code && output.codes.reserved == 0);
+}
+
+static void CheckTextCodes() {
+    FontTextCharacter chain[5]{};
+    const std::uint32_t codes[] = {'A', 0x0416, 0x4E2D, 0x1F642, 0x0301};
+    for (int i = 0; i < 5; ++i) {
+        chain[i].prev = i == 0 ? nullptr : &chain[i - 1];
+        chain[i].next = i == 4 ? nullptr : &chain[i + 1];
+        chain[i].textOrder = &chain[i];
+        chain[i].characterCode = codes[i];
+        chain[i].clusterSpan = 1;
+    }
+    CodesOutput output;
+    for (int start = 0; start < 5; ++start) {
+        for (int end = start + 1; end <= 5; ++end) {
+            const FontTextCharacter* term = end == 5 ? nullptr : &chain[end];
+            Require(sceFontCharactersRefersTextCodes(&chain[start], term, &output.codes) == &output.codes);
+            for (int i = start; i < end; ++i) {
+                CheckCodes(output, &chain[i], codes[i]);
+                if (i + 1 < end) Require(sceFontTextCodesStepNext(&output.codes) == &output.codes);
+            }
+            const FontTextCodes last = output.codes;
+            Require(sceFontTextCodesStepNext(&output.codes) == nullptr);
+            Require(std::memcmp(&last, &output.codes, sizeof(last)) == 0);
+            for (int i = end - 1; i > 0; --i) {
+                Require(sceFontTextCodesStepBack(&output.codes) == &output.codes);
+                CheckCodes(output, &chain[i - 1], codes[i - 1]);
+            }
+            const FontTextCodes first = output.codes;
+            Require(sceFontTextCodesStepBack(&output.codes) == nullptr);
+            Require(std::memcmp(&first, &output.codes, sizeof(first)) == 0);
+        }
+    }
+    Require(sceFontCharactersRefersTextCodes(chain, nullptr, &output.codes) == &output.codes);
+    FontTextCodes copy = output.codes;
+    Require(sceFontTextCodesStepNext(&copy) == &copy && copy.textCode == 0x0416);
+    CheckCodes(output, chain, 'A');
+    Require(sceFontCharactersRefersTextCodes(nullptr, nullptr, &output.codes) == &output.codes);
+    CheckCodes(output, chain, 'A');
+    Require(sceFontCharactersRefersTextCodes(chain, nullptr, nullptr) == nullptr);
+    Require(sceFontTextCodesStepNext(nullptr) == nullptr);
+    Require(sceFontTextCodesStepBack(nullptr) == nullptr);
+    FontTextCodes invalid{};
+    Require(Throws([&] { sceFontTextCodesStepNext(&invalid); }));
+    Require(Throws([&] { sceFontTextCodesStepBack(&invalid); }));
+}
 
 static void SetFontDirectory(const std::filesystem::path& directory) {
 #ifdef _WIN32
@@ -158,6 +225,7 @@ static bool KerningIs(const FontKerning& kerning, float offsetX) {
 }
 
 int main() {
+    CheckTextCodes();
     constexpr std::uint32_t SystemFontSet = 0x18070043u;
     const std::filesystem::path fontRoot = std::filesystem::temp_directory_path() / ("anyps5_guest_font-" + std::to_string(std::random_device{}()));
     std::filesystem::remove_all(fontRoot);
@@ -345,6 +413,14 @@ int main() {
     std::uint32_t characterCount = 0;
     FontTextCharacter* characters = sceFontStringRefersTextCharacters(string, &characterCount);
     Require(characters != nullptr && characterCount == 2);
+    CodesOutput stringCodes;
+    Require(sceFontCharactersRefersTextCodes(characters, nullptr, &stringCodes.codes) == &stringCodes.codes);
+    CheckCodes(stringCodes, characters->textOrder, 'A');
+    Require(sceFontTextCodesStepNext(&stringCodes.codes) == &stringCodes.codes);
+    CheckCodes(stringCodes, characters[1].textOrder, 'V');
+    Require(sceFontTextCodesStepNext(&stringCodes.codes) == nullptr);
+    Require(sceFontTextCodesStepBack(&stringCodes.codes) == &stringCodes.codes);
+    CheckCodes(stringCodes, characters->textOrder, 'A');
     FontWriting writing{};
     Require(sceFontWritingInit(&writing, string, characters) == SCE_FONT_OK);
     constexpr std::uint64_t guard = 0x5a5a5a5a5a5a5a5aull;

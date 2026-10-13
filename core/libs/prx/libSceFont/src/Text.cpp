@@ -7,6 +7,7 @@
 #include <cstring>
 #include <new>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 #include "prx/libSceFont/include/FontInternal.hpp"
@@ -14,6 +15,25 @@
 namespace {
 
 using namespace Font;
+
+constexpr std::uint64_t TEXT_CODES_TAG = 0x41505335434F4445ull;
+
+void FillTextCodes_nid_no_patch(FontTextCodes* codes, const FontTextCharacter* character, const FontTextCharacter* term) {
+    if (!codes || !character) return;
+    *codes = {};
+    codes->textOrder = character->textOrder;
+    codes->textCode = character->characterCode;
+    codes->systemUse[0] = const_cast<FontTextCharacter*>(character);
+    codes->systemUse[1] = const_cast<FontTextCharacter*>(term);
+    std::memcpy(&codes->systemUse[2], &TEXT_CODES_TAG, sizeof(TEXT_CODES_TAG));
+}
+
+const FontTextCharacter* ReadTextCodes_nid_no_patch(const FontTextCodes* codes, const char* function) {
+    std::uint64_t tag = 0;
+    std::memcpy(&tag, &codes->systemUse[2], sizeof(tag));
+    if (tag != TEXT_CODES_TAG || !codes->systemUse[0]) throw std::runtime_error(std::string(function) + ": text codes cursor was not initialized");
+    return static_cast<const FontTextCharacter*>(codes->systemUse[0]);
+}
 
 constexpr std::uint16_t TEXT_SOURCE_MAGIC = 0x0F04;
 constexpr std::uint16_t FONT_STRING_MAGIC = 0x0F05;
@@ -213,6 +233,28 @@ void AccumulateWritingMetrics(FontWritingData& writing) {
 #pragma GCC visibility push(default)
 
 extern "C" {
+
+FontTextCodes* APS5_VABI sceFontCharactersRefersTextCodes(const FontTextCharacter* textCharacter, const FontTextCharacter* termCharacter, FontTextCodes* textCodes) {
+    FillTextCodes_nid_no_patch(textCodes, textCharacter, termCharacter);
+    return textCodes;
+}
+
+FontTextCodes* APS5_VABI sceFontTextCodesStepNext(FontTextCodes* textCodesStep) {
+    if (!textCodesStep) return nullptr;
+    const FontTextCharacter* current = ReadTextCodes_nid_no_patch(textCodesStep, __func__);
+    const auto* term = static_cast<const FontTextCharacter*>(textCodesStep->systemUse[1]);
+    if (!current->next || current->next == term) return nullptr;
+    FillTextCodes_nid_no_patch(textCodesStep, current->next, term);
+    return textCodesStep;
+}
+
+FontTextCodes* APS5_VABI sceFontTextCodesStepBack(FontTextCodes* textCodesStep) {
+    if (!textCodesStep) return nullptr;
+    const FontTextCharacter* current = ReadTextCodes_nid_no_patch(textCodesStep, __func__);
+    if (!current->prev) return nullptr;
+    FillTextCodes_nid_no_patch(textCodesStep, current->prev, static_cast<const FontTextCharacter*>(textCodesStep->systemUse[1]));
+    return textCodesStep;
+}
 
 int APS5_VABI sceFontTextSourceInit(FontTextSource* textSource, const void* textAddress, std::uint32_t textSizeByte, FontTextParseFunction textParser, void* textObject) {
     if (!textSource) return SCE_FONT_ERROR_INVALID_PARAMETER;
