@@ -70,6 +70,7 @@ double APS5_VABI expm1_nid_postfix(double);
 float APS5_VABI expm1f_nid_postfix(float);
 float APS5_VABI erff_nid_postfix(float);
 double APS5_VABI lgamma_nid_postfix(double);
+extern int signgam_nid_postfix;
 float APS5_VABI logbf_nid_postfix(float);
 double APS5_VABI exp2_nid_postfix(double);
 float APS5_VABI __powisf2_nid_postfix(float, int);
@@ -758,6 +759,22 @@ static void CheckNoConversionIsPositiveZero() {
     Require(parsedWideLong == 0.L && !std::signbit(parsedWideLong) && wideEnd == wide);
 }
 
+static void CheckLgammaSign() {
+    Require(std::abs(lgamma_nid_postfix(-0.5) - 1.265512123484645) < 1e-15 && signgam_nid_postfix == -1);
+    Require(std::abs(lgamma_nid_postfix(-1.5) - 0.8600470153764812) < 1e-15 && signgam_nid_postfix == 1);
+    Require(std::abs(lgamma_nid_postfix(-2.5) + 0.056243716497674) < 1e-15 && signgam_nid_postfix == -1);
+    Require(std::abs(lgamma_nid_postfix(1.5) + 0.1207822376352454) < 1e-15 && signgam_nid_postfix == 1);
+    Require(std::abs(lgamma_nid_postfix(2.5) - 0.2846828704729192) < 1e-15 && signgam_nid_postfix == 1);
+    Require(std::abs(lgamma_nid_postfix(-1e-100) - 230.25850929940458) < 1e-12 && signgam_nid_postfix == -1);
+    Require(std::isinf(lgamma_nid_postfix(0.)) && signgam_nid_postfix == 1);
+    Require(std::isinf(lgamma_nid_postfix(-0.)) && signgam_nid_postfix == -1);
+    Require(std::isinf(lgamma_nid_postfix(-1.)) && signgam_nid_postfix == 1);
+    Require(std::isinf(lgamma_nid_postfix(-2.)) && signgam_nid_postfix == 1);
+    Require(std::isinf(lgamma_nid_postfix(std::numeric_limits<double>::infinity())) && signgam_nid_postfix == 1);
+    Require(std::isinf(lgamma_nid_postfix(-std::numeric_limits<double>::infinity())) && signgam_nid_postfix == 1);
+    Require(std::isnan(lgamma_nid_postfix(std::numeric_limits<double>::quiet_NaN())) && signgam_nid_postfix == 1);
+}
+
 int main() {
     CheckFloatClassification();
     CheckNoConversionIsPositiveZero();
@@ -837,6 +854,7 @@ int main() {
     Require(lgamma_nid_postfix(1.) == 0. && lgamma_nid_postfix(2.) == 0. && std::isinf(lgamma_nid_postfix(0.)));
     Require(std::abs(lgamma_nid_postfix(0.5) - 0.5723649429247001) < 1e-15 && std::abs(lgamma_nid_postfix(10.) - 12.801827480081469) < 1e-13);
     Require(std::abs(lgamma_nid_postfix(-0.5) - 1.2655121234846454) < 1e-15);
+    CheckLgammaSign();
     Require(llroundl_nid_postfix(2.5L) == 3 && llroundl_nid_postfix(-2.5L) == -3 && llroundl_nid_postfix(0.49999999999999999L) == 0);
     Require(llroundl_nid_postfix(9007199254740993.0L) == 9007199254740993LL && llroundl_nid_postfix(-1e30L) == INT64_MIN);
     Require(logbf_nid_postfix(8.f) == 3.f && logbf_nid_postfix(-0.75f) == -1.f);

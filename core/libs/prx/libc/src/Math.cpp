@@ -163,9 +163,23 @@ long double AsinDenominator(long double t) {
     return 1.0L + t * (q[0] + t * (q[1] + t * (q[2] + t * (q[3] + t * q[4]))));
 }
 
+int GammaSign(double x) {
+    const std::uint32_t high = static_cast<std::uint32_t>(std::bit_cast<std::uint64_t>(x) >> 32);
+    const std::uint32_t magnitude = high & 0x7fffffffu;
+    if (magnitude >= 0x7ff00000u) return 1;
+    const int direction = 1 - 2 * static_cast<int>(high >> 31);
+    if (magnitude < 0x3c700000u) return direction;
+    if (high < 0x80000000u) return 1;
+    if (magnitude >= 0x43300000u) return 1;
+    if (std::trunc(x) == x) return 1;
+    return static_cast<std::int64_t>(std::ceil(x)) % 2 == 0 ? -1 : 1;
+}
+
 }
 
 extern "C" {
+
+int signgam_nid_postfix = 0;
 
 std::lldiv_t APS5_VABI lldiv_nid_postfix(long long numerator, long long denominator) {
     return std::lldiv(numerator, denominator);
@@ -300,7 +314,10 @@ float APS5_VABI log1pf_nid_postfix(float x) { return std::log1p(x); }
 double APS5_VABI expm1_nid_postfix(double x) { return std::expm1(x); }
 float APS5_VABI expm1f_nid_postfix(float x) { return std::expm1(x); }
 float APS5_VABI erff_nid_postfix(float x) { return std::erf(x); }
-double APS5_VABI lgamma_nid_postfix(double x) { return std::lgamma(x); }
+double APS5_VABI lgamma_nid_postfix(double x) {
+    signgam_nid_postfix = GammaSign(x);
+    return std::lgamma(x);
+}
 
 float APS5_VABI sinf_nid_postfix(float x) { return std::sin(x); }
 float APS5_VABI cosf_nid_postfix(float x) { return std::cos(x); }
