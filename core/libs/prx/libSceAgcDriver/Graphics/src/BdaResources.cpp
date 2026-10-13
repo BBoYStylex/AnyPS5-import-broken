@@ -128,9 +128,15 @@ BdaResources::BdaResources(const Context& context) {
 }
 
 BdaResources::BdaResources(const Context& context, const GuestBufferMemory& memory) : BdaResources(context) {
+    thread_local bool building = false;
+    Require(!building, "a BDA table build started inside another one on the same thread");
+    building = true;
+    struct Built {
+        ~Built() { building = false; }
+    } done;
     const auto cached = memory.CachedAddressTable();
-    std::vector<ShaderRecompiler::BdaAbi::Range> built;
-    if (!cached.has_value()) built = memory.AddressRanges();
+    thread_local std::vector<ShaderRecompiler::BdaAbi::Range> built;
+    if (!cached.has_value()) memory.AddressRanges(built);
     const auto& ranges = cached.has_value() ? *cached->ranges : built;
     const auto serial = cached.has_value() ? cached->serial : 0;
     Require(ranges.size() <= std::numeric_limits<std::uint32_t>::max(), "BDA table range count overflow");
@@ -204,7 +210,13 @@ BdaResources::BdaResources(const Context& context, const GuestBufferMemory& memo
             cache.entries.clear();
             cache.device = context.device;
         }
-        cache.entries.push_front({hash, cached.has_value() ? ranges : std::move(built), table, serial});
+        std::vector<ShaderRecompiler::BdaAbi::Range> stored;
+        if (cache.entries.size() >= tableCacheEntries()) {
+            stored = std::move(cache.entries.back().ranges);
+            cache.entries.pop_back();
+        }
+        stored.assign(ranges.begin(), ranges.end());
+        cache.entries.push_front({hash, std::move(stored), table, serial});
         while (cache.entries.size() > tableCacheEntries()) cache.entries.pop_back();
     }
 }
