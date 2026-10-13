@@ -130,6 +130,29 @@ int main() {
     Require(sceRtcSetDosTime(nullptr, 0) == invalidPointer);
     Require(sceRtcSetDosTime(&converted, 0xff9fbf7du) == 0 && Equal(converted, RtcDateTime{2107, 12, 31, 23, 59, 58, 0}));
     Require(sceRtcSetDosTime(&converted, 0x80210000u) == 0 && Equal(converted, RtcDateTime{2044, 1, 1, 0, 0, 0, 0}));
+    struct DosRefusal {
+        RtcDateTime date;
+        int result;
+    };
+    const DosRefusal dosRefusals[] = {
+        {{2000, 2, 30, 0, 0, 0, 0}, invalidDay},
+        {{2000, 1, 1, 24, 0, 0, 0}, invalidHour},
+        {{2000, 1, 1, 0, 60, 0, 0}, static_cast<int>(0x80B5000C)},
+        {{2000, 1, 1, 0, 0, 60, 0}, static_cast<int>(0x80B5000D)},
+        {{2000, 1, 1, 0, 0, 0, 1000000}, invalidMicrosecond},
+        {{0, 0, 0, 0, 0, 0, 0}, invalidYear},
+    };
+    for (const auto& refusal : dosRefusals) {
+        dosTime = 0x7777u;
+        Require(sceRtcGetDosTime(&refusal.date, &dosTime) == refusal.result && dosTime == 0x7777u);
+    }
+    const RtcDateTime dosYearOne{1, 1, 1, 0, 0, 0, 0};
+    Require(sceRtcGetDosTime(&dosYearOne, &dosTime) == invalidYear && dosTime == 0);
+    const RtcDateTime dosYearMax{9999, 12, 31, 23, 59, 59, 0};
+    Require(sceRtcGetDosTime(&dosYearMax, &dosTime) == invalidYear && dosTime == 0xff9fbf7du);
+    Require(sceRtcSetDosTime(&converted, 0xffffffffu) == 0 && Equal(converted, RtcDateTime{2107, 15, 31, 31, 63, 62, 0}));
+    Require(sceRtcSetDosTime(&converted, 0x5a8f6b7du) == 0 && Equal(converted, RtcDateTime{2025, 4, 15, 13, 27, 58, 0}));
+    Require(sceRtcSetDosTime(&converted, 0x0001bc00u) == 0 && Equal(converted, RtcDateTime{1980, 0, 1, 23, 32, 0, 0}));
 
     char text[32];
     tick.tick = leapDayTick;
