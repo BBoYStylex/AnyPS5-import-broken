@@ -145,6 +145,7 @@ int AddDescriptorKnote(const KernelEqueueRef& queue, KernelEvent& change, std::u
         NotImplemented_nid_no_patch("kevent: EV_CLEAR on a socket");
     }
     auto event = EqueueDescriptorEvent(descriptor, change.filter, flags, change.udata);
+    event.disabled = (change.flags & EV_DISABLE) != 0;
     change.fflags = 0;
     change.data = 0;
     return GuestErrno(queue->AddEvent(event));
@@ -180,6 +181,7 @@ int AddTimerKnote(const KernelEqueueRef& queue, KernelEvent& change, std::uint16
 
 int AddUserKnote(const KernelEqueueRef& queue, KernelEvent& change, std::uint16_t flags) {
     KernelEqueueEvent event{};
+    event.disabled = (change.flags & EV_DISABLE) != 0;
     event.event = change;
     event.event.flags = flags;
     event.filter.resetFunc = [](KernelEqueueEvent* e) {
@@ -228,6 +230,11 @@ int ModifyKnote(const KernelEqueueRef& queue, KernelEvent& change) {
         } else if (change.filter == EVFILT_VNODE) {
             SetVnodeNotes(event, change.fflags);
         }
+        if ((change.flags & EV_ENABLE) != 0) {
+            event.disabled = false;
+        } else if ((change.flags & EV_DISABLE) != 0) {
+            event.disabled = true;
+        }
     }));
 }
 
@@ -241,8 +248,8 @@ int Register(const KernelEqueueRef& queue, int kqueueDescriptor, KernelEvent& ch
     if (change.filter != EVFILT_READ && change.filter != EVFILT_WRITE && change.filter != EVFILT_VNODE && change.filter != EVFILT_TIMER && change.filter != EVFILT_USER) {
         NotImplemented_nid_no_patch(("kevent: filter " + std::to_string(change.filter)).c_str());
     }
-    if ((change.flags & EV_DISABLE) != 0) {
-        NotImplemented_nid_no_patch("kevent: EV_DISABLE");
+    if ((change.flags & EV_DISABLE) != 0 && change.filter == EVFILT_TIMER) {
+        NotImplemented_nid_no_patch("kevent: EV_DISABLE on EVFILT_TIMER");
     }
     if ((change.flags & EV_DISPATCH) != 0) {
         NotImplemented_nid_no_patch("kevent: EV_DISPATCH");
@@ -270,7 +277,7 @@ int Register(const KernelEqueueRef& queue, int kqueueDescriptor, KernelEvent& ch
             const std::uint32_t notes = change.fflags;
             change.fflags = 0;
             change.data = 0;
-            return AddVnodeEvent(queue, static_cast<int>(change.ident), notes, flags, change.udata);
+            return AddVnodeEvent(queue, static_cast<int>(change.ident), notes, flags, change.udata, (change.flags & EV_DISABLE) != 0);
         }
         return AddDescriptorKnote(queue, change, flags);
     }

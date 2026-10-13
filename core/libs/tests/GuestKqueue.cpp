@@ -233,7 +233,7 @@ static void Errors() {
     RequireFailure(Apply(kq, Change(static_cast<std::uintptr_t>(kq), EvfiltRead, EvAdd)), GuestEinval);
     RequireFailure(Apply(kq, Change(1, 1, EvAdd)), GuestEinval);
     Require(Throws([kq] { Apply(kq, Change(1, EvfiltProc, EvAdd)); }));
-    Require(Throws([kq] { Apply(kq, Change(1, EvfiltUser, EvAdd | EvDisable)); }));
+    Require(Throws([kq] { Apply(kq, Change(1, EvfiltTimer, EvAdd | EvDisable, 0, 5)); }));
     int pipe[2];
     Require(pipe_nid_postfix(pipe) == 0);
     Require(Throws([kq, &pipe] { Apply(kq, Change(static_cast<std::uintptr_t>(pipe[0]), EvfiltRead, EvAdd)); }));
@@ -400,6 +400,80 @@ static void DirectoryWatch() {
     Require(std::filesystem::remove_all(path) == 1);
 }
 
+static void DisabledEvents() {
+    const int kq = kqueue_nid_postfix();
+    int marker = 0;
+    KernelEvent events[4]{};
+    RequireFailure(Apply(kq, Change(20, EvfiltUser, EvEnable)), GuestEnoent);
+    RequireFailure(Apply(kq, Change(20, EvfiltUser, EvDisable)), GuestEnoent);
+
+    Require(Apply(kq, Change(20, EvfiltUser, EvAdd | EvDisable, 0, 0, &marker)) == 0);
+    Require(Apply(kq, Change(20, EvfiltUser, 0, NoteTrigger, 0, &marker)) == 0);
+    Require(Poll(kq, events, 4) == 0);
+    Require(Apply(kq, Change(20, EvfiltUser, EvEnable, 0, 0, &marker)) == 0);
+    Require(Poll(kq, events, 4) == 1 && events[0].ident == 20 && events[0].flags == 0 && events[0].udata == &marker);
+    Require(Apply(kq, Change(20, EvfiltUser, EvDisable, 0, 0, &marker)) == 0);
+    Require(Poll(kq, events, 4) == 0);
+    Require(Apply(kq, Change(20, EvfiltUser, EvAdd, 0, 0, &marker)) == 0);
+    Require(Poll(kq, events, 4) == 0);
+    Require(Apply(kq, Change(20, EvfiltUser, EvEnable, 0, 0, &marker)) == 0);
+    Require(Poll(kq, events, 4) == 1 && events[0].ident == 20);
+    Require(Apply(kq, Change(20, EvfiltUser, EvDelete | EvDisable)) == 0);
+    RequireFailure(Apply(kq, Change(20, EvfiltUser, EvDelete)), GuestEnoent);
+
+    Require(Apply(kq, Change(21, EvfiltUser, EvAdd | EvClear)) == 0);
+    Require(Apply(kq, Change(21, EvfiltUser, EvDisable, NoteTrigger | NoteFfcopy | 0x7, 5)) == 0);
+    Require(Poll(kq, events, 4) == 0);
+    Require(Apply(kq, Change(21, EvfiltUser, EvEnable, NoteFfor | 0x8, 6)) == 0);
+    Require(Poll(kq, events, 4) == 1 && events[0].ident == 21 && events[0].fflags == 0xf && events[0].data == 6 && events[0].flags == EvClear);
+    Require(Poll(kq, events, 4) == 0);
+    Require(Apply(kq, Change(21, EvfiltUser, EvDelete)) == 0);
+
+    Require(Apply(kq, Change(22, EvfiltUser, EvAdd | EvOneshot | EvDisable)) == 0);
+    Require(Apply(kq, Change(22, EvfiltUser, 0, NoteTrigger)) == 0);
+    Require(Poll(kq, events, 4) == 0);
+    std::thread enable([kq] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        Require(Apply(kq, Change(22, EvfiltUser, EvEnable)) == 0);
+    });
+    Require(kevent_nid_postfix(kq, nullptr, 0, events, 4, nullptr) == 1);
+    enable.join();
+    Require(events[0].ident == 22 && events[0].flags == EvOneshot);
+    RequireFailure(Apply(kq, Change(22, EvfiltUser, EvDelete)), GuestEnoent);
+
+    int pair[2];
+    Require(socketpair_nid_postfix(Unix, Stream, 0, pair) == 0);
+    const auto reader = static_cast<std::uintptr_t>(pair[0]);
+    Require(Apply(kq, Change(reader, EvfiltRead, EvAdd | EvDisable)) == 0);
+    Require(send_nid_postfix(pair[1], "abc", 3, 0) == 3);
+    const KernelTimespec timeout{0, 30000000};
+    const auto start = std::chrono::steady_clock::now();
+    Require(kevent_nid_postfix(kq, nullptr, 0, events, 4, &timeout) == 0);
+    Require(std::chrono::steady_clock::now() - start >= std::chrono::milliseconds(29));
+    Require(Apply(kq, Change(reader, EvfiltRead, EvEnable)) == 0);
+    Require(Wait(kq, events, 4) == 1 && events[0].ident == reader && events[0].filter == EvfiltRead && events[0].data == 3 && events[0].flags == 0);
+    Require(Apply(kq, Change(reader, EvfiltRead, EvDisable)) == 0);
+    Require(Poll(kq, events, 4) == 0);
+    Require(Apply(kq, Change(reader, EvfiltRead, EvEnable)) == 0);
+    Require(Poll(kq, events, 4) == 1 && events[0].data == 3);
+    Require(close_nid_postfix(pair[0]) == 0 && close_nid_postfix(pair[1]) == 0);
+
+    const auto path = TemporaryName("disabled");
+    const int file = open_nid_postfix(path.c_str(), ReadWrite | Create, 0644);
+    Require(file >= 0);
+    const auto ident = static_cast<std::uintptr_t>(file);
+    Require(Apply(kq, Change(ident, EvfiltVnode, EvAdd | EvClear | EvDisable, NoteWrite | NoteExtend)) == 0);
+    Require(write_nid_postfix(file, "abc", 3) == 3);
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    Require(Poll(kq, events, 4) == 0);
+    Require(Apply(kq, Change(ident, EvfiltVnode, EvEnable, NoteWrite | NoteExtend)) == 0);
+    Require(Poll(kq, events, 4) == 1 && events[0].ident == ident && events[0].fflags == (NoteWrite | NoteExtend) && events[0].flags == EvClear);
+    Require(Poll(kq, events, 4) == 0);
+    Require(close_nid_postfix(file) == 0);
+    Require(std::filesystem::remove(path));
+    Require(close_nid_postfix(kq) == 0);
+}
+
 static void Timeout() {
     const int kq = kqueue_nid_postfix();
     KernelEvent event{};
@@ -423,6 +497,7 @@ int main() {
     MoveDirectoryEntries();
 #endif
     DirectoryWatch();
+    DisabledEvents();
     Timeout();
     return 0;
 }

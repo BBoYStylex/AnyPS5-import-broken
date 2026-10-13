@@ -82,7 +82,7 @@ bool KernelEqueuePrivate::NextTimerWaitMicros(uint64_t nowNs, uint32_t* out) con
 bool KernelEqueuePrivate::PollEvents() {
     bool polled = false;
     for (auto& ev : m_events) {
-        if (ev.filter.pollFunc != nullptr) {
+        if (ev.filter.pollFunc != nullptr && !ev.disabled) {
             ev.triggered = ev.filter.pollFunc(&ev);
             polled = true;
         }
@@ -99,7 +99,7 @@ void KernelEqueuePrivate::WakePollers() {
 void KernelEqueuePrivate::WaitForDescriptors(std::unique_lock<std::mutex>& lock, std::uint64_t deadlineNanos) {
     std::vector<GuestSockets::Interest> interests;
     for (const auto& e : m_events) {
-        if (e.filter.pollFunc != nullptr) {
+        if (e.filter.pollFunc != nullptr && !e.disabled) {
             interests.push_back({static_cast<int>(e.event.ident), e.event.filter == EVFILT_WRITE});
         }
     }
@@ -152,7 +152,7 @@ int KernelEqueuePrivate::CollectOncePerWait(KernelEvent* ev, int num) {
     std::list<KernelEqueueEvent> requeued;
     for (auto it = m_events.begin(); it != m_events.end() && ret < num;) {
         auto& e = *it;
-        if (!e.triggered) {
+        if (!e.triggered || e.disabled) {
             ++it;
             continue;
         }

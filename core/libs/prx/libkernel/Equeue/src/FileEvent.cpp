@@ -580,7 +580,7 @@ void SetVnodeNotes(KernelEqueueEvent& event, std::uint32_t fflags) {
     static_cast<VnodeWatch*>(event.filter.data)->SetInterest(fflags);
 }
 
-int AddVnodeEvent(const KernelEqueueRef& queue, int descriptor, std::uint32_t fflags, std::uint16_t flags, void* udata) {
+int AddVnodeEvent(const KernelEqueueRef& queue, int descriptor, std::uint32_t fflags, std::uint16_t flags, void* udata, bool disabled) {
     RequireVnodeNotes(fflags);
     if (const int error = VnodeDescriptorError(descriptor)) {
         return error;
@@ -597,6 +597,7 @@ int AddVnodeEvent(const KernelEqueueRef& queue, int descriptor, std::uint32_t ff
         throw;
     }
     KernelEqueueEvent event{};
+    event.disabled = disabled;
     event.event.ident = static_cast<std::uintptr_t>(descriptor);
     event.event.filter = EVFILT_VNODE;
     event.event.flags = flags;

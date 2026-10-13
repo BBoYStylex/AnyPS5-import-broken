@@ -58,6 +58,7 @@ struct KernelFilter {
 
 struct KernelEqueueEvent {
     bool triggered = false;
+    bool disabled = false;
     uint64_t deadlineNs = 0;
     uint64_t intervalNs = 0;
     KernelEvent event;
@@ -114,7 +115,7 @@ bool IsKqueueDescriptor(int descriptor);
 KernelEqueueEvent EqueueDescriptorEvent(int descriptor, int16_t filter, uint16_t flags, void* udata);
 void RequireVnodeNotes(uint32_t fflags);
 void SetVnodeNotes(KernelEqueueEvent& event, uint32_t fflags);
-int AddVnodeEvent(const KernelEqueueRef& queue, int descriptor, uint32_t fflags, uint16_t flags, void* udata);
+int AddVnodeEvent(const KernelEqueueRef& queue, int descriptor, uint32_t fflags, uint16_t flags, void* udata, bool disabled = false);
 extern "C" {
 
 KernelEqueueRef EqueuePin_nid_postfix(KernelEqueue eq);
