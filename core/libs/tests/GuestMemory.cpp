@@ -2107,6 +2107,36 @@ static void CheckAvailableDirectMemoryIsLargestFreeBlock() {
     Require(start == top && size == static_cast<std::size_t>(window));
 }
 
+static void CheckRegistryOverlapsByAddress() {
+    constexpr std::uintptr_t page = 0x4000;
+    constexpr std::uintptr_t base = 0x300000000000ull;
+    const auto at = [](std::uintptr_t address) { return reinterpret_cast<void*>(address); };
+    GuestAllocations::Mutation mutation;
+    mutation.Add(at(base), page, true, true, false);
+    mutation.Add(at(base + 2 * page), page, true, true, false);
+    mutation.Add(at(base + 4 * page), page, true, true, false);
+    const auto overlaps = [&](std::uintptr_t address, std::size_t bytes) { return mutation.Overlaps(at(address), bytes); };
+    Require(!overlaps(base - page, page));
+    Require(overlaps(base - page, page + 1));
+    Require(overlaps(base, 1));
+    Require(overlaps(base + page - 1, 1));
+    Require(!overlaps(base + page, page));
+    Require(overlaps(base + page, page + 1));
+    Require(!overlaps(base + 3 * page, page));
+    Require(overlaps(base + 3 * page, page + 1));
+    Require(overlaps(base + 2 * page + 5, 1));
+    Require(overlaps(base - 1, 6 * page));
+    Require(overlaps(base + page + 1, 3 * page));
+    Require(!overlaps(base + 5 * page, page));
+    Require(!overlaps(base - 8 * page, page));
+    mutation.Remove(at(base));
+    Require(!overlaps(base, page));
+    Require(overlaps(base + 2 * page, 1));
+    mutation.Remove(at(base + 2 * page));
+    mutation.Remove(at(base + 4 * page));
+    Require(!overlaps(base - page, 8 * page));
+}
+
 static void CheckMunmapOverUnmappedPages() {
     constexpr std::size_t page = 0x4000;
     const auto failed = reinterpret_cast<void*>(static_cast<std::uintptr_t>(-1));
@@ -2142,6 +2172,7 @@ int main() {
     CheckInternalMemoryAvailableSize();
     CheckVirtualQueryPartialMunmap();
     CheckMunmapOverUnmappedPages();
+    CheckRegistryOverlapsByAddress();
     CheckPageTableStats();
     CheckNamedAndHintedMappings();
     CheckInternalNamedFlexibleMapping();
