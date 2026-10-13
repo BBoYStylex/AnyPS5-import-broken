@@ -3673,6 +3673,8 @@ void unchangedCpuStampTests(const Device& device, Recorder& recorder) {
     constexpr std::size_t bytes = 6 * 65536;
     constexpr std::array<std::uint8_t, 4> red{255, 0, 0, 255};
     const auto pattern = [](std::size_t i) { return static_cast<std::uint8_t>(i * 131u + 7u); };
+    enum class Store { None, CpuSame, CpuChanged, DriverSame, NeighborSame, CpuSameMiddle };
+    constexpr std::array<const char*, 6> stores{"no CPU store", "a CPU store restoring the baseline", "a CPU store changing the baseline", "a driver store restoring the baseline", "a CPU store before the image", "a CPU store restoring a full block"};
     for (const bool imported : {false, true}) {
 #ifdef _WIN32
         if (imported) {
@@ -3691,8 +3693,10 @@ void unchangedCpuStampTests(const Device& device, Recorder& recorder) {
             ImportWatch decided;
             ~Restore() { SetImportWatch(context, decided); }
         } restore{base, decided};
-        for (const bool changed : {false, true}) {
-            const std::string what = std::string(changed ? "a CPU store that changed a byte" : "a CPU store that left the bytes as they were") + (imported ? " over a watched host import" : " over watched memory");
+        for (const auto store : {Store::None, Store::CpuSame, Store::CpuChanged, Store::DriverSame, Store::NeighborSame, Store::CpuSameMiddle}) {
+            const bool cpu = store == Store::CpuSame || store == Store::CpuChanged || store == Store::CpuSameMiddle;
+            const bool changed = store == Store::CpuChanged;
+            const std::string what = std::string(stores[static_cast<std::size_t>(store)]) + (imported ? " over a watched host import" : " over watched memory");
             void* block = AllocateWatched(bytes, 65536);
             if (block == nullptr) {
                 std::cout << "no write watching: unchanged CPU stamps not tested\n";
@@ -3740,6 +3744,7 @@ void unchangedCpuStampTests(const Device& device, Recorder& recorder) {
             Require(DescribeSurface(resource).guestBytes == surfaceBytes, "(c) unexpected surface size");
             {
                 auto image = StorageTexture::Create(context, detiler, resource, 0);
+                const auto cpuGeneration = AgcDriver::GuestMemory::TrackerGeneration();
                 const VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
                 const auto commands = recorder.Commands();
                 recorder.Keep(image);
@@ -3748,10 +3753,22 @@ void unchangedCpuStampTests(const Device& device, Recorder& recorder) {
                 context.Function<PFN_vkCmdClearColorImage>("vkCmdClearColorImage")(commands, image->Image(), VK_IMAGE_LAYOUT_GENERAL, &value, 1, &range);
                 RecordMemoryBarrier(context, commands, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT);
                 image->MarkDirty();
-                for (std::size_t i = 0; i < 4096; ++i) memory[offset + i] = pattern(offset + i);
+                recorder.Submit();
+                device.WaitQueue();
+                const auto edit = store == Store::CpuSameMiddle ? std::size_t{65536} : static_cast<std::size_t>(offset);
+                if (cpu) {
+                    for (std::size_t i = 0; i < 4096; ++i) memory[edit + i] = pattern(edit + i);
+                } else if (store == Store::DriverSame) {
+                    AgcDriver::GuestMemory::StoreOwnBytes(address, 4096, [&] {
+                        for (std::size_t i = 0; i < 4096; ++i) memory[offset + i] = pattern(offset + i);
+                    });
+                } else if (store == Store::NeighborSame) {
+                    for (std::size_t i = 0; i < 4096; ++i) memory[offset - 4096 + i] = pattern(offset - 4096 + i);
+                }
                 if (changed) memory[offset + 16] = static_cast<std::uint8_t>(~pattern(offset + 16));
                 AgcDriver::GuestMemory::CollectWritesUncached(blockAddress, bytes);
                 Require(AgcDriver::GuestMemory::Watched(address, surfaceBytes) && (HostImportFor(context, address, surfaceBytes) != nullptr) == imported, "(c) " + what + ": the image is not on the path under test");
+                Require(AgcDriver::GuestMemory::UnchangedSinceCollected(address, surfaceBytes, cpuGeneration) != cpu, "(c) " + what + ": CPU write tracking did not distinguish the store");
                 image->WriteBack();
                 recorder.Submit();
                 device.WaitQueue();
@@ -3764,18 +3781,19 @@ void unchangedCpuStampTests(const Device& device, Recorder& recorder) {
                     }
                     return true;
                 };
-                const auto headEnd = static_cast<std::size_t>(65536);
-                std::size_t stored = 0, total = 0;
+                const auto keptBegin = std::max(static_cast<std::size_t>(offset), edit & ~std::size_t{65535});
+                const auto keptEnd = (edit & ~std::size_t{65535}) + 65536;
                 for (std::size_t at = offset; at < offset + surfaceBytes; at += 4) {
-                    ++total;
-                    if (texel(at)) ++stored;
+                    if (cpu && at >= keptBegin && at < keptEnd) {
+                        for (std::size_t c = 0; c < 4; ++c) {
+                            const auto expected = changed && at + c == offset + 16 ? static_cast<std::uint8_t>(~pattern(at + c)) : pattern(at + c);
+                            Require(std::to_integer<std::uint8_t>(read[at + c]) == expected, "(c) " + what + ": write-back overwrote a CPU store with GPU results");
+                        }
+                    } else {
+                        Require(texel(at), "(c) " + what + ": GPU results outside the CPU-written block were dropped");
+                    }
                 }
-                if (!changed) {
-                    if (stored != total) throw std::runtime_error(std::string("unchanged CPU stamps: ") + what + " dropped " + std::to_string(total - stored) + " of " + std::to_string(total) + " texels the GPU wrote");
-                } else {
-                    Require(std::to_integer<std::uint8_t>(read[offset + 16]) == static_cast<std::uint8_t>(~pattern(offset + 16)), "(c) " + what + ": the changed byte was overwritten by the GPU results");
-                    for (std::size_t at = headEnd; at < offset + surfaceBytes; at += 4) Require(texel(at), "(c) " + what + ": GPU results outside the block the CPU changed were dropped");
-                }
+                std::cout << "unchanged CPU stamps: " << what << ": ok\n";
             }
             recorder.Sync();
         }
