@@ -38,6 +38,10 @@
 #include <sys/ioctl.h>
 #include <unistd.h>
 #include "prx/libc/include/specifics/linux/HostMapping.hpp"
+#ifdef __APPLE__
+#include <mach/mach.h>
+#include <mach/mach_vm.h>
+#endif
 #endif
 
 namespace AgcDriver::GuestMemory {
@@ -375,7 +379,7 @@ struct PageSpan {
     }
 
     std::uint8_t load(std::uintptr_t address) const {
-        return std::atomic_ref<const std::uint8_t>(pages[(address - base) / PageBytes]).load(std::memory_order_relaxed);
+        return std::atomic_ref<std::uint8_t>(const_cast<std::uint8_t&>(pages[(address - base) / PageBytes])).load(std::memory_order_relaxed);
     }
 
     void store(std::uintptr_t address, std::uint8_t value) {
@@ -388,11 +392,11 @@ struct PageSpan {
         const auto stop = std::min<std::uintptr_t>((std::min(limit, base + size) - base + PageBytes - 1) / PageBytes, size / PageBytes);
         const std::uint64_t wide = 0x0101010101010101ull * value;
         while (index < stop) {
-            if (index % 8 == 0 && index + 8 <= stop && std::atomic_ref<const std::uint64_t>(*reinterpret_cast<const std::uint64_t*>(pages + index)).load(std::memory_order_relaxed) == wide) {
+            if (index % 8 == 0 && index + 8 <= stop && std::atomic_ref<std::uint64_t>(*reinterpret_cast<std::uint64_t*>(const_cast<std::uint8_t*>(pages + index))).load(std::memory_order_relaxed) == wide) {
                 index += 8;
                 continue;
             }
-            if (std::atomic_ref<const std::uint8_t>(pages[index]).load(std::memory_order_relaxed) != value) break;
+            if (std::atomic_ref<std::uint8_t>(const_cast<std::uint8_t&>(pages[index])).load(std::memory_order_relaxed) != value) break;
             ++index;
         }
         return std::min(limit, base + index * PageBytes);
@@ -548,6 +552,32 @@ bool describePages(std::uintptr_t address, std::size_t bytes, Emit&& emit) {
         const auto next = std::min(end, regionEnd);
         if (!emit(PageRun{cursor, next, readable, writable})) return true;
         cursor = next;
+#elif defined(__APPLE__)
+        const auto generation = GuestAllocations::GuestAllocationsGeneration_nid_postfix();
+        mach_vm_address_t regionStart = cursor;
+        mach_vm_size_t regionSize = 0;
+        vm_region_basic_info_data_64_t region{};
+        mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+        mach_port_t object = MACH_PORT_NULL;
+        const kern_return_t result = mach_vm_region(mach_task_self(), &regionStart, &regionSize, VM_REGION_BASIC_INFO_64, reinterpret_cast<vm_region_info_t>(&region), &count, &object);
+        if (result == KERN_INVALID_ADDRESS) {
+            static_cast<void>(emit(PageRun{cursor, end, false, false}));
+            return true;
+        }
+        if (result != KERN_SUCCESS || regionStart + regionSize <= cursor) return false;
+        if (regionStart > cursor) {
+            const auto gapEnd = std::min<std::uintptr_t>(end, regionStart);
+            if (!emit(PageRun{cursor, gapEnd, false, false})) return true;
+            cursor = gapEnd;
+            continue;
+        }
+        const bool readable = (region.protection & VM_PROT_READ) != 0;
+        const bool writable = readable && (region.protection & VM_PROT_WRITE) != 0;
+        const auto next = std::min<std::uintptr_t>(end, regionStart + regionSize);
+        constexpr auto mask = static_cast<std::uintptr_t>(PageBytes - 1);
+        pages.record(cursor & ~mask, (next + mask) & ~mask, readable, writable, generation);
+        if (!emit(PageRun{cursor, next, readable, writable})) return true;
+        cursor = next;
 #else
         const auto generation = GuestAllocations::GuestAllocationsGeneration_nid_postfix();
         const auto recordRun = [&](std::uintptr_t next, bool readable, bool writable) {
@@ -629,6 +659,10 @@ bool onOwnLiveStack(std::uintptr_t address, std::size_t bytes) {
             GetCurrentThreadStackLimits(&lowLimit, &highLimit);
             low = static_cast<std::uintptr_t>(lowLimit);
             high = static_cast<std::uintptr_t>(highLimit);
+#elif defined(__APPLE__)
+            const pthread_t self = pthread_self();
+            high = reinterpret_cast<std::uintptr_t>(pthread_get_stackaddr_np(self));
+            low = high - pthread_get_stacksize_np(self);
 #else
             pthread_attr_t attributes;
             if (pthread_getattr_np(pthread_self(), &attributes) != 0) return;

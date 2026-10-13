@@ -1,4 +1,5 @@
 #include "prx/libSceAgcDriver/Execution/include/ProfileOutput.hpp"
+#include "prx/libSceAgcDriver/Execution/include/AtomicSharedPtr.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/GuestBufferMemory.hpp"
 #include "ThreadOwned.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/BdaResources.hpp"
@@ -14,7 +15,9 @@
 #include <windows.h>
 #else
 #include <fcntl.h>
+#ifdef __linux__
 #include <linux/udmabuf.h>
+#endif
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -116,7 +119,7 @@ namespace {
 struct RetiredImport;
 
 struct AddressSpaceCache {
-    std::atomic<std::shared_ptr<const GuestBufferMemory::AddressSpace>> current;
+    AgcDriver::AtomicSharedPtr<const GuestBufferMemory::AddressSpace> current;
     std::atomic<std::uint64_t> serials{0};
     // Set by the waiter's drop, cleared by the next publish: the rebuild's reason.
     std::atomic<bool> droppedByWaiter{false};
@@ -307,14 +310,27 @@ int udmabufDevice() {
     return device;
 }
 
-const char* createDmaBufImport(const Context& context, HostImport& entry, int file, std::uint64_t offset, VkResult& failure) {
+int createUdmabuf(int device, int file, std::uint64_t offset, std::uint64_t bytes) {
+#ifdef __linux__
     udmabuf_create request{};
     request.memfd = static_cast<std::uint32_t>(file);
     request.flags = UDMABUF_FLAGS_CLOEXEC;
     request.offset = offset;
-    request.size = entry.bytes;
+    request.size = bytes;
+    return device < 0 ? -1 : ioctl(device, UDMABUF_CREATE, &request);
+#else
+    static_cast<void>(device);
+    static_cast<void>(file);
+    static_cast<void>(offset);
+    static_cast<void>(bytes);
+    errno = ENOSYS;
+    return -1;
+#endif
+}
+
+const char* createDmaBufImport(const Context& context, HostImport& entry, int file, std::uint64_t offset, VkResult& failure) {
     const int device = udmabufDevice();
-    const int buffer = device < 0 ? -1 : ioctl(device, UDMABUF_CREATE, &request);
+    const int buffer = createUdmabuf(device, file, offset, entry.bytes);
     close(file);
     if (buffer < 0) {
         failure = VK_ERROR_INVALID_EXTERNAL_HANDLE;
@@ -385,13 +401,8 @@ std::shared_ptr<ImportChunk> importChunk(const Context& context, int file, std::
         step = "a chunk past the end of the shared backing";
         return nullptr;
     }
-    udmabuf_create request{};
-    request.memfd = static_cast<std::uint32_t>(file);
-    request.flags = UDMABUF_FLAGS_CLOEXEC;
-    request.offset = index * ImportChunkBytes;
-    request.size = ImportChunkBytes;
     const int device = udmabufDevice();
-    const int buffer = device < 0 ? -1 : ioctl(device, UDMABUF_CREATE, &request);
+    const int buffer = createUdmabuf(device, file, index * ImportChunkBytes, ImportChunkBytes);
     if (buffer < 0) {
         failure = VK_ERROR_INVALID_EXTERNAL_HANDLE;
         step = device < 0 ? "open /dev/udmabuf" : "UDMABUF_CREATE";
@@ -1908,6 +1919,10 @@ ImportProbe ProbeDmaBufImportWriteProtection(const Context& context) {
 #ifdef _WIN32
     static_cast<void>(context);
     probe.failure = "the Linux write watch";
+    return probe;
+#elif defined(__APPLE__)
+    static_cast<void>(context);
+    probe.failure = "dma-buf import support";
     return probe;
 #else
     if (!context.dmaBufImport) {
