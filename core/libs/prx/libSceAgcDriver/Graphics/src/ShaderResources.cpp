@@ -71,6 +71,7 @@ struct TextureKey {
     std::array<std::uint32_t, 8> words;
     std::array<std::uint32_t, 4> components;
     bool depthCompare = false;
+    DccKeys clear = DccKeys::Uncompressed;
     bool operator==(const TextureKey&) const = default;
 };
 
@@ -82,18 +83,23 @@ std::uint64_t hashWords(std::uint64_t hash, const std::uint32_t* words, std::siz
 struct TextureKeyHash {
     std::size_t operator()(const TextureKey& key) const noexcept {
         auto hash = 14695981039346656037ull ^ reinterpret_cast<std::uintptr_t>(key.device);
-        hash = hashWords(hash, key.words.data(), key.words.size()) ^ static_cast<std::uint64_t>(key.depthCompare);
+        hash = hashWords(hash, key.words.data(), key.words.size()) ^ static_cast<std::uint64_t>(key.depthCompare) ^ (static_cast<std::uint64_t>(key.clear) << 1u);
         return static_cast<std::size_t>(hashWords(hash, key.components.data(), key.components.size()));
     }
 };
 
-TextureKey MakeTextureKey(VkDevice device, std::span<const std::uint32_t> words, VkComponentMapping components, bool depthCompare = false) {
+TextureKey MakeTextureKey(VkDevice device, std::span<const std::uint32_t> words, VkComponentMapping components, bool depthCompare = false, DccKeys clear = DccKeys::Uncompressed) {
     TextureKey key{device, {}, {static_cast<std::uint32_t>(components.r), static_cast<std::uint32_t>(components.g), static_cast<std::uint32_t>(components.b), static_cast<std::uint32_t>(components.a)}};
     key.depthCompare = depthCompare;
+    key.clear = clear;
     std::copy(words.begin(), words.end(), key.words.begin());
     key.words[5] &= ~((0xfffu << 8u) | (1u << 25u));
     key.words[6] &= ~0xffu;
     return key;
+}
+
+bool ConstantClearKeys(DccKeys keys) {
+    return keys == DccKeys::Clear0000 || keys == DccKeys::Clear0001 || keys == DccKeys::Clear1110 || keys == DccKeys::Clear1111;
 }
 
 struct CachedTexture {
@@ -632,7 +638,7 @@ std::shared_ptr<Texture> cachedTexture(const Context& context, std::span<const s
         return std::make_shared<Texture>(context, *context.detiler, resource, components, snapshot, depthCompare);
     }
     auto& cache = Textures();
-    const auto key = MakeTextureKey(context.device, words, components, depthCompare);
+    const auto key = MakeTextureKey(context.device, words, components, depthCompare, source == nullptr && !depthCompare && ConstantClearKeys(*keys) ? *keys : DccKeys::Uncompressed);
     std::lock_guard lock(cache.mutex);
     dropUncachedViews(cache);
     if (auto it = findTexture(cache, key); it != cache.entries.end()) {
@@ -931,6 +937,11 @@ TextureCacheUse TextureCacheUsage() {
     }
     use.storageBytes = storageCacheBytes();
     return use;
+}
+
+SampledTextureCounts SampledTextureCounters() {
+    const auto& counters = TextureCounts();
+    return {counters.snapshots.load(std::memory_order_relaxed), counters.fromStorage.load(std::memory_order_relaxed), counters.fastHits.load(std::memory_order_relaxed), counters.fastMisses.load(std::memory_order_relaxed)};
 }
 
 std::uint64_t SampledTextureCacheBudget(const Context& context) {
@@ -3205,7 +3216,14 @@ bool ShaderResources::precollectImages() {
                     record.keys = TextureClearKeys(record.resource, record.guestBytes);
                     auto& cache = Textures();
                     std::lock_guard lock(cache.mutex);
-                    if (const auto it = findSampledEntry(cache, context.device, record.words, record.components); it != cache.entries.end()) {
+                    auto it = findSampledEntry(cache, context.device, record.words, record.components);
+                    if (ConstantClearKeys(record.keys) && (it == cache.entries.end() || it->source == nullptr)) {
+                        if (const auto clear = findTexture(cache, MakeTextureKey(context.device, record.words, record.components, false, record.keys)); clear != cache.entries.end()) {
+                            it = clear;
+                            record.entryClear = record.keys;
+                        }
+                    }
+                    if (it != cache.entries.end()) {
                         record.texture = it->texture;
                         record.source = it->source;
                         record.entryKeys = it->keys;
@@ -3254,6 +3272,7 @@ std::shared_ptr<Texture> ShaderResources::fastTexture(const ImageRecord& record)
     // The keys the entry was made under (a view of a pending render target was made under its clear
     // keys and stays valid while they are unchanged); a change is the full lookup's to judge.
     if (keys != record.entryKeys) return nullptr;
+    if (record.entryClear != DccKeys::Uncompressed && ClearedViewEnabled() && StorageClearAvailable(context, record.resource.format, keys) && SampledFromStorageEligible(context, record.resource, record.guestBytes)) return nullptr;
     if (record.source != nullptr) {
         if (!StorageImageCached(context, record.source.get()) || !GuestMemory::UnchangedSince(address, bytes, record.source->Generation())) return nullptr;
         if (record.resource.dccAddress != 0 && IsDccClear(record.source->FilledKeys())) return nullptr;
@@ -3267,7 +3286,7 @@ std::shared_ptr<Texture> ShaderResources::fastTexture(const ImageRecord& record)
     // next lookup would make another), and it takes the stage-A generation like a hit would.
     auto& cache = Textures();
     std::lock_guard lock(cache.mutex);
-    const auto it = findSampledEntry(cache, context.device, record.words, record.components);
+    const auto it = record.entryClear == DccKeys::Uncompressed ? findSampledEntry(cache, context.device, record.words, record.components) : findTexture(cache, MakeTextureKey(context.device, record.words, record.components, false, record.entryClear));
     if (it == cache.entries.end() || it->texture != record.texture) return nullptr;
     if (it->source == nullptr) it->generation = record.generation;
     touchTexture(cache, it);

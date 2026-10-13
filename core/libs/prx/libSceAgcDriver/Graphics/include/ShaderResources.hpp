@@ -35,6 +35,13 @@ struct TextureCacheUse {
     std::uint64_t storageBytes = 0;
 };
 TextureCacheUse TextureCacheUsage();
+struct SampledTextureCounts {
+    std::uint64_t snapshots = 0;
+    std::uint64_t views = 0;
+    std::uint64_t fastHits = 0;
+    std::uint64_t fastMisses = 0;
+};
+SampledTextureCounts SampledTextureCounters();
 std::uint64_t SampledTextureCacheBudget(const Context& context);
 std::shared_ptr<Texture> CachedSampledTexture(const Context& context, std::span<const std::uint32_t> words);
 bool SampledTexturesShareEntry(std::span<const std::uint32_t> first, std::span<const std::uint32_t> second);
@@ -355,6 +362,7 @@ private:
         std::shared_ptr<StorageTexture> source;
         DccKeys entryKeys = DccKeys::Uncompressed;
         std::uint64_t entryGeneration = 0;
+        DccKeys entryClear = DccKeys::Uncompressed;
     };
     std::vector<ImageRecord> imageRecords;
     struct PreviousSampled {
