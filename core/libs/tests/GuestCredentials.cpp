@@ -87,9 +87,10 @@ int main() {
     RequireFailure(getgroups_nid_postfix(3, nullptr), GuestEfault);
     Require(getgroups_nid_postfix(static_cast<int>(groups.size()), groups.data()) == 3);
     Require(groups[0] == 0 && groups[1] == 5 && groups[2] == 7);
-    groups = {};
-    Require(getgroups_nid_postfix(-1, groups.data()) == 3);
-    Require(groups[0] == 0 && groups[1] == 5 && groups[2] == 7);
+    std::array<std::uint32_t, 1024> all;
+    all.fill(Unchanged);
+    Require(getgroups_nid_postfix(-1, all.data()) == 3);
+    Require(all[0] == 0 && all[1] == 5 && all[2] == 7 && all[3] == Unchanged);
     RequireFailure(getgroups_nid_postfix(-1, nullptr), GuestEfault);
 
     Require(setgroups_nid_postfix(0, nullptr) == 0);
@@ -102,6 +103,7 @@ int main() {
     const std::array<std::uint32_t, 1025> most{};
     Require(setgroups_nid_postfix(1024, most.data()) == 0);
     Require(getgroups_nid_postfix(0, nullptr) == 1024);
+    Require(getgroups_nid_postfix(-1, all.data()) == 1024 && all[1023] == 0);
     RequireFailure(setgroups_nid_postfix(1025, most.data()), GuestEinval);
     Require(getgroups_nid_postfix(0, nullptr) == 1024);
     return 0;
