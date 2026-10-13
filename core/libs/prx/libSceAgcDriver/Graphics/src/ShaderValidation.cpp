@@ -122,6 +122,10 @@ struct Module {
                 position = true;
                 return;
             }
+            if (value == spv::BuiltInClipDistance && (stage == Stage::TessellationControl || input)) {
+                Require(signature == "f32[1]", "invalid tessellation clip distance");
+                return;
+            }
             if (stage == Stage::TessellationControl || stage == Stage::TessellationEvaluation) {
                 Require(input && ((value == spv::BuiltInPosition && signature == "f32x4") || (value == spv::BuiltInTessCoord && stage == Stage::TessellationEvaluation && signature == "f32x3") || ((value == spv::BuiltInInvocationId || value == spv::BuiltInPrimitiveId || value == spv::BuiltInPatchVertices) && (signature == "i32" || signature == "u32"))), "unsupported tessellation built-in");
                 return;
@@ -242,7 +246,7 @@ Module Inspect(const CompiledShader& compiled, const State& state, const VkPhysi
                     capability == spv::CapabilityImage1D ||
                     capability == spv::CapabilityImageGatherExtended ||
                     capability == spv::CapabilityImageQuery ||
-                    ((vertex || evaluation) && shaderClipDistance && capability == spv::CapabilityClipDistance) ||
+                    ((vertex || control || evaluation) && shaderClipDistance && capability == spv::CapabilityClipDistance) ||
                     (fragment && geometryShader && capability == spv::CapabilityGeometry) ||
                     (fragment && sampleRateShading && capability == spv::CapabilitySampleRateShading) ||
                     capability == spv::CapabilityImageMSArray ||
