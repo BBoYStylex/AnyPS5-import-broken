@@ -18,6 +18,7 @@ static std::vector<EventRegistration>* getEventList(VideoOutConfig& cfg, int16_t
 }
 
 static int registerVideoOutEvent(int handle, KernelEqueue eq, int16_t eventKind, void* udata) {
+    if (!VideoOutDriver::Get().HasConfig(handle)) return VIDEO_OUT_ERROR_INVALID_HANDLE;
     auto cfg = VideoOutDriver::Get().GetConfig(handle);
     if (cfg == nullptr) {
         throw std::runtime_error(std::string(__func__) + ": VIDEO_OUT_ERROR_INVALID_HANDLE");
@@ -140,6 +141,12 @@ int APS5_VABI sceVideoOutAddVrrActiveStatusEvent(KernelEqueue eq, int handle, vo
 
 int APS5_VABI sceVideoOutDeleteFlipEvent(KernelEqueue eq, int handle) try {
     return deleteVideoOutEvent(handle, eq, VIDEO_OUT_EVENT_FLIP);
+} catch (const ProcessShutdown&) {
+    LibcAwaitExit_nid_postfix();
+}
+
+int APS5_VABI sceVideoOutDeleteOutputModeEvent(KernelEqueue eq, int handle) try {
+    return deleteVideoOutEvent(handle, eq, VIDEO_OUT_EVENT_SET_MODE);
 } catch (const ProcessShutdown&) {
     LibcAwaitExit_nid_postfix();
 }

@@ -12,6 +12,8 @@
 #include <vector>
 #ifdef _WIN32
 #include <windows.h>
+#elif defined(__APPLE__)
+#include <mach-o/dyld.h>
 #endif
 
 static constexpr int SCE_NP_ENTITLEMENT_ACCESS_ERROR_PARAMETER = static_cast<int>(0x80558003);
@@ -28,6 +30,15 @@ std::filesystem::path EntitlementsPath() {
     const auto length = GetModuleFileNameW(nullptr, module, MAX_PATH);
     if (length == 0 || length == MAX_PATH) throw std::runtime_error("NpEntitlementAccess: cannot locate the executable");
     return std::filesystem::path(module).parent_path() / "anyps5-entitlements.ini";
+#elif defined(__APPLE__)
+    std::uint32_t size = 0;
+    _NSGetExecutablePath(nullptr, &size);
+    std::vector<char> executable(size);
+    std::error_code error;
+    std::filesystem::path path;
+    if (_NSGetExecutablePath(executable.data(), &size) == 0) path = std::filesystem::canonical(executable.data(), error);
+    if (path.empty()) throw std::runtime_error("NpEntitlementAccess: cannot locate the executable");
+    return path.parent_path() / "anyps5-entitlements.ini";
 #else
     return std::filesystem::read_symlink("/proc/self/exe").parent_path() / "anyps5-entitlements.ini";
 #endif
@@ -128,34 +139,46 @@ int APS5_VABI sceNpEntitlementAccessRequestConsumeUnifiedEntitlement(void) {
  return SCE_NP_ERROR_SIGNED_OUT;
 }
 
+
+int APS5_VABI sceNpEntitlementAccessRequestConsumeServiceEntitlement(void) {
+ return SCE_NP_ERROR_SIGNED_OUT;
+}
+
+
+int APS5_VABI sceNpEntitlementAccessPollServiceEntitlementInfo(void) {
+    return SCE_NP_ERROR_SIGNED_OUT;
+}
+
+int APS5_VABI sceNpEntitlementAccessPollUnifiedEntitlementInfo(void) {
+    return SCE_NP_ERROR_SIGNED_OUT;
+}
+
+int APS5_VABI sceNpEntitlementAccessRequestServiceEntitlementInfo(void) {
+    return SCE_NP_ERROR_SIGNED_OUT;
+}
+
+int APS5_VABI sceNpEntitlementAccessRequestUnifiedEntitlementInfo(void) {
+    return SCE_NP_ERROR_SIGNED_OUT;
+}
+
 int APS5_VABI sceNpEntitlementAccessGetPftFlag(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
+int APS5_VABI sceNpEntitlementAccessGetGameTrialsFlag(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
 // No PSN account: remaining entitlement queries report a signed-out user.
-std::int32_t APS5_VABI sceNpEntitlementAccessPollServiceEntitlementInfo(const void*, const void*, const void*, const void*) {
-    return SCE_NP_ERROR_SIGNED_OUT;
-}
 std::int32_t APS5_VABI sceNpEntitlementAccessPollServiceEntitlementInfoList(const void*, const void*, const void*, const void*) {
-    return SCE_NP_ERROR_SIGNED_OUT;
-}
-std::int32_t APS5_VABI sceNpEntitlementAccessPollUnifiedEntitlementInfo(const void*, const void*, const void*, const void*) {
     return SCE_NP_ERROR_SIGNED_OUT;
 }
 std::int32_t APS5_VABI sceNpEntitlementAccessPollUnifiedEntitlementInfoList(const void*, const void*, const void*, const void*) {
     return SCE_NP_ERROR_SIGNED_OUT;
 }
-std::int32_t APS5_VABI sceNpEntitlementAccessRequestConsumeServiceEntitlement(const void*, const void*, const void*, const void*) {
-    return SCE_NP_ERROR_SIGNED_OUT;
-}
-std::int32_t APS5_VABI sceNpEntitlementAccessRequestServiceEntitlementInfo(const void*, const void*, const void*, const void*) {
-    return SCE_NP_ERROR_SIGNED_OUT;
-}
 std::int32_t APS5_VABI sceNpEntitlementAccessRequestServiceEntitlementInfoList(const void*, const void*, const void*, const void*) {
-    return SCE_NP_ERROR_SIGNED_OUT;
-}
-std::int32_t APS5_VABI sceNpEntitlementAccessRequestUnifiedEntitlementInfo(const void*, const void*, const void*, const void*) {
     return SCE_NP_ERROR_SIGNED_OUT;
 }
 std::int32_t APS5_VABI sceNpEntitlementAccessRequestUnifiedEntitlementInfoList(const void*, const void*, const void*, const void*) {

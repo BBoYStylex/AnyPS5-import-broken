@@ -1,8 +1,11 @@
 #include <cstdint>
 #include <cstddef>
+#include <cerrno>
 #include <ctime>
 #include <cstring>
+#include <cstdio>
 #include <limits>
+#include <string>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -10,9 +13,13 @@
 
 #include "prx/libc/include/General.hpp"
 #include "prx/libc/include/GuestTime.hpp"
+#include "prx/libc/include/SonyCrt.hpp"
 
 namespace {
 
+constexpr const char* WEEKDAY_NAMES[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+constexpr const char* MONTH_NAMES[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+constexpr std::size_t ASCTIME_SIZE = sizeof("Sun Jan-2147483648 -2147483648:-2147483648:-2147483648 -2147483648\n");
 constexpr std::int64_t SECONDS_PER_DAY = 86400;
 constexpr std::int64_t DAYS_FROM_MARCH_TO_YEAR_END = 306;
 
@@ -97,10 +104,127 @@ const bool timeZoneFixed = [] {
 }  // namespace
 #endif
 
+namespace {
+
+bool isFreeBsdConversion(char specifier) {
+    return specifier == 'k' || specifier == 'l' || specifier == 's' || specifier == 'v' || specifier == '+';
+}
+
+struct FormatConversion {
+    std::size_t length;
+    char specifier;
+    bool literal;
+    bool padded;
+};
+
+FormatConversion parseConversion(const char* afterPercent) {
+    const char* cursor = afterPercent;
+    bool alternative = false;
+    bool padded = false;
+    while (*cursor != '\0') {
+        if (*cursor == 'E' || *cursor == 'O') {
+            if (alternative) break;
+            alternative = true;
+        } else if (*cursor == '-' || *cursor == '_' || *cursor == '0') {
+            if (padded) break;
+            padded = true;
+        } else {
+            break;
+        }
+        ++cursor;
+    }
+    if (*cursor == '\0')
+        return {static_cast<std::size_t>(cursor - afterPercent), cursor[-1], true, padded};
+    const bool literal = *cursor == '%' || std::strchr("aAbBcCdDeFgGhHIjklmMnprRsStTuUVvWwXxyYzZ+", *cursor) == nullptr;
+    return {static_cast<std::size_t>(cursor - afterPercent) + 1, *cursor, literal, padded};
+}
+
+bool requiresFreeBsdExpansion(const char* format) {
+    while (*format != '\0') {
+        if (*format++ != '%') continue;
+        const auto conversion = parseConversion(format);
+        if (conversion.literal || (!conversion.padded && isFreeBsdConversion(conversion.specifier))) return true;
+        format += conversion.length;
+    }
+    return false;
+}
+
+const char* guestZoneName(const GuestTm& guest) {
+    if (guest.tm_zone != nullptr) return guest.tm_zone;
+#ifdef _WIN32
+    return _tzname[guest.tm_isdst != 0 ? 1 : 0];
+#else
+    return tzname[guest.tm_isdst != 0 ? 1 : 0];
+#endif
+}
+
+std::string expandFreeBsdConversions(const char* format, const GuestTm& guest) {
+    std::string result;
+    while (*format != '\0') {
+        const char next = *format++;
+        if (next != '%') {
+            result += next;
+            continue;
+        }
+        const auto conversion = parseConversion(format);
+        if (conversion.literal) {
+            if (conversion.specifier == '%') result += '%';
+            result += conversion.specifier;
+            format += conversion.length;
+            continue;
+        }
+        if (conversion.padded || !isFreeBsdConversion(conversion.specifier)) {
+            result.append(format - 1, conversion.length + 1);
+            format += conversion.length;
+            continue;
+        }
+        format += conversion.length;
+        char text[32];
+        switch (conversion.specifier) {
+        case 'k':
+            std::snprintf(text, sizeof(text), "%2d", guest.tm_hour);
+            result += text;
+            break;
+        case 'l':
+            std::snprintf(text, sizeof(text), "%2d", guest.tm_hour % 12 == 0 ? 12 : guest.tm_hour % 12);
+            result += text;
+            break;
+        case 's': {
+            std::tm host = toHostTm(guest);
+            std::snprintf(text, sizeof(text), "%lld", static_cast<long long>(std::mktime(&host)));
+            result += text;
+            break;
+        }
+        case 'v':
+            result += "%e-%b-%Y";
+            break;
+        default:
+            result += "%a %b %e %H:%M:%S ";
+            for (const char* zone = guestZoneName(guest); *zone != '\0'; ++zone) {
+                if (*zone == '%') result += '%';
+                result += *zone;
+            }
+            result += " %Y";
+            break;
+        }
+    }
+    return result;
+}
+
+}
+
 extern "C" {
 
 GuestTm* APS5_VABI localtime_s_nid_postfix(const int64_t* timer, GuestTm* result);
 GuestTm* APS5_VABI gmtime_s_nid_postfix(const int64_t* timer, GuestTm* result);
+
+void APS5_VABI tzset_nid_postfix(void) {
+#ifdef _WIN32
+    _tzset();
+#else
+    ::tzset();
+#endif
+}
 
 int64_t APS5_VABI libc_time_nid_postfix(int64_t* timer) {
     std::time_t t = std::time(nullptr);
@@ -126,11 +250,12 @@ int64_t APS5_VABI _Xtime_get_ticks_nid_postfix() {
 }
 
 double APS5_VABI libc_difftime_nid_postfix(int64_t time1, int64_t time0) {
-    return std::difftime(static_cast<std::time_t>(time1), static_cast<std::time_t>(time0));
+    if (time1 >= time0) return static_cast<double>(static_cast<uint64_t>(time1) - static_cast<uint64_t>(time0));
+    return -static_cast<double>(static_cast<uint64_t>(time0) - static_cast<uint64_t>(time1));
 }
 
 double APS5_VABI difftime_nid_postfix(int64_t time1, int64_t time0) {
-    return std::difftime(static_cast<std::time_t>(time1), static_cast<std::time_t>(time0));
+    return libc_difftime_nid_postfix(time1, time0);
 }
 
 GuestTm* APS5_VABI libc_gmtime_nid_postfix(const int64_t* timer) {
@@ -184,8 +309,9 @@ GuestTm* APS5_VABI gmtime_nid_postfix(const int64_t* timer) {
 
 int64_t APS5_VABI libc_mktime_nid_postfix(GuestTm* timeptr) {
     std::tm host = toHostTm(*timeptr);
+    host.tm_wday = -1;
     const std::time_t t = std::mktime(&host);
-    if (t == static_cast<std::time_t>(-1)) return -1;
+    if (t == static_cast<std::time_t>(-1) && host.tm_wday == -1) return -1;
     const int64_t time = static_cast<int64_t>(t);
     localtime_s_nid_postfix(&time, timeptr);
     return time;
@@ -197,12 +323,26 @@ int64_t APS5_VABI mktime_nid_postfix(GuestTm* timeptr) {
 
 size_t APS5_VABI libc_strftime_nid_postfix(char* str, size_t count, const char* format, const GuestTm* timeptr) {
     const std::tm host = toHostTm(*timeptr);
-    return std::strftime(str, count, format, &host);
+    if (!requiresFreeBsdExpansion(format)) return std::strftime(str, count, format, &host);
+    const std::string expanded = expandFreeBsdConversions(format, *timeptr);
+    return std::strftime(str, count, expanded.c_str(), &host);
 }
 
 char* APS5_VABI asctime_nid_postfix(const GuestTm* timeptr) {
-    const std::tm host = toHostTm(*timeptr);
-    return std::asctime(&host);
+    static thread_local char result[ASCTIME_SIZE];
+    const char* weekday = timeptr->tm_wday >= 0 && timeptr->tm_wday < 7 ? WEEKDAY_NAMES[timeptr->tm_wday] : "???";
+    const char* month = timeptr->tm_mon >= 0 && timeptr->tm_mon < 12 ? MONTH_NAMES[timeptr->tm_mon] : "???";
+    std::snprintf(result, sizeof(result), "%s %s%3d %.2d:%.2d:%.2d %lld\n", weekday, month, timeptr->tm_mday,
+        timeptr->tm_hour, timeptr->tm_min, timeptr->tm_sec, 1900LL + timeptr->tm_year);
+    return result;
+}
+
+char* APS5_VABI ctime_nid_postfix(const int64_t* timer) {
+    if (const GuestTm* local = localtime_nid_postfix(timer)) return asctime_nid_postfix(local);
+    static char unknown[26];
+    std::memcpy(unknown, "??? ??? ?? ??:??:?? ????\n", sizeof(unknown));
+    errno = EINVAL;
+    return unknown;
 }
 
 size_t APS5_VABI strftime_nid_postfix(char* str, size_t count, const char* format, const GuestTm* timeptr) {
@@ -219,6 +359,14 @@ int64_t APS5_VABI clock_nid_postfix() {
 #else
     return static_cast<int64_t>(static_cast<double>(std::clock()) * 1000000.0 / CLOCKS_PER_SEC);
 #endif
+}
+
+int APS5_VABI ctime_s_nid_postfix(char* buffer, std::size_t size, const std::int64_t* time) {
+    return SonyCtimeS(buffer, size, time);
+}
+
+int APS5_VABI asctime_s_nid_postfix(char* buffer, std::size_t size, const GuestTm* time) {
+    return SonyAsctimeS(buffer, size, time);
 }
 
 }

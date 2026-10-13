@@ -7,7 +7,7 @@
 #include <stdexcept>
 #include <span>
 extern "C" int APS5_VABI sceAgcLinkShaders(ShaderRegister*, ShaderRegister*, const void*, const Shader*, const Shader*, std::uint32_t);
-extern "C" int APS5_VABI sceAgcCreateInterpolantMappingSdk(ShaderRegister*, const Shader*, const Shader*);
+extern "C" int APS5_VABI sceAgcUnknown_vieBRwlh1Lw(ShaderRegister*, const Shader*, const Shader*);
 extern "C" void* APS5_VABI sceAgcGetRegisterDefaults();
 extern "C" void* APS5_VABI sceAgcGetRegisterDefaults2(std::uint32_t);
 static void Require(bool value) { if (!value) std::abort(); }
@@ -24,7 +24,8 @@ extern "C" void AgcDriverResolveGraphicsStagesAbi_nid_postfix(std::span<const Sh
 }
 
 extern "C" void AgcDriverResolveShaderAbi_nid_postfix(const Shader* shader, std::span<const ShaderRegister> context, std::span<const ShaderRegister> primitive) {
-    Require(shader != nullptr && context.size() == 32u && primitive.empty());
+    // The SDK mapping passes only the shader inputs; the other variants fill all 32.
+    Require(shader != nullptr && context.size() <= 32u && primitive.empty());
     mappedPixel = shader;
     ++mappings;
 }
@@ -109,8 +110,9 @@ int main() {
     Require(context[2].value == 0x220);
     Require(preparations == 7u && mappings == 3u && links == 7u);
 
+    // vieBRwlh1Lw writes one register per pixel shader input and leaves the rest untouched.
     std::array<ShaderRegister, 33> sdkMapping{};
-    sdkMapping.back() = {0xdeadbeef, 0xcafebabe};
+    sdkMapping.fill({0xdeadbeef, 0xcafebabe});
     output.semantic = 9;
     output.hardware_mapping = 5;
     input.semantic = 9;
@@ -120,38 +122,34 @@ int main() {
     vertex.num_output_semantics = 1;
     pixel.input_semantics = &input;
     pixel.num_input_semantics = 1;
-    Require(sceAgcCreateInterpolantMappingSdk(sdkMapping.data(), &vertex, &pixel) == 0);
+    Require(sceAgcUnknown_vieBRwlh1Lw(sdkMapping.data(), &vertex, &pixel) == 0);
     Require(sdkMapping[0].offset == SPI_PS_INPUT_CNTL_0 && sdkMapping[0].value == (5 | 0x400));
-    for (unsigned i = 1; i < 32; ++i)
-        Require(sdkMapping[i].offset == SPI_PS_INPUT_CNTL_0 + i && sdkMapping[i].value == 0);
-    Require(sdkMapping.back().offset == 0xdeadbeef && sdkMapping.back().value == 0xcafebabe);
+    for (unsigned i = 1; i < sdkMapping.size(); ++i)
+        Require(sdkMapping[i].offset == 0xdeadbeef && sdkMapping[i].value == 0xcafebabe);
 
     input.semantic = 10;
     input.default_value = 2;
-    Require(sceAgcCreateInterpolantMappingSdk(sdkMapping.data(), &vertex, &pixel) == 0);
+    Require(sceAgcUnknown_vieBRwlh1Lw(sdkMapping.data(), &vertex, &pixel) == 0);
     Require(sdkMapping[0].value == 0x220);
 
-    sdkMapping.fill({0xdeadbeef, 0xcafebabe});
-    Require(sceAgcCreateInterpolantMappingSdk(sdkMapping.data(), nullptr, nullptr) == 0);
-    for (unsigned i = 0; i < 32; ++i)
-        Require(sdkMapping[i].offset == SPI_PS_INPUT_CNTL_0 + i && sdkMapping[i].value == 0);
-    Require(sdkMapping.back().offset == 0xdeadbeef && sdkMapping.back().value == 0xcafebabe);
+    // Without a PS (ANIMAL WELL's first pipeline links a GS alone) every interpolant is written, disabled.
+    for (const Shader* gs : {static_cast<const Shader*>(nullptr), static_cast<const Shader*>(&vertex)}) {
+        sdkMapping.fill({0xdeadbeef, 0xcafebabe});
+        Require(sceAgcUnknown_vieBRwlh1Lw(sdkMapping.data(), gs, nullptr) == 0);
+        for (unsigned i = 0; i < 32; ++i)
+            Require(sdkMapping[i].offset == SPI_PS_INPUT_CNTL_0 + i && sdkMapping[i].value == 0);
+        Require(sdkMapping.back().offset == 0xdeadbeef && sdkMapping.back().value == 0xcafebabe);
+    }
 
-    // ANIMAL WELL's first pipeline links a GS with no PS: every interpolant is written, disabled.
-    sdkMapping.fill({0xdeadbeef, 0xcafebabe});
-    Require(sceAgcCreateInterpolantMappingSdk(sdkMapping.data(), &vertex, nullptr) == 0);
-    for (unsigned i = 0; i < 32; ++i)
-        Require(sdkMapping[i].offset == SPI_PS_INPUT_CNTL_0 + i && sdkMapping[i].value == 0);
-    Require(sdkMapping.back().offset == 0xdeadbeef && sdkMapping.back().value == 0xcafebabe);
-
-    sdkMapping.fill({0xdeadbeef, 0xcafebabe});
-    const auto untouchedSdkMapping = sdkMapping;
-    Require(sceAgcCreateInterpolantMappingSdk(sdkMapping.data(), nullptr, &pixel) == GRAPHICS5_ERROR_INVALID_SHADER_PROGRAM);
-    Require(std::memcmp(sdkMapping.data(), untouchedSdkMapping.data(), sizeof(sdkMapping)) == 0);
-
-    sdkMapping.fill({0xdeadbeef, 0xcafebabe});
-    const auto savedSdkMapping = sdkMapping;
+    const auto rejects = [&](const Shader* gs) {
+        sdkMapping.fill({0xdeadbeef, 0xcafebabe});
+        const auto saved = sdkMapping;
+        bool thrown = false;
+        try { sceAgcUnknown_vieBRwlh1Lw(sdkMapping.data(), gs, &pixel); }
+        catch (const std::runtime_error&) { thrown = true; }
+        Require(thrown && std::memcmp(sdkMapping.data(), saved.data(), sizeof(sdkMapping)) == 0);
+    };
+    rejects(nullptr);
     pixel.num_input_semantics = 33;
-    Require(sceAgcCreateInterpolantMappingSdk(sdkMapping.data(), &vertex, &pixel) == GRAPHICS5_ERROR_INVALID_SHADER_PROGRAM);
-    Require(std::memcmp(sdkMapping.data(), savedSdkMapping.data(), sizeof(sdkMapping)) == 0);
+    rejects(&vertex);
 }

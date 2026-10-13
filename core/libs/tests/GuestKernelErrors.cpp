@@ -6,7 +6,7 @@
 
 extern "C" {
 int APS5_VABI sceKernelConvertLocaltimeToUtc(int64_t local, int64_t dst, int64_t* utc, KernelTimesec* zone, int32_t* dstSeconds);
-int APS5_VABI sceKernelConvertUtcToLocaltime(int64_t utc, int64_t* local, KernelTimesec* zone, uint64_t* dstSeconds);
+int APS5_VABI sceKernelConvertUtcToLocaltime(int64_t utc, int64_t* local, KernelTimesec* zone, int32_t* dstSeconds);
 int APS5_VABI sceKernelCreateSema(KernelSema*, const char*, std::uint32_t, int, int, void*);
 int APS5_VABI sceKernelDeleteSema(KernelSema);
 int APS5_VABI sceKernelSignalSema(KernelSema, int);
@@ -62,9 +62,10 @@ int main() {
     Require(conversion.zone.t == sampleTime && conversion.zone.west_sec == 0 && conversion.zone.dst_sec == 0);
     Require(conversion.guard == 0x123456789abcdef0ull);
     conversion.zone = {-1, 0xffffffffu, 0xffffffffu};
-    uint64_t utcDstSeconds = ~uint64_t{0};
-    Require(sceKernelConvertUtcToLocaltime(sampleTime, &converted, &conversion.zone, &utcDstSeconds) == SCE_OK);
-    Require(converted == sampleTime && utcDstSeconds == 0);
+    // The DST output is 32 bits wide; the word after it must stay untouched.
+    struct { int32_t seconds; uint32_t after; } utcDst{-1, 0xa5a5a5a5u};
+    Require(sceKernelConvertUtcToLocaltime(sampleTime, &converted, &conversion.zone, &utcDst.seconds) == SCE_OK);
+    Require(converted == sampleTime && utcDst.seconds == 0 && utcDst.after == 0xa5a5a5a5u);
     Require(conversion.zone.t == sampleTime && conversion.zone.west_sec == 0 && conversion.zone.dst_sec == 0);
     Require(conversion.guard == 0x123456789abcdef0ull);
 
@@ -81,7 +82,10 @@ int main() {
     Require(sceKernelCreateSema(&semaphore, "limit", 1, 1, 3, nullptr) == SCE_OK);
     Require(sceKernelSignalSema(semaphore, 3) == SCE_KERNEL_ERROR_EINVAL);
     Require(sceKernelSignalSema(semaphore, 2) == SCE_OK);
+    Require(sceKernelSignalSema(semaphore, 0) == SCE_OK);
     Require(sceKernelPollSema(semaphore, 3) == SCE_OK);
+    Require(sceKernelSignalSema(semaphore, 0) == SCE_OK);
+    Require(sceKernelPollSema(semaphore, 1) == SCE_KERNEL_ERROR_EBUSY);
     Require(sceKernelDeleteSema(semaphore) == SCE_OK);
 
     KernelEqueue eq = 0;
@@ -106,13 +110,7 @@ int main() {
     Require(scePthreadMutexattrSettype(&attr, 5) == SCE_KERNEL_ERROR_EINVAL);
     Require(scePthreadMutexattrSetprotocol(&attr, PRIO_NONE) == SCE_OK);
     Require(scePthreadMutexattrSetprotocol(&attr, PRIO_INHERIT) == SCE_OK);
-    bool protectionRejected = false;
-    try {
-        scePthreadMutexattrSetprotocol(&attr, PRIO_PROTECT);
-    } catch (const std::invalid_argument&) {
-        protectionRejected = true;
-    }
-    Require(protectionRejected);
+    Require(scePthreadMutexattrSetprotocol(&attr, PRIO_PROTECT) == SCE_OK);
     PthreadMutex mutex = nullptr;
     Require(scePthreadMutexInit(&mutex, &attr, nullptr) == SCE_OK);
     Require(scePthreadMutexattrDestroy(&attr) == SCE_OK);

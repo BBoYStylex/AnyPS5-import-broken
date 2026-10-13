@@ -2,6 +2,7 @@
 #include "Recompiler.hpp"
 #include "execution/VulkanTestDevice.hpp"
 #include "prx/libc/include/GuestAllocations.hpp"
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdio>
@@ -95,6 +96,9 @@ alignas(256) std::array<Vertex, FanRim + 1> Fan{};
 alignas(256) std::array<Vertex, FanRim + 1> FanScrambled{};
 alignas(256) std::array<std::uint16_t, FanRim + 1> FanIndices{};
 alignas(256) std::array<std::uint16_t, FanRim + 1> FanRestart{};
+alignas(256) std::array<Vertex, 4 * Columns> Quads{};
+alignas(256) std::array<std::uint16_t, 5 * Columns> QuadStrips{};
+alignas(256) std::array<std::uint32_t, 5 * Columns> QuadStrips32{};
 
 std::array<std::uint32_t, 4> VertexBufferDescriptor(const void* vertices, std::uint32_t count) {
     const auto address = reinterpret_cast<std::uintptr_t>(vertices);
@@ -127,7 +131,28 @@ struct MeshDraw {
     std::uint32_t geometryPushBytes = ShaderRecompiler::MeshDrawPushOffsetBytes;
     bool restart = false;
     std::uint32_t waveSize = 64u;
+    VkCullModeFlags cull = VK_CULL_MODE_NONE;
 };
+
+bool ReadsNumWorkgroups(const std::vector<std::uint32_t>& words) {
+    constexpr std::uint32_t OpDecorate = 71;
+    constexpr std::uint32_t OpAccessChain = 65;
+    constexpr std::uint32_t OpLoad = 61;
+    constexpr std::uint32_t DecorationBuiltIn = 11;
+    constexpr std::uint32_t BuiltInNumWorkgroups = 24;
+    std::uint32_t variable = 0;
+    std::vector<std::uint32_t> pointers;
+    for (std::size_t at = 5; at < words.size();) {
+        const auto length = words[at] >> 16u;
+        const auto opcode = words[at] & 0xffffu;
+        if (length == 0 || at + length > words.size()) return false;
+        if (opcode == OpDecorate && length == 4 && words[at + 2] == DecorationBuiltIn && words[at + 3] == BuiltInNumWorkgroups) variable = words[at + 1];
+        if (opcode == OpAccessChain && length >= 4 && variable != 0 && words[at + 3] == variable) pointers.push_back(words[at + 2]);
+        if (opcode == OpLoad && length >= 4 && variable != 0 && (words[at + 3] == variable || std::find(pointers.begin(), pointers.end(), words[at + 3]) != pointers.end())) return true;
+        at += length;
+    }
+    return false;
+}
 
 void DrawMesh(AgcDriver::VulkanDevice& device, const MeshDraw& setup) {
     const auto target = device.Target();
@@ -145,6 +170,7 @@ void DrawMesh(AgcDriver::VulkanDevice& device, const MeshDraw& setup) {
         ShaderRecompiler::GraphicsCompileContext{0, {}, setup.mesh, std::nullopt, {setup.draw.indexAddress, setup.draw.indexCount, setup.draw.indexSize, setup.draw.instanceCount}}
     };
     const auto meshResult = ShaderRecompiler::Recompile(geometry);
+    Require(ReadsNumWorkgroups(meshResult.spirv), "the mesh program does not read NumWorkgroups, so RADV can keep a previous vertex pipeline's user SGPR count for its dispatch");
     const auto meshPush = static_cast<std::uint32_t>(meshResult.pushConstants.size());
     Require((meshPush == 0) == (setup.geometryPushBytes == 0), "the geometry program's push data does not follow its layout");
 
@@ -158,13 +184,13 @@ void DrawMesh(AgcDriver::VulkanDevice& device, const MeshDraw& setup) {
         {ShaderStage::Fragment, reinterpret_cast<std::uintptr_t>(PixelCode.data()), PixelCode, 0, {}},
         {64, 0, {}, std::nullopt, pixel, std::nullopt, pixelMemory},
         target,
-        {0, 0, meshPush, ShaderRecompiler::MeshDrawPushOffsetBytes - meshPush},
+        target.fixedPushSlots ? PixelPushLayout(meshPush, target) : ShaderRecompiler::BindingLayout{0, 0, meshPush, ShaderRecompiler::MeshDrawPushOffsetBytes - meshPush},
         std::nullopt
     };
     const auto pixelResult = ShaderRecompiler::Recompile(fragment);
     const std::array<AgcDriver::Graphics::CompiledShader, 2> shaders{{
         {ShaderStage::Mesh, &meshResult, 0},
-        {ShaderStage::Fragment, &pixelResult, meshPush}
+        {ShaderStage::Fragment, &pixelResult, PixelPushOffset(meshPush, target)}
     }};
 
     AgcDriver::Graphics::State state{};
@@ -178,7 +204,7 @@ void DrawMesh(AgcDriver::VulkanDevice& device, const MeshDraw& setup) {
     state.viewport = {0, static_cast<float>(Height), static_cast<float>(Width), -static_cast<float>(Height), 0, 1};
     state.negativeOneToOne = false;
     state.scissor = {{0, 0}, {Width, Height}};
-    state.cullMode = VK_CULL_MODE_NONE;
+    state.cullMode = setup.cull;
     state.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     state.blend.colorWriteMask = 15;
     state.blends = {state.blend};
@@ -203,6 +229,24 @@ void CheckFan(const char* what) {
     }
     Require(PixelIs(FanPixel((static_cast<float>(FanRim) - 0.5f) * FanStep, 0.5f), Background), std::string(what) + ": the fan was closed");
     Require(PixelIs(0, Background) && PixelIs(Pixels.size() - 4u, Background), std::string(what) + ": the corners changed");
+}
+
+std::size_t QuadPixel(std::uint32_t quad, float across) {
+    const auto x = static_cast<std::uint32_t>((static_cast<float>(quad) + across * 0.8f) * Width / Columns);
+    return (static_cast<std::size_t>(Height * 3u / 4u) * Width + x) * 4u;
+}
+
+void CheckQuads(const char* what, std::uint32_t first, std::uint32_t count) {
+    for (std::uint32_t quad = 0; quad < Columns; ++quad) {
+        const bool drawn = quad >= first && quad < first + count;
+        for (const float across : {0.25f, 0.75f}) {
+            const auto offset = QuadPixel(quad, across);
+            Require(PixelIs(offset, drawn ? TriangleColor(quad) : Background), std::string(what) + ": quad " + std::to_string(quad) + (across < 0.5f ? " left" : " right") + " half pixel " + PixelText(offset));
+        }
+        const auto gap = QuadPixel(quad, 1.12f);
+        Require(PixelIs(gap, Background), std::string(what) + ": a triangle crossed the restart after quad " + std::to_string(quad) + ", pixel " + PixelText(gap));
+    }
+    Require(PixelIs((static_cast<std::size_t>(Height / 4u) * Width + Width / 2u) * 4u, Background), std::string(what) + ": the upper half changed");
 }
 
 void CheckTriangles(const char* what) {
@@ -249,6 +293,22 @@ int main() {
             FanRestart[k] = FanIndices[k];
         }
         FanRestart[FanRim] = 0xffffu;
+        for (std::uint32_t quad = 0; quad < Columns; ++quad) {
+            const auto color = TriangleColor(quad);
+            const std::array<float, 4> rgba{color[0] / 255.0f, color[1] / 255.0f, color[2] / 255.0f, 1.0f};
+            const float left = -1.0f + 2.0f * static_cast<float>(quad) / Columns;
+            const float right = left + 1.6f / Columns;
+            Quads[4 * quad] = {{left, -1.0f, 0.5f, 1.0f}, rgba};
+            Quads[4 * quad + 1] = {{left, 0.0f, 0.5f, 1.0f}, rgba};
+            Quads[4 * quad + 2] = {{right, -1.0f, 0.5f, 1.0f}, rgba};
+            Quads[4 * quad + 3] = {{right, 0.0f, 0.5f, 1.0f}, rgba};
+            for (std::uint32_t k = 0; k < 4; ++k) {
+                QuadStrips[5 * quad + k] = static_cast<std::uint16_t>(4 * quad + k);
+                QuadStrips32[5 * quad + k] = 4 * quad + k;
+            }
+            QuadStrips[5 * quad + 4] = 0xffffu;
+            QuadStrips32[5 * quad + 4] = 0xffffffffu;
+        }
 
         const auto testDevice = OpenVulkanTestDevice();
         if (!testDevice) return VulkanTestSkipped;
@@ -288,7 +348,7 @@ int main() {
         auto* record = static_cast<std::uint32_t*>(::operator new(recordBlockBytes, std::align_val_t{65536}));
         {
             GuestAllocations::Mutation mutation;
-            mutation.Add(record, recordBlockBytes, true, true);
+            mutation.Add(record, recordBlockBytes, true, true, true);
         }
         const auto drawIndirect = [&](std::uint32_t count, std::uint32_t instances, std::uint32_t first) {
             const std::array<std::uint32_t, 5> words{count, instances, first, 0u, 0u};
@@ -331,6 +391,21 @@ int main() {
             }
         }
         Require(PixelIs((static_cast<std::size_t>(Height / 4u) * Width + Width / 2u) * 4u, Background), "triangle strip: the upper half changed");
+
+        const auto quadBuffer = VertexBufferDescriptor(Quads.data(), static_cast<std::uint32_t>(Quads.size()));
+        ClearPixels();
+        DrawMesh(device, {strip, {reinterpret_cast<std::uintptr_t>(QuadStrips.data()), static_cast<std::uint32_t>(QuadStrips.size()), 2, 1, 0, true}, quadBuffer, ShaderRecompiler::MeshDrawPushOffsetBytes, true, 64u, VK_CULL_MODE_FRONT_BIT});
+        CheckQuads("16-bit triangle strips with restarts", 0, Columns);
+        ClearPixels();
+        DrawMesh(device, {strip, {reinterpret_cast<std::uintptr_t>(QuadStrips32.data()), static_cast<std::uint32_t>(QuadStrips32.size()), 4, 1, 0, true}, quadBuffer, ShaderRecompiler::MeshDrawPushOffsetBytes, true, 64u, VK_CULL_MODE_FRONT_BIT});
+        CheckQuads("32-bit triangle strips with restarts", 0, Columns);
+        const std::array<std::uint32_t, 5> quadWords{15u, 1u, 5u, 0u, 0u};
+        std::copy(quadWords.begin(), quadWords.end(), record);
+        AgcDriver::Pm4::DrawParameters quadDraw{reinterpret_cast<std::uintptr_t>(QuadStrips.data()), static_cast<std::uint32_t>(QuadStrips.size()), 2, 1, 0, true};
+        quadDraw.indirect = AgcDriver::Pm4::DrawParameters::IndirectDraw{reinterpret_cast<std::uintptr_t>(record), 0x25u, 20u, 20u, 1u, false, 0u, 0x280u, 0x280u, 0x280u, false, 0u};
+        ClearPixels();
+        DrawMesh(device, {strip, quadDraw, quadBuffer, ShaderRecompiler::MeshDrawPushOffsetBytes, true, 64u, VK_CULL_MODE_FRONT_BIT});
+        CheckQuads("indirect triangle strips with restarts", 1, 3);
 
         const ShaderRecompiler::MeshConfiguration fan{5u, 3u, 5u, 9u, 3u, 64u, 1024u, 0u, 4u};
         ClearPixels();

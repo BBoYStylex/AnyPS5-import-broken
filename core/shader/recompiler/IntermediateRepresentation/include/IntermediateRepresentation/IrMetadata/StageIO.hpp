@@ -16,6 +16,13 @@ enum class TessellationAttribute {
     Factor
 };
 
+enum class TessellationBaseKind {
+    OffChip,
+    Factor,
+    RelativeIndex,
+    PassthroughPrimitive
+};
+
 enum class StageInputKind {
     VertexIndex,
     InvocationId,
@@ -44,6 +51,7 @@ enum class StageOutputKind {
     Mrt,
     Depth,
     SampleMask,
+    StencilRef,
     PointSize,
     ClipDistance,
     CullDistance,

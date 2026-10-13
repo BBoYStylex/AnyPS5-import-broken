@@ -127,8 +127,6 @@ struct ShaderMeshInputInfo: ShaderWorkgroupInputInfo {
 struct ShaderTessellationInputInfo {
     std::uint32_t inputControlPoints = 0;
     std::uint32_t outputControlPoints = 0;
-    std::uint32_t lsStride = 0;
-    std::uint32_t hsStride = 0;
     std::uint32_t domain = 0;
     std::uint32_t partitioning = 0;
     std::uint32_t outputTopology = 0;
@@ -147,6 +145,7 @@ struct ShaderVertexInputInfo {
     int fetchBufferReg = 0;
     int buffersNum = 0;
     std::uint32_t scratchSizeDwords = 0;
+    std::uint32_t hostSubgroupSize = 64;
     std::uint32_t paClVsOutCntl = 0;
     ShaderClipSpaceTransform clipSpace;
     ShaderMeshInputInfo mesh;
@@ -186,11 +185,13 @@ struct ShaderPixelInputInfo {
     bool psPixelKillEnable = false;
     bool psDepthExportEnable = false;
     bool psSampleMaskExportEnable = false;
+    bool psStencilRefExportEnable = false;
     bool psSampleShading = false;
     bool psEarlyZ = false;
     bool psExecuteOnNoop = false;
     ConservativeZExport psConservativeZExport = ConservativeZExport::AnyZ;
     bool psOrderedPixelShader = false;
+    bool psAlphaToCoverage = false;
     ShaderStageRuntime stage;
 
     bool HasPositionInput() const {

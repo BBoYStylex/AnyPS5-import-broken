@@ -8,6 +8,7 @@ namespace Codegen {
 using namespace X64OpcodeConstants;
 
 std::size_t X64InstructionDecoder::Decode(const std::uint8_t* data, std::size_t available) const {
+    constexpr std::size_t maxInstructionLength = 15;
     std::size_t pos = 0;
     bool rexPresent = false;
     std::uint8_t rex = 0;
@@ -16,6 +17,7 @@ std::size_t X64InstructionDecoder::Decode(const std::uint8_t* data, std::size_t 
     bool repnePrefix = false;
 
     while (pos < available) {
+        if (pos == maxInstructionLength) throw CodegenException("Instruction exceeds 15 bytes");
         const std::uint8_t b = data[pos];
 
         if (b >= RexMin && b <= RexMax) {
@@ -246,7 +248,7 @@ std::size_t X64InstructionDecoder::Decode(const std::uint8_t* data, std::size_t 
             hasModRm = true;
         } else if (opcode >= TwoByteJccRel32Min && opcode <= TwoByteJccRel32Max) {
             immediateSize = ImmSize32;
-        } else if (opcode == TwoByteMovImm8ModRm) {
+        } else if (opcode == TwoByteMovImm8ModRm || opcode == TwoByte3DNow) {
             hasModRm = true;
             immediateSize = ImmSize8;
         } else if (opcode >= TwoByteShiftImm8Min && opcode <= TwoByteShiftImm8Max) {
@@ -287,6 +289,7 @@ std::size_t X64InstructionDecoder::Decode(const std::uint8_t* data, std::size_t 
     }
 
     if (!hasModRm) {
+        if (pos + immediateSize > maxInstructionLength) throw CodegenException("Instruction exceeds 15 bytes");
         if (pos + immediateSize > available) {
             throw CodegenException("Instruction truncated in immediate operand");
         }
@@ -336,6 +339,7 @@ std::size_t X64InstructionDecoder::Decode(const std::uint8_t* data, std::size_t 
 
     pos += immediateSize;
 
+    if (pos > maxInstructionLength) throw CodegenException("Instruction exceeds 15 bytes");
     if (pos > available) {
         throw CodegenException("Instruction truncated in displacement or immediate operand");
     }
@@ -554,7 +558,7 @@ DecodedInstructionInfo X64InstructionDecoder::DecodeInstruction(
             op == TwoByteImulRmModRm || op == TwoByteGrp7 ||
             op == TwoByteGrp15 || op == TwoByteXadd ||
             op == TwoByteGrp9 || op == TwoByteNopModRm ||
-            op == TwoByteEndbr || op == TwoByteMovImm8ModRm ||
+            op == TwoByteEndbr || op == TwoByteMovImm8ModRm || op == TwoByte3DNow ||
             op == ThreeByteEscape38 || op == ThreeByteEscape3A ||
             (op >= TwoByteShiftImm8Min && op <= TwoByteShiftImm8Max) ||
             op == TwoByteShldImm8 || op == TwoByteShrdImm8 ||

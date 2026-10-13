@@ -9,6 +9,8 @@
 #include <functional>
 #include <memory>
 #include <stdexcept>
+#include <string>
+#include <csignal>
 #include <pthread.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -35,6 +37,10 @@ extern "C" void (*_ZSt13set_terminatePFvvE_nid_postfix(void(*)()))();
 thread_local int destroyed = 0;
 struct Guard {
     ~Guard() { assert(__cxa_uncaught_exceptions_nid_postfix() > 0); ++destroyed; }
+};
+thread_local int counted = 0;
+struct Counted {
+    ~Counted() { ++counted; }
 };
 struct Base { virtual ~Base() = default; int value = 7; };
 struct Other { virtual ~Other() = default; int padding = 9; };
@@ -156,6 +162,27 @@ void CheckTerminate(void (*function)()) {
     assert(waitpid(child, &status, 0) == child);
     assert(WIFEXITED(status) && WEXITSTATUS(status) == 61);
 }
+void CheckDefaultTerminateMessage() {
+    const std::string message = std::string(3000, 'w') + " end of message";
+    int channel[2];
+    assert(pipe(channel) == 0);
+    pid_t child = fork();
+    assert(child >= 0);
+    if (child == 0) {
+        close(channel[0]);
+        dup2(channel[1], 2);
+        throw std::runtime_error(message);
+    }
+    close(channel[1]);
+    std::string output;
+    char buffer[4096];
+    for (ssize_t count; (count = read(channel[0], buffer, sizeof(buffer))) > 0;) output.append(buffer, static_cast<std::size_t>(count));
+    close(channel[0]);
+    int status;
+    assert(waitpid(child, &status, 0) == child);
+    assert(WIFSIGNALED(status) && WTERMSIG(status) == SIGABRT);
+    assert(output.find("  what():  " + message + "\n") != std::string::npos);
+}
 struct ForcedGuard { ~ForcedGuard() { ++destroyed; } };
 [[gnu::noinline]] void ForceUnwind() {
     ForcedGuard guard;
@@ -188,6 +215,11 @@ int main() {
     try { __cxa_rethrow_primary_exception_nid_postfix(retained); assert(false); }
     catch (int value) { assert(value == 27); }
     __cxa_decrement_exception_refcount_nid_postfix(retained);
+    {
+        auto made = std::make_exception_ptr(Counted());
+        try { std::rethrow_exception(made); assert(false); } catch (const Counted&) {}
+    }
+    assert(counted == 2);
     Derived object;
     Base* pointer = &object;
     try { throw &object; } catch (Base* value) { assert(value == pointer); }
@@ -222,6 +254,7 @@ int main() {
     CheckThreads();
     CheckTerminate(UncaughtThrow);
     CheckTerminate(NoexceptThrow);
+    CheckDefaultTerminateMessage();
     CheckForcedUnwind();
     int frames = 0;
     auto backtrace = _Unwind_Backtrace_nid_postfix([](_Unwind_Context* context, void* argument) {

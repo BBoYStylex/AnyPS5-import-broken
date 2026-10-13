@@ -2,6 +2,7 @@
 #include "prx/libSceAgcDriver/Graphics/include/GuestTextureResource.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Context.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/TextureTiling.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/TextureFormat.hpp"
 #include <algorithm>
 #include <stdexcept>
 #include <string>
@@ -152,6 +153,12 @@ GuestTextureResource DecodeTextureResource(std::span<const std::uint32_t> words)
             Require(height == 1 && depth == 0 && baseArray == 0, "guest 1D texture descriptor has a nonzero height, depth or base array");
             break;
         case TextureDimension::k2D:
+            if (depth != 0 && tileMode == TextureTileMode::kLinear) {
+                const auto elementsPerPitchUnit = 256u / BytesPerElement(format);
+                const auto defaultPitch = (width + elementsPerPitchUnit - 1u) / elementsPerPitchUnit * elementsPerPitchUnit;
+                Require(!IsBlockCompressed(format) && maxMip == 0 && baseArray == 0 && depth + 1u == defaultPitch, "guest 2D linear texture descriptor sets a custom pitch other than its default pitch, which is not implemented" + describe());
+                depth = 0;
+            }
             Require(depth == 0 && baseArray == 0, "guest 2D texture descriptor has a nonzero depth or base array");
             break;
         case TextureDimension::k3D:
@@ -210,6 +217,10 @@ GuestTextureResource DecodeTextureResource(std::span<const std::uint32_t> words)
 float EffectiveMinLod(const GuestTextureResource& resource) {
     if (resource.minLod <= resource.baseLevel * 256u) return 0.0f;
     return std::min(static_cast<float>(resource.minLod) / 256.0f, static_cast<float>(resource.lastLevel));
+}
+
+bool DescriptorSingleLevel(std::span<const std::uint32_t> words) {
+    return ((words[3] >> 12u) & 0xfu) == ((words[3] >> 16u) & 0xfu);
 }
 
 bool MatchesGuestDimension(ShaderRecompiler::DescriptorImageShape shape, TextureDimension dimension) {

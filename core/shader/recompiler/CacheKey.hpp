@@ -176,6 +176,8 @@ private:
         append(key, value.executeOnNoop);
         append(key, value.conservativeZExport);
         append(key, value.orderedPixelShader);
+        append(key, value.alphaToCoverage);
+        append(key, value.stencilRefExportEnable);
         append(key, value.targetOutputMode);
     }
 
@@ -238,6 +240,10 @@ private:
         append(key, value.nonConstantImageOffsets);
         append(key, value.srgbDecodeFormats);
         append(key, value.narrowSubgroupClock);
+        append(key, value.float64DenormPreserve);
+        append(key, value.registrationModules);
+        append(key, value.registrationWordLimit);
+        append(key, value.vertexSubgroups);
     }
 };
 

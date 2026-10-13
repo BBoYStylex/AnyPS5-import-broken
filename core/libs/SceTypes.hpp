@@ -16,6 +16,23 @@ struct alignas(16) __m128 { float v[4]; };
 
 using Bool = std::uint8_t;
 
+struct SonyLconv {
+    char* monetary[7];
+    char chars[14];
+    char pad[2];
+    char* decimal_point;
+    char* grouping;
+    char* thousands_sep;
+    char* frac_grouping;
+    char* frac_sep;
+    char* false_text;
+    char* true_text;
+    char* no_text;
+    char* yes_text;
+};
+static_assert(offsetof(SonyLconv, decimal_point) == 0x48);
+static_assert(sizeof(SonyLconv) == 0x90);
+
 using KernelModule = std::int32_t;
 using KernelCpumask = std::uint64_t;
 using KernelUseconds = unsigned int;
@@ -76,6 +93,14 @@ struct KernelAioRwRequest {
     void* buf;
     KernelAioResult* result;
     std::int32_t fd;
+};
+
+struct KernelAioSchedulingParam {
+    std::int32_t schedulingWindowSize;
+    std::int32_t delayedCountLimit;
+    std::uint32_t enableSplit;
+    std::uint32_t splitSize;
+    std::uint32_t splitChunkSize;
 };
 
 struct KernelBatchMapEntry {
@@ -1397,7 +1422,7 @@ union NetCtlInfo { std::uint8_t opaque[256]; };
 
 using NetCtlCallback = void (*)(int, void*);
 
-struct HttpEpoll {};
+struct HttpEpoll;
 using HttpEpollHandle = HttpEpoll*;
 using HttpsCallback = int (*)(int, unsigned int, void* const*, int, void*);
 using HttpRedirectCallback = int (*)(int, std::int32_t, std::int32_t*, const char*, void*);
@@ -1439,6 +1464,18 @@ struct NpTitleId { char data[13]; char pad[3]; };
 struct NpTitleSecret { std::uint8_t data[128]; };
 struct NpContentRestriction { std::uint8_t opaque[128]; };
 struct NpOnlineId { char data[17]; char pad[3]; };
+
+struct SharePlayConnectionInfoA {
+    std::int32_t status;
+    std::int32_t mode;
+    NpOnlineId hostOnlineId;
+    NpOnlineId visitorOnlineId;
+    std::uint64_t hostAccountId;
+    std::uint64_t visitorAccountId;
+    std::int32_t hostUserId;
+    std::int32_t visitorUserId;
+};
+static_assert(sizeof(SharePlayConnectionInfoA) == 72 && offsetof(SharePlayConnectionInfoA, hostAccountId) == 48 && offsetof(SharePlayConnectionInfoA, hostUserId) == 64);
 struct NpId { NpOnlineId online_id; std::uint8_t opaque[4]; };
 struct NpCreateAsyncRequestParameter { std::uint8_t opaque[64]; };
 struct NpCheckPremiumParameter { std::uint8_t opaque[64]; };
@@ -1572,7 +1609,12 @@ struct SaveDataMountInfo {
 
 struct SceSaveDataTitleId { char data[10]; char pad[2]; };
 struct SceSaveDataDirName { char data[32]; };
-struct SaveDataSearchInfo { std::uint8_t opaque[128]; };
+struct SaveDataSearchInfo {
+    std::uint64_t blocks;
+    std::uint64_t free_blocks;
+    std::uint8_t reserved[32];
+};
+static_assert(sizeof(SaveDataSearchInfo) == 48);
 struct SaveDataMemoryData { void* buf; std::size_t buf_size; std::size_t offset; };
 
 struct SaveDataMount3 {
@@ -1695,6 +1737,13 @@ struct SaveDataBackup {
     std::uint8_t reserved[32];
 };
 
+struct SaveDataConvert {
+    std::int32_t user_id;
+    std::int32_t pad;
+    const SceSaveDataDirName* dir_name;
+    std::uint8_t unknown[48];
+};
+
 struct AppContentInitParam { char reserved[32]; };
 
 struct AppContentBootParam {
@@ -1712,6 +1761,19 @@ struct ContentExportInitParam2 {
     std::size_t buffer_size;
     std::int64_t reserved0;
     std::int64_t reserved1;
+};
+
+struct ContentExportParam {
+    char title[257];
+    char comment[257];
+    char content_type[65];
+};
+static_assert(sizeof(ContentExportParam) == 579);
+
+struct ContentExportCallbackParam {
+    std::size_t content_length;
+    void* func;
+    void* user_data;
 };
 
 struct ContentSearchInitParam { std::size_t memory_size; };

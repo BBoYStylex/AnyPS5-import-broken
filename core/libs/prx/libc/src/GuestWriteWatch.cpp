@@ -95,10 +95,56 @@ public:
         begin &= ~(PageBytes - 1);
         end = (end + PageBytes - 1) & ~(PageBytes - 1);
         if (end <= begin) return true;
+        if (!takeFresh(begin, end, true, written, context)) return false;
+        return scanWritten(begin, end, written, context);
+    }
+
+    bool CollectFresh(std::uintptr_t begin, std::uintptr_t end, void (*written)(void*, std::uintptr_t, std::uintptr_t), void* context) {
+        if (!Available()) return false;
+        begin &= ~(PageBytes - 1);
+        end = (end + PageBytes - 1) & ~(PageBytes - 1);
+        if (end <= begin) return true;
+        {
+            std::shared_lock lock(_lock);
+            auto it = _fresh.upper_bound(begin);
+            if (it != _fresh.begin()) --it;
+            while (it != _fresh.end() && it->first < end && it->second <= begin) ++it;
+            if (it == _fresh.end() || it->first >= end) return true;
+        }
+        return takeFresh(begin, end, false, written, context);
+    }
+
+    bool CollectArmed(std::uintptr_t begin, std::uintptr_t end, void (*written)(void*, std::uintptr_t, std::uintptr_t), void* context) {
+        if (!Available()) return false;
+        begin &= ~(PageBytes - 1);
+        end = (end + PageBytes - 1) & ~(PageBytes - 1);
+        if (end <= begin) return true;
+        std::vector<std::pair<std::uintptr_t, std::uintptr_t>> armed;
+        {
+            std::shared_lock lock(_lock);
+            if (!covers(begin, end)) return false;
+            auto cursor = begin;
+            auto it = _fresh.upper_bound(begin);
+            if (it != _fresh.begin()) --it;
+            for (; it != _fresh.end() && it->first < end; ++it) {
+                if (it->second <= cursor) continue;
+                if (it->first > cursor) armed.emplace_back(cursor, it->first);
+                cursor = std::max(cursor, it->second);
+            }
+            if (cursor < end) armed.emplace_back(cursor, end);
+        }
+        for (const auto& [from, to] : armed) {
+            if (!scanWritten(from, to, written, context)) return false;
+        }
+        return true;
+    }
+
+private:
+    bool takeFresh(std::uintptr_t begin, std::uintptr_t end, bool whole, void (*written)(void*, std::uintptr_t, std::uintptr_t), void* context) {
         std::vector<std::pair<std::uintptr_t, std::uintptr_t>> fresh;
         {
             std::unique_lock lock(_lock);
-            if (!covers(begin, end)) return false;
+            if (whole && !covers(begin, end)) return false;
             auto it = _fresh.upper_bound(begin);
             if (it != _fresh.begin()) --it;
             for (; it != _fresh.end() && it->first < end; ++it) {
@@ -106,7 +152,7 @@ public:
                 const auto to = std::min(it->second, end);
                 if (from < to) fresh.emplace_back(from, to);
             }
-            if (!fresh.empty()) remove(_fresh, begin, end);
+            for (const auto& [from, to] : fresh) remove(_fresh, from, to);
         }
         for (const auto& [from, to] : fresh) {
             written(context, from, to);
@@ -117,9 +163,14 @@ public:
                 remove(_fresh, left, right);
                 insert(_fresh, left, right);
             }
-            written(context, begin, end);
+            if (whole) written(context, begin, end);
+            else for (const auto& [left, right] : fresh) written(context, left, right);
             return false;
         }
+        return true;
+    }
+
+    bool scanWritten(std::uintptr_t begin, std::uintptr_t end, void (*written)(void*, std::uintptr_t, std::uintptr_t), void* context) const {
         std::array<page_region, 256> regions;
         auto cursor = begin;
         while (cursor < end) {
@@ -282,7 +333,9 @@ public:
         begin = pageStart(begin);
         end = pageEnd(end);
         if (!_available || end <= begin) return;
-        std::vector<std::uint8_t> pages((end - begin) / _page, Written);
+        std::vector<std::uint8_t> pages((end - begin) / _page, Written | Fresh);
+        std::vector<bool> queried(pages.size(), false);
+        const Lock lock(_lock);
         for (auto cursor = begin; cursor < end;) {
             mach_vm_address_t address = cursor;
             mach_vm_size_t size = 0;
@@ -293,12 +346,18 @@ public:
             const auto first = std::max<std::uintptr_t>(cursor, address);
             const auto last = std::min<std::uintptr_t>(end, address + size);
             const std::uint8_t protection = ((info.protection & VM_PROT_READ) ? PROT_READ : 0) | ((info.protection & VM_PROT_WRITE) ? PROT_WRITE : 0) | ((info.protection & VM_PROT_EXECUTE) ? PROT_EXEC : 0);
-            for (auto page = first; page < last; page += _page) pages[(page - begin) / _page] = Written | protection;
+            for (auto page = first; page < last; page += _page) {
+                pages[(page - begin) / _page] = Written | Fresh | protection;
+                queried[(page - begin) / _page] = true;
+            }
             cursor = last;
         }
-        const Lock lock(_lock);
         forEachPage(begin, end, [&](std::uintptr_t page, std::uint8_t& state) {
-            pages[(page - begin) / _page] = static_cast<std::uint8_t>(Written | (state & ProtectionMask));
+            auto& entry = pages[(page - begin) / _page];
+            const std::uint8_t recorded = state & ProtectionMask;
+            const bool armed = (state & Protected) != 0 && (entry & ProtectionMask) == (recorded & ~PROT_WRITE);
+            if (armed || !queried[(page - begin) / _page]) entry = static_cast<std::uint8_t>(Written | Fresh | recorded);
+            else state = static_cast<std::uint8_t>(state & ~Protected);
         });
         erase(begin, end);
         _ranges.emplace(begin, Range{end, std::move(pages)});
@@ -318,7 +377,9 @@ public:
         return covers(begin, end);
     }
 
-    bool Collect(std::uintptr_t begin, std::uintptr_t end, void (*written)(void*, std::uintptr_t, std::uintptr_t), void* context) {
+    enum class Take { All, Armed, Fresh };
+
+    bool Collect(std::uintptr_t begin, std::uintptr_t end, void (*written)(void*, std::uintptr_t, std::uintptr_t), void* context, Take take = Take::All) {
         if (!_available) return false;
         begin = pageStart(begin);
         end = pageEnd(end);
@@ -326,9 +387,12 @@ public:
         std::vector<std::pair<std::uintptr_t, std::uintptr_t>> runs;
         {
             const Lock lock(_lock);
-            if (!covers(begin, end)) return false;
+            if (take != Take::Fresh && !covers(begin, end)) return false;
             forEachPage(begin, end, [&](std::uintptr_t page, std::uint8_t& state) {
                 if ((state & Written) == 0) return;
+                const bool fresh = (state & Fresh) != 0;
+                if ((take == Take::Armed && fresh) || (take == Take::Fresh && !fresh)) return;
+                state &= static_cast<std::uint8_t>(~Fresh);
                 if (!runs.empty() && runs.back().second == page) runs.back().second = page + _page;
                 else runs.emplace_back(page, page + _page);
                 for (const auto& [first, last] : _hostWrites)
@@ -348,7 +412,7 @@ public:
         if (!_available || end <= begin) return;
         const Lock lock(_lock);
         forEachPage(begin, end, [&](std::uintptr_t, std::uint8_t& state) {
-            state = static_cast<std::uint8_t>(Written | (protection & ProtectionMask));
+            state = static_cast<std::uint8_t>(Written | (state & Fresh) | (protection & ProtectionMask));
         });
     }
 
@@ -360,7 +424,7 @@ public:
         _hostWrites.emplace_back(begin, end);
         forEachPage(begin, end, [&](std::uintptr_t page, std::uint8_t& state) {
             if ((state & Protected) != 0) ::mprotect(reinterpret_cast<void*>(page), _page, state & ProtectionMask);
-            state = static_cast<std::uint8_t>((state & ProtectionMask) | Written);
+            state = static_cast<std::uint8_t>((state & (ProtectionMask | Fresh)) | Written);
         });
     }
 
@@ -394,6 +458,7 @@ private:
     static constexpr std::uint8_t ProtectionMask = PROT_READ | PROT_WRITE | PROT_EXEC;
     static constexpr std::uint8_t Written = 0x10;
     static constexpr std::uint8_t Protected = 0x20;
+    static constexpr std::uint8_t Fresh = 0x40;
 
     struct Range {
         std::uintptr_t end;
@@ -453,7 +518,7 @@ private:
         if (page >= it->second.end) return false;
         auto& state = it->second.pages[(page - it->first) / _page];
         if ((state & Protected) != 0) {
-            state = static_cast<std::uint8_t>((state & ProtectionMask) | Written);
+            state = static_cast<std::uint8_t>((state & (ProtectionMask | Fresh)) | Written);
             ::mprotect(reinterpret_cast<void*>(page), _page, state & ProtectionMask);
             return true;
         }
@@ -641,6 +706,38 @@ int GuestWriteWatchProtection_nid_postfix(std::uintptr_t address, std::uintptr_t
     static_cast<void>(address);
     *runEnd = limit;
     return -1;
+#endif
+}
+
+bool GuestWriteWatchCollectFresh_nid_postfix(std::uintptr_t address, std::size_t bytes, void (*written)(void* context, std::uintptr_t begin, std::uintptr_t end), void* context) {
+#if defined(__linux__) && defined(PAGEMAP_SCAN) && defined(UFFD_FEATURE_WP_ASYNC)
+    if (bytes == 0 || address + bytes < address) return false;
+    return Watch::Get().CollectFresh(address, address + bytes, written, context);
+#elif defined(__APPLE__)
+    if (bytes == 0 || address + bytes < address) return false;
+    return Watch::Get().Collect(address, address + bytes, written, context, Watch::Take::Fresh);
+#else
+    static_cast<void>(address);
+    static_cast<void>(bytes);
+    static_cast<void>(written);
+    static_cast<void>(context);
+    return false;
+#endif
+}
+
+bool GuestWriteWatchCollectArmed_nid_postfix(std::uintptr_t address, std::size_t bytes, void (*written)(void* context, std::uintptr_t begin, std::uintptr_t end), void* context) {
+#if defined(__linux__) && defined(PAGEMAP_SCAN) && defined(UFFD_FEATURE_WP_ASYNC)
+    if (bytes == 0 || address + bytes < address) return false;
+    return Watch::Get().CollectArmed(address, address + bytes, written, context);
+#elif defined(__APPLE__)
+    if (bytes == 0 || address + bytes < address) return false;
+    return Watch::Get().Collect(address, address + bytes, written, context, Watch::Take::Armed);
+#else
+    static_cast<void>(address);
+    static_cast<void>(bytes);
+    static_cast<void>(written);
+    static_cast<void>(context);
+    return false;
 #endif
 }
 

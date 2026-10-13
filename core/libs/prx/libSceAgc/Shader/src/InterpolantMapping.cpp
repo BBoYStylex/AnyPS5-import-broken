@@ -53,9 +53,20 @@ std::uint32_t CreateInterpolantValueSplitF16(std::uint32_t psWord, const ShaderS
         : CreateInterpolantValue(psWord, gsSemantic);
 }
 
-int CreateInterpolantMapping(const char* fn, ShaderRegister* regs, const Shader* gs, const Shader* ps, CreateInterpolantValueFn createValue, bool identityUnused) {
+std::uint32_t UpdateInterpolantValue(std::uint32_t psWord, const ShaderSemantic* gsSemantic) {
+    const std::uint32_t f16 = (psWord >> 20u) & 0x3u;
+    if (f16 != 0 && f16 != InterpolantF16HiOnly && ((psWord >> 28u) & 0x3u) != ((psWord >> 30u) & 0x3u)) {
+        throw std::runtime_error(std::string(__func__) + ": DEFAULT_VAL of an f16 input with different low and high defaults is unknown");
+    }
+    return CreateInterpolantValueSplitF16(psWord, gsSemantic);
+}
+
+int CreateInterpolantMapping(const char* fn, ShaderRegister* regs, const Shader* gs, const Shader* ps, CreateInterpolantValueFn createValue, bool fillIdentityTail) {
     if (regs == nullptr) {
         throw std::runtime_error(std::string(fn) + ": regs is null");
+    }
+    if (ps == nullptr && !fillIdentityTail) {
+        throw std::runtime_error(std::string(fn) + ": ps is null");
     }
     if (ps != nullptr && ps->num_input_semantics > 32) {
         throw std::runtime_error(std::string(fn) + ": input semantic count exceeds 32");
@@ -66,14 +77,14 @@ int CreateInterpolantMapping(const char* fn, ShaderRegister* regs, const Shader*
     auto* output = regs;
     regs = values.data();
     if (ps == nullptr || ps->num_input_semantics == 0) {
-        for (std::uint32_t i = 0; i < 32; ++i)
-            SetInterpolantRegister(regs, i, identityUnused ? i : 0);
+        const std::uint32_t count = fillIdentityTail ? InterpolantRegisterCount : 0;
+        if (fillIdentityTail) FillIdentityInterpolants(regs, 0);
         if (ps != nullptr) {
-            AgcDriverResolveShaderAbi_nid_postfix(ps, {regs, 32}, {});
+            AgcDriverResolveShaderAbi_nid_postfix(ps, {regs, count}, {});
             if (gs != nullptr) AgcDriverResolveGraphicsAbi_nid_postfix(gs, ps, 0);
         }
         transaction.Commit();
-        std::copy(values.begin(), values.end(), output);
+        std::copy_n(values.begin(), count, output);
         return 0;
     }
 
@@ -99,12 +110,12 @@ int CreateInterpolantMapping(const char* fn, ShaderRegister* regs, const Shader*
         SetInterpolantRegister(regs, i, createValue(ShaderSemanticWord(psSemantic), gsSemantic));
     }
 
-    for (std::uint32_t i = ps->num_input_semantics; i < 32; ++i)
-        SetInterpolantRegister(regs, i, identityUnused ? i : 0);
-    AgcDriverResolveShaderAbi_nid_postfix(ps, {regs, 32}, {});
+    const std::uint32_t count = fillIdentityTail ? InterpolantRegisterCount : ps->num_input_semantics;
+    if (fillIdentityTail) FillIdentityInterpolants(regs, ps->num_input_semantics);
+    AgcDriverResolveShaderAbi_nid_postfix(ps, {regs, count}, {});
     AgcDriverResolveGraphicsAbi_nid_postfix(gs, ps, 0);
     transaction.Commit();
-    std::copy(values.begin(), values.end(), output);
+    std::copy_n(values.begin(), count, output);
     return 0;
 }
 }
@@ -112,23 +123,6 @@ int CreateInterpolantMapping(const char* fn, ShaderRegister* regs, const Shader*
 extern "C" {
 int APS5_VABI sceAgcCreateInterpolantMapping(ShaderRegister* regs, const Shader* gs, const Shader* ps) {
     return CreateInterpolantMapping(__func__, regs, gs, ps, CreateInterpolantValue, true);
-}
-
-// SDK mapping entry points used by ANIMAL WELL. Its wrappers pass an output
-// register array, a GS producer and a PS consumer; unused inputs are disabled.
-APS5_EXPORT("vieBRwlh1Lw", sceAgcCreateInterpolantMappingSdk);
-int APS5_VABI sceAgcCreateInterpolantMappingSdk(ShaderRegister* regs, const Shader* gs, const Shader* ps) {
-    using namespace ShaderRegs;
-    // A GS without a PS (the title's first, depth-only pipeline) still gets all 32 interpolants
-    // disabled; leaving them unwritten sent stale stack words to the CP as register offsets.
-    if (!regs || (gs == nullptr && ps != nullptr) ||
-        (gs && (gs->type != static_cast<std::uint8_t>(ShaderBinaryType::Gs) ||
-                (gs->num_output_semantics && !gs->output_semantics))) ||
-        (ps && (ps->type != static_cast<std::uint8_t>(ShaderBinaryType::Ps) ||
-                ps->num_input_semantics > 32 ||
-                (ps->num_input_semantics && !ps->input_semantics))))
-        return GRAPHICS5_ERROR_INVALID_SHADER_PROGRAM;
-    return CreateInterpolantMapping(__func__, regs, gs, ps, CreateInterpolantValue, false);
 }
 
 }
@@ -141,7 +135,23 @@ int APS5_VABI sceAgcCreateInterpolantMapping_0100(ShaderRegister* regs, const Sh
 
 APS5_EXPORT("dbOlWdppb4o", sceAgcUnknownCreateInterpolantMapping);
 int APS5_VABI sceAgcUnknownCreateInterpolantMapping(ShaderRegister* regs, const Shader* gs, const Shader* ps) {
-    return CreateInterpolantMapping(__func__, regs, gs, ps, CreateInterpolantValueSplitF16, !(gs != nullptr && ps == nullptr));
+    if (gs != nullptr && ps == nullptr) {
+        for (std::uint32_t i = 0; i < InterpolantRegisterCount; ++i) SetInterpolantRegister(regs, i, 0);
+        return 0;
+    }
+    return CreateInterpolantMapping(__func__, regs, gs, ps, CreateInterpolantValueSplitF16, true);
+}
+
+APS5_EXPORT("vieBRwlh1Lw", sceAgcUnknown_vieBRwlh1Lw);
+int APS5_VABI sceAgcUnknown_vieBRwlh1Lw(ShaderRegister* regs, const Shader* gs, const Shader* ps) {
+    // ANIMAL WELL's first, depth-only pipeline passes a GS without a PS; leaving the interpolants
+    // unwritten sent stale stack words to the CP as register offsets, so all 32 are written disabled.
+    if (ps == nullptr) {
+        if (regs == nullptr) throw std::runtime_error(std::string(__func__) + ": regs is null");
+        for (std::uint32_t i = 0; i < InterpolantRegisterCount; ++i) SetInterpolantRegister(regs, i, 0);
+        return 0;
+    }
+    return CreateInterpolantMapping(__func__, regs, gs, ps, UpdateInterpolantValue, false);
 }
 
 }

@@ -242,6 +242,7 @@ public:
             if (hasResult && hasType) resultTypes.emplace(instruction.at(2), instruction.at(1));
             if (op == spv::OpTypeBool) types.emplace(instruction.at(1), ScalarType{1u, true});
             if (op == spv::OpTypeInt) types.emplace(instruction.at(1), ScalarType{instruction.at(2), false});
+            if (op == spv::OpTypeVector) vectorTypes.insert(instruction.at(1));
             if (op == spv::OpConstant && types.contains(instruction.at(1)) && types.at(instruction[1]).width <= 32u) values.emplace(instruction.at(2), instruction.at(3));
             if (op == spv::OpConstantTrue || op == spv::OpConstantFalse) values.emplace(instruction.at(2), op == spv::OpConstantTrue ? 1u : 0u);
             cursor += count;
@@ -349,7 +350,7 @@ private:
             if (op == spv::OpCompositeExtract && instruction.size() == 5u) extracts.emplace(instruction[2], std::pair{instruction[3], instruction[4]});
             if (op == spv::OpCompositeConstruct && instruction.size() == 7u) {
                 const auto first = extracts.find(instruction[3]);
-                bool shuffle = first != extracts.end();
+                bool shuffle = first != extracts.end() && vectorTypes.contains(instruction[1]) && resultTypes.contains(first->second.first) && vectorTypes.contains(resultTypes.at(first->second.first));
                 for (std::size_t index = 4; shuffle && index < instruction.size(); ++index) {
                     const auto found = extracts.find(instruction[index]);
                     shuffle = found != extracts.end() && found->second.first == first->second.first;
@@ -416,6 +417,12 @@ private:
             }
             return true;
         };
+        std::set<std::uint32_t> loopHeaders;
+        for (const auto& [label, indices] : blocks) {
+            for (const auto index : indices) {
+                if (Opcode(instructions[index]) == spv::OpLoopMerge) loopHeaders.insert(label);
+            }
+        }
         std::map<std::uint32_t, std::vector<std::uint32_t>> edges;
         for (const auto& [label, indices] : blocks) {
             auto& terminal = instructions[indices.back()];
@@ -424,7 +431,7 @@ private:
             bool loop = false;
             for (const auto index : indices) loop |= Opcode(instructions[index]) == spv::OpLoopMerge;
             if (!loop && op == spv::OpBranchConditional) {
-                if (const auto condition = value(terminal.at(1))) target = terminal.at(*condition != 0u ? 2u : 3u);
+                if (const auto condition = value(terminal.at(1)); condition.has_value() && !loopHeaders.contains(terminal.at(*condition != 0u ? 3u : 2u))) target = terminal.at(*condition != 0u ? 2u : 3u);
             } else if (!loop && op == spv::OpSwitch) {
                 if (const auto selector = value(terminal.at(1))) {
                     target = terminal.at(2);
@@ -614,6 +621,7 @@ private:
     std::map<std::uint32_t, ScalarType> types;
     std::map<std::uint32_t, std::uint32_t> values;
     std::map<std::uint32_t, std::uint32_t> resultTypes;
+    std::set<std::uint32_t> vectorTypes;
     std::set<std::uint32_t> removed;
 };
 

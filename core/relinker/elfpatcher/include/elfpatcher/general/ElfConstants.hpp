@@ -76,10 +76,12 @@ inline constexpr std::uint32_t PT_OS_RELRO = 0x61000010;
 inline constexpr std::uint32_t PT_LOOS = 0x61000000;
 inline constexpr std::uint32_t PT_HIOS = 0x6fffffff;
 
+inline constexpr std::int64_t DT_DEBUG = 21;
 inline constexpr std::int64_t DT_NULL = 0;
 inline constexpr std::int64_t DT_NEEDED = 1;
 inline constexpr std::int64_t DT_PLTRELSZ = 2;
 inline constexpr std::int64_t DT_PLTGOT = 3;
+inline constexpr std::int64_t DT_HASH = 4;
 inline constexpr std::int64_t DT_STRTAB = 5;
 inline constexpr std::int64_t DT_SYMTAB = 6;
 inline constexpr std::int64_t DT_RELA = 7;
@@ -139,6 +141,7 @@ inline constexpr std::uint32_t R_X86_64_REX_GOTPCRELX = 42;
 
 inline constexpr std::uint8_t STB_GLOBAL = 1;
 inline constexpr std::uint8_t STB_WEAK = 2;
+inline constexpr std::uint8_t STT_NOTYPE = 0;
 inline constexpr std::uint8_t STT_FUNC = 2;
 inline constexpr std::uint8_t STV_DEFAULT = 0;
 inline constexpr std::uint16_t SHN_UNDEF = 0;
