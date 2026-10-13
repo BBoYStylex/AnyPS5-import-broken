@@ -166,7 +166,8 @@ int APS5_VABI ftrylockfile_nid_postfix(FileStream* stream) {
 }
 
 std::uint64_t APS5_VABI _Stoul_nid_postfix(const char* str, char** endptr, int base) {
-    return ParseGuestInteger(str, endptr, base, [](const char* text, char** end, int radix) { return static_cast<std::uint64_t>(std::strtoull(text, end, radix)); });
+    if (StopAtPrefixLetter_nid_no_patch(str, endptr, base)) return 0;
+    return std::strtoull(str, endptr, base);
 }
 
 void APS5_VABI _Locksyslock_nid_postfix() {

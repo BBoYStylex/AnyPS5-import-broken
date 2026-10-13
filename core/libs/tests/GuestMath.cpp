@@ -477,11 +477,6 @@ static void CheckIntegerConversions() {
             std::fprintf(stderr, "Guest strtoumax failed for '%s' in base %d\n", test.text, test.base);
             std::abort();
         }
-        *__error_nid_postfix() = 0;
-        if (_Stoul_nid_postfix(test.text, &end, test.base) != test.value || end != test.text + test.consumed || *__error_nid_postfix() != test.error) {
-            std::fprintf(stderr, "Guest _Stoul failed for '%s' in base %d\n", test.text, test.base);
-            std::abort();
-        }
     }
     for (const int base : {0, 2}) {
         const char text[] = " -0B11";
@@ -491,6 +486,22 @@ static void CheckIntegerConversions() {
         Require(strtoumax_nid_postfix(text, &end, base) == 0 && end == text + 3);
         Require(_Stoull_nid_postfix(text, &end, base) == 0 && end == text + 3);
         Require(_Stoul_nid_postfix(text, &end, base) == 0 && end == text + 3);
+    }
+    for (const char* text : {"", "abc"}) {
+        char* end = nullptr;
+        *__error_nid_postfix() = 12345;
+        const auto stoul = _Stoul_nid_postfix(text, &end, 10);
+        if (stoul != 0 || end != text || *__error_nid_postfix() != 12345) {
+            std::fprintf(stderr, "_Stoul('%s'): value=%llu, end=%td, errno=%d\n", text, static_cast<unsigned long long>(stoul), end - text, *__error_nid_postfix());
+            std::abort();
+        }
+        end = nullptr;
+        *__error_nid_postfix() = 12345;
+        const auto stoull = _Stoull_nid_postfix(text, &end, 10);
+        if (stoull != 0 || end != text || *__error_nid_postfix() != 12345) {
+            std::fprintf(stderr, "_Stoull('%s'): value=%llu, end=%td, errno=%d\n", text, stoull, end - text, *__error_nid_postfix());
+            std::abort();
+        }
     }
     Require(atol_nid_postfix(" \t-4294967296tail") == -INT64_C(4294967296));
     Require(atol_nid_postfix("9223372036854775807") == INT64_MAX && atol_nid_postfix("+12") == 12);

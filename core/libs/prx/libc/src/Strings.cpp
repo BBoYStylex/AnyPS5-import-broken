@@ -210,7 +210,10 @@ long double APS5_VABI strtold_nid_postfix(const char* str, char** endptr) {
 }
 
 int APS5_VABI atoi_nid_postfix(const char* str) {
-    return static_cast<int>(strtol_nid_postfix(str, nullptr, 10));
+    const int savedError = errno;
+    const int value = static_cast<int>(strtol_nid_postfix(str, nullptr, 10));
+    errno = savedError;
+    return value;
 }
 
 std::int64_t APS5_VABI atol_nid_postfix(const char* str) {
@@ -388,7 +391,8 @@ char* APS5_VABI strnstr_nid_postfix(const char* haystack, const char* needle, si
 }
 
 unsigned long long APS5_VABI _Stoull_nid_postfix(const char* str, char** endptr, int base) {
-    return ParseGuestInteger(str, endptr, base, [](const char* text, char** end, int radix) { return std::strtoull(text, end, radix); });
+    if (StopAtPrefixLetter_nid_no_patch(str, endptr, base)) return 0;
+    return std::strtoull(str, endptr, base);
 }
 
 size_t APS5_VABI wcslen_nid_postfix(const char16_t* s) {
