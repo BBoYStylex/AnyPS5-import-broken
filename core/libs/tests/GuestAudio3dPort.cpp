@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <exception>
 #include <vector>
 
@@ -29,6 +30,7 @@ int APS5_VABI sceAudio3dObjectSetAttribute(std::uint32_t port_id, std::uint32_t 
 int APS5_VABI sceAudio3dPortGetParameters(std::uint32_t port_id, Audio3dOpenParameters* out);
 const char* APS5_VABI sceAudio3dStrError(int error_code);
 int APS5_VABI sceAudio3dPortGetAttributesSupported(std::uint32_t port_id, std::uint32_t* capabilities, std::uint32_t* num_capabilities);
+int APS5_VABI sceAudio3dPortGetStatus(void);
 }
 
 namespace {
@@ -353,7 +355,8 @@ void CheckRemainingExports() {
     Require(sceAudio3dObjectSetAttribute(0, 2, 0x10001, &value, sizeof(value)) == INVALID_OBJECT, "object set attribute on an unreserved object");
     Require(sceAudio3dPortGetParameters(1, nullptr) == INVALID_PORT, "get parameters on port 1");
     Require(sceAudio3dPortGetParameters(0, nullptr) == INVALID_PARAMETER, "get parameters needs an output");
-    Audio3dOpenParameters out{};
+    Audio3dOpenParameters out;
+    std::memset(&out, 0xAA, sizeof(out));
     Require(sceAudio3dPortGetParameters(0, &out) == 0, "get parameters");
     Require(out.size_this == 0x28, "the stored parameters use the full size");
     Require(out.granularity == parameters.granularity && out.rate == parameters.rate, "the stored granularity and rate");
@@ -368,6 +371,7 @@ void CheckRemainingExports() {
     Require(sceAudio3dPortGetAttributesSupported(1, &capabilities, &num_capabilities) == INVALID_PORT, "attributes supported on port 1");
     Require(sceAudio3dPortGetAttributesSupported(0, &capabilities, nullptr) == INVALID_PARAMETER, "attributes supported needs a count");
     Require(sceAudio3dPortGetAttributesSupported(0, nullptr, &num_capabilities) == 0 && num_capabilities == 0, "no object attribute capabilities");
+    RequireThrows([] { sceAudio3dPortGetStatus(); }, "an unimplemented export throws");
     Require(sceAudio3dPortClose(0) == 0, "close");
 }
 

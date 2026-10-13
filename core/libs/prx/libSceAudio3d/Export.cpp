@@ -127,6 +127,7 @@ void APS5_VABI sceAudio3dGetDefaultOpenParameters(Audio3dOpenParameters* p) {
     if (p == nullptr) APS5_INVALID_ARG_EX;
     constexpr Audio3dOpenParameters defaults{0x20, 256, 0, 512, 2, 2, 0, 0};
     static_assert(offsetof(Audio3dOpenParameters, num_beds) == 0x20);
+    static_assert(sizeof(Audio3dOpenParameters) == 0x28);
     std::memcpy(p, &defaults, defaults.size_this);
 }
 
@@ -421,6 +422,7 @@ int APS5_VABI sceAudio3dPortGetParameters(uint32_t port_id, Audio3dOpenParameter
     std::lock_guard lock(g_mutex);
     if (!PortIsOpen(port_id)) return AUDIO3D_ERROR_INVALID_PORT;
     if (out == nullptr) return AUDIO3D_ERROR_INVALID_PARAMETER;
+    *out = Audio3dOpenParameters{};
     out->size_this = 0x28;
     out->granularity = g_port.granularity;
     out->rate = g_port.rate;
