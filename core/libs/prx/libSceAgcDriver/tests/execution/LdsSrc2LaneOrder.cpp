@@ -119,7 +119,7 @@ std::string Hex(std::uint32_t value) {
     return text;
 }
 
-void Run(AgcDriver::VulkanDevice& device, std::span<const std::uint32_t> code, std::uint32_t threads) {
+void Run(AgcDriver::VulkanDevice& device, std::span<const std::uint32_t> code, std::uint32_t threads, std::uint32_t hostSubgroup) {
     Output.fill(0xdeadbeefu);
     std::vector<std::uint32_t> userData(8, 0u);
     const auto input = BufferDescriptor(Input.data(), static_cast<std::uint32_t>(Input.size() * 4u));
@@ -134,18 +134,20 @@ void Run(AgcDriver::VulkanDevice& device, std::span<const std::uint32_t> code, s
         device.Target(),
         {0, 0, 0, 128}
     };
+    if (hostSubgroup != 0u) request.target.subgroupSize = hostSubgroup;
     request.useCache = false;
     const auto result = ShaderRecompiler::Recompile(request);
+    Require(hostSubgroup == 0u || result.hostSubgroupSize == hostSubgroup, "lds src2 lane order: the program was not laid out for a " + std::to_string(hostSubgroup) + "-lane host subgroup");
     device.Dispatch(result, 1, 1, 1, {}, reinterpret_cast<std::uintptr_t>(code.data()));
     device.WaitIdle();
 }
 
-void Check(AgcDriver::VulkanDevice& device, std::span<const std::uint32_t> code, std::uint32_t threads, std::uint32_t first) {
+void Check(AgcDriver::VulkanDevice& device, std::span<const std::uint32_t> code, std::uint32_t threads, std::uint32_t first, std::uint32_t hostSubgroup) {
     Fill(threads, first);
-    Run(device, code, threads);
+    Run(device, code, threads, hostSubgroup);
     const auto expected = Expected(threads);
     for (std::uint32_t word = 0; word < expected.size(); ++word) {
-        Require(Output[word] == expected[word], "lds src2 lane order: wave" + std::to_string(threads) + " LDS word " + std::to_string(word) + " is " + Hex(Output[word]) + ", expected " + Hex(expected[word]));
+        Require(Output[word] == expected[word], "lds src2 lane order: wave" + std::to_string(threads) + " on a " + (hostSubgroup == 0u ? std::string("default") : std::to_string(hostSubgroup) + "-lane") + " host subgroup, LDS word " + std::to_string(word) + " is " + Hex(Output[word]) + ", expected " + Hex(expected[word]));
     }
 }
 
@@ -156,8 +158,10 @@ int main() {
         const auto device = OpenVulkanTestDevice();
         if (!device) return VulkanTestSkipped;
         std::transform(Code.begin(), Code.end(), Code64.begin(), [](std::uint32_t word) { return word == AndSaveexecB32 ? AndSaveexecB64 : word == MovExecLo ? MovExec : word; });
-        Check(*device, Code, 32u, 0u);
-        Check(*device, Code64, 64u, 28u);
+        Check(*device, Code, 32u, 0u, 0u);
+        Check(*device, Code64, 64u, 28u, 0u);
+        if (device->ComputeTarget(32u).subgroupSize == 32u) Check(*device, Code64, 64u, 28u, 32u);
+        else std::puts("lds src2 lane order: wave64 on a 32-lane host subgroup skipped, the device cannot require 32-lane subgroups");
         std::puts("lds src2 lane order tests passed");
         return 0;
     } catch (const std::exception& error) {
