@@ -523,6 +523,13 @@ int main() {
     Require(std::filesystem::file_size(renamedFrom / "child") == 5 && std::filesystem::remove_all(renamedFull) == 2);
     Require(sceKernelRename(renamedFromName.c_str(), renamedOnto.generic_string().c_str()) == 0);
     Require(!std::filesystem::exists(renamedFrom) && std::filesystem::file_size(renamedOnto / "child") == 5);
+    const auto renamedSlash = root / "kernel-rename-slash";
+    Require(sceKernelRename(renamedOnto.generic_string().c_str(), (renamedSlash.generic_string() + "/").c_str()) == 0);
+    Require(!std::filesystem::exists(renamedOnto) && std::filesystem::file_size(renamedSlash / "child") == 5);
+    Require(rename_nid_postfix(renamedSlash.generic_string().c_str(), (renamedOnto.generic_string() + "/").c_str()) == 0);
+    Require(!std::filesystem::exists(renamedSlash) && std::filesystem::file_size(renamedOnto / "child") == 5);
+    Require(rename_nid_postfix(presentName.c_str(), (renamedSlash.generic_string() + "/").c_str()) == -1 && *__error_nid_postfix() == 2);
+    Require(std::filesystem::exists(present) && !std::filesystem::exists(renamedSlash));
     Require(std::filesystem::remove_all(renamedOnto) == 2);
     Require(sceKernelRmdir("") == static_cast<int>(0x80020002u));
     Require(sceKernelMkdir("", 0700) == static_cast<int>(0x80020002u));
