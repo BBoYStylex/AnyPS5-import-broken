@@ -1218,7 +1218,7 @@ int APS5_VABI sceKernelUtimes_nid_postfix(const char* path, const KernelTimeval*
     }
     std::filesystem::path native;
     if (const int error = ResolvePathError_nid_no_patch(path, native)) return SceKernelError(error);
-    if (NativeUtimes(native, times) != 0) return SceErrorFromErrno(errno);
+    if (NativeUtimes(native, times) != 0) return PathFailure(native);
     return 0;
 }
 
@@ -1236,7 +1236,7 @@ int APS5_VABI lutimes_nid_postfix(const char* path, const KernelTimeval* times) 
     }
     std::filesystem::path native;
     if (const int error = ResolvePathError_nid_no_patch(path, native)) return PosixFailure(error);
-    if (NativeUtimes(native, times, false) != 0) return PosixResult(SceErrorFromErrno(errno));
+    if (NativeUtimes(native, times, false) != 0) return PosixResult(PathFailure(native));
     return 0;
 }
 
