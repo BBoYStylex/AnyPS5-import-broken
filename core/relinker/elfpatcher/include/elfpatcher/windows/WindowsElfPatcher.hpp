@@ -11,7 +11,7 @@ namespace Elfpatcher::Windows {
 
 class WindowsPePatcher : public IElfPatcher {
 public:
-    explicit WindowsPePatcher(bool windowsGui = false, std::optional<std::vector<std::uint8_t>> icon = std::nullopt, std::filesystem::path iconName = "icon0.png", std::function<void(std::uint64_t, std::uint64_t)> progress = {}, std::optional<std::uint64_t> fixedBase = std::nullopt);
+    explicit WindowsPePatcher(bool windowsGui = false, std::optional<std::vector<std::uint8_t>> icon = std::nullopt, std::filesystem::path iconName = "icon0.png", std::function<void(std::uint64_t, std::uint64_t)> progress = {}, std::optional<std::uint64_t> fixedBase = std::nullopt, bool traceImports = false);
     const std::string& GetDiagnostics() const;
 
 
@@ -24,7 +24,7 @@ private:
     std::string diagnostics;
     std::filesystem::path iconName;
     std::optional<std::uint64_t> fixedBase;
-
+    bool traceImports;
 };
 
 }
