@@ -95,6 +95,16 @@ bool Contains(const dl_phdr_info& image, std::uintptr_t begin, std::uint64_t siz
     return false;
 }
 
+bool Readable(const dl_phdr_info& image, std::uintptr_t begin, std::uint64_t size) {
+    for (std::uint16_t i = 0; i < image.dlpi_phnum; ++i) {
+        const auto& header = image.dlpi_phdr[i];
+        if (header.p_type != PT_LOAD || (header.p_flags & PF_R) == 0) continue;
+        const std::uintptr_t start = image.dlpi_addr + header.p_vaddr;
+        if (begin >= start && begin - start <= header.p_memsz && size <= header.p_memsz - (begin - start)) return true;
+    }
+    return false;
+}
+
 struct FrameTableCache {
     std::mutex mutex;
     unsigned long long unloads = 0;
@@ -154,7 +164,7 @@ void Fill(const dl_phdr_info& image, TInfo& info) {
                 info.eh_frame_hdr_size = ToU32(header.p_memsz, "eh_frame_hdr size");
                 info.eh_frame_addr = tables.frames;
                 info.eh_frame_size = ToU32(tables.framesSize + TerminatorSize, "eh_frame size");
-            } else if (header.p_type == PT_DYNAMIC) {
+            } else if (header.p_type == PT_DYNAMIC && Readable(image, address, header.p_memsz)) {
                 for (const auto* entry = reinterpret_cast<const Elf64_Dyn*>(address); entry->d_tag != DT_NULL; ++entry) {
                     if (entry->d_tag == DT_INIT) info.init_proc_addr = image.dlpi_addr + entry->d_un.d_ptr;
                     else if (entry->d_tag == DT_FINI) info.fini_proc_addr = image.dlpi_addr + entry->d_un.d_ptr;
