@@ -1337,6 +1337,16 @@ class Vector(Integer):
         for index in range(16):
             self.set_ymm_upper(index, '0')
 
+    def op_vptest(self):
+        left, right = self.operands()
+        _, bits = self.vex_register(left)
+        a, b = self.vex_read(left, bits), self.vex_read(right, bits)
+        self.set_flag('zf', self.v(f'icmp eq i{bits} {self.v(f"and i{bits} {a}, {b}")}, 0'))
+        inverted = self.v(f'xor i{bits} {a}, -1')
+        self.set_flag('cf', self.v(f'icmp eq i{bits} {self.v(f"and i{bits} {inverted}, {b}")}, 0'))
+        for flag in ('of', 'af', 'pf', 'sf'):
+            self.set_flag(flag, 'false')
+
     def set_ymm_upper(self, index, value):
         self.emit(f'store i128 {value}, ptr %Y{index}')
 
@@ -1799,6 +1809,16 @@ class Vector(Integer):
 
     op_comiss = op_ucomiss
 
+    def op_vucomisd(self):
+        if self.ins.bytes[0] not in (0xc4, 0xc5):
+            self.unsupported('only VEX floating comparisons are qualified')
+        self.compare_flags('sd')
+
+    def op_vucomiss(self):
+        if self.ins.bytes[0] not in (0xc4, 0xc5):
+            self.unsupported('only VEX floating comparisons are qualified')
+        self.compare_flags('ss')
+
     def compare_mask(self, kind, predicate_index):
         index, _, source = self.destination_source()
         name, bits, count = FLOAT[kind]
@@ -2248,7 +2268,8 @@ class Vector(Integer):
 
 ALL_FLAGS = frozenset(FLAGS)
 STATUS_WRITERS = {'add', 'sub', 'adc', 'sbb', 'cmp', 'neg', 'and', 'or', 'xor', 'test', 'imul', 'mul', 'popcnt', 'andn',
-                  'bzhi', 'blsr', 'blsi', 'blsmsk', 'ucomisd', 'comisd', 'ucomiss', 'comiss', 'popfq', 'xadd', 'cmpxchg'}
+                  'bzhi', 'blsr', 'blsi', 'blsmsk', 'ucomisd', 'comisd', 'ucomiss', 'comiss', 'popfq', 'xadd', 'cmpxchg', 'vptest',
+                  'vucomisd', 'vucomiss'}
 COUNTED = {'shl', 'sal', 'shr', 'sar', 'shld', 'shrd', 'rol', 'ror'}
 
 
