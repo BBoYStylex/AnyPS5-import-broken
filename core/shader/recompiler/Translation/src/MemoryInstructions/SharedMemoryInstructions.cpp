@@ -196,48 +196,22 @@ bool TranslationContext::dsWrite2(const RdnaInstruction& inst) {
 }
 
 bool TranslationContext::dsSrc2(const RdnaInstruction& inst, IrOpcode opcode) {
-    if (inst.gds) {
-        throw std::runtime_error("GDS src2 operations are not supported");
-    }
-    const MemoryInfo memory = sharedMemoryInfoFromInstruction(inst);
-    const IrU32 address = readU32(inst.source0);
-    MemoryInfo source = memory;
-    source.offset = memory.secondaryOffset;
-    source.secondaryOffset = 0u;
-    IrValue* value = loadSharedU32(1u, address, source, inst.programCounter);
-    MemoryInfo target = memory;
-    target.secondaryOffset = 0u;
-    target.flushDenormals = sharedFloatFlush(opcode);
-    IrValue& active = ir.GetExec();
-    (void)ir.Emit(opcode, IrOpcodeType(opcode), {&address.Value(), value, &active}, addMemoryInfo(target, inst.programCounter));
-    return true;
+    return emitSharedSrc2(inst, opcode, IrOpcode::SharedSrc2U32);
 }
 
 bool TranslationContext::dsSrc2B64(const RdnaInstruction& inst, IrOpcode opcode) {
+    return emitSharedSrc2(inst, opcode, IrOpcode::SharedSrc2U64);
+}
+
+bool TranslationContext::emitSharedSrc2(const RdnaInstruction& inst, IrOpcode update, IrOpcode opcode) {
     if (inst.gds) {
         throw std::runtime_error("GDS src2 operations are not supported");
     }
-    const MemoryInfo memory = sharedMemoryInfoFromInstruction(inst);
+    MemoryInfo memory = sharedMemoryInfoFromInstruction(inst);
+    memory.flushDenormals = sharedFloatFlush(update);
     const IrU32 address = readU32(inst.source0);
-    MemoryInfo source = memory;
-    source.offset = memory.secondaryOffset;
-    source.secondaryOffset = 0u;
-    IrValue* loaded = loadSharedU32(2u, address, source, inst.programCounter);
-    IrValue& zero = ir.Constant(0u);
-    const auto aligned = [&](IrValue& byteAddress) -> IrValue& { return ir.IEqual(ir.BitwiseAnd(byteAddress, ir.Constant(7u)), zero); };
-    IrValue& sourceAligned = aligned(ir.IAdd(address.Value(), ir.Constant(memory.secondaryOffset)));
-    IrValue& low = ir.Select(sourceAligned, ir.CompositeExtract(*loaded, 0u), zero);
-    IrValue& high = ir.Select(sourceAligned, ir.CompositeExtract(*loaded, 1u), zero);
-    MemoryInfo target = memory;
-    target.secondaryOffset = 0u;
-    target.flushDenormals = sharedFloatFlush(opcode);
-    IrValue& active = ir.LogicalAnd(ir.GetExec(), aligned(address.Value()));
-    if (opcode == IrOpcode::WriteSharedU32x2) {
-        (void)ir.Emit(opcode, IrType::Void, {&address.Value(), &low, &high, &active}, addMemoryInfo(target, inst.programCounter));
-    } else {
-        IrValue& value = ir.ConstructU64(low, high);
-        (void)ir.Emit(opcode, IrOpcodeType(opcode), {&address.Value(), &value, &active}, addMemoryInfo(target, inst.programCounter));
-    }
+    IrValue& active = ir.GetExec();
+    (void)ir.Emit(opcode, IrType::Void, {&address.Value(), &ir.Constant(static_cast<std::uint32_t>(update)), &active}, addMemoryInfo(memory, inst.programCounter));
     return true;
 }
 
