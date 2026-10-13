@@ -7,6 +7,7 @@ from test_guest_needed_modules import executable_with_needed
 from test_guest_module_directories import module_with_symbol
 from test_guest_intel_trampolines import PLAIN_SITE, guest_fixture
 from test_linux_dynamic_strings import DT_RUNPATH, dynamic_strings
+from test_macos_output import MachO
 
 
 def main():
@@ -17,7 +18,7 @@ def main():
         checked = 0
         for index, module_directory in enumerate(("sce_module", "prx")):
             for label, run_path in (("default", None), ("origin", "$ORIGIN"),
-                                    ("custom", "$ORIGIN/host libs"), ("absolute", str(work / "absolute libs")),
+                                    ("custom", "$ORIGIN/host libs"), ("absolute", "/absolute libs"),
                                     ("list", "$ORIGIN/first:$ORIGIN/second"),
                                     ("list-bare", "$ORIGIN:$ORIGIN/libs:$ORIGIN")):
                 case = work / f"{index}-{label}"
@@ -50,6 +51,21 @@ def main():
                     if resolved != expected or (label == "absolute" and actual != run_path):
                         failures.append((str(relative), label, actual, str(resolved), str(expected)))
                     checked += 1
+                if label == "absolute":
+                    mac_output = output.with_suffix(".macho")
+                    result = subprocess.run([str(relinker), "--macos", *options, str(source), str(mac_output)],
+                                            capture_output=True, text=True, timeout=20)
+                    assert result.returncode == 0, (result.stdout, result.stderr)
+                    assert MachO(mac_output.read_bytes()).rpaths == [run_path]
+                    for relative in (Path(module_directory) / "needed.prx.guest.prx", Path("sce_module/standard.prx.guest.prx")):
+                        assert MachO((output.parent / "app0" / relative).read_bytes()).rpaths == [run_path]
+                if label == "default":
+                    for invalid in ("C:/host libs", r"\\server\host libs"):
+                        rejected = output.with_suffix(".rejected")
+                        result = subprocess.run([str(relinker), "--rpath", invalid, str(source), str(rejected)],
+                                                capture_output=True, text=True, timeout=20)
+                        assert result.returncode != 0 and "Guest Linux run path" in result.stdout + result.stderr
+                        assert not rejected.exists()
         assert not failures, failures
         print(f"Guest run path tests passed: {checked} module/path combinations")
 
