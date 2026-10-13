@@ -251,9 +251,14 @@ void Trace(const char* format, ...) {
 int PhysicalFile() {
     static const int file = [] {
         const auto name = "/aps5-dmem-" + std::to_string(::getpid());
-        const int created = ::shm_open(name.c_str(), O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+        const int created = ::shm_open(name.c_str(), O_RDWR | O_CREAT | O_EXCL, 0600);
         if (created < 0) throw std::system_error(errno, std::generic_category(), "create direct memory backing");
         ::shm_unlink(name.c_str());
+        if (::fcntl(created, F_SETFD, FD_CLOEXEC) != 0) {
+            const int error = errno;
+            ::close(created);
+            throw std::system_error(error, std::generic_category(), "mark direct memory backing close-on-exec");
+        }
         if (ftruncate(created, static_cast<off_t>(DIRECT_MEMORY_SIZE)) != 0) {
             const int error = errno;
             ::close(created);

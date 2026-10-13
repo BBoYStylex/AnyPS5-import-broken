@@ -161,6 +161,21 @@ std::string NamedHostPath(const char* path, int& error) {
     return hostName;
 }
 
+int HostShmOpen(const char* name, int flags, mode_t mode) {
+#ifdef __APPLE__
+    const int descriptor = ::shm_open(name, flags & ~O_CLOEXEC, mode);
+    if (descriptor >= 0 && (flags & O_CLOEXEC) != 0 && ::fcntl(descriptor, F_SETFD, FD_CLOEXEC) != 0) {
+        const int error = errno;
+        ::close(descriptor);
+        errno = error;
+        return -1;
+    }
+    return descriptor;
+#else
+    return ::shm_open(name, flags, mode);
+#endif
+}
+
 int OpenNamedFile(const char* path, int flags, int mode) {
     int validationError = 0;
     const auto hostName = NamedHostPath(path, validationError);
@@ -179,13 +194,13 @@ int OpenNamedFile(const char* path, int flags, int mode) {
     bool created = false;
     int descriptor;
     if (flags & SCE_KERNEL_O_CREAT) {
-        descriptor = ::shm_open(hostName.c_str(), hostFlags | O_CLOEXEC | O_EXCL, permissions);
+        descriptor = HostShmOpen(hostName.c_str(), hostFlags | O_CLOEXEC | O_EXCL, permissions);
         created = descriptor >= 0;
         if (descriptor < 0 && errno == EEXIST && !(flags & SCE_KERNEL_O_EXCL)) {
-            descriptor = ::shm_open(hostName.c_str(), (hostFlags & ~(O_CREAT | O_EXCL)) | O_CLOEXEC, 0);
+            descriptor = HostShmOpen(hostName.c_str(), (hostFlags & ~(O_CREAT | O_EXCL)) | O_CLOEXEC, 0);
         }
     } else {
-        descriptor = ::shm_open(hostName.c_str(), hostFlags | O_CLOEXEC, 0);
+        descriptor = HostShmOpen(hostName.c_str(), hostFlags | O_CLOEXEC, 0);
     }
     if (descriptor >= 0) {
         if (!created || ::fchmod(descriptor, permissions) == 0) return descriptor;

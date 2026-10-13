@@ -9,6 +9,7 @@
 #include <sched.h>
 #include <unistd.h>
 #ifdef __APPLE__
+#include <crt_externs.h>
 #include <mach/mach.h>
 #include <pthread.h>
 #endif
@@ -83,6 +84,11 @@ public:
             throw std::system_error(GetLastError(), std::system_category(), "Reading process arguments");
         for (int index = 0; index < count; ++index)
             arguments.push_back(toUtf8(values.get()[index]));
+#elif defined(__APPLE__)
+        const int count = *_NSGetArgc();
+        char** values = *_NSGetArgv();
+        for (int index = 0; index < count; ++index)
+            arguments.emplace_back(values[index]);
 #else
         std::ifstream stream("/proc/self/cmdline", std::ios::binary);
         if (!stream)
