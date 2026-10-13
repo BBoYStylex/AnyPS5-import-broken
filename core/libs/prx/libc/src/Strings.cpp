@@ -2,7 +2,6 @@
 #include <cstdint>
 #include <cstring>
 #include <cstdlib>
-#include <cctype>
 #include <cwchar>
 #include <cstdio>
 #include <limits>
@@ -12,6 +11,10 @@
 #include "prx/libc/include/SonyCrt.hpp"
 
 namespace {
+
+constexpr int LowerCase(unsigned char value) {
+    return value >= 'A' && value <= 'Z' ? value - 'A' + 'a' : value;
+}
 
 int CompareUnits(char16_t left, char16_t right) {
     return left < right ? -1 : 1;
@@ -232,16 +235,16 @@ extern "C" {
 
 int APS5_VABI strcasecmp_nid_postfix(const char* s1, const char* s2) {
     for (;; ++s1, ++s2) {
-        const int a = std::tolower(static_cast<unsigned char>(*s1));
-        const int b = std::tolower(static_cast<unsigned char>(*s2));
+        const int a = LowerCase(static_cast<unsigned char>(*s1));
+        const int b = LowerCase(static_cast<unsigned char>(*s2));
         if (a != b || *s1 == 0) return a - b;
     }
 }
 
 int APS5_VABI strncasecmp_nid_postfix(const char* s1, const char* s2, size_t n) {
     for (; n != 0; ++s1, ++s2, --n) {
-        const int a = std::tolower(static_cast<unsigned char>(*s1));
-        const int b = std::tolower(static_cast<unsigned char>(*s2));
+        const int a = LowerCase(static_cast<unsigned char>(*s1));
+        const int b = LowerCase(static_cast<unsigned char>(*s2));
         if (a != b) return a - b;
         if (*s1 == 0) break;
     }
