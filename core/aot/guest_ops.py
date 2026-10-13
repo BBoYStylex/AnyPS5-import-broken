@@ -616,14 +616,17 @@ class Integer(Emitter):
     def double_shift(self, left):
         destination, source = self.operands()[:2]
         bits = destination.size * 8
-        if bits == 16:
-            self.unsupported('16-bit double shift')
         value, fill = self.read(destination), self.read(source)
         count = self.shift_count(destination, bits, 2)
+        if bits == 16:
+            self.trap_if(self.v(f'icmp ugt i8 {count}, 16'), TRAP_UNSUPPORTED)
         amount = self.zext(count, 8, bits)
         name = 'fshl' if left else 'fshr'
         arguments = f'i{bits} {value}, i{bits} {fill}' if left else f'i{bits} {fill}, i{bits} {value}'
         result = self.v(f'call i{bits} @llvm.{name}.i{bits}({arguments}, i{bits} {amount})')
+        if bits == 16:
+            complete = self.v(f'icmp eq i8 {count}, 16')
+            result = self.v(f'select i1 {complete}, i16 {fill}, i16 {result}')
         if left:
             out = self.v(f'lshr i{bits} {value}, {self.v(f"sub i{bits} {bits}, {amount}")}')
         else:

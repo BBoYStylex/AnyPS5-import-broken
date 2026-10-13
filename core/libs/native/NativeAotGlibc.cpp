@@ -23,6 +23,7 @@
 #include <sys/resource.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <utime.h>
 #include <vector>
 
 namespace NativeAotGlibcSupport {
@@ -1265,7 +1266,42 @@ void Swprintf(State& state) {
     ReturnInteger(state, static_cast<std::int64_t>(text.size()));
 }
 
+void Strncpy(State& state) {
+    ReturnPointer(state, std::strncpy(Pointer<char>(state, 0), Text(state, 1), Argument(state, 2)));
+}
+
+void Strcat(State& state) {
+    ReturnPointer(state, std::strcat(Pointer<char>(state, 0), Text(state, 1)));
+}
+
+void Rewind(State& state) {
+    ErrnoScope scope;
+    std::rewind(Pointer<FILE>(state, 0));
+}
+
+void Utime(State& state) {
+    ErrnoScope scope;
+    struct utimbuf value{};
+    if (Argument(state, 1)) {
+        std::int64_t times[2];
+        std::memcpy(times, Pointer<void>(state, 1), sizeof(times));
+        value.actime = times[0];
+        value.modtime = times[1];
+    }
+    ReturnInteger(state, ::utime(Text(state, 0), Argument(state, 1) ? &value : nullptr));
+}
+
 const NativeAotGuest::ProviderBinding Bindings[] = {
+    {"fgetc", Getc, nullptr},
+    {"fopen64", Fopen, nullptr},
+    {"signal", SysvSignal, nullptr},
+    {"strncpy", Strncpy, nullptr},
+    {"open64", Open, nullptr},
+    {"utime", Utime, nullptr},
+    {"strcat", Strcat, nullptr},
+    {"rewind", Rewind, nullptr},
+    {"__lxstat64", LxStat, nullptr},
+    {"__xstat64", XStat, nullptr},
     {"printf", Printf, nullptr},
     {"puts", Puts, nullptr},
     {"strtoul", IntegerParse<unsigned long, std::strtoul>, nullptr},

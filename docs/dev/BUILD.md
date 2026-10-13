@@ -374,3 +374,16 @@ The concurrent profile defaults to `--ordered-access atomic` to use volatile seq
 For a separately qualified zstd corpus, `core/aot/examples/zstd_benchmark.py` compares supplied ARM64 AOT/native and x86-64 Rosetta executables. Pass `--aot`, `--arm64`, `--x86`, `--decoder`, `--dataset` and a fresh `--output` JSON path; `--baseline-aot` adds another AOT implementation. It validates compressed outputs before alternating timed runs and records hashes, wall/CPU time and peak RSS. `--single-thread` also disables asynchronous I/O on every variant. Source and feature equivalence must be qualified separately. These are warm CLI measurements, not cold-cache, isolated kernel or game benchmarks.
 
 The guest glibc bridge can also qualify an adapted jq CLI without Oniguruma. Build a source-equivalent ARM64 reference separately, then compare results, errors and exit codes with `python3 core/aot/examples/jq_transfer.py --aot /path/to/aot-jq --reference /path/to/arm64-jq --output /path/to/new-receipt.json`. Source archives, converted binaries and receipts stay outside the repository. This comparison does not establish arbitrary glibc libm bit equivalence or console compatibility.
+
+
+### Independent bzip2 transfer
+
+The `core/aot/examples/bzip2_transfer.py` checker accepts an AOT executable, a
+source-equivalent ARM64 reference and a fresh output receipt (`--help` lists
+the arguments). It covers levels, round trips, invalid/truncated streams,
+concatenated members and file replacement with mode and timestamp preservation.
+Python's independent `bz2` decoder checks compressed output. Pin bzip2 1.0.8
+source SHA-256 `ab5a03176ee106d3f0fa90e381da478ddae405918153cca248e682cd0c4a2269`
+and record both build configurations. The tested input is a whole-program
+ELF with section metadata removed. This is an adapted consumer, not an unseen
+transfer after these changes; it makes no performance claim.

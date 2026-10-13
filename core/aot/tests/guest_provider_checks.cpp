@@ -216,6 +216,51 @@ void PosixData() {
     Check(Call("stpcpy", {Address(formatted), Address("copied")}) == Address(formatted + 6) && std::string(formatted) == "copied", "stpcpy returns end");
 }
 
+void FileCompatibility() {
+    char text[16];
+    std::memset(text, 'X', sizeof(text));
+    Check(Call("strncpy", {Address(text), Address("ab"), 5}) == Address(text) &&
+          text[0] == 'a' && text[1] == 'b' && text[2] == 0 && text[4] == 0 && text[5] == 'X', "strncpy pads only bound");
+    Call("strncpy", {Address(text), Address("abcd"), 2});
+    Check(text[0] == 'a' && text[1] == 'b' && text[5] == 'X', "strncpy bounded prefix");
+    text[2] = 0;
+    Check(Call("strcat", {Address(text), Address("cd")}) == Address(text) && std::string(text) == "abcd", "strcat result");
+    char path[] = "/tmp/aot-file-XXXXXX";
+    const auto descriptor = mkstemp(path);
+    Check(descriptor >= 0, "temporary file");
+    if (descriptor < 0) return;
+    write(descriptor, "az", 2);
+    close(descriptor);
+    const auto file = Call("fopen64", {Address(path), Address("r")});
+    Check(file != 0, "fopen64 opens file");
+    if (file) {
+        Check(Call("fgetc", {file}) == 'a' && Call("fgetc", {file}) == 'z', "fgetc reads bytes");
+        Check(static_cast<int>(Call("fgetc", {file})) == EOF, "fgetc end");
+        Call("rewind", {file});
+        Check(Call("feof", {file}) == 0 && Call("fgetc", {file}) == 'a', "rewind clears EOF and seeks");
+        Call("fclose", {file});
+    }
+    const std::int64_t times[2] = {1650000000, 1660000000};
+    Check(Call("utime", {Address(path), Address(times)}) == 0, "utime result");
+    struct stat observed{};
+    Check(stat(path, &observed) == 0 && observed.st_atime == times[0] && observed.st_mtime == times[1], "utime LP64 layout");
+    const auto opened = static_cast<int>(Call("open64", {Address(path), 0, 0}));
+    Check(opened >= 0, "open64 flags");
+    if (opened >= 0) close(opened);
+    unsigned char normal[144] = {}, large[144] = {};
+    Check(Call("__xstat", {1, Address(path), Address(normal)}) == 0 &&
+          Call("__xstat64", {1, Address(path), Address(large)}) == 0 && std::memcmp(normal, large, sizeof(normal)) == 0, "stat64 LP64 alias");
+    const auto link = std::string(path) + "-link";
+    Check(symlink(path, link.c_str()) == 0, "symlink setup");
+    Check(Call("__lxstat", {1, Address(link.c_str()), Address(normal)}) == 0 &&
+          Call("__lxstat64", {1, Address(link.c_str()), Address(large)}) == 0 && std::memcmp(normal, large, sizeof(normal)) == 0, "lstat64 preserves link");
+    unlink(link.c_str());
+    unlink(path);
+    Check(Call("fopen64", {Address(path), Address("r")}) == 0 && *reinterpret_cast<int*>(Call("__errno_location", {})) == 2, "fopen64 missing file errno");
+    const auto previous = Call("signal", {13, 1});
+    Check(Call("signal", {13, previous}) == 1, "signal ignore round trip");
+}
+
 void ThreadKeys() {
     std::uint32_t output[2] = {0, 0xfeedface};
     Check(Call("pthread_key_create", {Address(output), 0}) == 0 && output[1] == 0xfeedface, "TLS key writes only four bytes");
@@ -252,6 +297,7 @@ int main() {
     Mathematics();
     PosixData();
     ThreadKeys();
+    FileCompatibility();
     std::printf(failures == 0 ? "ok\n" : "failed\n");
     return failures == 0 ? 0 : 1;
 }
