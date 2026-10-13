@@ -200,12 +200,19 @@ static void UnpinStack(const void* context, std::uint64_t bytes) {
 extern "C" void Aps5FiberSwitchStack_nid_no_patch(void** save, void* load);
 extern "C" void Aps5FiberTrampoline_nid_no_patch();
 
-asm(R"(
-    .text
-    .globl Aps5FiberSwitchStack_nid_no_patch
-    .type Aps5FiberSwitchStack_nid_no_patch, @function
-Aps5FiberSwitchStack_nid_no_patch:
-    push %rbp
+#ifdef __APPLE__
+#define APS5_FIBER_SYMBOL(name) "_" name
+#define APS5_FIBER_FUNCTION(name) ".globl _" name "\n_" name ":\n"
+#define APS5_FIBER_END(name) ""
+#else
+#define APS5_FIBER_SYMBOL(name) name
+#define APS5_FIBER_FUNCTION(name) ".globl " name "\n.type " name ", @function\n" name ":\n"
+#define APS5_FIBER_END(name) ".size " name ", .-" name "\n"
+#endif
+
+asm(".text\n"
+    APS5_FIBER_FUNCTION("Aps5FiberSwitchStack_nid_no_patch")
+    R"(    push %rbp
     push %rbx
     push %r12
     push %r13
@@ -226,17 +233,13 @@ Aps5FiberSwitchStack_nid_no_patch:
     pop %rbx
     pop %rbp
     ret
-    .size Aps5FiberSwitchStack_nid_no_patch, .-Aps5FiberSwitchStack_nid_no_patch
-
-    .globl Aps5FiberTrampoline_nid_no_patch
-    .type Aps5FiberTrampoline_nid_no_patch, @function
-Aps5FiberTrampoline_nid_no_patch:
-    mov %r12, %rdi
-    and $-16, %rsp
-    call Aps5FiberMain_nid_no_patch
-    ud2
-    .size Aps5FiberTrampoline_nid_no_patch, .-Aps5FiberTrampoline_nid_no_patch
-)");
+)"  APS5_FIBER_END("Aps5FiberSwitchStack_nid_no_patch")
+    APS5_FIBER_FUNCTION("Aps5FiberTrampoline_nid_no_patch")
+    "    mov %r12, %rdi\n"
+    "    and $-16, %rsp\n"
+    "    call " APS5_FIBER_SYMBOL("Aps5FiberMain_nid_no_patch") "\n"
+    "    ud2\n"
+    APS5_FIBER_END("Aps5FiberTrampoline_nid_no_patch"));
 
 struct InitialFrame {
     std::uint32_t mxcsr;

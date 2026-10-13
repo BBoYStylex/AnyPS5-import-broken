@@ -21,7 +21,12 @@
 #include <windows.h>
 #else
 #include <dlfcn.h>
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#include <mach-o/loader.h>
+#else
 #include <link.h>
+#endif
 #endif
 
 namespace {
@@ -58,6 +63,15 @@ void* Symbol(Module& module, const char* name) {
 }
 #ifndef _WIN32
 std::uintptr_t MainProgramBase() {
+#ifdef __APPLE__
+    static const std::uintptr_t base = [] {
+        for (std::uint32_t index = 0; index < _dyld_image_count(); ++index) {
+            const auto* header = _dyld_get_image_header(index);
+            if (header != nullptr && header->filetype == MH_EXECUTE) return reinterpret_cast<std::uintptr_t>(header);
+        }
+        return std::uintptr_t{0};
+    }();
+#else
     static const std::uintptr_t base = [] {
         struct Scan {
             std::uintptr_t value = 0;
@@ -72,6 +86,7 @@ std::uintptr_t MainProgramBase() {
             &scan);
         return scan.value;
     }();
+#endif
     return base;
 }
 
