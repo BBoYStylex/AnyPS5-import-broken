@@ -296,38 +296,6 @@ static void RequireTimeout(int socket, int option, int expected) {
     }
 }
 
-static void CheckKernelTimeouts() {
-    const int descriptor = sceNetSocket("kernel-timeouts", 2, 2, 17);
-    Require(descriptor >= 0);
-    const KernelTimeval receive{1, 250000};
-    Require(setsockopt_nid_postfix(descriptor, 0xffff, 0x1006, &receive, sizeof(receive)) == 0);
-    RequireTimeout(descriptor, 0x1006, 1250000);
-    const KernelTimeval send{0, 500000};
-    Require(setsockopt_nid_postfix(descriptor, 0xffff, 0x1005, &send, sizeof(send)) == 0);
-    RequireTimeout(descriptor, 0x1005, 500000);
-    const KernelTimeval invalid{0, 1000000};
-    Require(setsockopt_nid_postfix(descriptor, 0xffff, 0x1006, &invalid, sizeof(invalid)) == -1 && *__error_nid_postfix() == 33);
-    const KernelTimeval negative{-1, 0};
-    Require(setsockopt_nid_postfix(descriptor, 0xffff, 0x1005, &negative, sizeof(negative)) == -1 && *__error_nid_postfix() == 33);
-    const int microseconds = 1000;
-    Require(setsockopt_nid_postfix(descriptor, 0xffff, 0x1006, &microseconds, sizeof(microseconds)) == -1 && *__error_nid_postfix() == 22);
-    RequireTimeout(descriptor, 0x1006, 1250000);
-    RequireTimeout(descriptor, 0x1005, 500000);
-    Require(sceNetSetsockopt(descriptor, 0xffff, 0x1006, &microseconds, sizeof(microseconds)) == 0);
-    RequireTimeout(descriptor, 0x1006, microseconds);
-#ifndef _WIN32
-    std::array<std::uint8_t, 16> loopback{16, 2, 0, 0, 127, 0, 0, 1};
-    Require(sceNetBind_nid_postfix(descriptor, loopback.data(), loopback.size()) == 0);
-    const KernelTimeval brief{0, 50000};
-    Require(setsockopt_nid_postfix(descriptor, 0xffff, 0x1006, &brief, sizeof(brief)) == 0);
-    char buffer[8]{};
-    const auto start = std::chrono::steady_clock::now();
-    Require(Failed(sceNetRecv(descriptor, buffer, sizeof(buffer), 0), 35));
-    Require(std::chrono::steady_clock::now() - start >= std::chrono::milliseconds(40));
-#endif
-    Require(sceNetSocketClose(descriptor) == 0);
-}
-
 static void CheckStreamTimeouts() {
     const int listener = sceNetSocket(nullptr, 2, 1, 6);
     Require(listener >= 0);
@@ -393,6 +361,38 @@ static void CheckStreamTimeouts() {
     Require(sceNetSend(client, late, sizeof(late), 0) == sizeof(late));
     Require(sceNetRecv(accepted, buffer.data(), buffer.size(), 0) == sizeof(late) && std::strcmp(buffer.data(), late) == 0);
     for (const int descriptor : {client, accepted, listener}) Require(sceNetSocketClose(descriptor) == 0);
+}
+
+static void CheckKernelTimeouts() {
+    const int descriptor = sceNetSocket("kernel-timeouts", 2, 2, 17);
+    Require(descriptor >= 0);
+    const KernelTimeval receive{1, 250000};
+    Require(setsockopt_nid_postfix(descriptor, 0xffff, 0x1006, &receive, sizeof(receive)) == 0);
+    RequireTimeout(descriptor, 0x1006, 1250000);
+    const KernelTimeval send{0, 500000};
+    Require(setsockopt_nid_postfix(descriptor, 0xffff, 0x1005, &send, sizeof(send)) == 0);
+    RequireTimeout(descriptor, 0x1005, 500000);
+    const KernelTimeval invalid{0, 1000000};
+    Require(setsockopt_nid_postfix(descriptor, 0xffff, 0x1006, &invalid, sizeof(invalid)) == -1 && *__error_nid_postfix() == 33);
+    const KernelTimeval negative{-1, 0};
+    Require(setsockopt_nid_postfix(descriptor, 0xffff, 0x1005, &negative, sizeof(negative)) == -1 && *__error_nid_postfix() == 33);
+    const int microseconds = 1000;
+    Require(setsockopt_nid_postfix(descriptor, 0xffff, 0x1006, &microseconds, sizeof(microseconds)) == -1 && *__error_nid_postfix() == 22);
+    RequireTimeout(descriptor, 0x1006, 1250000);
+    RequireTimeout(descriptor, 0x1005, 500000);
+    Require(sceNetSetsockopt(descriptor, 0xffff, 0x1006, &microseconds, sizeof(microseconds)) == 0);
+    RequireTimeout(descriptor, 0x1006, microseconds);
+#ifndef _WIN32
+    std::array<std::uint8_t, 16> loopback{16, 2, 0, 0, 127, 0, 0, 1};
+    Require(sceNetBind_nid_postfix(descriptor, loopback.data(), loopback.size()) == 0);
+    const KernelTimeval brief{0, 50000};
+    Require(setsockopt_nid_postfix(descriptor, 0xffff, 0x1006, &brief, sizeof(brief)) == 0);
+    char buffer[8]{};
+    const auto start = std::chrono::steady_clock::now();
+    Require(Failed(sceNetRecv(descriptor, buffer, sizeof(buffer), 0), 35));
+    Require(std::chrono::steady_clock::now() - start >= std::chrono::milliseconds(40));
+#endif
+    Require(sceNetSocketClose(descriptor) == 0);
 }
 
 static void CheckAddressText(int family, const char* text) {
@@ -559,8 +559,8 @@ int main() {
     Require(sceNetSetsockopt(closed, 0xffff, 0x4, &enabled, sizeof(enabled)) == 0);
     Require(close_nid_postfix(closed) == 0);
     Require(Failed(sceNetSocketClose(closed), 9));
-    CheckKernelTimeouts();
     CheckStreamTimeouts();
+    CheckKernelTimeouts();
 
     const int listener = sceNetSocket(nullptr, 2, 1, 6);
     Require(listener >= 0);
