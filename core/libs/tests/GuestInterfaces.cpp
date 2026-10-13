@@ -6,29 +6,25 @@
 #else
 #include <ifaddrs.h>
 #include <netinet/in.h>
+#include <net/if.h>
+#include <sys/ioctl.h>
+#include <unistd.h>
+#if defined(__linux__)
+#include <netpacket/packet.h>
+#include <net/if_arp.h>
+#else
+#include <net/if_dl.h>
+#endif
 #endif
 #include "prx/libc/include/general/VabiMacros.hpp"
+#include "prx/libc/include/Interfaces.hpp"
+#include <map>
+#include <string>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <vector>
-
-struct GuestInterfaceAddress {
-    GuestInterfaceAddress* next;
-    char* name;
-    std::uint32_t flags;
-    void* address;
-    void* netmask;
-    void* destination;
-    void* data;
-};
-static_assert(sizeof(GuestInterfaceAddress) == 56);
-static_assert(offsetof(GuestInterfaceAddress, flags) == 16);
-static_assert(offsetof(GuestInterfaceAddress, address) == 24);
-static_assert(offsetof(GuestInterfaceAddress, netmask) == 32);
-static_assert(offsetof(GuestInterfaceAddress, destination) == 40);
-static_assert(offsetof(GuestInterfaceAddress, data) == 48);
 
 extern "C" {
 int APS5_VABI getifaddrs_nid_postfix(GuestInterfaceAddress** list);
@@ -61,7 +57,7 @@ static HostInterfaceAddress HostAddress(const sockaddr* address) {
 static std::vector<HostInterfaceAddress> HostSnapshot() {
     std::vector<HostInterfaceAddress> entries;
 #ifdef _WIN32
-    const ULONG options = GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER;
+    const ULONG options = GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER | GAA_FLAG_INCLUDE_ALL_INTERFACES;
     ULONG size = 0;
     std::vector<std::uint8_t> storage;
     ULONG result = GetAdaptersAddresses(AF_UNSPEC, options, nullptr, nullptr, &size);
@@ -105,6 +101,70 @@ static std::vector<HostInterfaceAddress> HostSnapshot() {
     return entries;
 }
 
+struct HostLink {
+    unsigned index;
+    unsigned type;
+    std::vector<std::uint8_t> address;
+    std::uint32_t mtu;
+};
+
+static std::map<std::string, HostLink> HostLinks() {
+    std::map<std::string, HostLink> links;
+#ifdef _WIN32
+    ULONG size = 0;
+    std::vector<std::uint8_t> storage;
+    const ULONG options = GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER | GAA_FLAG_INCLUDE_ALL_INTERFACES;
+    ULONG result = GetAdaptersAddresses(AF_UNSPEC, options, nullptr, nullptr, &size);
+    for (unsigned calls = 1; result == ERROR_BUFFER_OVERFLOW && calls < 4; ++calls) {
+        storage.resize(size);
+        result = GetAdaptersAddresses(AF_UNSPEC, options, nullptr, reinterpret_cast<IP_ADAPTER_ADDRESSES*>(storage.data()), &size);
+    }
+    Require(result == NO_ERROR || result == ERROR_NO_DATA);
+    if (result == ERROR_NO_DATA) return links;
+    for (auto* adapter = reinterpret_cast<IP_ADAPTER_ADDRESSES*>(storage.data()); adapter; adapter = adapter->Next) {
+        char name[NDIS_IF_MAX_STRING_SIZE + 1] = {};
+        Require(ConvertInterfaceLuidToNameA(&adapter->Luid, name, sizeof(name)) == NO_ERROR);
+        MIB_IF_ROW2 row{};
+        row.InterfaceLuid = adapter->Luid;
+        Require(GetIfEntry2(&row) == NO_ERROR);
+        const unsigned index = row.InterfaceIndex;
+        const std::string guestName = std::strlen(name) < 16 ? std::string(name) : "if" + std::to_string(index);
+        links.emplace(guestName, HostLink{index, row.Type,
+            {row.PhysicalAddress, row.PhysicalAddress + row.PhysicalAddressLength}, row.Mtu});
+    }
+#else
+    ifaddrs* host = nullptr;
+    Require(::getifaddrs(&host) == 0);
+    for (auto* item = host; item; item = item->ifa_next) {
+        if (!item->ifa_addr) continue;
+#if defined(__linux__)
+        if (item->ifa_addr->sa_family != AF_PACKET) continue;
+        const auto* address = reinterpret_cast<const sockaddr_ll*>(item->ifa_addr);
+        const int descriptor = ::socket(AF_INET, SOCK_DGRAM, 0);
+        Require(descriptor >= 0);
+        ifreq request{};
+        std::strcpy(request.ifr_name, item->ifa_name);
+        Require(::ioctl(descriptor, SIOCGIFMTU, &request) == 0);
+        Require(::close(descriptor) == 0);
+        unsigned type = 0;
+        if (address->sll_hatype == ARPHRD_ETHER) type = 6;
+        if (address->sll_hatype == ARPHRD_LOOPBACK) type = 24;
+        links.emplace(item->ifa_name, HostLink{static_cast<unsigned>(address->sll_ifindex), type,
+            {address->sll_addr, address->sll_addr + address->sll_halen}, static_cast<std::uint32_t>(request.ifr_mtu)});
+#else
+        if (item->ifa_addr->sa_family != AF_LINK) continue;
+        const auto* address = reinterpret_cast<const sockaddr_dl*>(item->ifa_addr);
+        const auto* mac = reinterpret_cast<const std::uint8_t*>(LLADDR(address));
+        Require(item->ifa_data != nullptr);
+        links.emplace(item->ifa_name, HostLink{address->sdl_index, address->sdl_type,
+            {mac, mac + address->sdl_alen}, static_cast<const if_data*>(item->ifa_data)->ifi_mtu});
+#endif
+    }
+    ::freeifaddrs(host);
+#endif
+    return links;
+}
+
 int main() {
     constexpr std::uint32_t knownFlags = 0x1 | 0x2 | 0x8 | 0x10 | 0x40 | 0x80 | 0x100 | 0x200 | 0x8000;
     const std::uint8_t loopbackAddress[] = {127, 0, 0, 1};
@@ -112,9 +172,11 @@ int main() {
     bool matched = false;
     for (unsigned attempt = 0; attempt < 3 && !matched; ++attempt) {
         const std::vector<HostInterfaceAddress> host = HostSnapshot();
+        const auto links = HostLinks();
+        std::map<std::string, bool> foundLinks;
         GuestInterfaceAddress* list = nullptr;
         Require(getifaddrs_nid_postfix(&list) == 0);
-        std::size_t entries = 0;
+        std::size_t entries = 0, ipEntries = 0;
         bool equal = true;
         bool loopback = false;
         for (auto* item = list; item; item = item->next) {
@@ -123,10 +185,31 @@ int main() {
             const std::size_t nameLength = std::strlen(item->name);
             Require(nameLength >= 1 && nameLength <= 15);
             Require((item->flags & ~knownFlags) == 0);
-            Require(item->data == nullptr);
             const auto* address = static_cast<const std::uint8_t*>(item->address);
             const auto* netmask = static_cast<const std::uint8_t*>(item->netmask);
-            Require(address != nullptr && netmask != nullptr);
+            Require(address != nullptr);
+            if (address[1] == 18) {
+                const auto found = links.find(item->name);
+                Require(found != links.end() && foundLinks.emplace(item->name, true).second);
+                const auto& expected = found->second;
+                std::uint16_t index;
+                std::memcpy(&index, address + 2, 2);
+                Require(index == expected.index);
+                Require(address[0] >= 54 && address[0] >= 8 + nameLength + expected.address.size());
+                Require(address[5] == nameLength && address[6] == expected.address.size() && address[7] == 0);
+                Require(std::memcmp(address + 8, item->name, nameLength) == 0);
+                Require(std::memcmp(address + 8 + nameLength, expected.address.data(), expected.address.size()) == 0);
+                if (expected.type) Require(address[4] == expected.type);
+                Require(item->netmask == nullptr && item->destination == nullptr && item->data != nullptr);
+                Require(reinterpret_cast<std::uintptr_t>(address) % 8 == 0);
+                Require(reinterpret_cast<std::uintptr_t>(item->data) % 8 == 0);
+                const auto& data = *static_cast<const GuestInterfaceData*>(item->data);
+                Require(data.dataLength == 152 && data.mtu == expected.mtu);
+                Require(data.type == address[4] && data.addressLength == address[6]);
+                continue;
+            }
+            ++ipEntries;
+            Require(item->data == nullptr && netmask != nullptr);
             Require(reinterpret_cast<std::uintptr_t>(address) % 8 == 0);
             Require(reinterpret_cast<std::uintptr_t>(netmask) % 8 == 0);
             Require((address[0] == 16 && address[1] == 2) || (address[0] == 28 && address[1] == 28));
@@ -144,8 +227,8 @@ int main() {
             }
             if (address[1] == 2 && (item->flags & 0x2)) Require(item->destination != nullptr);
             if (item->flags & 0x10) Require(item->destination != nullptr);
-            if (entries <= host.size()) {
-                const HostInterfaceAddress& expected = host[entries - 1];
+            if (ipEntries <= host.size()) {
+                const HostInterfaceAddress& expected = host[ipEntries - 1];
                 const bool ipv4 = address[1] == 2;
                 const std::size_t offset = ipv4 ? 4 : 8;
                 const std::size_t length = ipv4 ? 4 : 16;
@@ -163,7 +246,7 @@ int main() {
             if (address[1] == 2 && std::memcmp(address + 4, loopbackAddress, 4) == 0)
                 loopback = loopback || (std::memcmp(netmask + 4, loopbackMask, 4) == 0 && (item->flags & 0x9) == 0x9 && !(item->flags & 0x2));
         }
-        matched = equal && entries == host.size() && loopback;
+        matched = equal && ipEntries == host.size() && foundLinks.size() == links.size() && !foundLinks.empty() && loopback;
         freeifaddrs_nid_postfix(list);
     }
     Require(matched);
