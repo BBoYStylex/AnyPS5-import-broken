@@ -74,7 +74,6 @@ bool mappingsCurrent(const std::vector<MappingSpan>& spans) {
 }
 
 bool hasOriginalMapping(std::uint64_t address, std::uint64_t end, const MappingIdentity& identity) {
-    // Preserve the refusal for an unregistered surface: lack of tracking is not proof of reuse.
     if (identity == nullptr) return true;
     while (address < end) {
         const auto mapping = GuestAllocations::GuestAllocationsLookup_nid_postfix(address, true);
@@ -269,7 +268,6 @@ void guardReads(std::uint64_t address, std::size_t bytes) {
 
 void guard(const Context& context, const MultisampleTarget& target) {
     std::unique_lock lock(guardedMutex());
-    // Keep each mapping's identity separately if a surface crosses allocation boundaries.
     for (const auto& span : target.mappings) {
         guarded().push_back({context.device, span.address, span.bytes, target.target.samples, span.identity});
     }
@@ -297,7 +295,6 @@ std::shared_ptr<MultisampleTarget> acquire(const Context& context, const ColorTa
         return target;
     }
     auto created = std::make_shared<MultisampleTarget>(context, use);
-    // Recorded commands retain their own references; expired mappings need no cache ownership.
     std::erase_if(targets(), [&](const auto& target) { return target->context.device == context.device && !mappingsCurrent(target->mappings); });
     {
         std::unique_lock lock(guardedMutex());

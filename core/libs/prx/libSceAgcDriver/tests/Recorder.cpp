@@ -5127,7 +5127,6 @@ void multisampleGuestAccessTests(const Device& device, Recorder& recorder) {
     {
         std::lock_guard gpu(GpuMutex());
         oldView = MultisampleTargetView(context, target, &oldOwner);
-        // Resource preparation can sync before the draw enters its actual command batch.
         recorder.Sync();
         recorder.FlushDeferredReleases();
         recorder.Keep(oldOwner);
@@ -5135,7 +5134,6 @@ void multisampleGuestAccessTests(const Device& device, Recorder& recorder) {
     const std::weak_ptr<void> retired = oldOwner;
     oldOwner.reset();
     const auto awaitRetirement = [](const std::weak_ptr<void>& image, const char* failure) {
-        // The recorder hands completed batches to its asynchronous release thread.
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
         while (!image.expired() && std::chrono::steady_clock::now() < deadline) std::this_thread::sleep_for(std::chrono::milliseconds(1));
         Require(image.expired(), failure);
@@ -5175,7 +5173,6 @@ void multisampleGuestAccessTests(const Device& device, Recorder& recorder) {
         mutation.Remove(middle);
         mutation.Add(block, bytes, true, true, true);
     }
-    // The same virtual address now names another allocation, with CPU-owned bytes.
     std::memset(block, 0x5a, bytes);
     AgcDriver::GuestMemory::Read(address + 256u, texels);
     Require(std::all_of(texels.begin(), texels.end(), [](std::byte b) { return b == std::byte{0x5a}; }), "remapped memory did not return its new contents");

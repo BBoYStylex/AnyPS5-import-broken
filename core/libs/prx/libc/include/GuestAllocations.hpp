@@ -19,8 +19,6 @@ struct Range {
     std::size_t allocationBytes;
     bool releasable = true;
     bool gpu = false;
-    // Mapping identity survives protection splits, but not an unmap followed by a new allocation.
-    // Holding this token does not lease or pin the mapped memory.
     std::shared_ptr<const std::uint8_t> mappingIdentity = std::make_shared<const std::uint8_t>(0);
 };
 
