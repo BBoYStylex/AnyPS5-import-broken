@@ -83,9 +83,15 @@ namespace ShaderRecompiler
     std::uint32_t EmitWaveBallot(SpirvEmitterState& state, std::uint32_t ballot) {
         if (!state.splitSubgroup) return ballot;
         const auto word = EmitBinaryU32(state, spv::OpShiftRightLogical, HostInvocationId(state), ConstantU32(state, 5u));
-        const auto mask = state.module.AllocateId();
+        auto mask = state.module.AllocateId();
+        state.module.AddFunction(spv::OpCompositeExtract, TypeU32(state), mask, ballot, 0u);
+        for (std::uint32_t component = 1u; component < 4u; ++component) {
+            const auto bits = state.module.AllocateId();
+            state.module.AddFunction(spv::OpCompositeExtract, TypeU32(state), bits, ballot, component);
+            const auto selected = Binary(state, spv::OpIEqual, TypeBool(state), word, ConstantU32(state, component));
+            mask = Select(state, TypeU32(state), selected, bits, mask);
+        }
         const auto result = state.module.AllocateId();
-        state.module.AddFunction(spv::OpVectorExtractDynamic, TypeU32(state), mask, ballot, word);
         state.module.AddFunction(spv::OpCompositeConstruct, TypeU32Vector(state, 4u), result, mask, ConstantU32(state, 0u), ConstantU32(state, 0u), ConstantU32(state, 0u));
         return result;
     }
