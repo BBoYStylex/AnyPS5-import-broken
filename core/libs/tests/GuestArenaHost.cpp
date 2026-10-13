@@ -51,8 +51,6 @@ std::vector<HostRegion> RegionsInArenaRange() {
     return regions;
 }
 
-// The kernel keeps ranges inside the PS5 application map that no process may map (max protection none);
-// the arena has to come up around them instead of giving up.
 void CheckAvailable() {
     Require(GuestArenaAvailable_nid_postfix(), "the guest arena is unavailable on macOS");
     std::uintptr_t base = 0;
@@ -77,7 +75,6 @@ void CheckSkipsUnmappable() {
 void CheckHostRegionsKept() {
     std::size_t hostRegions = 0;
     for (const auto& region : RegionsInArenaRange()) {
-        // Reservations made by the arena itself are no-access with full max protection.
         if (region.maxProtection == VM_PROT_ALL) continue;
         ++hostRegions;
         bool rejected = false;
