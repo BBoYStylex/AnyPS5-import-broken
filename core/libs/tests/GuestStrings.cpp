@@ -1,6 +1,7 @@
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include <array>
 #include <cstdint>
+#include <clocale>
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
@@ -13,6 +14,7 @@ char* APS5_VABI dirname_nid_postfix(const char*);
 int* APS5_VABI __error_nid_postfix();
 int APS5_VABI strcasecmp_nid_postfix(const char*, const char*);
 int APS5_VABI strncasecmp_nid_postfix(const char*, const char*, std::size_t);
+const char* APS5_VABI setlocale_nid_postfix(int, const char*);
 std::size_t APS5_VABI strnlen_nid_postfix(const char*, std::size_t);
 std::size_t APS5_VABI strnlen_s_nid_postfix(const char*, std::size_t);
 char* APS5_VABI strncat_nid_postfix(char*, const char*, std::size_t);
@@ -43,6 +45,60 @@ static void Require(bool condition) {
         std::fputs("Guest string check failed\n", stderr);
         std::abort();
     }
+}
+
+static bool CheckCaseComparisons() {
+    const char* previous = std::setlocale(LC_CTYPE, nullptr);
+    if (!previous) return false;
+    const std::string original(previous);
+    const char* locales[] = {"C",
+#ifdef _WIN32
+        "German_Germany.1252",
+#endif
+    };
+    std::array<int, 256> folded{};
+    for (int byte = 0; byte < 256; ++byte) folded[byte] = byte;
+    constexpr char upper[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    constexpr char lower[] = "abcdefghijklmnopqrstuvwxyz";
+    for (unsigned index = 0; index < 26; ++index) folded[static_cast<unsigned char>(upper[index])] = lower[index];
+    bool correct = true;
+    for (const char* locale : locales) {
+        if (!std::setlocale(LC_CTYPE, locale)) { correct = false; break; }
+        const char* guestLocale = setlocale_nid_postfix(2, "C");
+        if (!guestLocale || std::strcmp(guestLocale, "C") != 0) { correct = false; break; }
+        const char accentedUpper[] = {static_cast<char>(0xc9), 0};
+        const char accentedLower[] = {static_cast<char>(0xe9), 0};
+        const int compared = strcasecmp_nid_postfix(accentedUpper, accentedLower);
+        const int bounded = strncasecmp_nid_postfix(accentedUpper, accentedLower, 1);
+        const bool matched = strcasestr_nid_postfix(accentedUpper, accentedLower) != nullptr;
+        if (compared != -32 || bounded != -32 || matched) {
+            std::fprintf(stderr, "Host locale %s leaked into guest C comparisons: strcasecmp=%d, strncasecmp=%d, strcasestr=%s\n",
+                locale, compared, bounded, matched ? "matched" : "no match");
+            correct = false;
+            break;
+        }
+        for (int first = 0; first < 256 && correct; ++first) {
+            for (int second = 0; second < 256; ++second) {
+                const char left[] = {static_cast<char>(first), 0};
+                const char right[] = {static_cast<char>(second), 0};
+                const char boundedLeft[] = {static_cast<char>(first)};
+                const char boundedRight[] = {static_cast<char>(second)};
+                const int expected = folded[first] - folded[second];
+                const char* found = second == 0 || (first != 0 && expected == 0) ? left : nullptr;
+                if (strcasecmp_nid_postfix(left, right) != expected
+                    || strncasecmp_nid_postfix(left, right, 0) != 0
+                    || strncasecmp_nid_postfix(boundedLeft, boundedRight, 1) != expected
+                    || strncasecmp_nid_postfix(left, right, 2) != expected
+                    || strcasestr_nid_postfix(left, right) != found) {
+                    std::fprintf(stderr, "Guest C-locale case comparison failed for bytes %02x/%02x in host locale %s\n", first, second, locale);
+                    correct = false;
+                    break;
+                }
+            }
+        }
+        if (!correct) break;
+    }
+    return std::setlocale(LC_CTYPE, original.c_str()) && correct;
 }
 
 static bool CheckMemcpyOverlap() {
@@ -379,5 +435,6 @@ int main() {
     const char highBytes[] = {static_cast<char>(0xff), 'A', 0};
     Require(strcasestr_nid_postfix(highBytes, "a") == highBytes + 1);
     CheckSecureCopySizeLimits();
+    if (!CheckCaseComparisons()) return 1;
     return CheckMemcpyOverlap() ? 0 : 1;
 }
