@@ -41,7 +41,7 @@ unsigned int APS5_VABI _ZSt14_Random_devicev_nid_postfix();
 #define Require(condition) do { if (!(condition)) { std::fprintf(stderr, "guest_crt: line %d: %s\n", __LINE__, #condition); std::abort(); } } while (0)
 
 static int g_handlerCalls = 0;
-static void CountingHandler(const char* message, void* pointer, int error) {
+static void APS5_VABI CountingHandler(const char* message, void* pointer, int error) {
     (void)message;
     (void)pointer;
     (void)error;
