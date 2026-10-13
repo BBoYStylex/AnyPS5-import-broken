@@ -348,6 +348,17 @@ int main() {
     Require(*__error_nid_postfix() == 66);
     Require(std::filesystem::is_regular_file(file));
     Require(remove_nid_postfix((file / "invalid").string().c_str()) == -1);
+    const auto beneathFile = (file / "invalid").generic_string();
+    const auto deepBeneathFile = (file / "invalid" / "leaf").generic_string();
+    const auto beneathAbsent = (root / "absent-directory" / "leaf").generic_string();
+    for (const auto& name : {beneathFile, deepBeneathFile}) {
+        Require(access_nid_postfix(name.c_str(), 0) == -1 && *__error_nid_postfix() == 20);
+        Require(access_nid_postfix(name.c_str(), 4) == -1 && *__error_nid_postfix() == 20);
+        Require(remove_nid_postfix(name.c_str()) == -1 && *__error_nid_postfix() == 20);
+    }
+    Require(access_nid_postfix(beneathAbsent.c_str(), 0) == -1 && *__error_nid_postfix() == 2);
+    Require(remove_nid_postfix(beneathAbsent.c_str()) == -1 && *__error_nid_postfix() == 2);
+    Require(std::filesystem::is_regular_file(file));
     Require(remove_nid_postfix("") == -1 && *__error_nid_postfix() == 2);
     Require(remove_nid_postfix(nullptr) == -1 && *__error_nid_postfix() == 14);
     const auto readOnly = root / "read-only.txt";
