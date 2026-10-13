@@ -157,9 +157,11 @@ int main() {
         const auto dangling = (root / "dangling").string();
 #ifdef _WIN32
         Require((GetFileAttributesW(std::filesystem::path(symbolic).wstring().c_str()) & FILE_ATTRIBUTE_REPARSE_POINT) != 0);
+        Require(readlink_nid_postfix(symbolic.c_str(), buffer, sizeof(buffer)) == 12 && std::memcmp(buffer, "original.bin", 12) == 0);
         Require(symlink_nid_postfix("original.bin", symbolic.c_str()) == -1 && Error() == 17);
         Require(symlink_nid_postfix("missing.bin", dangling.c_str()) == 0);
         Require((GetFileAttributesW(std::filesystem::path(dangling).wstring().c_str()) & FILE_ATTRIBUTE_REPARSE_POINT) != 0);
+        Require(readlink_nid_postfix(dangling.c_str(), buffer, sizeof(buffer)) == 11 && std::memcmp(buffer, "missing.bin", 11) == 0);
         Require(symlink_nid_postfix("missing.bin", dangling.c_str()) == -1 && Error() == 17);
 #else
         Require(std::filesystem::is_symlink(std::filesystem::symlink_status(symbolic)));

@@ -92,13 +92,6 @@ std::int64_t APS5_VABI readlink_nid_postfix(const char* path, char* buffer, std:
     if (size > static_cast<std::size_t>(std::numeric_limits<std::int64_t>::max())) return Fail(GuestEinval);
     std::filesystem::path native;
     if (const int error = ResolvePathError_nid_no_patch(path, native)) return Fail(error);
-#ifdef _WIN32
-    const DWORD attributes = GetFileAttributesW(native.wstring().c_str());
-    if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
-        NotImplemented_nid_no_patch("readlink of a Windows symbolic link");
-        return -1;
-    }
-#endif
     std::error_code error;
     const auto status = std::filesystem::symlink_status(native, error);
     if (error) return Fail(GuestError(error));
