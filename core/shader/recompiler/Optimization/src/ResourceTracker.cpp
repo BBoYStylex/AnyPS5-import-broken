@@ -460,7 +460,7 @@ private:
     }
 
     // The table entry offset `key * 32` (a shift or a multiply), optionally plus an immediate.
-    static bool MatchTableOffset(IrValue* value, IrValue*& key, std::uint32_t& entryOffset) {
+    static bool MatchTableOffset(IrValue* value, IrValue*& key, std::uint32_t& entryOffset, std::uint32_t& entryStride) {
         value = value->Resolve();
         entryOffset = 0;
         if (value->Opcode() == IrOpcode::IAdd32 && value->ArgumentCount() == 2u) {
@@ -483,6 +483,7 @@ private:
                 return false;
             }
             key = value->Argument(0)->Resolve();
+            entryStride = 32u;
             return true;
         }
         if (value->Opcode() != IrOpcode::IMul32) {
@@ -495,7 +496,8 @@ private:
         } else {
             return false;
         }
-        return scale == 32u;
+        entryStride = scale;
+        return scale >= 32u && scale % sizeof(std::uint32_t) == 0u;
     }
 
     // A T# whose eight dwords are scalar reads of one V# (the table) at `entryOffset + key * 32`
@@ -538,10 +540,14 @@ private:
 
         IrValue* key = nullptr;
         std::uint32_t entryOffset = 0;
-        if (!MatchTableOffset(heapOffset, key, entryOffset) || key->Type() != IrType::U32) {
+        std::uint32_t entryStride = 0;
+        if (!MatchTableOffset(heapOffset, key, entryOffset, entryStride) || key->Type() != IrType::U32) {
             return false;
         }
         entryOffset += immediateOffset;
+        if (entryOffset + 8u * sizeof(std::uint32_t) > entryStride) {
+            return false;
+        }
 
         for (const auto* read : heapReads) {
             if (!usedOnlyAsImage(*read, heapReads)) {
@@ -559,6 +565,7 @@ private:
         table.heapSource = heapSourceIndex;
         table.materialSource = heapSourceIndex;
         table.entryOffset = entryOffset;
+        table.entryStride = entryStride;
         DescriptorSource materialSource = heapSource;
         std::uint32_t materialMemoryIndex = 0;
         const MemoryInfo* materialMemory = ScalarReadMemory(*key, materialMemoryIndex);

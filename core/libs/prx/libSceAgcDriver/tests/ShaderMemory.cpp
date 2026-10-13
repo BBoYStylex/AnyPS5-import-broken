@@ -1076,6 +1076,33 @@ void verifyBindlessTable() {
 #if ANYPS5_ENABLE_SPIRV_TOOLS
     static_cast<void>(ValidateAndOptimizeSpirv(queried->spirv, query.target.vulkanVersion, query.target.spirvVersion));
 #endif
+    static std::array<std::uint32_t, 48> strided{};
+    for (std::uint32_t entry = 0; entry < 4u; entry++) {
+        std::fill_n(strided.begin() + entry * 12u, 4u, 0xdead0000u + entry);
+        std::copy(heap[entry].begin(), heap[entry].end(), strided.begin() + entry * 12u + 4u);
+    }
+    const std::vector<std::uint32_t> stridedCode{0xf4080100u, 0xfa000000u, 0xf4080200u, 0xfa000010u, 0xf4080300u, 0xfa000020u, 0xf4080700u, 0xfa000030u, 0x7e200500u, 0x9310ff10u, 0x00000030u, 0xf42c0502u, 0x20000010u, 0xf09c0f08u, 0x00450000u, 0xe0700000u, 0x80070000u, 0xbf810000u};
+    const auto stridedHeapV = bufferDescriptor(strided.data(), 48u, 4u);
+    std::copy(stridedHeapV.begin(), stridedHeapV.end(), srt.begin());
+    auto stridedRequest = makeRequest(stridedCode);
+    const auto stridedPlan = GetResourcePlan(stridedRequest);
+    std::uint32_t stridedTables = 0;
+    for (const auto& source : stridedPlan->descriptorSources) {
+        if (!source.indirectImage.has_value()) continue;
+        stridedTables++;
+        require(!source.indirectImage->hasMaterial && source.indirectImage->entryStride == 48u && source.indirectImage->entryOffset == 16u, "bindless: the 48-byte table entries were not recorded");
+    }
+    require(stridedTables == 1, "bindless: a 48-byte table was not planned");
+    AgcDriver::ShaderMemory stridedMemory({});
+    const auto stridedCapture = stridedMemory.Capture(stridedRequest);
+    const auto stridedDirect = static_cast<std::uint32_t>(stridedPlan->info.images.size());
+    const auto stridedRoot = tableRoot(*stridedCapture, stridedDirect);
+    const auto stridedMapping = mappingOf(stridedCapture->snapshot);
+    require(std::vector<std::uint32_t>(stridedMapping.begin(), stridedMapping.begin() + 7) == std::vector<std::uint32_t>{3u, 0u, 0u, 1u, 1u, 3u, 3u}, "bindless: the 48-byte table is not the identity mapping");
+    require(stridedCapture->snapshot.images[stridedRoot].dwords == heap[0] && stridedCapture->snapshot.images[stridedDirect].dwords == heap[1] && stridedCapture->snapshot.images[stridedDirect + 1u].dwords == heap[2] && stridedCapture->snapshot.images[stridedDirect + 2u].dwords == heap[3], "bindless: the 48-byte table slots are wrong");
+    stridedRequest.context.memory = stridedMemory.Regions();
+    require(!Recompile(stridedRequest, *stridedCapture)->spirv.empty(), "bindless: the 48-byte table did not compile");
+    fillSrt(4u);
 
     // A table wider than the slots without a material pattern is rejected.
     fillSrt(100u);
