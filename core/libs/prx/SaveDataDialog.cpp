@@ -493,7 +493,6 @@ private:
                            std::nullopt);
                 return;
             }
-            // TECHNICAL DEBT: stall expiry is reported as USER_CANCELED; the native result code for a stalled progress dialog is unverified.
             if (now - m_session.lastProgressAt >= m_timings.progressStallTimeout) {
                 FinishWith(SCE_SAVE_DATA_DIALOG_RESULT_USER_CANCELED,
                            SCE_SAVE_DATA_DIALOG_BUTTON_ID_INVALID, std::nullopt);
@@ -507,7 +506,6 @@ private:
                 return;
             }
         }
-        // TECHNICAL DEBT: interaction expiry is reported as USER_CANCELED; the native result code for an unanswered dialog is unverified.
         if (displayed >= m_timings.interactionTimeout) {
             FinishWith(SCE_SAVE_DATA_DIALOG_RESULT_USER_CANCELED,
                        SCE_SAVE_DATA_DIALOG_BUTTON_ID_INVALID, std::nullopt);
