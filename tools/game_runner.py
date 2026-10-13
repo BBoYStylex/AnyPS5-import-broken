@@ -41,9 +41,20 @@ def default_state_path(workdir=None):
     return local
 
 
+def init_dpi_awareness():
+    if os.name != "nt":
+        return
+    try:
+        import ctypes
+        ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))
+    except Exception:
+        pass
+
+
 def attach_input_desktop():
     if os.name != "nt":
         return False
+    init_dpi_awareness()
     try:
         import ctypes
         user32 = ctypes.windll.user32
@@ -56,33 +67,63 @@ def attach_input_desktop():
     return False
 
 
+def get_all_desktops():
+    if os.name != "nt":
+        return []
+    try:
+        import ctypes
+        from ctypes import wintypes
+        user32 = ctypes.windll.user32
+        desktops = []
+        DESKTOPENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.LPCWSTR, wintypes.LPARAM)
+
+        def desk_cb(name, _):
+            desktops.append(name)
+            return True
+
+        winsta0 = user32.OpenWindowStationW("WinSta0", False, 0x037F)
+        if winsta0:
+            user32.EnumDesktopsW(winsta0, DESKTOPENUMPROC(desk_cb), 0)
+            user32.CloseWindowStation(winsta0)
+        if not desktops:
+            desktops = ["Default"]
+        return desktops
+    except Exception:
+        return ["Default"]
+
+
 def find_windows_for_pid(pid):
     if os.name != "nt":
         return []
-    attach_input_desktop()
+    init_dpi_awareness()
     try:
         import ctypes
         from ctypes import wintypes
         user32 = ctypes.windll.user32
         WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
-
+        desktops = get_all_desktops()
         found = []
+        for desk_name in desktops:
+            hdesk = user32.OpenDesktopW(desk_name, 0, False, 0x01FF)
+            if not hdesk:
+                continue
 
-        def enum_cb(hwnd, _):
-            if user32.IsWindowVisible(hwnd):
-                win_pid = wintypes.DWORD()
-                user32.GetWindowThreadProcessId(hwnd, ctypes.byref(win_pid))
-                if win_pid.value == pid:
-                    length = user32.GetWindowTextLengthW(hwnd)
-                    title = ""
-                    if length > 0:
-                        buf = ctypes.create_unicode_buffer(length + 1)
-                        user32.GetWindowTextW(hwnd, buf, length + 1)
-                        title = buf.value
-                    found.append((hwnd, title))
-            return True
+            def enum_cb(hwnd, _):
+                if user32.IsWindowVisible(hwnd):
+                    win_pid = wintypes.DWORD()
+                    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(win_pid))
+                    if win_pid.value == pid:
+                        length = user32.GetWindowTextLengthW(hwnd)
+                        title = ""
+                        if length > 0:
+                            buf = ctypes.create_unicode_buffer(length + 1)
+                            user32.GetWindowTextW(hwnd, buf, length + 1)
+                            title = buf.value
+                        found.append((hwnd, title))
+                return True
 
-        user32.EnumWindows(WNDENUMPROC(enum_cb), 0)
+            user32.EnumDesktopWindows(hdesk, WNDENUMPROC(enum_cb), 0)
+            user32.CloseDesktop(hdesk)
         return found
     except Exception:
         return []
@@ -135,10 +176,111 @@ def bring_window_to_foreground(hwnd):
         return False
 
 
+def capture_window_direct(hwnd):
+    if os.name != "nt":
+        return None
+    init_dpi_awareness()
+    try:
+        import ctypes
+        from ctypes import wintypes
+        from PIL import Image
+        user32 = ctypes.windll.user32
+        gdi32 = ctypes.windll.gdi32
+
+        desktops = get_all_desktops()
+        matched_desk = None
+        for desk_name in desktops:
+            hdesk = user32.OpenDesktopW(desk_name, 0, False, 0x01FF)
+            if not hdesk:
+                continue
+            found = [False]
+            WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+            def w_cb(h, _):
+                if h == hwnd:
+                    found[0] = True
+                    return False
+                return True
+
+            user32.EnumDesktopWindows(hdesk, WNDENUMPROC(w_cb), 0)
+            user32.CloseDesktop(hdesk)
+            if found[0]:
+                matched_desk = desk_name
+                break
+
+        hdesk_switch = None
+        if matched_desk:
+            hdesk_switch = user32.OpenDesktopW(matched_desk, 0, False, 0x01FF)
+            if hdesk_switch:
+                user32.SetThreadDesktop(hdesk_switch)
+
+        rect = wintypes.RECT()
+        if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+            if hdesk_switch:
+                user32.CloseDesktop(hdesk_switch)
+            return None
+
+        w = rect.right - rect.left
+        h = rect.bottom - rect.top
+        if w <= 0 or h <= 0:
+            if hdesk_switch:
+                user32.CloseDesktop(hdesk_switch)
+            return None
+
+        hdc_window = user32.GetWindowDC(hwnd)
+        hdc_mem = gdi32.CreateCompatibleDC(hdc_window)
+        hbm_mem = gdi32.CreateCompatibleBitmap(hdc_window, w, h)
+        hold = gdi32.SelectObject(hdc_mem, hbm_mem)
+
+        pw_res = user32.PrintWindow(hwnd, hdc_mem, 2)
+        if not pw_res:
+            pw_res = user32.PrintWindow(hwnd, hdc_mem, 0)
+
+        image = None
+        if pw_res:
+            class BITMAPINFOHEADER(ctypes.Structure):
+                _fields_ = [
+                    ("biSize", wintypes.DWORD),
+                    ("biWidth", wintypes.LONG),
+                    ("biHeight", wintypes.LONG),
+                    ("biPlanes", wintypes.WORD),
+                    ("biBitCount", wintypes.WORD),
+                    ("biCompression", wintypes.DWORD),
+                    ("biSizeImage", wintypes.DWORD),
+                    ("biXPelsPerMeter", wintypes.LONG),
+                    ("biYPelsPerMeter", wintypes.LONG),
+                    ("biClrUsed", wintypes.DWORD),
+                    ("biClrImportant", wintypes.DWORD),
+                ]
+
+            bmi = BITMAPINFOHEADER()
+            bmi.biSize = ctypes.sizeof(BITMAPINFOHEADER)
+            bmi.biWidth = w
+            bmi.biHeight = -h
+            bmi.biPlanes = 1
+            bmi.biBitCount = 32
+            bmi.biCompression = 0
+            buf_size = w * h * 4
+            buf = (ctypes.c_ubyte * buf_size)()
+            gdi32.GetDIBits(hdc_mem, hbm_mem, 0, h, ctypes.byref(buf), ctypes.byref(bmi), 0)
+            image = Image.frombuffer("RGBA", (w, h), bytes(buf), "raw", "BGRA", 0, 1).convert("RGB")
+
+        gdi32.SelectObject(hdc_mem, hold)
+        gdi32.DeleteObject(hbm_mem)
+        gdi32.DeleteDC(hdc_mem)
+        user32.ReleaseDC(hwnd, hdc_window)
+        if hdesk_switch:
+            user32.CloseDesktop(hdesk_switch)
+        return image
+    except Exception:
+        return None
+
+
 def capture_screenshot(output_path, pid=None, window_only=True, focus=True):
     attach_input_desktop()
     target_bounds = None
     target_hwnd = None
+    direct_image = None
 
     if pid and window_only and os.name == "nt":
         windows = find_windows_for_pid(pid)
@@ -149,11 +291,20 @@ def capture_screenshot(output_path, pid=None, window_only=True, focus=True):
                 bring_window_to_foreground(target_hwnd)
                 time.sleep(0.05)
             target_bounds = get_window_bounds(target_hwnd)
+            direct_image = capture_window_direct(target_hwnd)
 
     output = Path(output_path).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
 
     try:
+        if direct_image is not None:
+            direct_image.save(output, format="PNG")
+            return {
+                "path": str(output),
+                "size": direct_image.size,
+                "window_captured": True,
+                "bounds": target_bounds,
+            }
         import PIL.ImageGrab
         image = PIL.ImageGrab.grab(bbox=target_bounds)
         image.save(output, format="PNG")
