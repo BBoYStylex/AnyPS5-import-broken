@@ -365,6 +365,12 @@ int main() {
     }
     Require(opendir_nid_postfix(beneathAbsent.c_str()) == nullptr && *__error_nid_postfix() == 2);
     Require(chdir_nid_postfix(beneathAbsent.c_str()) == -1 && *__error_nid_postfix() == 2);
+    for (const auto& name : {beneathFile, deepBeneathFile}) {
+        Require(chmod_nid_postfix(name.c_str(), 0600) == -1 && *__error_nid_postfix() == 20);
+        Require(sceKernelChmod_nid_postfix(name.c_str(), 0600) == static_cast<int>(0x80020014u));
+    }
+    Require(chmod_nid_postfix(beneathAbsent.c_str(), 0600) == -1 && *__error_nid_postfix() == 2);
+    Require(sceKernelChmod_nid_postfix(beneathAbsent.c_str(), 0600) == static_cast<int>(0x80020002u));
     Require(remove_nid_postfix("") == -1 && *__error_nid_postfix() == 2);
     Require(remove_nid_postfix(nullptr) == -1 && *__error_nid_postfix() == 14);
     const auto readOnly = root / "read-only.txt";
