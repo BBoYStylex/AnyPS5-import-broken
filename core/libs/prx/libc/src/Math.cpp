@@ -183,6 +183,10 @@ float APS5_VABI asinf_nid_postfix(float x) {
     return result;
 }
 float APS5_VABI acosf_nid_postfix(float x) {
+    if (std::isgreater(x, 1.0f) || std::isless(x, -1.0f)) {
+        std::feraiseexcept(FE_INVALID);
+        return -std::numeric_limits<float>::quiet_NaN();
+    }
     const int saved_errno = errno;
     const float result = std::acos(x);
     errno = saved_errno;

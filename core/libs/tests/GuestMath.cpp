@@ -220,6 +220,12 @@ static void CheckAcosfErrno() {
     Require(errno == 0);
     Require(std::bit_cast<std::uint32_t>(acosf_nid_postfix(-2.0f)) == 0xffc00000u);
     Require(errno == 0);
+    Require(std::bit_cast<std::uint32_t>(acosf_nid_postfix(std::numeric_limits<float>::infinity())) == 0xffc00000u);
+    Require(std::bit_cast<std::uint32_t>(acosf_nid_postfix(-std::numeric_limits<float>::infinity())) == 0xffc00000u);
+    std::feclearexcept(FE_ALL_EXCEPT);
+    (void)acosf_nid_postfix(2.0f);
+    Require(std::fetestexcept(FE_INVALID) != 0);
+    Require(errno == 0);
     Require(std::bit_cast<std::uint32_t>(acosf_nid_postfix(0.5f)) == 0x3f860a92u);
     Require(errno == 0);
 }
