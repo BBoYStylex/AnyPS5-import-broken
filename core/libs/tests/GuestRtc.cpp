@@ -55,6 +55,60 @@ static bool Equal(const RtcDateTime& left, const RtcDateTime& right) {
         && left.minute == right.minute && left.second == right.second && left.microsecond == right.microsecond;
 }
 
+static void CheckFullRangeLocalTime() {
+    struct Zone {
+        const char* name;
+        std::int64_t offset;
+        const char* rfc3339;
+        const char* rfc2822;
+    };
+    const Zone zones[] = {
+        {"UTC0", 0, "1969-12-31T23:59:59.50Z", "Wed, 31 Dec 1969 23:59:59 +0000"},
+        {"XXX-5:30", 19800, "1970-01-01T05:29:59.50+05:30", "Thu, 01 Jan 1970 05:29:59 +0530"},
+        {"XXX+3", -10800, "1969-12-31T20:59:59.50-03:00", "Wed, 31 Dec 1969 20:59:59 -0300"},
+    };
+    const RtcDateTime dates[] = {
+        {1, 1, 2, 12, 34, 56, 789000},
+        {1601, 1, 1, 12, 34, 56, 789000},
+        {1900, 2, 28, 12, 34, 56, 789000},
+        {1969, 12, 31, 23, 59, 59, 500000},
+        {1970, 1, 1, 12, 34, 56, 789000},
+        {2024, 2, 29, 12, 34, 56, 789000},
+        {3001, 1, 19, 12, 34, 56, 789000},
+        {9999, 6, 30, 12, 34, 56, 789000},
+    };
+    for (const auto& zone : zones) {
+        SetTimeZone(zone.name);
+        for (const auto& date : dates) {
+            RtcTick utc{}, local{};
+            Require(sceRtcGetTick(&date, &utc) == 0);
+            const auto expected = utc.tick + static_cast<std::uint64_t>(zone.offset * 1000000);
+            const int status = sceRtcConvertUtcToLocalTime(&utc, &local);
+            if (status != 0 || local.tick != expected)
+                std::fprintf(stderr, "RTC local offset lost for year %u in %s\n", static_cast<unsigned>(date.year), zone.name);
+            Require(status == 0 && local.tick == expected);
+            RtcTick inPlace = utc;
+            Require(sceRtcConvertUtcToLocalTime(&inPlace, &inPlace) == 0 && inPlace.tick == expected);
+            Require(sceRtcConvertLocalTimeToUtc(&local, &local) == 0 && local.tick == utc.tick);
+        }
+        RtcTick utc{};
+        const RtcDateTime beforeEpoch{1969, 12, 31, 23, 59, 59, 500000};
+        Require(sceRtcGetTick(&beforeEpoch, &utc) == 0);
+        char text[64]{};
+        Require(sceRtcFormatRFC3339LocalTime(text, &utc) == 0 && std::strcmp(text, zone.rfc3339) == 0);
+        Require(sceRtcFormatRFC2822LocalTime(text, &utc) == 0 && std::strcmp(text, zone.rfc2822) == 0);
+        constexpr std::uint64_t maxTick = 315537897599999999ull;
+        constexpr int invalidValue = static_cast<int>(0x80B50003);
+        if (zone.offset != 0) {
+            RtcTick edge{zone.offset > 0 ? maxTick : 0}, result{123};
+            Require(sceRtcConvertUtcToLocalTime(&edge, &result) == invalidValue && result.tick == 123);
+            edge.tick = zone.offset > 0 ? 0 : maxTick;
+            Require(sceRtcConvertLocalTimeToUtc(&edge, &result) == invalidValue && result.tick == 123);
+        }
+    }
+    SetTimeZone("UTC0");
+}
+
 int main() {
     constexpr int invalidPointer = static_cast<int>(0x80B50002);
     constexpr int invalidValue = static_cast<int>(0x80B50003);
@@ -481,4 +535,5 @@ int main() {
     Require(sceRtcFormatRFC2822LocalTime(rfc2822, &tick) == 0 && std::strcmp(rfc2822, "Wed, 31 Dec 1969 23:59:59 +0000") == 0);
     SetTimeZone("UTC0");
 #endif
+    CheckFullRangeLocalTime();
 }
