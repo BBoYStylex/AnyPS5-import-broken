@@ -55,9 +55,6 @@ int main() {
     }
 
     void* directDso = module;
-#ifdef _WIN32
-    directDso = nullptr;
-#endif
 
     int firstObject = 1;
     int secondObject = 2;
