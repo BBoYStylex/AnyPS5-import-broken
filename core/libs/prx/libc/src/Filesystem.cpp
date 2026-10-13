@@ -110,7 +110,11 @@ extern "C" int APS5_VABI remove_nid_postfix(const char* path) {
         const bool removed = std::filesystem::remove(resolved, error);
 #endif
         if (error || !removed) {
-            errno = error ? FilesystemError(error) : 2;
+            int failure = error ? FilesystemError(error) : 2;
+#ifdef _WIN32
+            if (failure == 2 && UnderRegularFile_nid_no_patch(resolved)) failure = 20;
+#endif
+            errno = failure;
             return -1;
         }
         RecordWrittenPath_nid_no_patch(resolved);
