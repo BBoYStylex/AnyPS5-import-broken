@@ -4,6 +4,7 @@
 #include <cstring>
 #include <cstdarg>
 #include <cstdint>
+#include <string>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -542,6 +543,18 @@ int main() {
     Require(fscanf_nid_postfix(&scanned, "%d", &scannedNumber) == EOF);
     Require(feof_nid_postfix(&scanned) && (scanned.GuestState().flags & 0x20));
     scanned.Close();
+
+    FileStream wideScanned(std::tmpfile());
+    Require(fprintf_nid_postfix(&wideScanned, "%s", "alpha beta") == 10);
+    std::rewind(wideScanned.GetHandle());
+    char16_t wideFirst[16]{};
+    char16_t wideSecond[16]{};
+    Require(fscanf_nid_postfix(&wideScanned, "%ls %ls", wideFirst, wideSecond) == 2);
+    Require(std::u16string(wideFirst) == u"alpha" && std::u16string(wideSecond) == u"beta");
+    char16_t wideUnit = 0;
+    Require(fscanf_nid_postfix(&wideScanned, "%lc", &wideUnit) == EOF);
+    Require(wideUnit == 0);
+    wideScanned.Close();
 
     FileStream scanBinary(std::tmpfile());
     Require(std::fputs("0b101", scanBinary.GetHandle()) >= 0);
