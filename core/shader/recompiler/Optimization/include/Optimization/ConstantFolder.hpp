@@ -16,6 +16,8 @@ public:
 
     void Fold(IrProgram& program, std::span<IrBlock* const> blocks) const;
 
+    [[nodiscard]] bool ComposePackedAncillary(IrProgram& program) const;
+
 private:
     std::uint32_t vertexHostSubgroupSize;
 
