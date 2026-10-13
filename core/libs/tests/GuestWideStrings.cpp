@@ -173,17 +173,16 @@ int main() {
     require(wcstoull_nid_postfix(u"18446744073709551615", nullptr, 10) == ULLONG_MAX);
     const char16_t* letters = u"abc";
     require(wcstol_nid_postfix(letters, &end, 10) == 0 && end == letters);
-    for (const int expected : {22, 0}) {
-        const char16_t* text = expected == 0 ? u"7" : u"abc";
-        *__error_nid_postfix() = 0;
-        require(wcstol_nid_postfix(text, &end, 10) == (expected == 0 ? 7 : 0) && *__error_nid_postfix() == expected);
-        *__error_nid_postfix() = 0;
-        require(wcstoll_nid_postfix(text, &end, 10) == (expected == 0 ? 7 : 0) && *__error_nid_postfix() == expected);
-        *__error_nid_postfix() = 0;
-        require(wcstoul_nid_postfix(text, &end, 10) == (expected == 0 ? 7u : 0u) && *__error_nid_postfix() == expected);
-        *__error_nid_postfix() = 0;
-        require(wcstoull_nid_postfix(text, &end, 10) == (expected == 0 ? 7u : 0u) && *__error_nid_postfix() == expected);
-    }
+    const auto checkNoConversion = [](auto parse) {
+        const char16_t noDigits[] = u"abc";
+        char16_t* noDigitsEnd = nullptr;
+        *__error_nid_postfix() = 12345;
+        require(parse(noDigits, &noDigitsEnd, 10) == 0 && noDigitsEnd == noDigits && *__error_nid_postfix() == 12345);
+    };
+    checkNoConversion(wcstol_nid_postfix);
+    checkNoConversion(wcstoll_nid_postfix);
+    checkNoConversion(wcstoul_nid_postfix);
+    checkNoConversion(wcstoull_nid_postfix);
     const char16_t* binary = u" -0b101";
     for (const int base : {0, 2}) {
         require(wcstol_nid_postfix(binary, &end, base) == 0 && end == binary + 3);

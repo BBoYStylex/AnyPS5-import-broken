@@ -29,7 +29,6 @@ auto ParseGuestInteger(const char* str, char** endptr, int base, TParse parse) {
     if (StopAtPrefixLetter_nid_no_patch(str, endptr, base)) return TValue{};
     char* end = nullptr;
     const TValue value = parse(str, &end, base);
-    if (end == str) errno = EINVAL;
     if (endptr != nullptr) *endptr = end;
     return value;
 }
