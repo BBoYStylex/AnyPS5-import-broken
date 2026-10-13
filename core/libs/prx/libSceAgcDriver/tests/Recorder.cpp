@@ -5122,6 +5122,95 @@ void multisampleGuestAccessTests(const Device& device, Recorder& recorder) {
     }
     refused([&] { AgcDriver::GuestMemory::Read(address + targetBytes - texels.size(), texels); }, "a CPU read", "a CPU read inside the tiled multisampled target");
     AgcDriver::GuestMemory::Read(address + targetBytes, texels);
+    std::shared_ptr<void> oldOwner;
+    VkImageView oldView;
+    {
+        std::lock_guard gpu(GpuMutex());
+        oldView = MultisampleTargetView(context, target, &oldOwner);
+        // Resource preparation can sync before the draw enters its actual command batch.
+        recorder.Sync();
+        recorder.FlushDeferredReleases();
+        recorder.Keep(oldOwner);
+    }
+    const std::weak_ptr<void> retired = oldOwner;
+    oldOwner.reset();
+    const auto awaitRetirement = [](const std::weak_ptr<void>& image, const char* failure) {
+        // The recorder hands completed batches to its asynchronous release thread.
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+        while (!image.expired() && std::chrono::steady_clock::now() < deadline) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        Require(image.expired(), failure);
+    };
+    {
+        GuestAllocations::Mutation mutation;
+        mutation.Protect(block, bytes, true, true, true, [] {});
+    }
+    refused([&] { AgcDriver::GuestMemory::Read(address + 256u, texels); }, "a CPU read", "a CPU read after protection changes");
+    auto* middle = static_cast<std::byte*>(block) + 16384u;
+    {
+        GuestAllocations::Mutation mutation;
+        mutation.Unmap(middle, 16384u, [](const void*, std::size_t, const void*, bool) {});
+        mutation.Add(middle, 16384u, true, true, true);
+    }
+    std::memset(middle, 0x5a, 16384u);
+    AgcDriver::GuestMemory::Read(address + 16384u, texels);
+    Require(std::all_of(texels.begin(), texels.end(), [](std::byte b) { return b == std::byte{0x5a}; }), "partly remapped memory did not return its new contents");
+    refused([&] { AgcDriver::GuestMemory::Read(address + 256u, texels); }, "a CPU read", "a CPU read of an unaffected mapping");
+    refused([&] { AgcDriver::GuestMemory::Read(address + 32768u - 32u, texels); }, "a CPU read", "a read spanning remapped and still multisampled memory");
+    std::shared_ptr<void> partialOwner;
+    VkImageView partialView;
+    {
+        std::lock_guard gpu(GpuMutex());
+        partialView = MultisampleTargetView(context, target, &partialOwner);
+        Require(partialView != oldView, "partly remapped memory reused a stale multisampled image");
+        Require(!retired.expired(), "retired MSAA image was released before its recorded commands completed");
+        recorder.Submit();
+        device.WaitQueue();
+        recorder.Sync();
+        recorder.FlushDeferredReleases();
+    }
+    awaitRetirement(retired, "retired MSAA image stayed cached after GPU completion");
+    {
+        GuestAllocations::Mutation mutation;
+        mutation.Remove(block);
+        mutation.Remove(middle);
+        mutation.Add(block, bytes, true, true, true);
+    }
+    // The same virtual address now names another allocation, with CPU-owned bytes.
+    std::memset(block, 0x5a, bytes);
+    AgcDriver::GuestMemory::Read(address + 256u, texels);
+    Require(std::all_of(texels.begin(), texels.end(), [](std::byte b) { return b == std::byte{0x5a}; }), "remapped memory did not return its new contents");
+    {
+        std::lock_guard gpu(GpuMutex());
+        Require(MultisampleTargetView(context, target) != partialView, "remapped memory reused a stale multisampled image");
+        recorder.Submit();
+        device.WaitQueue();
+        recorder.Sync();
+    }
+    partialOwner.reset();
+    refused([&] { AgcDriver::GuestMemory::Read(address + 256u, texels); }, "a CPU read", "a CPU read of the new multisampled allocation");
+    for (int reuse = 0; reuse < 4; ++reuse) {
+        std::shared_ptr<void> owner;
+        {
+            std::lock_guard gpu(GpuMutex());
+            MultisampleTargetView(context, target, &owner);
+            recorder.Sync();
+            recorder.FlushDeferredReleases();
+        }
+        const std::weak_ptr<void> previous = owner;
+        owner.reset();
+        {
+            GuestAllocations::Mutation mutation;
+            mutation.Remove(block);
+            mutation.Add(block, bytes, true, true, true);
+        }
+        {
+            std::lock_guard gpu(GpuMutex());
+            MultisampleTargetView(context, target);
+            recorder.Sync();
+            recorder.FlushDeferredReleases();
+        }
+        awaitRetirement(previous, "repeated remapping retained an old MSAA image");
+    }
     ClearMultisampleTargets(context.device);
     if ((base.limits.framebufferColorSampleCounts & VK_SAMPLE_COUNT_2_BIT) != 0) {
         target.extent = {128, 64};

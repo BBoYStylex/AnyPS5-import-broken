@@ -6,6 +6,7 @@
 #include "prx/libSceAgcDriver/Graphics/include/State.hpp"
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 
@@ -48,7 +49,7 @@ private:
 std::uint64_t MultisampledColorBytes(const ColorTarget& target);
 bool MultisampledFillClearColor(const ColorTarget& target, std::uint32_t fill, VkClearColorValue& clear);
 bool TakeMultisampledClear(MultisampledCmask& cmask, MultisampledColorFill& colorFill, const ColorTarget& use, VkClearColorValue& clear);
-VkImageView MultisampleTargetView(const Context& context, const ColorTarget& target);
+VkImageView MultisampleTargetView(const Context& context, const ColorTarget& target, std::shared_ptr<void>* owner = nullptr);
 void ResolveMultisampleTarget(const Context& context, const ColorTarget& source, StorageTexture& destination, VkImageView destinationView);
 void NoteColorMetadataFill(std::uint64_t address, std::size_t bytes, std::uint32_t pattern);
 void ClearMultisampleTargets(VkDevice device);

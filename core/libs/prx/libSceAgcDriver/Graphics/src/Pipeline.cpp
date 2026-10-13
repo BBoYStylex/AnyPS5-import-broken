@@ -572,10 +572,11 @@ VkPipelineLayout Pipeline::Layout() const {
     return layout;
 }
 
-std::shared_ptr<Framebuffer> Pipeline::AcquireFramebuffer(std::span<const VkImageView> targets, std::span<const std::shared_ptr<StorageTexture>> owners, VkExtent2D extent, std::uint32_t layers, std::span<const std::uint8_t> persistent) {
+std::shared_ptr<Framebuffer> Pipeline::AcquireFramebuffer(std::span<const VkImageView> targets, std::span<const std::shared_ptr<StorageTexture>> owners, VkExtent2D extent, std::uint32_t layers, std::span<const std::shared_ptr<void>> persistent) {
     Require(targets.size() == attachments && owners.size() == colorAttachments, "render targets do not match the pipeline's attachments");
     bool resident = true;
-    for (std::size_t i = 0; i < owners.size(); ++i) resident = resident && (owners[i] != nullptr || (i < persistent.size() && persistent[i] != 0));
+    const auto ownerAt = [&](std::size_t i) -> std::shared_ptr<void> { return owners[i] != nullptr ? owners[i] : i < persistent.size() ? persistent[i] : nullptr; };
+    for (std::size_t i = 0; i < owners.size(); ++i) resident = resident && ownerAt(i) != nullptr;
     if (resident) {
         // Entries whose views are gone can never match again and go as soon as no recorded draw holds
         // them (Kept keeps its framebuffer until the batch completes).
@@ -591,7 +592,7 @@ std::shared_ptr<Framebuffer> Pipeline::AcquireFramebuffer(std::span<const VkImag
             // View handles are recycled once a StorageTexture is destroyed, so the owners must be the
             // very objects the views were made for.
             bool same = true;
-            for (std::size_t i = 0; i < owners.size() && same; ++i) same = it->owned[i] == (owners[i] != nullptr) && it->owners[i].lock().get() == owners[i].get();
+            for (std::size_t i = 0; i < owners.size() && same; ++i) same = it->owned[i] == (ownerAt(i) != nullptr) && it->owners[i].lock().get() == ownerAt(i).get();
             if (!same) continue;
             std::rotate(it, std::next(it), framebuffers.end());
             return framebuffers.back().framebuffer;
@@ -608,8 +609,10 @@ std::shared_ptr<Framebuffer> Pipeline::AcquireFramebuffer(std::span<const VkImag
     }
     CachedFramebuffer entry;
     entry.views.assign(targets.begin(), targets.end());
-    entry.owners.assign(owners.begin(), owners.end());
-    for (const auto& owner : owners) entry.owned.push_back(owner != nullptr);
+    for (std::size_t i = 0; i < owners.size(); ++i) {
+        entry.owners.emplace_back(ownerAt(i));
+        entry.owned.push_back(ownerAt(i) != nullptr);
+    }
     entry.extent = extent;
     entry.layers = layers;
     entry.framebuffer = framebuffer;
