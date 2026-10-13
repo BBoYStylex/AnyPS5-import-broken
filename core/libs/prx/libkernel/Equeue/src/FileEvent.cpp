@@ -17,6 +17,11 @@
 #include <windows.h>
 #include <io.h>
 #include "prx/libkernel/File/include/DirectoryDescriptor.hpp"
+#elif defined(__APPLE__)
+#include "prx/libkernel/Equeue/MacOsFileWatch.hpp"
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #else
 #include <dirent.h>
 #include <fcntl.h>
@@ -48,6 +53,15 @@ public:
         if (stopEvent == nullptr) {
             throw std::runtime_error("EVFILT_VNODE: CreateEvent failed, error=" + std::to_string(::GetLastError()));
         }
+#elif defined(__APPLE__)
+        int ends[2];
+        if (::pipe(ends) != 0) {
+            throw std::runtime_error("EVFILT_VNODE: pipe failed, errno=" + std::to_string(errno));
+        }
+        ::fcntl(ends[0], F_SETFD, FD_CLOEXEC);
+        ::fcntl(ends[1], F_SETFD, FD_CLOEXEC);
+        stopRead = ends[0];
+        stopEvent = ends[1];
 #else
         stopEvent = ::eventfd(0, EFD_CLOEXEC);
         if (stopEvent < 0) {
@@ -61,6 +75,9 @@ public:
         ::CloseHandle(stopEvent);
 #else
         ::close(stopEvent);
+#ifdef __APPLE__
+        ::close(stopRead);
+#endif
 #endif
     }
 
@@ -85,6 +102,8 @@ public:
 
 #ifdef _WIN32
     HANDLE StopEvent() const { return stopEvent; }
+#elif defined(__APPLE__)
+    int StopEvent() const { return stopRead; }
 #else
     int StopEvent() const { return stopEvent; }
 #endif
@@ -98,6 +117,9 @@ private:
     HANDLE stopEvent = nullptr;
 #else
     int stopEvent = -1;
+#ifdef __APPLE__
+    int stopRead = -1;
+#endif
 #endif
 };
 
@@ -323,6 +345,66 @@ int OpenHostWatch(int descriptor, std::uint32_t notes, HostWatch& host) {
     } catch (...) {
         CloseHostWatch(host);
         throw;
+    }
+    return 0;
+}
+
+#elif defined(__APPLE__)
+
+struct HostWatch {
+    int queue = -1;
+    int target = -1;
+};
+
+void CloseHostWatch(HostWatch& host) {
+    for (int* descriptor : {&host.queue, &host.target}) {
+        if (*descriptor >= 0) {
+            ::close(*descriptor);
+            *descriptor = -1;
+        }
+    }
+}
+
+void RunHostWatch(std::shared_ptr<VnodeWatch> watch, HostWatch host) {
+    if (MacOsFileWatch::WatchStop(host.queue, watch->StopEvent()) != 0) {
+        const int error = errno;
+        CloseHostWatch(host);
+        throw std::runtime_error("EVFILT_VNODE: kevent failed, errno=" + std::to_string(error));
+    }
+    while (true) {
+        const auto notes = MacOsFileWatch::Wait(host.queue);
+        if (notes < 0) {
+            const int error = errno;
+            CloseHostWatch(host);
+            throw std::runtime_error("EVFILT_VNODE: kevent failed, errno=" + std::to_string(error));
+        }
+        if (notes == 0) {
+            break;
+        }
+        watch->Deliver(static_cast<std::uint32_t>(notes) & MAPPED_NOTES);
+    }
+    CloseHostWatch(host);
+}
+
+int OpenHostWatch(int descriptor, std::uint32_t, HostWatch& host) {
+    struct stat status {};
+    if (::fstat(descriptor, &status) != 0) {
+        return GUEST_EBADF;
+    }
+    if (S_ISFIFO(status.st_mode) || S_ISSOCK(status.st_mode)) {
+        return GUEST_EINVAL;
+    }
+    if (!S_ISREG(status.st_mode) && !S_ISDIR(status.st_mode)) {
+        NotImplemented_nid_no_patch("EVFILT_VNODE: a descriptor that is not a file or a directory");
+    }
+    host.target = MacOsFileWatch::OpenTarget(descriptor);
+    if (host.target >= 0) {
+        host.queue = MacOsFileWatch::Open(host.target);
+    }
+    if (host.queue < 0) {
+        const int error = errno;
+        CloseHostWatch(host);
+        throw std::runtime_error("EVFILT_VNODE: watching the file failed, errno=" + std::to_string(error));
     }
     return 0;
 }

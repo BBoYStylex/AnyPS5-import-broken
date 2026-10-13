@@ -397,7 +397,11 @@ static int NativeFstatfs(int descriptor, KernelStatfs* fs) {
     constexpr long PipeFilesystem = 0x50495045;
     struct stat file{};
     if (::fstat(descriptor, &file) != 0) return SceErrorFromErrno(errno) & 0xffff;
+#ifdef __APPLE__
+    if (S_ISSOCK(file.st_mode)) return GUEST_EINVAL;
+#else
     if (S_ISSOCK(file.st_mode) && (::fcntl(descriptor, F_GETFL) & O_PATH) == 0) return GUEST_EINVAL;
+#endif
     if (S_ISFIFO(file.st_mode)) {
         struct statfs kind{};
         if (::fstatfs(descriptor, &kind) == 0 && static_cast<long>(kind.f_type) == PipeFilesystem) return GUEST_EINVAL;
