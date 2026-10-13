@@ -21,6 +21,16 @@ namespace {
     throw std::runtime_error(message);
 }
 
+bool namesEachComponentOnce(std::uint32_t word3, std::uint32_t componentCount) {
+    std::array<std::uint32_t, 4> names{};
+    for (std::uint32_t slot = 0; slot < 4u; ++slot) {
+        const auto selector = (word3 >> (slot * 3u)) & 7u;
+        if (selector == 2u || selector == 3u) return false;
+        if (selector >= 4u && selector - 4u < componentCount) ++names[selector - 4u];
+    }
+    return std::all_of(names.begin(), names.begin() + componentCount, [](std::uint32_t count) { return count == 1u; });
+}
+
 // Debug aid: APS5_TRACE_BUFFER_WRITTEN=1 prints, after every Populate, how many guest buffer
 // elements the program may store to and how many it only loads (this call and cumulative), so the
 // replay tool shows what a driver gains from DescriptorBinding::bufferWritten.
@@ -298,6 +308,9 @@ DescriptorBindingPlan DescriptorBindingBuilder::Prepare(const IrBindingLayout& l
                 const auto selector = (descriptor.dwords[3] >> (component * 3u)) & 7u;
                 if (selector == 2u || selector == 3u) fail("buffer specialization has a reserved component selector");
             }
+        }
+        if (buffer.formattedWritten && present && !namesEachComponentOnce(descriptor.dwords[3], GetFormatInfo(static_cast<IrBufferFormat>(format)).componentCount)) {
+            fail("formatted buffer store through a V# whose DST_SEL does not name each format component once");
         }
     }
     for (std::uint32_t index = 0; index < info.images.size() && !registrationModules; ++index) {

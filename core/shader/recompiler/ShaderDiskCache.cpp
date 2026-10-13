@@ -474,6 +474,7 @@ void encodeInfo(Writer& writer, const CompiledShaderInfo& compiled) {
         out.Value(buffer.formatted);
         out.Value(buffer.descriptorFormatted);
         out.Value(buffer.formattedReadMask);
+        out.Value(buffer.formattedWritten);
         out.Value(buffer.scalar);
         out.Value(buffer.typedAlignment);
     });
@@ -572,7 +573,7 @@ void decodeInfo(Reader& reader, CompiledShaderInfo& compiled) {
     auto& info = compiled.info;
     reader.Value(info.scratchDwords);
     reader.Value(info.sharedMemoryBytes);
-    reader.List(info.buffers, 27, [](Reader& in, BufferResource& buffer) {
+    reader.List(info.buffers, 28, [](Reader& in, BufferResource& buffer) {
         in.Value(buffer.source);
         in.Value(buffer.firstUsePc);
         in.Value(buffer.maxByteExtent);
@@ -583,6 +584,7 @@ void decodeInfo(Reader& reader, CompiledShaderInfo& compiled) {
         in.Value(buffer.formatted);
         in.Value(buffer.descriptorFormatted);
         in.Value(buffer.formattedReadMask);
+        in.Value(buffer.formattedWritten);
         in.Value(buffer.scalar);
         in.Value(buffer.typedAlignment);
     });
