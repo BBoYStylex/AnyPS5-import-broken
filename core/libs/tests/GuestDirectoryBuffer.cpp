@@ -18,6 +18,8 @@ int APS5_VABI sceKernelOpen(const char*, int, std::uint16_t);
 int APS5_VABI sceKernelClose(int);
 int APS5_VABI sceKernelGetdents(int, char*, int);
 int APS5_VABI sceKernelGetdirentries(int, char*, int, std::int64_t*);
+int APS5_VABI getdents_nid_postfix(int, char*, int);
+int* APS5_VABI __error_nid_postfix();
 }
 
 static void Check(bool value, int line) {
@@ -66,7 +68,12 @@ static void CheckName(const std::u8string& utf8Name) {
     Require(sceKernelGetdents(directory, buffer.data(), 8) == 0);
     Require(sceKernelGetdents(directory, buffer.data(), 256) == 0);
     Require(sceKernelClose(directory) == 0);
-    Require(sceKernelGetdents(-1, buffer.data(), 256) == SCE_KERNEL_ERROR_ENOTDIR);
+    Require(sceKernelGetdents(-1, buffer.data(), 256) == SCE_KERNEL_ERROR_EBADF);
+    Require(sceKernelGetdents(directory, buffer.data(), 256) == SCE_KERNEL_ERROR_EBADF);
+    Require(sceKernelGetdirentries(-1, buffer.data(), 256, &base) == SCE_KERNEL_ERROR_EBADF);
+    *__error_nid_postfix() = 0;
+    Require(getdents_nid_postfix(directory, buffer.data(), 256) == -1);
+    Require(*__error_nid_postfix() == 9);
     std::filesystem::remove_all(root);
 }
 

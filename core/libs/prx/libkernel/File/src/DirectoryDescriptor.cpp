@@ -130,7 +130,7 @@ std::optional<std::int64_t> SeekDirectoryDescriptor(int fd, std::int64_t offset,
 
 int ReadDirectoryDescriptor(int fd, char* buf, int nbytes) {
     const auto found = Find(fd);
-    if (!found) return SCE_KERNEL_ERROR_ENOTDIR;
+    if (!found) return DescriptorIsOpen_nid_no_patch(fd) ? SCE_KERNEL_ERROR_ENOTDIR : SCE_KERNEL_ERROR_EBADF;
     auto& state = *found;
     std::lock_guard lock(state.mutex);
     Load(state);
