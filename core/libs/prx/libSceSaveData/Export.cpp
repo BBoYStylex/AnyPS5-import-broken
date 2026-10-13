@@ -91,4 +91,19 @@ int APS5_VABI sceSaveDataTransferringMount(const SaveDataTransferringMount* moun
     SAVEDATA_TRACE("sceSaveDataTransferringMount -> 0x%08x", static_cast<unsigned>(rc));
     return rc;
 }
+
+int APS5_VABI sceSaveDataGetUpdatedDataCountProspero() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceSaveDataMount5Prospero() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceSaveDataMountSysProspero2() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
 }
