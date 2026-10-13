@@ -168,6 +168,10 @@ static void CheckNamedAndHintedMappings() {
     Require(sceKernelClearVirtualRangeName(first, length) == 0);
     Require(NameAt(middle)[0] == '\0');
     Require(sceKernelSetVirtualRangeName(nullptr, length, "x") != 0);
+    void* heapFlagged = nullptr;
+    Require(sceKernelMapNamedFlexibleMemory(&heapFlagged, length, 3, 0x8000, "heap flag") == 0 && heapFlagged != nullptr);
+    Require(std::strcmp(NameAt(heapFlagged), "heap flag") == 0);
+    Require(sceKernelMunmap(heapFlagged, length) == 0);
     void* hinted = first;
     Require(sceKernelMapFlexibleMemory(&hinted, length, 3, 0) == 0);
     Require(hinted > first && (reinterpret_cast<std::uintptr_t>(hinted) & 0x3fff) == 0);

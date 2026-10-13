@@ -201,14 +201,14 @@ int APS5_VABI sceKernelMapNamedDirectMemory(void** addr, size_t len, int prot, i
 }
 
 int32_t APS5_VABI sceKernelMapNamedFlexibleMemory(void** addr_in_out, size_t len, int prot, int flags, const char* name) {
- const int result = _mapFlexible(addr_in_out, len, prot, flags);
+ constexpr int IgnoredHeapFlag = 0x8000;
+ const int result = _mapFlexible(addr_in_out, len, prot, flags & ~IgnoredHeapFlag);
  if (result == 0 && name) sceKernelSetVirtualRangeName(*addr_in_out, len, name);
  return result;
 }
 
 int32_t APS5_VABI sceKernelMapNamedFlexibleMemoryInternal(void** addr_in_out, size_t len, int prot, int flags, const char* name) {
- constexpr int IgnoredInternalFlag = 0x8000;
- return sceKernelMapNamedFlexibleMemory(addr_in_out, len, prot, flags & ~IgnoredInternalFlag, name);
+ return sceKernelMapNamedFlexibleMemory(addr_in_out, len, prot, flags, name);
 }
 
 int APS5_VABI sceKernelMprotect(const void* addr, size_t len, int prot) {
