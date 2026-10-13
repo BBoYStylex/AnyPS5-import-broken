@@ -472,8 +472,7 @@ int* APS5_VABI sceNetErrnoLoc(void) {
 }
 
 int APS5_VABI sceNetShowNetstat(void) {
-    const int result = 0;
-    return result;
+    return 0;
 }
 
 int PollSockets(KernelSocketPoll::Entry* entries, int count, int timeoutMilliseconds) {
@@ -1410,8 +1409,7 @@ int APS5_VABI sceNetResolverAbort(int rid, int flags) {
 }
 
 int APS5_VABI sceNetShowIfconfig() {
-    const int result = 0;
-    return result;
+    return 0;
 }
 
 extern const std::uint8_t in6addr_any_nid_postfix[16] = {};

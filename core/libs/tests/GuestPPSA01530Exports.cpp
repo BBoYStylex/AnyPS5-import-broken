@@ -6,25 +6,46 @@
 
 extern "C" {
 int APS5_VABI sceNetShowIfconfig();
+int APS5_VABI sceNetShowNetstat();
 int APS5_VABI scePadUnknown_n3kSX62fgNo();
 int APS5_VABI _ZN3sce4Json5Value21setNullAccessCallBackEPFRKS1_NS0_9ValueTypeEPS2_PvES6_();
 }
 
 namespace {
 
-bool CheckSceNetShowIfconfig() {
-    return sceNetShowIfconfig() == 0;
+struct SilentStub {
+    const char* name;
+    int (APS5_VABI *function)();
+};
+
+const SilentStub silent_stubs[] = {
+    {"sceNetShowIfconfig", sceNetShowIfconfig},
+    {"sceNetShowNetstat", sceNetShowNetstat},
+};
+
+struct Export {
+    const char* name;
+    int (APS5_VABI *function)();
+};
+
+const Export exports[] = {
+    {"scePadUnknown_n3kSX62fgNo", scePadUnknown_n3kSX62fgNo},
+    {"_ZN3sce4Json5Value21setNullAccessCallBackEPFRKS1_NS0_9ValueTypeEPS2_PvES6_", _ZN3sce4Json5Value21setNullAccessCallBackEPFRKS1_NS0_9ValueTypeEPS2_PvES6_},
+};
+
+bool CheckSilentStub(const SilentStub& entry) {
+    return entry.function() == 0;
 }
 
-bool ReportsNotImplemented(const char* name, int (APS5_VABI *function)()) {
+bool ReportsNotImplemented(const Export& entry) {
     try {
-        function();
+        entry.function();
     } catch (const std::runtime_error& error) {
-        if (std::string(error.what()) == std::string(name) + " not implemented") return true;
-        std::fprintf(stderr, "%s threw: %s\n", name, error.what());
+        if (std::string(error.what()) == std::string(entry.name) + " not implemented") return true;
+        std::fprintf(stderr, "%s threw: %s\n", entry.name, error.what());
         return false;
     }
-    std::fprintf(stderr, "%s returned instead of reporting that it is not implemented\n", name);
+    std::fprintf(stderr, "%s returned instead of reporting that it is not implemented\n", entry.name);
     return false;
 }
 
@@ -32,8 +53,7 @@ bool ReportsNotImplemented(const char* name, int (APS5_VABI *function)()) {
 
 int main() {
     bool correct = true;
-    correct &= CheckSceNetShowIfconfig();
-    correct &= ReportsNotImplemented("scePadUnknown_n3kSX62fgNo", scePadUnknown_n3kSX62fgNo);
-    correct &= ReportsNotImplemented("_ZN3sce4Json5Value21setNullAccessCallBackEPFRKS1_NS0_9ValueTypeEPS2_PvES6_", _ZN3sce4Json5Value21setNullAccessCallBackEPFRKS1_NS0_9ValueTypeEPS2_PvES6_);
+    for (const auto& entry : silent_stubs) correct &= CheckSilentStub(entry);
+    for (const auto& entry : exports) correct &= ReportsNotImplemented(entry);
     return correct ? 0 : 1;
 }
