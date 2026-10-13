@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
+#include <cfenv>
 #include <limits>
 #include <thread>
 #include <fcntl.h>
@@ -168,6 +169,13 @@ double MathCall(const char* name, std::initializer_list<double> values, std::ini
 }
 
 void Mathematics() {
+    const auto rounding = std::fegetround();
+    std::fesetround(FE_DOWNWARD);
+    Check(MathCall("rint", {1.75}) == 1, "math uses current downward rounding");
+    std::fesetround(FE_UPWARD);
+    Check(MathCall("rint", {1.25}) == 2, "math uses current upward rounding");
+    std::fesetround(rounding);
+
     Check(MathCall("sqrt", {81}) == 9, "sqrt floating argument and result");
     Check(MathCall("pow", {2, -3}) == 0.125, "pow two SSE arguments");
     Check(MathCall("fma", {0x1.0000000000001p0, 0x1.fffffffffffffp-1, -1}) == 0x1.ffffffffffffep-54, "fma single rounding");

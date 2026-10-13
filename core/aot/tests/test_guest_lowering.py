@@ -694,6 +694,15 @@ destroy_end:
         result = self.run_binary(binary)
         self.assertEqual((result.returncode, result.stdout), (0, b'ok\n'), result.stdout)
 
+    def test_provider_conversions_optimized(self):
+        binary = self.directory / 'provider_checks'
+        native = guest_lab.NATIVE
+        sources = [str(native / 'NativeAotGuest.cpp'), *map(str, sorted(native.glob('NativeAotGlibc*.cpp')))]
+        guest_lab.run(['xcrun', 'clang++', '-std=c++20', '-O3', '-flto=thin', '-arch', 'arm64', f'-I{guest_lab.ROOT / "core/libs"}',
+                       str(Path(__file__).parent / 'guest_provider_checks.cpp'), *sources, '-o', str(binary)])
+        result = self.run_binary(binary)
+        self.assertEqual((result.returncode, result.stdout), (0, b'ok\n'), result.stdout)
+
     def test_flags_read_after_call_are_rejected(self):
         with self.assertRaisesRegex(guest_lift.LiftError, 'read after the call'):
             self.program(PRELUDE + '''

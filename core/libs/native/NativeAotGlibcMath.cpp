@@ -5,6 +5,8 @@
 #include <cstring>
 #include <limits>
 
+#pragma STDC FENV_ACCESS ON
+
 namespace {
 
 using namespace NativeAotGlibcSupport;

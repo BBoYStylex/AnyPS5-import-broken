@@ -1414,7 +1414,7 @@ static void EmitNativeF16Modes(SpirvEmitterState& state) {
     state.module.EmitCapability(spv::CapabilityDenormPreserve);
     if (!state.nativeF16ModesEmitted) {
         state.module.AddExecutionMode(state.mainFunc, spv::ExecutionModeRoundingModeRTE, 16u);
-        state.module.AddExecutionMode(state.mainFunc, spv::ExecutionModeDenormPreserve, 16u);
+        EmitF16DenormPreserve(state);
         state.module.AddExecutionMode(state.mainFunc, spv::ExecutionModeSignedZeroInfNanPreserve, 16u);
         state.nativeF16ModesEmitted = true;
     }
@@ -1546,8 +1546,44 @@ std::uint32_t EmitBitCastU32F32(SpirvEmitterState& state, std::uint32_t arg0) {
     return EmitBitCastU16F16(state, arg0);
 }
 
-std::uint32_t EmitConvertF32F16(SpirvEmitterState& state, std::uint32_t bits) {
-    return EmitF16BitsToF32(state, bits);
+static bool NarrowF16Field(const IrValue& half) {
+    const IrValue* value = half.Resolve();
+    while (value->Opcode() == IrOpcode::BitCastF16U16 || value->Opcode() == IrOpcode::ConvertU16U32) value = value->Argument(0)->Resolve();
+    if (value->Opcode() != IrOpcode::BitFieldUExtract && value->Opcode() != IrOpcode::BitFieldSExtract) return false;
+    const IrValue* count = value->Argument(2)->Resolve();
+    return !count->HasImmediate() || count->ImmediateU32() < 16u;
+}
+
+static bool OnlyCompared(const IrValue& value) {
+    return std::ranges::all_of(value.Uses(), [](const IrValue* user) {
+        switch (user->Opcode()) {
+            case IrOpcode::FPOrdEqual32:
+            case IrOpcode::FPUnordEqual32:
+            case IrOpcode::FPOrdNotEqual32:
+            case IrOpcode::FPUnordNotEqual32:
+            case IrOpcode::FPOrdLessThan32:
+            case IrOpcode::FPUnordLessThan32:
+            case IrOpcode::FPOrdGreaterThan32:
+            case IrOpcode::FPUnordGreaterThan32:
+            case IrOpcode::FPOrdLessThanEqual32:
+            case IrOpcode::FPUnordLessThanEqual32:
+            case IrOpcode::FPOrdGreaterThanEqual32:
+            case IrOpcode::FPUnordGreaterThanEqual32:
+            case IrOpcode::FPIsNan32:
+                return true;
+            case IrOpcode::FPAbs32:
+            case IrOpcode::FPNeg32:
+            case IrOpcode::Identity:
+                return OnlyCompared(*user);
+            default:
+                return false;
+        }
+    });
+}
+
+std::uint32_t EmitConvertF32F16(SpirvEmitterState& state, const IrValue& inst, std::uint32_t bits) {
+    if (NarrowF16Field(*inst.Argument(0))) return EmitF16BitsToF32Decoded(state, bits);
+    return OnlyCompared(inst) ? EmitF16BitsToF32AnyNan(state, bits) : EmitF16BitsToF32(state, bits);
 }
 
 std::uint32_t EmitCompositeExtractU32x2(SpirvEmitterState& state, std::uint32_t arg0, const IrValue* arg1) {
