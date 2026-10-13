@@ -61,8 +61,22 @@ static void Positive(bool reverse) {
     Check(function==image.GetRva(0x20,1),"wrong export RVA");
     for(auto target:{0x2800,0x2808})Check(Io::ReadU64(pe,Offset(pe,image.GetRva(target,8)))==Elfpatcher::Windows::ImageBase+function,"wrong alias relocation value");
 }
+static void AddressRanges() {
+    const auto guest = Relinker::GuestImageReader().Read("generic.prx", Fixture(), true);
+    const Elfpatcher::Windows::WindowsLoadImage image(guest.Bytes, guest.Headers, false);
+    Check(image.GetRva(0x3000, 0) == image.GetEndRva(), "wrong final endpoint RVA");
+    Check(image.GetRva(0x1000, 0) == Elfpatcher::Windows::LoadRva + 0x1000, "wrong endpoint before a gap");
+    Reject([&] { image.GetRva(0x1001, 0); }, "not contained in PT_LOAD");
+    Reject([&] { image.GetRva(0x3000); }, "not contained in PT_LOAD");
+    Reject([&] { image.GetRva(0x3000, 1); }, "not contained in PT_LOAD");
+    Reject([&] { image.RequireWritable(0x3000, 0); }, "Cannot map an empty ELF address range");
+    Reject([&] { image.RequireWritable(0x2800, 0); }, "Cannot map an empty ELF address range");
+    auto writable = image;
+    Reject([&] { writable.WritePointer(0x3000, 1); }, "not contained in PT_LOAD");
+}
 int main() {
     try {
+        AddressRanges();
         Positive(false);Positive(true);
         Reject([]{Relinker::GuestImageReader().Read("generic.prx",Fixture());},"Duplicate or empty export");
         const std::array<std::pair<unsigned,std::uint64_t>,7> changes={{{4,0x22},{4,0x11},{5,0},{6,2},{8,0x28},{16,2},{6,Relinker::AbsoluteSection}}};

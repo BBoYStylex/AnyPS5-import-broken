@@ -58,10 +58,8 @@ WindowsLoadImage::WindowsLoadImage(const std::vector<std::uint8_t>& source, cons
 }
 
 std::uint32_t WindowsLoadImage::GetRva(const std::uint64_t address, const std::uint64_t size) const {
-    if (size == 0)
-        throw Domain::RelinkerException("Cannot map an empty ELF address range", address);
     for (const auto& segment : segments) {
-        if (address >= segment.MappedAddress && address - segment.MappedAddress < segment.MemorySize && size <= segment.MemorySize - (address - segment.MappedAddress))
+        if (address >= segment.MappedAddress && address - segment.MappedAddress <= segment.MemorySize && size <= segment.MemorySize - (address - segment.MappedAddress))
             return CheckedRva(LoadRva + address - firstAddress);
     }
     throw Domain::RelinkerException("ELF address is not contained in PT_LOAD memory", address);
@@ -86,6 +84,8 @@ void WindowsLoadImage::WritePointer(const std::uint64_t address, const std::uint
 }
 
 void WindowsLoadImage::RequireWritable(const std::uint64_t address, const std::uint64_t size) const {
+    if (size == 0)
+        throw Domain::RelinkerException("Cannot map an empty ELF address range", address);
     const auto offset = GetRva(address, size) - LoadRva;
     for (auto page = offset / SectionAlignment; page <= (offset + size - 1) / SectionAlignment; ++page) {
         if ((pageFlags[page] & SectionWrite) == 0)

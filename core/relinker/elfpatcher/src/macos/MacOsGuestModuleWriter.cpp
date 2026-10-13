@@ -99,7 +99,7 @@ std::vector<std::uint8_t> GuestModuleWriter::WriteMacOs(const Relinker::GuestIma
             input.TlsExports.push_back({name, symbol.Value});
             continue;
         }
-        input.Exports.push_back({name, image.GetRva(symbol.Value, std::max<std::uint64_t>(symbol.Size, 1))});
+        input.Exports.push_back({name, image.GetRva(symbol.Value, (symbol.Info & 15) == 2 ? std::max<std::uint64_t>(symbol.Size, 1) : symbol.Size)});
     }
 
     for (const auto& dependency : dependencies) input.Dylibs.push_back(MachODependency(dependency, "@loader_path"));

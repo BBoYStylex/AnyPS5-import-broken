@@ -138,7 +138,7 @@ std::vector<std::uint8_t> GuestModuleWriter::WriteWindows(const Relinker::GuestI
             Io::AppendU64(tlsExports.Data, ImageBase + tlsIndex);
             Io::AppendU64(tlsExports.Data, symbol.Value);
             relocations.push_back(rva);
-        } else rva = image.GetRva(symbol.Value, std::max<std::uint64_t>(symbol.Size, 1));
+        } else rva = image.GetRva(symbol.Value, (symbol.Info & 15) == 2 ? std::max<std::uint64_t>(symbol.Size, 1) : symbol.Size);
         if (!exports.emplace(symbol.Name, rva).second) throw Domain::RelinkerException("Duplicate guest export: " + symbol.Name);
         if ((symbol.Info & 15) == 2 && returnsZero(symbol.Value)) runtime.ZeroReturnExports.insert(symbol.Name);
     }
