@@ -319,7 +319,7 @@ counter: .quad 0
 extern "C" const NativeAotGuestImage __aps5_guest_image;
 void Exit(NativeAotGuestState& state) { std::_Exit(static_cast<int>(NativeAotGuest::Argument(state, 0))); }
 int main(int argc, char** argv) {
-    const NativeAotGuest::ProviderBinding bindings[] = {{"exit", Exit, nullptr}};
+    const NativeAotGuest::ProviderBinding bindings[] = {{"exit", Exit, nullptr, true}};
     NativeAotGuest::RegisterProviders(bindings, 1);
     NativeAotGuest::StartSceApplication(__aps5_guest_image, argc, argv);
 }
@@ -704,6 +704,96 @@ destroy_end:
     def test_memory_epochs_preserve_thread_creation_and_tls_destructors(self):
         self.memory_epochs = True
         self.test_tls_destructors_repeat_before_join_returns()
+
+    def test_single_profile_updates_file_times_without_sharing_memory(self):
+        target = self.directory / 'timestamps.txt'
+        target.write_text('unchanged')
+        binary, _ = self.program(PRELUDE + '''
+    mov rdi, -100
+    lea rsi, [rip + filename]
+    lea rdx, [rip + timestamps]
+    xor ecx, ecx
+    call qword ptr [rip + utimensat_slot]
+    test eax, eax
+    jne failed
+    xor edi, edi
+''' + EXIT + '''
+failed:
+    mov edi, 71
+''' + EXIT + f'''
+filename: .asciz "{target}"
+.p2align 3
+timestamps: .quad 1700000000, 123456789, 1700000001, 987654321
+''', imports=('exit', 'utimensat'))
+        result = self.run_binary(binary)
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, b'', b''))
+        self.assertEqual(target.stat().st_atime_ns, 1700000000123456789)
+        self.assertEqual(target.stat().st_mtime_ns, 1700000001987654321)
+        self.assertEqual(target.read_text(), 'unchanged')
+
+    def test_single_profile_rejects_unqualified_provider_before_execution(self):
+        launcher = r'''#include "native/NativeAotGuest.hpp"
+#include "native/NativeAotGlibc.hpp"
+#include <cstdlib>
+extern "C" const NativeAotGuestImage __aps5_guest_image;
+extern char** environ;
+void Foreign(NativeAotGuestState&) { std::_Exit(93); }
+int main(int argc, char** argv) {
+    NativeAotGlibc::Register();
+    const NativeAotGuest::ProviderBinding provider{"foreign", Foreign, nullptr};
+    NativeAotGuest::RegisterProviders(&provider, 1);
+    NativeAotGuest::Start(__aps5_guest_image, argc, argv, environ);
+}
+'''
+        binary, _ = self.program(PRELUDE + '''
+    call qword ptr [rip + foreign_slot]
+    xor edi, edi
+''' + EXIT, imports=('exit', 'foreign'), launcher=launcher)
+        result = self.run_binary(binary)
+        self.assertEqual(result.returncode, 127)
+        self.assertIn(b'shared memory requires the ordered memory profile', result.stderr)
+
+    def test_single_profile_rejects_shared_anonymous_mapping(self):
+        binary, _ = self.program(PRELUDE + '''
+    xor edi, edi
+    mov esi, 16384
+    mov edx, 3
+    mov ecx, 33
+    mov r8, -1
+    xor r9d, r9d
+    call qword ptr [rip + mmap_slot]
+    xor edi, edi
+''' + EXIT, imports=('exit', 'mmap'))
+        result = self.run_binary(binary)
+        self.assertEqual(result.returncode, 127)
+        self.assertIn(b'shared memory requires the ordered memory profile', result.stderr)
+
+    def test_single_profile_preserves_private_anonymous_mapping(self):
+        binary, _ = self.program(PRELUDE + '''
+    xor edi, edi
+    mov esi, 16384
+    mov edx, 3
+    mov ecx, 34
+    mov r8, -1
+    xor r9d, r9d
+    call qword ptr [rip + mmap_slot]
+    cmp rax, -1
+    je fail
+    mov qword ptr [rax], 123
+    cmp qword ptr [rax], 123
+    jne fail
+    mov rdi, rax
+    mov esi, 16384
+    call qword ptr [rip + munmap_slot]
+    test eax, eax
+    jne fail
+    xor edi, edi
+''' + EXIT + '''
+fail:
+    mov edi, 71
+''' + EXIT, imports=('exit', 'mmap', 'munmap'))
+        result = self.run_binary(binary)
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, b'', b''))
 
     def test_memory_epoch_promotion_resumes_without_replaying_effects(self):
         self.memory_epochs = True

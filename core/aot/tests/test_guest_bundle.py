@@ -53,7 +53,7 @@ extern "C" const NativeAotGuestImage peer___aps5_guest_image;
 void Exit(NativeAotGuestState& state) { std::_Exit(static_cast<int>(NativeAotGuest::Argument(state, 0))); }
 void WrongPeer(NativeAotGuestState& state) { NativeAotGuest::Return(state, 99); }
 int main(int argc, char** argv) {
-    const NativeAotGuest::ProviderBinding providers[] = {{"exit", Exit, nullptr}, {"peer", WrongPeer, nullptr}};
+    const NativeAotGuest::ProviderBinding providers[] = {{"exit", Exit, nullptr, true}, {"peer", WrongPeer, nullptr, true}};
     NativeAotGuest::RegisterProviders(providers, 2);
     const NativeAotGuest::ImageBinding images[] = {{&app___aps5_guest_image, NativeAotGuest::Abi::SceApplication},
         {&peer___aps5_guest_image, NativeAotGuest::Abi::SceModule}};
@@ -76,7 +76,7 @@ extern char** environ;
 void Exit(NativeAotGuestState& state) { std::_Exit(static_cast<int>(NativeAotGuest::Argument(state, 0))); }
 void NativeOnly() { std::_Exit(99); }
 int main(int argc, char** argv) {
-    const NativeAotGuest::ProviderBinding providers[] = {{"exit", Exit, nullptr},
+    const NativeAotGuest::ProviderBinding providers[] = {{"exit", Exit, nullptr, true},
         {"opaque", nullptr, nullptr, false, false, reinterpret_cast<const void*>(NativeOnly)}};
     NativeAotGuest::RegisterProviders(providers, 2);
     NativeAotGuest::Start(__aps5_guest_image, argc, argv, environ);
@@ -111,7 +111,7 @@ int main(int argc, char** argv) {
                     struct.pack_into('<Qq',raw,guest_lab.DYNAMIC+0x1400+8,16,0)
                     counter=guest_lab.CODE+labels['_start']
                 path=folder/'input.elf';path.write_bytes(raw)
-                guest_emit.build(path,folder/'ir',shards=1,jobs=1,abi=abi,namespace=name+'_')
+                guest_emit.build(path,folder/'ir',shards=1,jobs=1,abi=abi,namespace=name+'_',concurrent=True)
                 for module in (folder/'ir').glob('*.ll'):
                     obj=module.with_suffix('.o');guest_lab.run(['xcrun','clang','-O2','-c',str(module),'-o',str(obj)]);objects.append(str(obj))
             main=directory/'main.cpp'
@@ -164,7 +164,7 @@ int main() {
 extern "C" const NativeAotGuestImage __aps5_guest_image;
 void Throw(NativeAotGuestState&) { throw std::runtime_error("provider failure"); }
 int main() {
-    const NativeAotGuest::ProviderBinding provider{"throw",Throw,nullptr};
+    const NativeAotGuest::ProviderBinding provider{"throw",Throw,nullptr,true};
     NativeAotGuest::RegisterProviders(&provider,1);
     const auto base=NativeAotGuest::Load(__aps5_guest_image);
     NativeAotGuestState state{};

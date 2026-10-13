@@ -1023,7 +1023,6 @@ void Sysconf(State& state) {
 
 void Utimensat(State& state) {
     const auto guestFlags = Integer(state, 3);
-    if ((guestFlags & 1) != 0 || (guestFlags & 0x20) == 0) NativeAotGuest::PromoteSharedMemory();
     if (guestFlags & ~0x100) Unsupported("unsupported utimensat flags");
     timespec times[2];
     const auto* source = Pointer<const std::int64_t>(state, 2);

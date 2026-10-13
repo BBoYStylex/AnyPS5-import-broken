@@ -70,7 +70,7 @@ def main():
             record={'identity':canonical,'native':choices[0],'data':symbol['info']&15==1,'api':raw}
             require(canonical not in records or records[canonical]==record, 'conflicting system binding')
             records[canonical]=record
-        report=guest_emit.build(path,OUT/(name+'-ir'),shards=8,jobs=1,abi=abi,namespace=name+'_')
+        report=guest_emit.build(path,OUT/(name+'-ir'),shards=8,jobs=1,abi=abi,namespace=name+'_',concurrent=True)
         require(not report['unsupported'], 'unqualified instruction sites remain')
         reports[name]=report
     objects=list(OUT.glob('*-ir/*.ll'))
