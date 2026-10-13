@@ -9,6 +9,7 @@
 #include <cerrno>
 #include <cstdlib>
 #include <memory>
+#include <optional>
 
 #include "prx/libc/include/General.hpp"
 #include "SceTypes.hpp"
@@ -205,6 +206,28 @@ int ScanGuest(const char* buffer, const char* format, bool secure, NextPointer n
 
 }
 
+namespace {
+
+std::optional<int> ScanResultAtEndOfFile(const char* format) {
+    const char* cursor = format;
+    for (;;) {
+        const auto directive = static_cast<unsigned char>(*cursor++);
+        if (directive == 0) return 0;
+        if (std::isspace(directive)) continue;
+        if (directive != '%') return EOF;
+        for (;;) {
+            const auto conversion = static_cast<unsigned char>(*cursor++);
+            if (conversion == '%') return EOF;
+            if (conversion == 0) return EOF;
+            if (conversion == 'n') return std::nullopt;
+            if (std::strchr("*jlqtzLh0123456789", conversion) != nullptr) continue;
+            return std::strchr("diouxXAEFGaefgSs[Ccp", conversion) != nullptr ? EOF : 0;
+        }
+    }
+}
+
+}
+
 extern "C" {
 
 int APS5_VABI vasprintf_nid_postfix(char** destination, const char* format, VaList* args) {
@@ -281,9 +304,11 @@ int APS5_VABI fprintf_nid_postfix(FileStream* stream, const char* format, ...) {
 
 int APS5_VABI fscanf_nid_postfix(FileStream* stream, const char* format, ...) {
     auto* native = GetNativeStream(stream);
-    if (format != nullptr && *format != ' ' && std::feof(native)) {
-        stream->SyncStatus();
-        return EOF;
+    if (format != nullptr && std::feof(native)) {
+        if (const auto result = ScanResultAtEndOfFile(format)) {
+            stream->SyncStatus();
+            return *result;
+        }
     }
 #ifdef _WIN32
     __builtin_sysv_va_list args;

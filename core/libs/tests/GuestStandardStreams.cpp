@@ -280,6 +280,12 @@ static void CheckStickyEndOfFile() {
     Require(fscanf_nid_postfix(reader, "%c", &scanned) == EOF && scanned == '?' && feof_nid_postfix(reader) != 0);
     clearerr_nid_postfix(reader);
     Require(fscanf_nid_postfix(reader, "%c", &scanned) == 1 && scanned == 'f');
+    Require(fgetc_nid_postfix(reader) == EOF && feof_nid_postfix(reader) != 0);
+    int counted = 7;
+    Require(fscanf_nid_postfix(reader, " ") == 0 && fscanf_nid_postfix(reader, "\n") == 0 && fscanf_nid_postfix(reader, "") == 0);
+    Require(fscanf_nid_postfix(reader, "%n", &counted) == 0 && counted == 0);
+    Require(fscanf_nid_postfix(reader, "x") == EOF && fscanf_nid_postfix(reader, "%%") == EOF && fscanf_nid_postfix(reader, " %d", &counted) == EOF);
+    Require(fscanf_nid_postfix(reader, "%*[a-z]") == EOF && fscanf_nid_postfix(reader, "%y") == 0 && counted == 0 && feof_nid_postfix(reader) != 0);
     Require(fclose_nid_postfix(reader) == 0 && fclose_nid_postfix(writer) == 0);
     Require(std::filesystem::remove(filename));
 }
