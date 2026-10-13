@@ -76,6 +76,14 @@ int main() {
     CheckTimes(path, fd, first);
     Require(lutimes_nid_postfix(path.c_str(), second) == 0, "lutimes fractional timestamp");
     CheckTimes(path, fd, second);
+    const auto beneathFile = path + "/leaf";
+    const auto beneathAbsent = (root / "absent" / "leaf").string();
+    Require(utimes_nid_postfix(beneathFile.c_str(), first) == -1 && *__error_nid_postfix() == 20, "utimes under a regular file");
+    Require(sceKernelUtimes_nid_postfix(beneathFile.c_str(), first) == static_cast<int>(0x80020014u), "sceKernelUtimes under a regular file");
+    Require(lutimes_nid_postfix(beneathFile.c_str(), first) == -1 && *__error_nid_postfix() == 20, "lutimes under a regular file");
+    Require(utimes_nid_postfix(beneathAbsent.c_str(), first) == -1 && *__error_nid_postfix() == 2, "utimes under a missing directory");
+    Require(lutimes_nid_postfix(beneathAbsent.c_str(), first) == -1 && *__error_nid_postfix() == 2, "lutimes under a missing directory");
+    CheckTimes(path, fd, second);
 
     for (int index = 0; index < 2; ++index) {
         for (const auto micros : {-1LL, 1000000LL}) {
