@@ -1533,6 +1533,7 @@ struct RecordedDraw {
     std::span<const VkImageView> targetViews;
     std::vector<std::shared_ptr<StorageTexture>> targets;
     std::vector<std::shared_ptr<StorageTexture>> proxies;
+    std::vector<VkImage> multisampleImages;
     const IndirectRecord* indirect = nullptr;
     std::span<const ShaderResources::MovedBuffer> moved;
     bool listed = false;
@@ -1684,12 +1685,14 @@ void recordDraw(const Context& context, const State& state, const Pm4::DrawParam
         passReads.emplace_back(args->arguments, args->arguments + args->RangeBytes());
         if (args->countIndirect) passReads.emplace_back(args->countAddress, args->countAddress + 4);
     }
+    passReads.insert(passReads.end(), inputs.inPlaceReads.begin(), inputs.inPlaceReads.end());
     const auto passImages = resources.StorageImages();
     std::vector<std::pair<VkImage, bool>> passAttachments;
     passAttachments.reserve(record.targets.size());
     for (const auto& target : record.targets) {
         if (target != nullptr) passAttachments.emplace_back(target->Image(), true);
     }
+    for (const auto image : record.multisampleImages) passAttachments.emplace_back(image, true);
     const bool unknownMemory = addressBased || resources.UsesAddressTable() || resources.HasCopiedWrites();
     const PassAccess passAccess{passReads, resources.GpuWrites(), passImages, passAttachments, unknownMemory, unknownMemory};
     const bool fenced = state.depth.has_value() || !record.proxies.empty();
@@ -1881,6 +1884,7 @@ void Draw(const Context& context, const State& state, const Pm4::DrawParameters&
         TileMipLayout mip{};
         std::unique_ptr<RenderTarget> target;
         bool multisampled = false;
+        VkImage multisampleImage = VK_NULL_HANDLE;
         // APS5_DUMP_TARGETS: the rendered linear pixels, read back for target_<address>_<n>.raw.
         std::unique_ptr<Buffer> dump;
     };
@@ -1897,7 +1901,7 @@ void Draw(const Context& context, const State& state, const Pm4::DrawParameters&
         if (color.samples > 1) {
             binding.multisampled = true;
             timer.phase(PhaseSetup);
-            targetViews.push_back(MultisampleTargetView(context, color));
+            targetViews.push_back(MultisampleTargetView(context, color, &binding.multisampleImage));
             timer.phase(PhaseReadTarget);
             continue;
         }
@@ -2134,6 +2138,7 @@ void Draw(const Context& context, const State& state, const Pm4::DrawParameters&
         record.targets = owners;
         for (const auto& binding : targets) {
             if (binding.proxied) record.proxies.push_back(binding.resident);
+            if (binding.multisampled) record.multisampleImages.push_back(binding.multisampleImage);
         }
         record.indirect = args != nullptr ? &indirect : nullptr;
         record.listed = listed;
