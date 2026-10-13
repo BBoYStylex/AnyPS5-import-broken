@@ -19,6 +19,8 @@
 
 #ifdef _WIN32
 #include "prx/libc/include/WindowsScanning.hpp"
+#else
+#include "prx/libc/include/SuppressedScanning.hpp"
 #endif
 
 #if defined(__GLIBC__)
@@ -94,6 +96,17 @@ int HostVfscanf(std::FILE* stream, const char* format, std::va_list args) {
 #else
     return std::vfscanf(stream, format, args);
 #endif
+}
+
+int ScanHostString_nid_no_patch(const char* input, const char* format, std::va_list args) {
+    if (!input) { errno = 22; return EOF; }
+    return LibcDetail::ScanSuppressedArguments_nid_no_patch(format, args,
+        [input](const char* translated, std::va_list forwarded) { return HostVsscanf(input, translated, forwarded); });
+}
+
+int ScanHostFile_nid_no_patch(std::FILE* stream, const char* format, std::va_list args) {
+    return LibcDetail::ScanSuppressedArguments_nid_no_patch(format, args,
+        [stream](const char* translated, std::va_list forwarded) { return HostVfscanf(stream, translated, forwarded); });
 }
 #endif
 
@@ -290,7 +303,7 @@ int APS5_VABI fscanf_nid_postfix(FileStream* stream, const char* format, ...) {
     RejectGuestWideScan(format);
     std::va_list args;
     va_start(args, format);
-    const int result = HostVfscanf(native, format, args);
+    const int result = ScanHostFile_nid_no_patch(native, format, args);
     va_end(args);
 #endif
     stream->SyncStatus();
@@ -374,7 +387,7 @@ int APS5_VABI vsscanf_nid_postfix(const char* input, const char* format, VaList*
     RejectGuestWideScan(format);
     std::va_list copy;
     va_copy(copy, *reinterpret_cast<std::va_list*>(args));
-    const int result = HostVsscanf(input, format, copy);
+    const int result = ScanHostString_nid_no_patch(input, format, copy);
     va_end(copy);
     return result;
 #endif
@@ -393,7 +406,7 @@ int APS5_VABI sscanf_nid_postfix(const char* input, const char* format, ...) {
     RejectGuestWideScan(format);
     std::va_list args;
     va_start(args, format);
-    const int result = HostVsscanf(input, format, args);
+    const int result = ScanHostString_nid_no_patch(input, format, args);
     va_end(args);
     return result;
 }
