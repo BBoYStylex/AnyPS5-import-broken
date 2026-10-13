@@ -712,6 +712,10 @@ GuestSockets::DescriptorKind GuestSockets::Kind(int descriptor) {
     const DWORD type = GetFileType(handle);
     if (type == FILE_TYPE_PIPE) return DescriptorKind::Pipe;
     if (type == FILE_TYPE_DISK) return DescriptorKind::File;
+    // a console is what ttydev_kqfilter attaches the read and write filters to; "nul" is a character
+    // device as well and has no filter of its own
+    DWORD mode = 0;
+    if (type == FILE_TYPE_CHAR && GetConsoleMode(handle, &mode)) return DescriptorKind::Terminal;
     return DescriptorKind::Other;
 #else
     if (descriptor < 0) return DescriptorKind::Other;
@@ -719,13 +723,62 @@ GuestSockets::DescriptorKind GuestSockets::Kind(int descriptor) {
     if (::fstat(descriptor, &status) != 0) return DescriptorKind::Other;
     if (S_ISFIFO(status.st_mode)) return DescriptorKind::Pipe;
     if (S_ISREG(status.st_mode) || S_ISDIR(status.st_mode)) return DescriptorKind::File;
+    if (S_ISCHR(status.st_mode) && ::isatty(descriptor) != 0) return DescriptorKind::Terminal;
     return DescriptorKind::Other;
 #endif
 }
 
-bool GuestSockets::FilterReady(int descriptor, bool write, std::int64_t* data, bool* eof) {
-    if (IsOpen(descriptor)) return Ready(descriptor, write, data, eof);
-    if (Kind(descriptor) != DescriptorKind::Pipe) return false;
+// tty_kqops_read_event reports ttydisc_read_poll, the bytes readable in the input queue, and sets
+// EV_EOF once the terminal is gone; tty_kqops_write_event reports ttydisc_write_poll, the space left
+// in the output queue, and sets it too. A canonical terminal is only readable with a whole line,
+// which is the readiness the host reports as well.
+static bool TerminalReady(int descriptor, bool write, std::int64_t* data, bool* eof) {
+#ifdef _WIN32
+    if (write) {
+        // the console answered GetConsoleMode, so it is there and takes a write; it does not report
+        // the space left, so the data is the lower bound of one byte a writable console has
+        *data = 1;
+        *eof = false;
+        return true;
+    }
+    DWORD pending = 0;
+    if (!GetNumberOfConsoleInputEvents(reinterpret_cast<HANDLE>(::_get_osfhandle(descriptor)), &pending)) return false;
+    // the host counts pending input records where FreeBSD counts the bytes of its input queue
+    *data = static_cast<std::int64_t>(pending);
+    *eof = false;
+    return *data > 0;
+#else
+    pollfd entry{descriptor, static_cast<short>(write ? POLLOUT : POLLIN), 0};
+    const int result = ::poll(&entry, 1, 0);
+    if (result < 0) throw std::runtime_error("equeue: polling terminal descriptor " + std::to_string(descriptor) + " failed, errno " + std::to_string(errno));
+    // a terminal that is gone reports POLLHUP, which tty_kqops_read_event and tty_kqops_write_event
+    // turn into EV_EOF before they read a count, and a revoked terminal refuses to be queried
+    const bool gone = result > 0 && (entry.revents & (POLLHUP | POLLERR)) != 0;
+    if (gone) {
+        *data = 0;
+        *eof = true;
+        return true;
+    }
+    if (write) {
+        // the host does not report the space left in the output queue, which is what FreeBSD counts,
+        // so the data is the lower bound of one byte a writable terminal has
+        *data = 1;
+        *eof = false;
+        return (entry.revents & POLLOUT) != 0;
+    }
+    int readable = 0;
+    if (::ioctl(descriptor, FIONREAD, &readable) != 0)
+        throw std::runtime_error("equeue: querying terminal descriptor " + std::to_string(descriptor) + " failed, errno " + std::to_string(errno));
+    *data = readable;
+    *eof = false;
+    return (entry.revents & POLLIN) != 0;
+#endif
+}
+
+bool GuestSockets::FilterReady(DescriptorKind kind, int descriptor, bool write, std::int64_t* data, bool* eof) {
+    if (kind == DescriptorKind::Socket) return Ready(descriptor, write, data, eof);
+    if (kind == DescriptorKind::Terminal) return TerminalReady(descriptor, write, data, eof);
+    if (kind != DescriptorKind::Pipe) return false;
 #ifdef _WIN32
     ACCESS_MASK access = 0;
     PipeLocalInformation pipe{};

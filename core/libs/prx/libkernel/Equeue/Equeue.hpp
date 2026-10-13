@@ -14,6 +14,7 @@
 #include "SceTypes.hpp"
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include "prx/libkernel/KernelErrors.hpp"
+#include "prx/libkernel/Socket/include/SocketRuntime.hpp"
 #include "prx/libkernel/Time/include/TimedWait.hpp"
 
 static constexpr int16_t EVFILT_READ = -1;
@@ -61,6 +62,7 @@ struct KernelEqueueEvent {
     uint64_t deadlineNs = 0;
     uint64_t intervalNs = 0;
     int64_t lowat = 0;
+    GuestSockets::DescriptorKind kind = GuestSockets::DescriptorKind::Socket;
     KernelEvent event;
     KernelFilter filter;
     std::deque<KernelEvent> pendingEvents;
@@ -112,7 +114,7 @@ using KernelEqueueRef = std::shared_ptr<KernelEqueuePrivate>;
 void EqueueDescriptorClosed(int descriptor);
 void KqueueDescriptorClosed(int descriptor);
 bool IsKqueueDescriptor(int descriptor);
-KernelEqueueEvent EqueueDescriptorEvent(int descriptor, int16_t filter, uint16_t flags, void* udata, std::int64_t lowat = 0);
+KernelEqueueEvent EqueueDescriptorEvent(int descriptor, int16_t filter, uint16_t flags, void* udata, GuestSockets::DescriptorKind kind, std::int64_t lowat = 0);
 void RequireVnodeNotes(uint32_t fflags);
 void SetVnodeNotes(KernelEqueueEvent& event, uint32_t fflags);
 int AddVnodeEvent(const KernelEqueueRef& queue, int descriptor, uint32_t fflags, uint16_t flags, void* udata);

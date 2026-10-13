@@ -6,6 +6,10 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#ifndef _WIN32
+#include <fcntl.h>
+#include <unistd.h>
+#endif
 
 extern "C" {
 int APS5_VABI kqueue_nid_postfix();
@@ -308,6 +312,49 @@ static void PipeEvents() {
     Require(close_nid_postfix(kq) == 0);
 }
 
+#ifndef _WIN32
+static void TerminalEvents() {
+    const int kq = kqueue_nid_postfix();
+    const int master = ::posix_openpt(O_RDWR | O_NOCTTY);
+    Require(master >= 0 && ::grantpt(master) == 0 && ::unlockpt(master) == 0);
+    const int slave = ::open(::ptsname(master), O_RDWR | O_NOCTTY);
+    Require(slave >= 0);
+    const auto watched = static_cast<std::uintptr_t>(slave);
+    KernelEvent events[4]{};
+    char buffer[8]{};
+
+    // a terminal carries the read and write filters, as ttydev_kqfilter attaches them: a canonical
+    // line is not readable until it is complete, and a writable terminal has at least one byte
+    Require(Apply(kq, Change(watched, EvfiltRead, EvAdd)) == 0);
+    Require(Poll(kq, events, 4) == 0);
+    Require(Apply(kq, Change(watched, EvfiltWrite, EvAdd)) == 0);
+    Require(Poll(kq, events, 4) == 1 && events[0].filter == EvfiltWrite && events[0].data == 1);
+    Require(Apply(kq, Change(watched, EvfiltWrite, EvDelete)) == 0);
+
+    // a partial line is not counted, which is what ttyinq_bytescanonicalized reports
+    Require(::write(master, "hi", 2) == 2);
+    Require(Poll(kq, events, 4) == 0);
+    Require(::write(master, "\n", 1) == 1);
+    Require(Poll(kq, events, 4) == 1 && events[0].filter == EvfiltRead && events[0].data == 3);
+    Require(::read(slave, buffer, 3) == 3);
+    Require(Poll(kq, events, 4) == 0);
+
+    // the terminal going away is an end of file, which tty_kqops_read_event sets
+    Require(::close(master) == 0);
+    Require(Poll(kq, events, 4) == 1 && (events[0].flags & EvEof) != 0);
+    Require(::close(slave) == 0);
+
+    // a character device that is not a terminal has no filters of its own, as /dev/null does not, and
+    // answers EINVAL; the guest open maps paths of its own, so the host one stands in
+    const int nullDevice = ::open("/dev/null", O_RDWR);
+    Require(nullDevice >= 0);
+    RequireFailure(Apply(kq, Change(static_cast<std::uintptr_t>(nullDevice), EvfiltRead, EvAdd)), GuestEinval);
+    RequireFailure(Apply(kq, Change(static_cast<std::uintptr_t>(nullDevice), EvfiltWrite, EvAdd)), GuestEinval);
+    Require(close_nid_postfix(nullDevice) == 0);
+    Require(close_nid_postfix(kq) == 0);
+}
+#endif
+
 static void Errors() {
     const int kq = kqueue_nid_postfix();
     KernelEvent events[4]{};
@@ -523,6 +570,7 @@ int main() {
     Errors();
     FileWatch();
 #ifndef _WIN32
+    TerminalEvents();
     RenameAndDeleteWatchedFile();
     MoveDirectoryEntries();
 #endif

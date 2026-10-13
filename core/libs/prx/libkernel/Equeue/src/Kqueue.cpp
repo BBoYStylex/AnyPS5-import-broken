@@ -135,23 +135,21 @@ int AddDescriptorKnote(const KernelEqueueRef& queue, KernelEvent& change, std::u
         }
         NotImplemented_nid_no_patch("kevent: EVFILT_READ on a kqueue descriptor");
     }
-    // a socket and a pipe carry the read and write filters, while a file only carries the vnode one,
-    // which answers EINVAL here; the descriptor number does not tell them apart
+    // a socket, a pipe and a terminal carry the read and write filters, while a file only carries the
+    // vnode one and a device like /dev/null carries none, which is what both answer EINVAL for here;
+    // the descriptor number does not tell them apart
     const auto kind = GuestSockets::Kind(descriptor);
-    if (kind == GuestSockets::DescriptorKind::File) {
+    if (kind == GuestSockets::DescriptorKind::File || kind == GuestSockets::DescriptorKind::Other) {
         return GUEST_EINVAL;
     }
-    if (kind == GuestSockets::DescriptorKind::Other) {
-        NotImplemented_nid_no_patch(change.filter == EVFILT_READ ? "kevent: EVFILT_READ on a descriptor that is neither a socket, a pipe nor a file" : "kevent: EVFILT_WRITE on a descriptor that is neither a socket, a pipe nor a file");
-    }
     if ((flags & EV_CLEAR) != 0) {
-        NotImplemented_nid_no_patch(kind == GuestSockets::DescriptorKind::Socket ? "kevent: EV_CLEAR on a socket" : "kevent: EV_CLEAR on a pipe");
+        NotImplemented_nid_no_patch(kind == GuestSockets::DescriptorKind::Socket ? "kevent: EV_CLEAR on a socket" : "kevent: EV_CLEAR on a pipe or a terminal");
     }
     // NOTE_LOWAT holds the knote until the socket has data (or free space) instead of reporting every
     // readiness. The value is kn_sdata of the change and stays apart from kn_data, which the filter
     // writes on every poll.
     const std::int64_t lowat = (change.fflags & NOTE_LOWAT) != 0 ? change.data : 0;
-    auto event = EqueueDescriptorEvent(descriptor, change.filter, flags, change.udata, lowat);
+    auto event = EqueueDescriptorEvent(descriptor, change.filter, flags, change.udata, kind, lowat);
     change.fflags = 0;
     change.data = 0;
     return GuestErrno(queue->AddEvent(event));

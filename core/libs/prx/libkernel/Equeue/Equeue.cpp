@@ -258,6 +258,7 @@ int KernelEqueuePrivate::AddEvent(const KernelEqueueEvent& event) {
         it->deadlineNs = event.deadlineNs;
         it->intervalNs = event.intervalNs;
         it->lowat = event.lowat;
+        it->kind = event.kind;
         it->event.udata = event.event.udata;
         for (auto& pending : it->pendingEvents) {
             pending.udata = event.event.udata;
@@ -596,21 +597,16 @@ int APS5_VABI sceKernelDeleteAmprSystemEvent(KernelEqueue eq, int id) {
 }
 
 static int AddDescriptorEvent(KernelEqueue eq, int fd, std::size_t size, void* udata, int16_t filter) {
-    // a socket and a pipe carry the read and write filters, while a file only carries the vnode one,
-    // which is why the call answers EINVAL for it, as kevent does
+    // a socket, a pipe and a terminal carry the read and write filters, while a file only carries the
+    // vnode one and a device like /dev/null carries none, which is what both answer EINVAL for here,
+    // as kevent does
     const auto kind = GuestSockets::Kind(fd);
-    if (kind == GuestSockets::DescriptorKind::File) {
-        return SCE_KERNEL_ERROR_EINVAL;
-    }
-    if (kind == GuestSockets::DescriptorKind::Other) {
-        if (!DescriptorIsOpen_nid_no_patch(fd)) {
-            return SCE_KERNEL_ERROR_EBADF;
-        }
-        NotImplemented_nid_no_patch(filter == EVFILT_READ ? "sceKernelAddReadEvent: descriptor that is neither a socket, a pipe nor a file" : "sceKernelAddWriteEvent: descriptor that is neither a socket, a pipe nor a file");
+    if (kind == GuestSockets::DescriptorKind::File || kind == GuestSockets::DescriptorKind::Other) {
+        return DescriptorIsOpen_nid_no_patch(fd) ? SCE_KERNEL_ERROR_EINVAL : SCE_KERNEL_ERROR_EBADF;
     }
     // size is the low water mark the event waits for, as it is in sceKernelAddReadEvent and
     // sceKernelAddWriteEvent; 0 and 1 are the readiness the default knote reports
-    return EqueueAddEvent_nid_postfix(eq, EqueueDescriptorEvent(fd, filter, EV_ADD, udata, size > 1 ? static_cast<std::int64_t>(size) : 0));
+    return EqueueAddEvent_nid_postfix(eq, EqueueDescriptorEvent(fd, filter, EV_ADD, udata, kind, size > 1 ? static_cast<std::int64_t>(size) : 0));
 }
 
 int APS5_VABI sceKernelAddReadEvent(KernelEqueue eq, int fd, std::size_t size, void* udata) {
@@ -631,17 +627,18 @@ int APS5_VABI sceKernelDeleteWriteEvent(KernelEqueue eq, int fd) {
 
 }
 
-KernelEqueueEvent EqueueDescriptorEvent(int descriptor, int16_t filter, uint16_t flags, void* udata, std::int64_t lowat) {
+KernelEqueueEvent EqueueDescriptorEvent(int descriptor, int16_t filter, uint16_t flags, void* udata, GuestSockets::DescriptorKind kind, std::int64_t lowat) {
     KernelEqueueEvent event{};
     event.event.ident = static_cast<uintptr_t>(descriptor);
     event.event.filter = filter;
     event.event.flags = flags;
     event.event.udata = udata;
     event.lowat = lowat;
+    event.kind = kind;
     event.filter.pollFunc = [](KernelEqueueEvent* e) {
         std::int64_t data = 0;
         bool eof = false;
-        if (!GuestSockets::FilterReady(static_cast<int>(e->event.ident), e->event.filter == EVFILT_WRITE, &data, &eof)) {
+        if (!GuestSockets::FilterReady(e->kind, static_cast<int>(e->event.ident), e->event.filter == EVFILT_WRITE, &data, &eof)) {
             return false;
         }
         e->event.data = static_cast<intptr_t>(data);

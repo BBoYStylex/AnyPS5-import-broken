@@ -5,6 +5,10 @@
 #include <cstdlib>
 #include <string>
 #include <thread>
+#ifndef _WIN32
+#include <fcntl.h>
+#include <unistd.h>
+#endif
 
 extern "C" {
 int APS5_VABI socket_nid_postfix(int, int, int);
@@ -149,6 +153,22 @@ int main() {
     Require(count == 1 && events[0].ident == static_cast<std::uintptr_t>(pipe[0]) && events[0].filter == EVFILT_READ && events[0].data == 5);
     Require(sceKernelDeleteEqueue(pipes) == SCE_OK);
     Require(close_nid_postfix(pipe[0]) == 0 && close_nid_postfix(pipe[1]) == 0);
+#ifndef _WIN32
+    // a terminal carries them too, and a canonical line is what its read event reports
+    const int terminal = ::posix_openpt(O_RDWR | O_NOCTTY);
+    Require(terminal >= 0 && ::grantpt(terminal) == 0 && ::unlockpt(terminal) == 0);
+    const int tty = ::open(::ptsname(terminal), O_RDWR | O_NOCTTY);
+    Require(tty >= 0);
+    KernelEqueue terminals = 0;
+    Require(sceKernelCreateEqueue(&terminals, "terminal") == SCE_OK);
+    Require(sceKernelAddReadEvent(terminals, tty, 0, nullptr) == SCE_OK);
+    std::thread lineWriter([&terminal] { Require(::write(terminal, "end\n", 4) == 4); });
+    Require(sceKernelWaitEqueue(terminals, events.data(), events.size(), &count, &timeout) == SCE_OK);
+    lineWriter.join();
+    Require(count == 1 && events[0].ident == static_cast<std::uintptr_t>(tty) && events[0].data == 4);
+    Require(sceKernelDeleteEqueue(terminals) == SCE_OK);
+    Require(::close(tty) == 0 && ::close(terminal) == 0);
+#endif
     // the size is the low water mark: two bytes below it leave the event pending, the fourth byte
     // reports it, and a re-add below the mark drops the watermark
     Require(sceKernelDeleteReadEvent(eq, accepted) == SCE_OK);
