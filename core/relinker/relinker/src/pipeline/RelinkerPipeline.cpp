@@ -176,6 +176,9 @@ RelinkResult RelinkerPipeline::Relink(const std::vector<std::uint8_t>& sourceElf
             neededLibraryNamesByStrOffset.emplace_back(tag.Value, std::string());
 
     std::vector<NidReference> nidRefs;
+    std::vector<NidReference> definedRefs;
+    std::set<std::uint32_t> referencedDefinitions;
+    std::vector<std::uint8_t> analysisElf;
     std::vector<std::string> neededLibraries;
     auto policy = std::dynamic_pointer_cast<ValidationPolicy>(validationPolicy);
 
@@ -253,8 +256,39 @@ RelinkResult RelinkerPipeline::Relink(const std::vector<std::uint8_t>& sourceElf
             }
 
             const FileByteOffset symOff = dynSymTabOffset + static_cast<FileByteOffset>(symIdx) * symEntSize;
-            if (symOff < dynSymTabOffset || symOff > raw.size() || raw.size() - symOff < 5)
+            if (symOff < dynSymTabOffset || symOff > raw.size() || raw.size() - symOff < symEntSize)
                 throw RelinkerException("Symbol table entry out of bounds", symOff);
+
+            std::uint16_t section = 0;
+            std::memcpy(&section, raw.data() + symOff + 6, sizeof(section));
+            if (section != SHN_UNDEF) {
+                if (section >= 0xff00 && section != 0xfff1)
+                    throw RelinkerException("Unsupported defined symbol section", symOff);
+                const auto info = raw[symOff + 4];
+                if ((info & 15) > STT_SECTION || (info >> 4) > STB_WEAK)
+                    throw RelinkerException("Unsupported defined symbol type or binding", symOff);
+                if (relType != R_X86_64_64 && relType != R_X86_64_GLOB_DAT && relType != R_X86_64_JUMP_SLOT)
+                    throw RelinkerException("Unsupported defined symbol relocation", pos);
+                if (relType != R_X86_64_64 && rAddend != 0)
+                    throw RelinkerException("GLOB_DAT/JUMP_SLOT relocation has a nonzero addend", pos);
+                std::uint32_t nameOff = 0;
+                std::uint64_t value = 0, size = 0;
+                std::memcpy(&nameOff, raw.data() + symOff, sizeof(nameOff));
+                std::memcpy(&value, raw.data() + symOff + 8, sizeof(value));
+                std::memcpy(&size, raw.data() + symOff + 16, sizeof(size));
+                NidReference reference{readCStr(nameOff), {}, relType, pos, rOffset, rAddend, (info >> 4) == STB_WEAK};
+                reference.Definition = Domain::ElfSymbolDefinition{info, raw[symOff + 5], section, value, size};
+                definedRefs.push_back(std::move(reference));
+                referencedDefinitions.insert(symIdx);
+                if (unusedFilterLevel != 0) {
+                    if (analysisElf.empty()) analysisElf = raw;
+                    const std::uint64_t pointerType = section == 0xfff1 ? R_X86_64_NONE : R_X86_64_RELATIVE;
+                    const auto target = value + (relType == R_X86_64_64 ? static_cast<std::uint64_t>(rAddend) : 0);
+                    std::memcpy(analysisElf.data() + pos + 8, &pointerType, sizeof(pointerType));
+                    std::memcpy(analysisElf.data() + pos + 16, &target, sizeof(target));
+                }
+                continue;
+            }
 
             std::uint32_t nameOff = 0;
             std::memcpy(&nameOff, raw.data() + symOff, 4);
@@ -335,7 +369,7 @@ RelinkResult RelinkerPipeline::Relink(const std::vector<std::uint8_t>& sourceElf
     if (unusedFilterLevel == 2) {
         if (executableSegments.size() > 1)
             throw RelinkerException("Strict NID filtering does not support multiple executable segments");
-        nidRefs = unusedNidFilter->Filter(nidRefs, raw, textSection, textVAddr);
+        nidRefs = unusedNidFilter->Filter(nidRefs, analysisElf.empty() ? raw : analysisElf, textSection, textVAddr);
         if (nidRefs.size() > originalNidCount) throw RelinkerException("Strict NID filter increased the reference count");
         { std::ostringstream message; message << "Strict filtering total: " << originalNidCount << " -> " << nidRefs.size() << "; filtered=" << originalNidCount - nidRefs.size() << "\n"; progress.Message(message.str()); }
     } else if (unusedFilterLevel == 1) {
@@ -354,7 +388,7 @@ RelinkResult RelinkerPipeline::Relink(const std::vector<std::uint8_t>& sourceElf
             { std::ostringstream message; message << "CFG/GOT filtering skipped: multiple executable segments are not modeled; "
                       << nonPltCount << " -> " << nonPltCount << "; filtered=0\n"; progress.Message(message.str()); }
         } else {
-            nonPltRefs = unusedNidFilter->Filter(nonPltRefs, raw, textSection, textVAddr);
+            nonPltRefs = unusedNidFilter->Filter(nonPltRefs, analysisElf.empty() ? raw : analysisElf, textSection, textVAddr);
             if (nonPltRefs.size() > nonPltCount) throw RelinkerException("Unused NID filter increased the reference count");
             { std::ostringstream message; message << "CFG/GOT filtering: " << nonPltCount << " -> " << nonPltRefs.size() << "; filtered=" << nonPltCount - nonPltRefs.size() << "\n"; progress.Message(message.str()); }
         }
@@ -370,10 +404,13 @@ RelinkResult RelinkerPipeline::Relink(const std::vector<std::uint8_t>& sourceElf
     { std::ostringstream message; message << "NID total: " << originalNidCount << " -> " << nidRefs.size() << "; filtered=" << originalNidCount - nidRefs.size() << "\n"; progress.Message(message.str()); }
 
     auto dynamicRefs = nidRefs;
+    dynamicRefs.insert(dynamicRefs.end(), definedRefs.begin(), definedRefs.end());
     std::vector<RelinkPatch> patches;
     auto pltCount = static_cast<std::uint32_t>(dynJmpRelSize / relaEntSize);
     if (unusedFilterLevel == 2) {
-        auto compacted = UnusedNidFilter::CompactPlt(originalNidRefs, nidRefs, textSection, textVAddr, elfReader->TranslateVirtualAddress(textVAddr), dynJmpRelOffset);
+        auto originalReferences = originalNidRefs;
+        originalReferences.insert(originalReferences.end(), definedRefs.begin(), definedRefs.end());
+        auto compacted = UnusedNidFilter::CompactPlt(originalReferences, dynamicRefs, textSection, textVAddr, elfReader->TranslateVirtualAddress(textVAddr), dynJmpRelOffset);
         dynamicRefs = std::move(compacted.References);
         patches = std::move(compacted.Patches);
         { std::ostringstream message; message << "PLT compaction: " << pltCount << " -> " << compacted.SlotCount << "\n"; progress.Message(message.str()); }
@@ -381,6 +418,7 @@ RelinkResult RelinkerPipeline::Relink(const std::vector<std::uint8_t>& sourceElf
     }
     auto dynSection = dynamicSectionBuilder->BuildDynamicSection(dynamicRefs, neededLibraries, dynJmpRelOffset, pltCount);
     for (const auto& ref : dynamicRefs) {
+        if (ref.Definition) continue;
         if (!ref.Library.empty()) continue;
         if (auto declared = Domain::DeclaredImportModule(ref.Nid, importModules); !declared.empty()) dynSection.UnmatchedImportModules.insert(std::move(declared));
     }
@@ -390,6 +428,7 @@ RelinkResult RelinkerPipeline::Relink(const std::vector<std::uint8_t>& sourceElf
         if (symbolBytes % symEntSize != 0 || dynSymTabOffset > raw.size() || symbolBytes > raw.size() - dynSymTabOffset)
             throw RelinkerException("Invalid executable dynamic symbol table size");
         for (ByteCount off = symEntSize; off < symbolBytes; off += symEntSize) {
+            if (referencedDefinitions.contains(static_cast<std::uint32_t>(off / symEntSize))) continue;
             const auto* symbol = raw.data() + dynSymTabOffset + off;
             std::uint16_t section = 0;
             std::memcpy(&section, symbol + 6, sizeof(section));

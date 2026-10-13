@@ -42,7 +42,7 @@ public:
                     terminated = true;
                     break;
                 }
-                if (tag == 1 || (tag >= 0x61000000 && tag != 0x6100002F && tag != 0x61000031 && tag != 0x61000033 && tag != 0x61000039 && tag != 0x6100003B && tag != 0x6100003F)) continue;
+                if (tag == 1 || (tag >= 0x61000000 && tag != 0x61000029 && tag != 0x6100002B && tag != 0x6100002D && tag != 0x6100002F && tag != 0x61000031 && tag != 0x61000033 && tag != 0x61000039 && tag != 0x6100003B && tag != 0x6100003F)) continue;
                 if (!tags.emplace(tag, read<std::uint64_t>(segment.Offset + offset + 8)).second)
                     throw RelinkerException("Strict filter: duplicate dynamic tag", segment.Offset + offset);
             }
@@ -68,29 +68,39 @@ public:
                 throw RelinkerException("Strict filter: duplicate imported slot", reference.RelocationAddress);
         }
 
-        const auto rela = table(7, 0x6100002F);
-        const auto relaSize = value(8, 0x61000031);
-        if (rela.has_value() != relaSize.has_value()) throw RelinkerException("Strict filter: incomplete relocation table metadata");
-        if (rela) {
-            if (value(9, 0x61000033) != 24 || *relaSize % 24 != 0)
-                throw RelinkerException("Strict filter: invalid RELA entry size");
-            requireRange(*rela, *relaSize);
-            for (std::uint64_t offset = 0; offset < *relaSize; offset += 24) {
-                const auto slot = read<std::uint64_t>(*rela + offset);
-                const auto info = read<std::uint64_t>(*rela + offset + 8);
-                if (static_cast<std::uint32_t>(info) != 8) continue;
+        const auto collectPointers = [&](std::int64_t addressTag, std::int64_t osAddressTag, std::int64_t sizeTag, std::int64_t osSizeTag, bool plt) {
+            const auto address = value(addressTag, osAddressTag);
+            const auto size = value(sizeTag, osSizeTag);
+            const auto format = plt ? value(20, 0x6100002B) : value(9, 0x61000033);
+            if (!address && !size && (!plt || !format)) return;
+            if (!address || !size) throw RelinkerException("Strict filter: incomplete relocation table metadata");
+            if (format != (plt ? 7 : 24) || *size % 24 != 0)
+                throw RelinkerException(plt ? "Strict filter: invalid PLT relocation format or size" : "Strict filter: invalid RELA entry size");
+            const auto position = tags.contains(osAddressTag) ? *table(addressTag, osAddressTag) : fileOffset(*address, *size);
+            requireRange(position, *size);
+            for (std::uint64_t offset = 0; offset < *size; offset += 24) {
+                const auto slot = read<std::uint64_t>(position + offset);
+                const auto info = read<std::uint64_t>(position + offset + 8);
+                const auto type = static_cast<std::uint32_t>(info);
+                if (type == 0) continue;
+                if (type != 8) {
+                    if (type != 7 && (plt || (type != 1 && type != 6)))
+                        throw RelinkerException("Strict filter: unsupported relocation type", slot);
+                    continue;
+                }
                 if (const auto symbol = info >> 32; symbol != 0) {
                     const auto symbols = table(6, 0x61000039);
                     const auto size = tags.find(0x6100003F);
                     if (!symbols || size == tags.end() || symbol >= size->second / 24 || (read<std::uint8_t>(*symbols + symbol * 24 + 4) & 15) != 3 || read<std::uint64_t>(*symbols + symbol * 24 + 8) != 0)
                         throw RelinkerException("Strict filter: relative relocation has a symbol", slot);
                 }
-                const auto target = read<std::uint64_t>(*rela + offset + 16);
+                const auto target = read<std::uint64_t>(position + offset + 16);
                 if (input.ImportSlots.contains(slot) || !input.Pointers.emplace(slot, target).second)
                     throw RelinkerException("Strict filter: overlapping pointer relocations", slot);
-
             }
-        }
+        };
+        collectPointers(7, 0x6100002F, 8, 0x61000031, false);
+        collectPointers(23, 0x61000029, 2, 0x6100002D, true);
 
         for (const auto tag : {12, 13}) {
             if (const auto entry = value(tag, 0x60000000 + tag); entry && *entry != 0) input.Entries.push_back(*entry);

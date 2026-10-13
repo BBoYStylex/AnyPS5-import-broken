@@ -140,10 +140,12 @@ inline constexpr std::uint32_t R_X86_64_32S = 11;
 inline constexpr std::uint32_t R_X86_64_GOTPCRELX = 41;
 inline constexpr std::uint32_t R_X86_64_REX_GOTPCRELX = 42;
 
+inline constexpr std::uint8_t STB_LOCAL = 0;
 inline constexpr std::uint8_t STB_GLOBAL = 1;
 inline constexpr std::uint8_t STB_WEAK = 2;
 inline constexpr std::uint8_t STT_NOTYPE = 0;
 inline constexpr std::uint8_t STT_FUNC = 2;
+inline constexpr std::uint8_t STT_SECTION = 3;
 inline constexpr std::uint8_t STV_DEFAULT = 0;
 inline constexpr std::uint16_t SHN_UNDEF = 0;
 

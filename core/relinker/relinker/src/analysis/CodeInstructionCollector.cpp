@@ -165,7 +165,8 @@ std::set<Domain::VirtualAddress> CodeInstructionCollector::Collect(const std::ve
         symbols = table(6, 0x61000039, symbolCount * 24);
         for (std::uint64_t index = 0; index < symbolCount; ++index) {
             const auto offset = symbols + index * 24;
-            if ((bytes[offset + 4] & 15) == 2 && Io::ReadU16(bytes, offset + 6) != 0) {
+            const auto section = Io::ReadU16(bytes, offset + 6);
+            if ((bytes[offset + 4] & 15) == 2 && section != 0 && section != 0xfff1) {
                 const auto address = Io::ReadU64(bytes, offset + 8);
                 addRoot(address);
                 addFunction(address, Io::ReadU64(bytes, offset + 16), true);
@@ -194,8 +195,8 @@ std::set<Domain::VirtualAddress> CodeInstructionCollector::Collect(const std::ve
                 if (index == 0 || index >= symbolCount) throw Domain::RelinkerException("Code analysis: invalid relocation symbol", slot);
                 const auto symbol = symbols + index * 24;
                 if (Io::ReadU16(bytes, symbol + 6) == 0) importSlots.insert(slot);
-                else {
-                    const auto target = Io::ReadU64(bytes, symbol + 8) + addend;
+                else if (Io::ReadU16(bytes, symbol + 6) != 0xfff1) {
+                    const auto target = Io::ReadU64(bytes, symbol + 8) + (type == 1 ? addend : 0);
                     if (!pointers.Values.emplace(slot, target).second) throw Domain::RelinkerException("Code analysis: duplicate pointer relocation", slot);
                     addRoot(target);
                 }

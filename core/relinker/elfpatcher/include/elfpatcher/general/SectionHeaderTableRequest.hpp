@@ -14,6 +14,7 @@ struct SectionHeaderTableRequest {
     std::uint64_t DynamicSegmentSize;
     std::uint64_t StubOffset;
     std::uint64_t StubSize;
+    std::uint32_t DynSymFirstGlobal = 1;
 };
 
 }

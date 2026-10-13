@@ -115,11 +115,13 @@ std::vector<std::uint8_t> LinuxElfPatcher::Patch(
 
     const auto hashOff = static_cast<std::uint64_t>(buf.size());
     const auto symbolCount = static_cast<std::uint32_t>(dynSection.DynSymData.size() / kSymEntrySize);
+    std::uint32_t firstGlobal = 1;
+    while (firstGlobal < symbolCount && (dynSection.DynSymData[firstGlobal * kSymEntrySize + 4] >> 4) == STB_LOCAL) ++firstGlobal;
     Io::AppendU32(buf, 1);
     Io::AppendU32(buf, symbolCount);
-    Io::AppendU32(buf, symbolCount > 1 ? 1 : 0);
+    Io::AppendU32(buf, firstGlobal < symbolCount ? firstGlobal : 0);
     for (std::uint32_t index = 0; index < symbolCount; ++index)
-        Io::AppendU32(buf, index != 0 && index + 1 < symbolCount ? index + 1 : 0);
+        Io::AppendU32(buf, index >= firstGlobal && index + 1 < symbolCount ? index + 1 : 0);
     alignBuf(buf, kDynSymAlignment);
 
     const auto relaOff = static_cast<std::uint64_t>(buf.size());
@@ -220,6 +222,7 @@ std::vector<std::uint8_t> LinuxElfPatcher::Patch(
     sectionRequest.DynStrSize = dynStrSize;
     sectionRequest.DynSymOffset = dynSymOff;
     sectionRequest.DynSymSize = dynSection.DynSymData.size();
+    sectionRequest.DynSymFirstGlobal = firstGlobal;
     sectionRequest.DynamicSegmentOffset = dynSegOff;
     sectionRequest.DynamicSegmentSize = dynSegBuf.size();
     sectionRequest.StubOffset = stubOff;

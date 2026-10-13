@@ -93,8 +93,8 @@ SysVDynamicSection SysVDynamicSectionBuilder::BuildDynamicSection(
     std::vector<const NidReference*> nonPltRefs;
 
     for (const auto& ref : nidReferences) {
-        if (!ref.Library.empty()) result.ImportModules.emplace(ref.RelocationAddress, ref.Library);
-        if (ref.Function) result.FunctionImports.insert(ref.RelocationAddress);
+        if (!ref.Definition && !ref.Library.empty()) result.ImportModules.emplace(ref.RelocationAddress, ref.Library);
+        if (!ref.Definition && ref.Function) result.FunctionImports.insert(ref.RelocationAddress);
         std::uint32_t relType = ref.RelocationTypeValue;
         if (relType == 0) relType = R_X86_64_JUMP_SLOT;
 
@@ -128,7 +128,27 @@ SysVDynamicSection SysVDynamicSectionBuilder::BuildDynamicSection(
         pltSlots[slotIndex] = &ref;
     }
 
+    std::map<const NidReference*, std::uint32_t> symbolIndices;
     std::uint32_t symIdx = 1;
+    const auto appendSymbol = [&](const NidReference& ref) {
+        const auto nameOff = _appendStr(result.DynStrData, stripHashSuffix(ref.Nid));
+        if (ref.Definition) {
+            const auto& definition = *ref.Definition;
+            const auto other = (definition.Info >> 4) == STB_LOCAL && ref.RelocationTypeValue == R_X86_64_JUMP_SLOT
+                ? static_cast<std::uint8_t>((definition.Other & ~3u) | 2u) : definition.Other;
+            _appendElfSym(result.DynSymData, nameOff, definition.Info, other,
+                          definition.Section, definition.Value, definition.Size);
+        } else {
+            _appendElfSym(result.DynSymData, nameOff, symbolInfo(ref), STV_DEFAULT, 0, 0, 0);
+        }
+        symbolIndices.emplace(&ref, symIdx++);
+    };
+    for (const bool local : {true, false}) {
+        for (const auto* slot : pltSlots)
+            if (slot && (slot->Definition && (slot->Definition->Info >> 4) == STB_LOCAL) == local) appendSymbol(*slot);
+        for (const auto* slot : nonPltRefs)
+            if ((slot->Definition && (slot->Definition->Info >> 4) == STB_LOCAL) == local) appendSymbol(*slot);
+    }
 
     for (const NidReference* slot : pltSlots) {
         if (slot == nullptr)
@@ -137,22 +157,14 @@ SysVDynamicSection SysVDynamicSectionBuilder::BuildDynamicSection(
                 "PLT thunks cannot be filtered without patching their hard-coded reloc index");
 
         const NidReference& ref = *slot;
-        const std::uint32_t nameOff = _appendStr(result.DynStrData, stripHashSuffix(ref.Nid));
-        _appendElfSym(result.DynSymData, nameOff, symbolInfo(ref), STV_DEFAULT, 0, 0, 0);
-
-        const std::uint64_t relaInfo = (static_cast<std::uint64_t>(symIdx) << 32) | R_X86_64_JUMP_SLOT;
+        const std::uint64_t relaInfo = (static_cast<std::uint64_t>(symbolIndices.at(&ref)) << 32) | R_X86_64_JUMP_SLOT;
         _appendRela(result.RelaPltData, ref.RelocationAddress, relaInfo, ref.Addend);
-        ++symIdx;
     }
 
     for (const NidReference* slotPtr : nonPltRefs) {
         const NidReference& ref = *slotPtr;
-        const std::uint32_t nameOff = _appendStr(result.DynStrData, stripHashSuffix(ref.Nid));
-        _appendElfSym(result.DynSymData, nameOff, symbolInfo(ref), STV_DEFAULT, 0, 0, 0);
-
-        const std::uint64_t relaInfo = (static_cast<std::uint64_t>(symIdx) << 32) | ref.RelocationTypeValue;
+        const std::uint64_t relaInfo = (static_cast<std::uint64_t>(symbolIndices.at(&ref)) << 32) | ref.RelocationTypeValue;
         _appendRela(result.RelaData, ref.RelocationAddress, relaInfo, ref.Addend);
-        ++symIdx;
     }
 
     for (const std::uint32_t off : neededOffsets)

@@ -36,8 +36,19 @@ PeRelocations WindowsRelocationBuilder::Apply(WindowsLoadImage& image, const Dom
             if (symbol == 0 || symbol >= dynamicSection.DynSymData.size() / 24)
                 throw Domain::RelinkerException("Invalid import symbol index", target);
             const auto symbolOffset = static_cast<std::size_t>(symbol) * 24;
-            if (Io::ReadU16(dynamicSection.DynSymData, symbolOffset + 6) != 0)
-                throw Domain::RelinkerException("Defined symbols require explicit relocation support", target);
+            const auto section = Io::ReadU16(dynamicSection.DynSymData, symbolOffset + 6);
+            if (section != 0) {
+                if (section >= 0xff00 && section != 0xfff1)
+                    throw Domain::RelinkerException("Unsupported defined symbol section", target);
+                if ((dynamicSection.DynSymData[symbolOffset + 4] & 15) > STT_SECTION)
+                    throw Domain::RelinkerException("Unsupported defined symbol type", target);
+                if (type != 1 && addend != 0)
+                    throw Domain::RelinkerException("GLOB_DAT/JUMP_SLOT relocation has a nonzero addend", target);
+                const auto value = Io::ReadU64(dynamicSection.DynSymData, symbolOffset + 8) + (type == 1 ? addend : 0);
+                image.WritePointer(target, section == 0xfff1 ? value : image.GetRelocatedAddress(value));
+                if (section != 0xfff1) result.BaseRelocations.push_back(rva);
+                continue;
+            }
             const auto name = ReadString(dynamicSection.DynStrData, Io::ReadU32(dynamicSection.DynSymData, symbolOffset));
             if (name.empty() && dynamicSection.DynSymData[symbolOffset + 4] >> 4 != STB_WEAK)
                 throw Domain::RelinkerException("Empty import symbol name", target);

@@ -7,6 +7,7 @@
 #include <map>
 #include <set>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <domain/GuestRuntime.hpp>
 
@@ -54,6 +55,14 @@ struct SectionHeader {
     std::uint64_t EntrySize;
 };
 
+struct ElfSymbolDefinition {
+    std::uint8_t Info;
+    std::uint8_t Other;
+    std::uint16_t Section;
+    std::uint64_t Value;
+    std::uint64_t Size;
+};
+
 struct NidReference {
     std::string Nid;
     std::string Library;
@@ -63,6 +72,7 @@ struct NidReference {
     std::int64_t Addend;
     bool Weak = false;
     bool Function = false;
+    std::optional<ElfSymbolDefinition> Definition;
 };
 
 struct CallSiteInfo {
