@@ -311,6 +311,21 @@ static void CheckFailedSeekKeepsState() {
     Require(ftello_nid_postfix(&stream) == 1 && fgetc_nid_postfix(&stream) == 'z' && fgetc_nid_postfix(&stream) == '2');
     Require(fseeko_nid_postfix(&stream, -2, SEEK_CUR) == 0 && fgetc_nid_postfix(&stream) == '1');
     stream.Close();
+    int pipeEnds[2];
+#ifdef _WIN32
+    Require(_pipe(pipeEnds, 4096, _O_BINARY) == 0 && _write(pipeEnds[1], "pq", 2) == 2 && _close(pipeEnds[1]) == 0);
+    FileStream pipe(_fdopen(pipeEnds[0], "rb"));
+#else
+    Require(::pipe(pipeEnds) == 0);
+    Require(::write(pipeEnds[1], "pq", 2) == 2);
+    ::close(pipeEnds[1]);
+    FileStream pipe(::fdopen(pipeEnds[0], "r"));
+#endif
+    Require(fgetc_nid_postfix(&pipe) == 'p');
+    *__error_nid_postfix() = 0;
+    Require(fseeko_nid_postfix(&pipe, -1, SEEK_SET) == -1 && *__error_nid_postfix() == 22);
+    Require(ferror_nid_postfix(&pipe) == 0 && fgetc_nid_postfix(&pipe) == 'q');
+    pipe.Close();
 }
 
 static void CheckFlushWhileReading() {
