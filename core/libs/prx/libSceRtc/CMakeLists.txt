@@ -2,6 +2,10 @@ add_library(libSceRtc SHARED EXCLUDE_FROM_ALL Export.cpp)
 target_include_directories(libSceRtc PRIVATE ${LIBS_INCLUDE_DIR})
 configure_windows_unwind(libSceRtc)
 
+if(WIN32)
+    target_link_libraries(libSceRtc PRIVATE libc)
+endif()
+
 if(BUILD_TESTING)
     add_test_executable(guest_rtc_tests ${LIBS_INCLUDE_DIR}/tests/GuestRtc.cpp)
     target_include_directories(guest_rtc_tests PRIVATE ${LIBS_INCLUDE_DIR})

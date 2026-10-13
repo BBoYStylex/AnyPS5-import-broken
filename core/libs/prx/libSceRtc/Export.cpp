@@ -8,6 +8,11 @@
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
 
+#ifdef _WIN32
+#include "prx/libc/include/GuestTime.hpp"
+extern "C" GuestTm* APS5_VABI localtime_s_nid_postfix(const std::int64_t*, GuestTm*);
+#endif
+
 namespace {
 
 constexpr int SCE_RTC_ERROR_INVALID_POINTER = static_cast<int>(0x80B50002);
@@ -97,16 +102,19 @@ std::uint64_t currentTick() {
 
 std::int64_t localOffsetSeconds(std::uint64_t utcTick) {
     const auto elapsed = std::chrono::microseconds{static_cast<std::int64_t>(utcTick) - static_cast<std::int64_t>(UNIX_EPOCH_TICK)};
-    const auto seconds = static_cast<std::time_t>(std::chrono::floor<std::chrono::seconds>(elapsed).count());
-    std::tm local{};
+    const std::int64_t seconds = std::chrono::floor<std::chrono::seconds>(elapsed).count();
 #ifdef _WIN32
-    if (localtime_s(&local, &seconds) != 0) return 0;
+    GuestTm local{};
+    if (!localtime_s_nid_postfix(&seconds, &local)) return 0;
+    return local.tm_gmtoff;
 #else
-    if (!localtime_r(&seconds, &local)) return 0;
-#endif
+    const auto hostTime = static_cast<std::time_t>(seconds);
+    std::tm local{};
+    if (!localtime_r(&hostTime, &local)) return 0;
     const std::int64_t localSeconds = (daysFromCivil(local.tm_year + 1900, static_cast<unsigned>(local.tm_mon + 1), static_cast<unsigned>(local.tm_mday)) - UNIX_EPOCH_DAYS) * 86400
         + local.tm_hour * 3600 + local.tm_min * 60 + local.tm_sec;
     return localSeconds - static_cast<std::int64_t>(seconds);
+#endif
 }
 
 constexpr const char* WEEKDAY_NAMES[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
