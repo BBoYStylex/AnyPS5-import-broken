@@ -1,6 +1,7 @@
 #include "SceTypes.hpp"
 #include <array>
 #include <atomic>
+#include <climits>
 #include <cstdlib>
 #include <stdexcept>
 
@@ -90,6 +91,10 @@ int main() {
     GuestBarrier* invalid = nullptr;
     Require(pthread_barrier_init_nid_postfix(nullptr, &attr, 1) == GUEST_EINVAL);
     Require(pthread_barrier_init_nid_postfix(&invalid, &attr, 0) == GUEST_EINVAL && invalid == nullptr);
+    Require(pthread_barrier_init_nid_postfix(&invalid, &attr, static_cast<unsigned>(INT_MAX) + 1u) == GUEST_EINVAL && invalid == nullptr);
+    Require(pthread_barrier_init_nid_postfix(&invalid, &attr, UINT_MAX) == GUEST_EINVAL && invalid == nullptr);
+    Require(pthread_barrier_init_nid_postfix(&invalid, &attr, static_cast<unsigned>(INT_MAX)) == 0 && invalid != nullptr);
+    Require(pthread_barrier_destroy_nid_postfix(&invalid) == 0 && invalid == nullptr);
 
     Context withAttr;
     Require(pthread_barrier_init_nid_postfix(&withAttr.barrier, &attr, WAITERS) == 0 && withAttr.barrier != nullptr);
