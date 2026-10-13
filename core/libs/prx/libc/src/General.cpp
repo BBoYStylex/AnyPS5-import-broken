@@ -245,6 +245,9 @@ int DirectoryFailure(const std::error_code& error) {
 int SetWorkingDirectory(WorkingDirectory& state, const std::filesystem::path& resolved) {
     std::error_code error;
     const auto canonical = std::filesystem::canonical(resolved, error);
+#ifdef _WIN32
+    if (error == std::errc::no_such_file_or_directory && UnderRegularFile_nid_no_patch(resolved)) return 20;
+#endif
     if (error) return DirectoryFailure(error);
     if (!std::filesystem::is_directory(canonical, error)) return error ? DirectoryFailure(error) : 20;
     const auto relative = canonical.lexically_relative(state.root);
