@@ -14,14 +14,17 @@
 #include <limits>
 #include <optional>
 #include <atomic>
+#include <mutex>
 
 #ifdef _WIN32
+#include <windows.h>
 #include <fcntl.h>
 #include <io.h>
 #include <share.h>
 #include <sys/stat.h>
 #include <filesystem>
 #include <random>
+extern "C" _invalid_parameter_handler _set_thread_local_invalid_parameter_handler(_invalid_parameter_handler);
 #else
 #include "nid/Sha1.hpp"
 #include <fcntl.h>
@@ -37,8 +40,38 @@ extern "C" int* APS5_VABI __error_nid_postfix();
 
 namespace {
 
+#ifdef _WIN32
+constexpr std::wstring_view anonymousObjectPrefix = L"anyps5-shm-";
+
+void IgnoreInvalidParameter(const wchar_t*, const wchar_t*, const wchar_t*, unsigned int, std::uintptr_t) {}
+
+bool IsAnonymousObjectHandle(HANDLE handle) {
+    if (::GetFileType(handle) != FILE_TYPE_DISK) return false;
+    FILE_BASIC_INFO basic{};
+    if (!::GetFileInformationByHandleEx(handle, FileBasicInfo, &basic, sizeof(basic)) ||
+        (basic.FileAttributes & FILE_ATTRIBUTE_TEMPORARY) == 0) return false;
+    std::wstring path(MAX_PATH, L'\0');
+    auto length = ::GetFinalPathNameByHandleW(handle, path.data(), static_cast<DWORD>(path.size()), FILE_NAME_NORMALIZED);
+    if (length >= path.size()) {
+        path.resize(length);
+        length = ::GetFinalPathNameByHandleW(handle, path.data(), length, FILE_NAME_NORMALIZED);
+    }
+    if (length == 0 || length >= path.size()) return false;
+    path.resize(length);
+    return std::filesystem::path(path).filename().wstring().starts_with(anonymousObjectPrefix);
+}
+#endif
+
 bool IsHostSharedMemoryDescriptor(int descriptor) {
-#ifdef __linux__
+#ifdef _WIN32
+    const int savedError = errno;
+    const auto previous = _set_thread_local_invalid_parameter_handler(IgnoreInvalidParameter);
+    const auto handle = reinterpret_cast<HANDLE>(::_get_osfhandle(descriptor));
+    _set_thread_local_invalid_parameter_handler(previous);
+    const bool anonymous = handle != INVALID_HANDLE_VALUE && IsAnonymousObjectHandle(handle);
+    errno = savedError;
+    return anonymous;
+#elif defined(__linux__)
     char descriptorPath[64];
     std::snprintf(descriptorPath, sizeof(descriptorPath), "/proc/self/fd/%d", descriptor);
     char objectPath[4096];
@@ -76,6 +109,13 @@ public:
     int Error() const { return error; }
 
 private:
+#ifdef _WIN32
+    static std::mutex& ProcessLock() {
+        static std::mutex lock;
+        return lock;
+    }
+    std::lock_guard<std::mutex> processLock{ProcessLock()};
+#endif
     int descriptor = -1;
     int error = 0;
 };
@@ -193,9 +233,9 @@ int CreateAnonymousFile() {
 #ifdef _WIN32
     static std::atomic<unsigned> sequence{0};
     const auto directory = std::filesystem::temp_directory_path();
-    const auto seed = std::to_string(std::random_device{}());
+    const auto seed = std::to_wstring(std::random_device{}());
     for (int attempt = 0; attempt < 64; ++attempt) {
-        const auto path = directory / ("anyps5-shm-" + seed + "-" + std::to_string(sequence++));
+        const auto path = directory / (std::wstring(anonymousObjectPrefix) + seed + L"-" + std::to_wstring(sequence++));
         int descriptor = -1;
         const int error = _wsopen_s(&descriptor, path.c_str(),
                                     _O_CREAT | _O_EXCL | _O_RDWR | _O_BINARY | _O_TEMPORARY | _O_SHORT_LIVED | _O_NOINHERIT,
@@ -341,7 +381,7 @@ std::int64_t PwriteSharedMemory_nid_no_patch(int descriptor, const void* buffer,
     if (offset >= status.st_size) return 0;
     const auto count = std::min<std::uint64_t>(size, static_cast<std::uint64_t>(status.st_size - offset));
 #ifdef _WIN32
-    const auto result = NativePositioned_nid_no_patch(fd, const_cast<void*>(buffer), static_cast<std::size_t>(count), offset, true);
+    const auto result = NativePositionedFile_nid_no_patch(fd, const_cast<void*>(buffer), static_cast<std::size_t>(count), offset, true);
 #else
     const auto result = ::pwrite(fd, buffer, static_cast<std::size_t>(count), static_cast<off_t>(offset));
 #endif
@@ -438,7 +478,11 @@ std::int64_t PwritevSharedMemory_nid_no_patch(int descriptor, const struct iovec
 int TruncateSharedMemory_nid_no_patch(int descriptor, std::int64_t length) {
     SharedMemoryLock guard(descriptor);
     if (!guard.IsShared()) return -2;
+#ifdef _WIN32
+    if (guard.Error() != 0) return guard.Error();
+#else
     if (guard.Error() != 0) { errno = guard.Error(); return -1; }
+#endif
     const auto fd = guard.Descriptor();
 #ifdef _WIN32
     const int result = static_cast<int>(::_chsize_s(fd, length));

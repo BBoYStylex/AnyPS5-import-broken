@@ -9,6 +9,10 @@ int APS5_VABI shm_open_nid_postfix(const char*, int, int);
 int APS5_VABI ftruncate_nid_postfix(int, std::int64_t);
 std::int64_t APS5_VABI pread_nid_postfix(int, void*, std::size_t, std::int64_t);
 std::int64_t APS5_VABI pwrite_nid_disambig1_nid_postfix(int, const void*, std::size_t, std::int64_t);
+std::int64_t APS5_VABI write_nid_postfix(int, const char*, std::int64_t);
+std::int64_t APS5_VABI lseek_nid_postfix(int, std::int64_t, int);
+void* APS5_VABI mmap_nid_postfix(void*, std::size_t, int, int, int, std::int64_t) noexcept;
+int APS5_VABI dup_nid_postfix(int);
 int APS5_VABI close_nid_postfix(int);
 int* APS5_VABI __error_nid_postfix();
 }
@@ -17,6 +21,11 @@ static const char* const anonymous = reinterpret_cast<const char*>(1);
 static void RequireInvalid(const char* path, int flags) {
     *__error_nid_postfix() = 0;
     Require(shm_open_nid_postfix(path, flags, 0600) == -1);
+    Require(*__error_nid_postfix() == 22);
+}
+static void RequireInvalidSeek(int descriptor, std::int64_t offset, int whence) {
+    *__error_nid_postfix() = 0;
+    Require(lseek_nid_postfix(descriptor, offset, whence) == -1);
     Require(*__error_nid_postfix() == 22);
 }
 int main() {
@@ -37,11 +46,32 @@ int main() {
     Require(pread_nid_postfix(first, &last, 1, 0x3fff) == 1 && last == 0);
     Require(pread_nid_postfix(first, &last, 1, 0x4000) == 0);
     Require(pread_nid_postfix(second, back, sizeof(back), 0) == 0);
-#ifndef _WIN32
     Require(pwrite_nid_disambig1_nid_postfix(third, text, sizeof(text), 0) == 0);
-#endif
+    Require(write_nid_postfix(third, text, sizeof(text)) == 0);
+    Require(lseek_nid_postfix(third, 0, 2) == 0);
+    RequireInvalidSeek(third, 1, 0);
     Require(ftruncate_nid_postfix(third, 0x4000) == 0);
     Require(pwrite_nid_disambig1_nid_postfix(third, text, sizeof(text), 0) == static_cast<std::int64_t>(sizeof(text)));
+    Require(pwrite_nid_disambig1_nid_postfix(third, text, sizeof(text), 0x3ffc) == 4);
+    Require(lseek_nid_postfix(third, 0x3ffc, 0) == 0x3ffc);
+    Require(write_nid_postfix(third, text, sizeof(text)) == 4);
+    Require(write_nid_postfix(third, text, sizeof(text)) == 0);
+    Require(lseek_nid_postfix(third, 0, 1) == 0x4000);
+    Require(lseek_nid_postfix(third, 0, 2) == 0x4000);
+    RequireInvalidSeek(third, 1, 2);
+    RequireInvalidSeek(third, 0x4001, 0);
+    Require(lseek_nid_postfix(third, 0, 1) == 0x4000);
+    const int copy = dup_nid_postfix(third);
+    Require(copy >= 0);
+    Require(write_nid_postfix(copy, text, sizeof(text)) == 0);
+    Require(pwrite_nid_disambig1_nid_postfix(copy, text, sizeof(text), 0x3fff) == 1);
+    Require(close_nid_postfix(copy) == 0);
+    Require(pread_nid_postfix(third, &last, 1, 0x4000) == 0);
+#ifdef _WIN32
+    *__error_nid_postfix() = 0;
+    Require(mmap_nid_postfix(nullptr, 0x4000, 3, 0x1, third, 0) == reinterpret_cast<void*>(-1));
+    Require(*__error_nid_postfix() == 45);
+#endif
     Require(close_nid_postfix(first) == 0 && close_nid_postfix(second) == 0 && close_nid_postfix(third) == 0);
     RequireInvalid(anonymous, 0x0);
     RequireInvalid(anonymous, 0x200);
