@@ -4,8 +4,11 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <clocale>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 #include <thread>
 
 extern "C" {
@@ -50,7 +53,51 @@ static void APS5_VABI RequestStatusCallback(int, int, void* argument) {
     ++*static_cast<int*>(argument);
 }
 
+static void CheckEscapeAlphabet() {
+    constexpr char unreserved[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
+    constexpr char hex[] = "0123456789ABCDEF";
+    constexpr int outOfMemory = static_cast<int>(0x80431022u);
+    for (unsigned value = 0; value < 256; ++value) {
+        const char input[] = {static_cast<char>(value), '\0'};
+        char expected[] = {'%', hex[value >> 4], hex[value & 15], '\0'};
+        if (value == 0 || std::strchr(unreserved, input[0])) {
+            expected[0] = input[0];
+            expected[1] = '\0';
+        }
+        const std::size_t size = std::strlen(expected) + 1;
+        std::size_t required = 0;
+        Require(sceHttpUriEscape(nullptr, &required, 0, input) == 0 && required == size);
+        char output[5];
+        std::memset(output, 'Z', sizeof(output));
+        Require(sceHttpUriEscape(output, &required, size - 1, input) == outOfMemory && required == size);
+        for (const char byte : output) Require(byte == 'Z');
+        Require(sceHttpUriEscape(output, &required, size, input) == 0 && required == size);
+        if (!Equal(output, expected) || output[size] != 'Z') {
+            std::fprintf(stderr, "URI escaping failed for byte 0x%02x\n", value);
+            std::abort();
+        }
+    }
+}
+
+static void CheckEscapeLocale() {
+    CheckEscapeAlphabet();
+#ifdef _WIN32
+    const std::string previous = std::setlocale(LC_CTYPE, nullptr);
+    Require(std::setlocale(LC_CTYPE, "German_Germany.1252") != nullptr);
+    char output[64];
+    std::size_t required = 0;
+    Require(sceHttpUriEscape(output, &required, sizeof(output), "caf\xE9 \xC3\xA9") == 0);
+    if (!Equal(output, "caf%E9%20%C3%A9") || required != sizeof("caf%E9%20%C3%A9")) {
+        std::fprintf(stderr, "URI escaping changed with the host locale: required %zu\n", required);
+        std::abort();
+    }
+    CheckEscapeAlphabet();
+    Require(std::setlocale(LC_CTYPE, previous.c_str()) != nullptr);
+#endif
+}
+
 int main() {
+    CheckEscapeLocale();
     int callbackCount = 0;
     const auto request = sceHttpCreateRequest2(1, "GET", "/", 0);
     Require(sceHttpSetRequestStatusCallback(request, RequestStatusCallback, &callbackCount) == 0);
