@@ -1,6 +1,7 @@
 #include "Recompiler.hpp"
 #include <algorithm>
 #include <cstring>
+#include <spirv/unified1/spirv.hpp>
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
@@ -180,6 +181,7 @@ IrProgram PrepareResourceProgram(const RecompileRequest& request, ShaderPreparat
     const auto supports = [&](spv::Capability capability) { return std::ranges::find(request.target.supportedCapabilities, static_cast<std::uint32_t>(capability)) != request.target.supportedCapabilities.end(); };
     translateOptions.nativeFloat16 = supports(spv::CapabilityFloat16) && supports(spv::CapabilityRoundingModeRTE) && supports(spv::CapabilityDenormPreserve);
     translateOptions.floatMode = request.context.floatMode;
+    translateOptions.integerDot4x8 = std::ranges::find(request.target.supportedCapabilities, static_cast<std::uint32_t>(spv::CapabilityDotProductInput4x8BitPacked)) != request.target.supportedCapabilities.end();
     translateOptions.inputInfo = inputInfo;
 
     constexpr InstructionTranslator translator;
@@ -791,6 +793,7 @@ RecompileResult materializeResult(const CompiledVariant& variant, const Recompil
         moduleKey.push_back(request.context.pixel->dualSourceBlend ? 1u : 0u);
         if (variant.info.info.rasterPrimitive) moduleKey.push_back(static_cast<std::uint32_t>(request.context.pixel->rasterPrimitive));
         if (variant.info.info.layerExported) moduleKey.push_back(request.context.pixel->layerExported ? 1u : 0u);
+        if (variant.info.info.layerBase) moduleKey.push_back(request.context.pixel->layerBase);
     }
     result.vertexAttributes.reserve(result.vertexInputs.size());
     std::array<std::uint32_t, ShaderVertexStageInfo::MaxResources> vertexClasses{};
@@ -839,6 +842,7 @@ RecompileResult materializeResult(const CompiledVariant& variant, const Recompil
                 constants.push_back({PipelineSpecialization::DualSourceBlend, moduleKey[index++]});
                 if (variant.info.info.rasterPrimitive) constants.push_back({PipelineSpecialization::RasterPrimitive, moduleKey[index++]});
                 if (variant.info.info.layerExported) constants.push_back({PipelineSpecialization::LayerExported, moduleKey[index++]});
+                if (variant.info.info.layerBase) constants.push_back({PipelineSpecialization::LayerBase, moduleKey[index++]});
             }
             if (!artifact.vertexInputPatches.empty()) {
                 for (const auto& input : result.vertexInputs) {
@@ -1041,6 +1045,7 @@ std::uint64_t snapshotHash(const RecompileRequest& request, const ResourceSnapsh
         mix(request.context.pixel->dualSourceBlend);
         mix(static_cast<std::uint64_t>(request.context.pixel->rasterPrimitive));
         mix(request.context.pixel->layerExported);
+        mix(static_cast<std::uint64_t>(request.context.pixel->layerBase));
     }
     if (request.context.vertex) {
         const auto& vertex = *request.context.vertex;

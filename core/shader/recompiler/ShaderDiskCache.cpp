@@ -558,6 +558,7 @@ void encodeInfo(Writer& writer, const CompiledShaderInfo& compiled) {
     writer.Value(info.dispatchThreadLimit);
     writer.Value(info.rasterPrimitive);
     writer.Value(info.layerExported);
+    writer.Value(info.layerBase);
     encodeLayout(writer, compiled.bindings);
 }
 
@@ -669,6 +670,7 @@ void decodeInfo(Reader& reader, CompiledShaderInfo& compiled) {
     reader.Value(info.dispatchThreadLimit);
     reader.Value(info.rasterPrimitive);
     reader.Value(info.layerExported);
+    reader.Value(info.layerBase);
     decodeLayout(reader, compiled.bindings);
 }
 
