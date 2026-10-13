@@ -1,4 +1,4 @@
-"""Check that a Linux relink orders PT_PHDR and PT_INTERP before the PT_LOAD entries and sorts the PT_LOAD entries by address."""
+"""Check that a Linux relink orders PT_PHDR and PT_INTERP before the PT_LOAD entries, sorts the PT_LOAD entries by address, and appends its extra PT_LOAD past the last guest page."""
 
 from pathlib import Path
 import platform
@@ -26,8 +26,8 @@ DYNAMIC_OFFSET = 0x6400
 TAGS = [(5, 0x2600), (10, 1), (6, 0x2620), (11, 24), (7, 0x2700), (8, 0), (9, 24), (0, 0)]
 
 
-def multi_load_fixture(segments):
-    image = bytearray(0x8000)
+def multi_load_fixture(segments, size=0x8000):
+    image = bytearray(size)
     image[:16] = b"\x7fELF\x02\x01\x01" + bytes(9)
     headers = [*segments, (PT_DYNAMIC, 6, DYNAMIC_OFFSET, 0x2400, len(TAGS) * 16, len(TAGS) * 16, 8)]
     headers += [(PT_SCE_VERSION, 0, 0, 0, 0, 0, 1)] * 4
@@ -106,6 +106,14 @@ def main():
         assert [h[3] for h in headers if h[0] == PT_LOAD][:3] == [TEXT[3], RODATA[3], DATA[3]], headers
         assert kinds_between_loads(headers) == [PT_OS_PROCPARAM], headers
         run_expecting_trap("unordered-loads", unordered)
+
+        unaligned = convert("unaligned-bss-tail", multi_load_fixture([TEXT, RODATA, PROCPARAM, DATA], 0x8800))
+        headers = check_order("unaligned-bss-tail", unaligned.read_bytes())
+        appended = [h for h in headers if h[0] == PT_LOAD and h[3] not in (TEXT[3], RODATA[3], DATA[3])]
+        guest_end = max(segment[3] + segment[5] for segment in (TEXT, RODATA, DATA))
+        assert len(appended) == 2, headers
+        assert min(h[3] for h in appended) >= (guest_end + PAGE - 1) & ~(PAGE - 1), headers
+        run_expecting_trap("unaligned-bss-tail", unaligned)
     print("Linux program header order test passed")
 
 
