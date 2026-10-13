@@ -9,6 +9,7 @@
 #include <string>
 #include <cstdio>
 #include <cstdlib>
+#include <list>
 
 static constexpr int SCE_OK = 0;
 static constexpr int SCE_KERNEL_ERROR_EPERM = 0x80020001;
@@ -27,6 +28,13 @@ static constexpr uint32_t EVF_WAITMODE_OR = 0x02;
 static constexpr uint32_t EVF_WAITMODE_CLEAR_ALL = 0x10;
 static constexpr uint32_t EVF_WAITMODE_CLEAR_PAT = 0x20;
 
+struct EventFlagWaiter {
+    uint64_t bitPattern = 0;
+    uint32_t waitMode = 0;
+    bool released = false;
+    uint64_t resultPattern = 0;
+};
+
 struct KernelEventFlagPrivate {
     std::mutex _mutex;
     TimedWait::Condition _changed;
@@ -35,6 +43,7 @@ struct KernelEventFlagPrivate {
     bool _multipleWaiters = false;
     bool _deleted = false;
     int _waiters = 0;
+    std::list<EventFlagWaiter*> _queue;
     uint64_t _cancelGeneration = 0;
 };
 
@@ -58,6 +67,19 @@ static void Consume(KernelEventFlagPrivate* flag, uint64_t bitPattern, uint32_t 
     if (resultPattern) *resultPattern = flag->_pattern;
     if (waitMode & EVF_WAITMODE_CLEAR_ALL) flag->_pattern = 0;
     else if (waitMode & EVF_WAITMODE_CLEAR_PAT) flag->_pattern &= ~bitPattern;
+}
+
+static void ReleaseSatisfiedWaiters(KernelEventFlagPrivate* flag) {
+    for (auto it = flag->_queue.begin(); it != flag->_queue.end();) {
+        EventFlagWaiter* waiter = *it;
+        if (!IsSatisfied(flag->_pattern, waiter->bitPattern, waiter->waitMode)) {
+            ++it;
+            continue;
+        }
+        Consume(flag, waiter->bitPattern, waiter->waitMode, &waiter->resultPattern);
+        waiter->released = true;
+        it = flag->_queue.erase(it);
+    }
 }
 
 extern "C" {
@@ -96,6 +118,7 @@ int APS5_VABI sceKernelSetEventFlag(KernelEventFlag ef, uint64_t bit_pattern) {
     std::lock_guard lock(ef->_mutex);
     if (ef->_deleted) return SCE_KERNEL_ERROR_ESRCH;
     ef->_pattern |= bit_pattern;
+    ReleaseSatisfiedWaiters(ef);
     if (TraceSync()) std::fprintf(stderr, "[evf] set %p '%s' |=0x%llx -> 0x%llx\n", static_cast<void*>(ef), ef->_name.c_str(), static_cast<unsigned long long>(bit_pattern), static_cast<unsigned long long>(ef->_pattern));
     ef->_changed.NotifyAll();
     return SCE_OK;
@@ -113,7 +136,7 @@ int APS5_VABI sceKernelCancelEventFlag(KernelEventFlag ef, uint64_t set_pattern,
     if (!ef) return SCE_KERNEL_ERROR_ESRCH;
     std::lock_guard lock(ef->_mutex);
     if (ef->_deleted) return SCE_KERNEL_ERROR_ESRCH;
-    if (num_wait_threads) *num_wait_threads = ef->_waiters;
+    if (num_wait_threads) *num_wait_threads = static_cast<int>(ef->_queue.size());
     ef->_pattern = set_pattern;
     ++ef->_cancelGeneration;
     ef->_changed.NotifyAll();
@@ -125,7 +148,7 @@ int APS5_VABI sceKernelPollEventFlag(KernelEventFlag ef, uint64_t bit_pattern, u
     if (bit_pattern == 0 || !IsValidWaitMode(wait_mode)) return SCE_KERNEL_ERROR_EINVAL;
     std::lock_guard lock(ef->_mutex);
     if (ef->_deleted) return SCE_KERNEL_ERROR_ESRCH;
-    if (!ef->_multipleWaiters && ef->_waiters != 0) return SCE_KERNEL_ERROR_EPERM;
+    if (!ef->_multipleWaiters && !ef->_queue.empty()) return SCE_KERNEL_ERROR_EPERM;
     if (!IsSatisfied(ef->_pattern, bit_pattern, wait_mode)) {
         if (result_pat) *result_pat = ef->_pattern;
         return SCE_KERNEL_ERROR_EBUSY;
@@ -139,10 +162,16 @@ int APS5_VABI sceKernelWaitEventFlag(KernelEventFlag ef, uint64_t bit_pattern, u
     if (bit_pattern == 0 || !IsValidWaitMode(wait_mode)) return SCE_KERNEL_ERROR_EINVAL;
     std::unique_lock lock(ef->_mutex);
     if (ef->_deleted) return SCE_KERNEL_ERROR_ESRCH;
-    if (!ef->_multipleWaiters && ef->_waiters != 0) return SCE_KERNEL_ERROR_EPERM;
+    if (!ef->_multipleWaiters && !ef->_queue.empty()) return SCE_KERNEL_ERROR_EPERM;
     const uint64_t generation = ef->_cancelGeneration;
     if (TraceSync()) std::fprintf(stderr, "[evf] wait %p '%s' want=0x%llx mode=0x%x have=0x%llx timeout=%d caller=%p outer=%p\n", static_cast<void*>(ef), ef->_name.c_str(), static_cast<unsigned long long>(bit_pattern), wait_mode, static_cast<unsigned long long>(ef->_pattern), timeout ? static_cast<int>(*timeout) : -1, __builtin_return_address(0), static_cast<void**>(static_cast<void**>(__builtin_frame_address(0))[0])[1]);
-    const auto released = [&] { return ef->_deleted || ef->_cancelGeneration != generation || IsSatisfied(ef->_pattern, bit_pattern, wait_mode); };
+    if (IsSatisfied(ef->_pattern, bit_pattern, wait_mode)) {
+        Consume(ef, bit_pattern, wait_mode, result_pat);
+        return SCE_OK;
+    }
+    EventFlagWaiter waiter{bit_pattern, wait_mode};
+    ef->_queue.push_back(&waiter);
+    const auto released = [&] { return waiter.released || ef->_deleted || ef->_cancelGeneration != generation; };
     ++ef->_waiters;
     bool timedOut = false;
     const auto waitStart = std::chrono::steady_clock::now();
@@ -155,6 +184,14 @@ int APS5_VABI sceKernelWaitEventFlag(KernelEventFlag ef, uint64_t bit_pattern, u
     }
     KernelTraceWait_nid_postfix("evf", __builtin_return_address(0), static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - waitStart).count()), timedOut);
     --ef->_waiters;
+    if (waiter.released) {
+        const bool last = ef->_deleted && ef->_waiters == 0;
+        if (result_pat) *result_pat = waiter.resultPattern;
+        lock.unlock();
+        if (last) delete ef;
+        return SCE_OK;
+    }
+    ef->_queue.remove(&waiter);
     if (ef->_deleted) {
         const bool last = ef->_waiters == 0;
         lock.unlock();
@@ -165,12 +202,8 @@ int APS5_VABI sceKernelWaitEventFlag(KernelEventFlag ef, uint64_t bit_pattern, u
         if (result_pat) *result_pat = ef->_pattern;
         return SCE_KERNEL_ERROR_ECANCELED;
     }
-    if (timedOut) {
-        if (result_pat) *result_pat = ef->_pattern;
-        return SCE_KERNEL_ERROR_ETIMEDOUT;
-    }
-    Consume(ef, bit_pattern, wait_mode, result_pat);
-    return SCE_OK;
+    if (result_pat) *result_pat = ef->_pattern;
+    return SCE_KERNEL_ERROR_ETIMEDOUT;
 }
 
 }
