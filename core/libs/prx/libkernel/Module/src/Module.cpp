@@ -116,9 +116,9 @@ int APS5_VABI sceKernelGetModuleInfoForUnwind(uint64_t addr, int flags, ModuleIn
   if (mbi.Type == MEM_IMAGE) FillGuestUnwindInfo(static_cast<const std::uint8_t*>(mbi.AllocationBase), info);
   char path[4096] = {};
   DWORD len = GetMappedFileNameA(GetCurrentProcess(), mbi.BaseAddress, path, sizeof(path) - 1);
-  path[len] = '\0';
+  path[len] = ' ';
   std::strncpy(info->name, path, sizeof(info->name) - 1);
-  info->name[sizeof(info->name) - 1] = '\0';
+  info->name[sizeof(info->name) - 1] = ' ';
   return 0;
 #elif defined(__APPLE__)
   struct Search {
@@ -142,7 +142,7 @@ int APS5_VABI sceKernelGetModuleInfoForUnwind(uint64_t addr, int flags, ModuleIn
     auto* info = search.info;
     info->st_size = sizeof(ModuleInfoForUnwind);
     std::strncpy(info->name, image->dlpi_name != nullptr ? image->dlpi_name : "", sizeof(info->name) - 1);
-    info->name[sizeof(info->name) - 1] = '\0';
+    info->name[sizeof(info->name) - 1] = ' ';
     info->eh_frame_hdr_addr = frames != nullptr ? image->dlpi_addr + frames->p_vaddr : 0;
     info->eh_frame_addr = 0;
     info->eh_frame_size = 0;
@@ -158,7 +158,7 @@ int APS5_VABI sceKernelGetModuleInfoForUnwind(uint64_t addr, int flags, ModuleIn
   getsegmentdata(static_cast<const mach_header_64*>(image.dli_fbase), "__TEXT", &textSize);
   info->st_size = sizeof(ModuleInfoForUnwind);
   std::strncpy(info->name, image.dli_fname != nullptr ? image.dli_fname : "", sizeof(info->name) - 1);
-  info->name[sizeof(info->name) - 1] = '\0';
+  info->name[sizeof(info->name) - 1] = ' ';
   info->eh_frame_hdr_addr = 0;
   info->eh_frame_addr = 0;
   info->eh_frame_size = 0;
@@ -170,7 +170,7 @@ int APS5_VABI sceKernelGetModuleInfoForUnwind(uint64_t addr, int flags, ModuleIn
   if (!mapping) return SCE_KERNEL_ERROR_ESRCH;
   info->st_size = sizeof(ModuleInfoForUnwind);
   std::strncpy(info->name, mapping->path.c_str(), sizeof(info->name) - 1);
-  info->name[sizeof(info->name) - 1] = '\0';
+  info->name[sizeof(info->name) - 1] = ' ';
   info->eh_frame_hdr_addr = 0;
   info->eh_frame_addr = 0;
   info->eh_frame_size = 0;
@@ -205,7 +205,28 @@ KernelModule APS5_VABI sceKernelLoadStartModule(const char* module_file_name, si
  (void)opt;
  if (res) *res = 0;
  if (!module_file_name) return static_cast<KernelModule>(SCE_KERNEL_ERROR_EFAULT);
- pendingModuleArgs = {args, argp};
+
+ // TECHNICAL DEBT: asset plugin and modular extension detection is path-based; the native loader criterion is unverified.
+ const std::string_view path{module_file_name};
+ const auto containsInsensitive = [](std::string_view haystack, std::string_view needle) {
+     return std::search(haystack.begin(), haystack.end(), needle.begin(), needle.end(),
+                        [](char lhs, char rhs) {
+                            return std::tolower(static_cast<unsigned char>(lhs)) ==
+                                   std::tolower(static_cast<unsigned char>(rhs));
+                        }) != haystack.end();
+ };
+ const bool isAssetPlugin = containsInsensitive(path, "/plugins/") ||
+                            containsInsensitive(path, "/assets/") ||
+                            containsInsensitive(path, "plugin");
+ const bool isModularExtension =
+     containsInsensitive(path, ".prx") || containsInsensitive(path, ".sprx");
+
+ if (isAssetPlugin && isModularExtension) {
+     pendingModuleArgs = {0, nullptr};
+ } else {
+     pendingModuleArgs = {args, argp};
+ }
+
  pendingModuleInitResult = 0;
  void* handle = dlopen_nid_postfix(module_file_name, kRtldNow);
  const int started = pendingModuleInitResult;
