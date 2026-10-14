@@ -1,7 +1,5 @@
-add_library(libSceOpusDec SHARED EXCLUDE_FROM_ALL ${CMAKE_CURRENT_SOURCE_DIR}/Export.cpp)
-target_include_directories(libSceOpusDec PRIVATE ${LIBS_INCLUDE_DIR})
-target_link_libraries(libSceOpusDec PRIVATE ffmpeg)
-configure_windows_unwind(libSceOpusDec)
+include(${CMAKE_CURRENT_SOURCE_DIR}/OpusLibrary.cmake)
+add_sce_opus_library(libSceOpusDec)
 
 if(BUILD_TESTING)
     add_test_executable(guest_opus_dec_tests ${LIBS_INCLUDE_DIR}/tests/GuestOpusDec.cpp)
