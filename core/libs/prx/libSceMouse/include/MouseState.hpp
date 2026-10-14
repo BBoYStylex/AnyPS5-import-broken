@@ -25,6 +25,6 @@ void Publish(const MouseInputEvent& event);
 }
 
 extern "C" void MousePublishInput_nid_postfix(const MouseInputEvent& event);
-extern "C" bool MouseIsOpen_nid_postfix();
+extern "C" bool MouseHasOpenHandle_nid_postfix();
 
 #endif

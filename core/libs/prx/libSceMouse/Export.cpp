@@ -28,7 +28,7 @@ int APS5_VABI sceMouseResetAbsolutePosition() {
     return 0;
 }
 
-bool MouseIsOpen_nid_postfix() {
+bool MouseHasOpenHandle_nid_postfix() {
     return Mouse::IsOpen();
 }
 

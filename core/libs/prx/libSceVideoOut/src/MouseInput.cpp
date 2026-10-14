@@ -78,7 +78,7 @@ std::int32_t MouseInput::scaled(std::int32_t delta, double scale, double& remain
 }
 
 bool MouseInput::CaptureWanted(bool allowed) const {
-    return allowed && focused && MouseIsOpen_nid_postfix();
+    return allowed && focused && MouseHasOpenHandle_nid_postfix();
 }
 
 void MouseInput::UpdateCapture(bool allowed) {
