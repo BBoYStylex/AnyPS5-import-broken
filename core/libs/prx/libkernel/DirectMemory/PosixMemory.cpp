@@ -246,7 +246,9 @@ int APS5_VABI msync_nid_postfix(void* address, std::size_t length, int flags) {
     constexpr std::uintptr_t mask = PS5_PAGE_SIZE - 1;
     const auto first = reinterpret_cast<std::uintptr_t>(address);
     const auto start = first & ~mask;
-    const std::uintptr_t size = (length + (first - start) + mask) & ~mask;
+    const auto offset = first - start;
+    if (length > std::numeric_limits<std::uintptr_t>::max() - mask - offset) return failed(GuestInvalid);
+    const std::uintptr_t size = (length + offset + mask) & ~mask;
     const auto end = start + size;
     if (end < start) return failed(GuestInvalid);
     if ((flags & (GuestSyncAsync | GuestSyncInvalidate)) == (GuestSyncAsync | GuestSyncInvalidate)) return failed(GuestInvalid);
