@@ -70,12 +70,12 @@ jobs:
                 paths.some((path) => prefixes.some((prefix) => prefix.endsWith('/') ? path.startsWith(prefix) : path === prefix));
               return {
                 relinker: touches(
-                  'core/relinker/', libc, 'core/libs/prx/libkernel/AppMetadata/', 'core/libs/tests/ParamJsonParser.cpp',
+                  'core/relinker/', libc, 'core/libs/prx/libkernel/AppMetadata/', 'core/libs/tests/services/ParamJsonParser.cpp',
                   'core/shader/recompiler/tests/CacheFileReadTests.cpp', 'core/shader/recompiler/ShaderCacheDirectory.hpp',
                   'tools/', 'cmake/', 'CMakeLists.txt', workflow
                 ),
-                registerContext: touches('core/libs/tests/register_context/', 'core/libs/tests/RegisterContext.cpp', libc, workflow),
-                writeWatch: touches('core/libs/tests/write_watch/', 'core/libs/tests/WriteWatch.cpp', libc, workflow),
+                registerContext: touches('core/libs/tests/register_context/', 'core/libs/tests/exceptions/RegisterContext.cpp', libc, workflow),
+                writeWatch: touches('core/libs/tests/write_watch/', 'core/libs/tests/memory/WriteWatch.cpp', libc, workflow),
               };
             };
             const relinkerHosts = (full, linux) => JSON.stringify([

@@ -6,7 +6,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = Path(__file__).resolve().parents[4]
 RUNTIME = ROOT / 'core/libs/prx/libc/src/exception/Exports.cpp'
 TEST = Path(__file__).with_name('ExceptionRuntime.cpp')
 parser = argparse.ArgumentParser()

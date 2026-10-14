@@ -19,7 +19,7 @@ function(add_png_decoder target runtimeTarget)
         target_include_directories(${target}_tests SYSTEM PRIVATE ${PROJECT_SOURCE_DIR}/3rdparty/stb)
         target_link_libraries(${target}_tests PRIVATE ${target})
         configure_windows_unwind(${target}_tests)
-        add_test(NAME ${target} COMMAND ${target}_tests)
+        add_component_test(decoder NAME ${target} COMMAND ${target}_tests)
         if(WIN32)
             set_tests_properties(${target} PROPERTIES ENVIRONMENT_MODIFICATION
                 "PATH=path_list_prepend:$<TARGET_FILE_DIR:${runtimeTarget}>")

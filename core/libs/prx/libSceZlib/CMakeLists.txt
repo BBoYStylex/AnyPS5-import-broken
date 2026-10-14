@@ -6,11 +6,11 @@ configure_windows_unwind(libSceZlib)
 target_link_libraries(libSceZlib PRIVATE jpeg_turbo)
 
 if(BUILD_TESTING)
-    add_test_executable(guest_zlib_tests ${LIBS_INCLUDE_DIR}/tests/GuestZlib.cpp)
+    add_test_executable(guest_zlib_tests ${LIBS_INCLUDE_DIR}/tests/runtime/GuestZlib.cpp)
     target_include_directories(guest_zlib_tests PRIVATE ${LIBS_INCLUDE_DIR})
     target_link_libraries(guest_zlib_tests PRIVATE libSceZlib libc)
     configure_windows_unwind(guest_zlib_tests)
-    add_test(NAME guest_zlib COMMAND guest_zlib_tests)
+    add_library_test(runtime NAME guest_zlib COMMAND guest_zlib_tests)
     set_tests_properties(guest_zlib PROPERTIES TIMEOUT 30)
     if(WIN32)
         set_tests_properties(guest_zlib PROPERTIES ENVIRONMENT_MODIFICATION

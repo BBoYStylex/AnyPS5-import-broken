@@ -3,10 +3,10 @@ target_include_directories(libSceCdlgG2P PRIVATE ${LIBS_INCLUDE_DIR})
 configure_windows_unwind(libSceCdlgG2P)
 
 if(BUILD_TESTING)
-    add_test_executable(guest_g2p_dialog_tests ${LIBS_INCLUDE_DIR}/tests/GuestG2PDialog.cpp)
+    add_test_executable(guest_g2p_dialog_tests ${LIBS_INCLUDE_DIR}/tests/services/GuestG2PDialog.cpp)
     target_include_directories(guest_g2p_dialog_tests PRIVATE ${LIBS_INCLUDE_DIR})
     target_link_libraries(guest_g2p_dialog_tests PRIVATE libSceCdlgG2P)
-    add_test(NAME guest_g2p_dialog COMMAND guest_g2p_dialog_tests)
+    add_library_test(services NAME guest_g2p_dialog COMMAND guest_g2p_dialog_tests)
     if(WIN32)
         set_tests_properties(guest_g2p_dialog PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceCdlgG2P>")

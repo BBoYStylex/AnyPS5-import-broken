@@ -3,10 +3,10 @@ target_include_directories(libSceNpAuth PRIVATE ${LIBS_INCLUDE_DIR})
 configure_windows_unwind(libSceNpAuth)
 
 if(BUILD_TESTING)
-    add_test_executable(guest_np_auth_authorized_app_code_tests ${LIBS_INCLUDE_DIR}/tests/GuestNpAuthAuthorizedAppCode.cpp)
+    add_test_executable(guest_np_auth_authorized_app_code_tests ${LIBS_INCLUDE_DIR}/tests/services/GuestNpAuthAuthorizedAppCode.cpp)
     target_include_directories(guest_np_auth_authorized_app_code_tests PRIVATE ${LIBS_INCLUDE_DIR})
     target_link_libraries(guest_np_auth_authorized_app_code_tests PRIVATE libSceNpAuth)
-    add_test(NAME guest_np_auth_authorized_app_code COMMAND guest_np_auth_authorized_app_code_tests)
+    add_library_test(services NAME guest_np_auth_authorized_app_code COMMAND guest_np_auth_authorized_app_code_tests)
     if(WIN32)
         set_tests_properties(guest_np_auth_authorized_app_code PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceNpAuth>")

@@ -13,11 +13,11 @@ target_link_libraries(libSceNpTrophy2 PRIVATE libc)
 configure_windows_unwind(libSceNpTrophy2)
 
 if(BUILD_TESTING)
-    add_test_executable(guest_nptrophy2_tests ${LIBS_INCLUDE_DIR}/tests/GuestNpTrophy2.cpp)
+    add_test_executable(guest_nptrophy2_tests ${LIBS_INCLUDE_DIR}/tests/services/GuestNpTrophy2.cpp)
     target_include_directories(guest_nptrophy2_tests PRIVATE ${LIBS_INCLUDE_DIR})
     target_link_libraries(guest_nptrophy2_tests PRIVATE libSceNpTrophy2 libc)
     configure_windows_unwind(guest_nptrophy2_tests)
-    add_test(NAME guest_nptrophy2 COMMAND guest_nptrophy2_tests)
+    add_library_test(services NAME guest_nptrophy2 COMMAND guest_nptrophy2_tests)
     if(WIN32)
         set_tests_properties(guest_nptrophy2 PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceNpTrophy2>")

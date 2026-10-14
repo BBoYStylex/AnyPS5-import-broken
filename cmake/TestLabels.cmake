@@ -1,0 +1,17 @@
+include_guard(GLOBAL)
+
+function(add_component_test component nameKeyword testName)
+    if(NOT "${nameKeyword}" STREQUAL "NAME" OR "${testName}" STREQUAL "" OR "${component}" STREQUAL "")
+        message(FATAL_ERROR "add_component_test requires a component and NAME")
+    endif()
+    add_test(NAME "${testName}" ${ARGN})
+    set_property(TEST "${testName}" APPEND PROPERTY LABELS "${component}")
+endfunction()
+
+function(add_library_test subject nameKeyword testName)
+    if(NOT "${nameKeyword}" STREQUAL "NAME" OR "${testName}" STREQUAL "" OR "${subject}" STREQUAL "")
+        message(FATAL_ERROR "add_library_test requires a subject and NAME")
+    endif()
+    add_component_test(libs NAME "${testName}" ${ARGN})
+    set_property(TEST "${testName}" APPEND PROPERTY LABELS "${subject}")
+endfunction()

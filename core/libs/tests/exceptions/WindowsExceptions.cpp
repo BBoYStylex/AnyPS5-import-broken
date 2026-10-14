@@ -13,7 +13,7 @@
 #include <cstddef>
 #include <typeinfo>
 #include <windows.h>
-#include "../prx/libc/include/general/VabiMacros.hpp"
+#include "../../prx/libc/include/general/VabiMacros.hpp"
 
 extern "C" {
 extern const unsigned char _ZTVN10__cxxabiv117__class_type_infoE_nid_postfix[];

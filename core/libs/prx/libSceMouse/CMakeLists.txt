@@ -14,7 +14,7 @@ if(BUILD_TESTING)
     target_include_directories(mouse_tests PRIVATE ${LIBS_INCLUDE_DIR} ${ANYPS5_SDL2_INCLUDE_DIR})
     target_link_libraries(mouse_tests PRIVATE libSceMouse libkernel libc SDL2-static)
     configure_windows_unwind(mouse_tests)
-    add_test(NAME mouse_input COMMAND mouse_tests)
+    add_library_test(input NAME mouse_input COMMAND mouse_tests)
     if(WIN32)
         set_tests_properties(mouse_input PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceMouse>")

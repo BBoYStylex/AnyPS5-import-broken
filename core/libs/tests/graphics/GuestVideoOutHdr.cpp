@@ -3,7 +3,7 @@
 #include "prx/libkernel/Equeue/Equeue.hpp"
 #include "prx/libSceAgcDriver/Execution/include/HostHdr.hpp"
 #include "prx/libSceSystemService/SystemService.hpp"
-#include "tests/VideoOutTestEnvironment.hpp"
+#include "tests/graphics/VideoOutTestEnvironment.hpp"
 #include <array>
 #include <chrono>
 #include <cstddef>

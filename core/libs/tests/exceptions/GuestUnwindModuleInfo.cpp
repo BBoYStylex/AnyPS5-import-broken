@@ -1,5 +1,5 @@
 #include "SceTypes.hpp"
-#include "tests/GuestUnwindModuleInfoFixture.hpp"
+#include "tests/exceptions/GuestUnwindModuleInfoFixture.hpp"
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>

@@ -3,10 +3,10 @@ target_include_directories(libSceNpAuthAuthorizedAppDialog PRIVATE ${LIBS_INCLUD
 configure_windows_unwind(libSceNpAuthAuthorizedAppDialog)
 
 if(BUILD_TESTING)
-    add_test_executable(guest_np_auth_authorized_app_dialog_tests ${LIBS_INCLUDE_DIR}/tests/GuestNpAuthAuthorizedAppDialog.cpp)
+    add_test_executable(guest_np_auth_authorized_app_dialog_tests ${LIBS_INCLUDE_DIR}/tests/services/GuestNpAuthAuthorizedAppDialog.cpp)
     target_include_directories(guest_np_auth_authorized_app_dialog_tests PRIVATE ${LIBS_INCLUDE_DIR})
     target_link_libraries(guest_np_auth_authorized_app_dialog_tests PRIVATE libSceNpAuthAuthorizedAppDialog)
-    add_test(NAME guest_np_auth_authorized_app_dialog COMMAND guest_np_auth_authorized_app_dialog_tests)
+    add_library_test(services NAME guest_np_auth_authorized_app_dialog COMMAND guest_np_auth_authorized_app_dialog_tests)
     if(WIN32)
         set_tests_properties(guest_np_auth_authorized_app_dialog PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceNpAuthAuthorizedAppDialog>")

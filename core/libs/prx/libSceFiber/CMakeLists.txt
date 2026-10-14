@@ -4,10 +4,10 @@ target_compile_options(libSceFiber PRIVATE -fno-omit-frame-pointer)
 configure_windows_unwind(libSceFiber)
 
 if(BUILD_TESTING)
-    add_test_executable(fiber_tests ${LIBS_INCLUDE_DIR}/tests/Fiber.cpp)
+    add_test_executable(fiber_tests ${LIBS_INCLUDE_DIR}/tests/threads/Fiber.cpp)
     target_include_directories(fiber_tests PRIVATE ${LIBS_INCLUDE_DIR})
     target_link_libraries(fiber_tests PRIVATE libSceFiber libc)
-    add_test(NAME fiber COMMAND fiber_tests)
+    add_library_test(threads NAME fiber COMMAND fiber_tests)
     if(WIN32)
         set_tests_properties(fiber PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceFiber>")
