@@ -189,7 +189,7 @@
         },
         {
           "path": "core/libs/SceTypes.hpp",
-          "sha256": "1f82fb9b2a22c87cbe701b7554fc178f315c14e3d1f10ebdd1cfcffb12893954",
+          "sha256": "4f2b951ff102099f24f1666821dd2b6a9ef2f1817f82678698a2921e0e291692",
           "excerpt": "struct PadData"
         },
         {
@@ -203,7 +203,7 @@
           "excerpt": "#define APS5_VABI"
         }
       ],
-      "facts_sha256": "524fc65e078bc6219bd6d9c6a9bb2e30bb4469fc312bb28fde04e3f1ac55a90f"
+      "facts_sha256": "860a3d5ad2cb3a685a73d8b6a400029b9a9a07b925733bb8e90e82d47b84a71a"
     },
     {
       "identity": {
@@ -231,7 +231,7 @@
         },
         {
           "path": "core/libs/SceTypes.hpp",
-          "sha256": "1f82fb9b2a22c87cbe701b7554fc178f315c14e3d1f10ebdd1cfcffb12893954",
+          "sha256": "4f2b951ff102099f24f1666821dd2b6a9ef2f1817f82678698a2921e0e291692",
           "excerpt": "struct PadData"
         },
         {
@@ -245,7 +245,7 @@
           "excerpt": "#define APS5_VABI"
         }
       ],
-      "facts_sha256": "a55fafa86bfe4050a0a0ca5187556d8119e1c0d391c172948c6c1fa7554aaef9"
+      "facts_sha256": "588e32a7cc55d74a0256305b088390947f0716444211d29e1c477be1bf786ff0"
     },
     {
       "identity": {
@@ -271,7 +271,7 @@
         },
         {
           "path": "core/libs/SceTypes.hpp",
-          "sha256": "1f82fb9b2a22c87cbe701b7554fc178f315c14e3d1f10ebdd1cfcffb12893954",
+          "sha256": "4f2b951ff102099f24f1666821dd2b6a9ef2f1817f82678698a2921e0e291692",
           "excerpt": "struct PadData"
         },
         {
@@ -285,7 +285,7 @@
           "excerpt": "#define APS5_VABI"
         }
       ],
-      "facts_sha256": "9d731fec143f1caf32ed00cd07d5ff9bcc9a49c58798367c2812b4f418260e9b"
+      "facts_sha256": "485b20d59a380aef367aa67d1f418cdca135dc0b6714fef6ac369ec2cf5e90bc"
     },
     {
       "identity": {
@@ -344,7 +344,7 @@
         },
         {
           "path": "core/libs/SceTypes.hpp",
-          "sha256": "1f82fb9b2a22c87cbe701b7554fc178f315c14e3d1f10ebdd1cfcffb12893954",
+          "sha256": "4f2b951ff102099f24f1666821dd2b6a9ef2f1817f82678698a2921e0e291692",
           "excerpt": "struct PadData"
         },
         {
@@ -358,7 +358,7 @@
           "excerpt": "#define APS5_VABI"
         }
       ],
-      "facts_sha256": "fe3068f42b21f53ada1163dc4a7bccd11e03aa23a0cec75a57a4feecf145b0dc"
+      "facts_sha256": "0c71e3234a56b7df79ee44ba51514303b2f13c9185655483fa2d1ffe283d606d"
     },
     {
       "identity": {
