@@ -98,6 +98,11 @@ int APS5_VABI _ZN3sce4Json11Initializer10initializeEPKNS0_14InitParameter2E(void
 void APS5_VABI _ZN3sce4Json18InitParameterRtti216setAllocatorRttiEPNS0_14AllocParamRttiEPv(void*, void*, void*);
 void APS5_VABI _ZN3sce4Json14InitParameter225setSpecialFloatFormatTypeENS0_22SpecialFloatFormatTypeE(void*, std::int32_t);
 void APS5_VABI _ZN3sce4Json17InitParameterRttiC1EPNS0_14AllocParamRttiEPvm(void*, void*, void*, std::size_t);
+void APS5_VABI _ZN3sce4Json5Array8iteratorC1Ev(Iterator*);
+Iterator* APS5_VABI _ZN3sce4Json5Array8iteratoraSERKS2_(Iterator*, const Iterator*);
+Iterator* APS5_VABI _ZN3sce4Json5Array8iteratorppEi(Iterator*, Iterator*, int);
+void APS5_VABI _ZN3sce4Json6Object4PairC1ERKNS0_6StringERKNS0_5ValueE(Pair*, const String*, const Value*);
+void APS5_VABI _ZN3sce4Json6Object4PairD1Ev(Pair*);
 }
 
 static void Check(bool value, int line) {
@@ -610,6 +615,65 @@ static void StreamParse() {
     _ZN3sce4Json5ValueD1Ev(&root);
 }
 
+static void ArrayIteratorCopyAndPostIncrement() {
+    Array array{};
+    _ZN3sce4Json5ArrayC1Ev(&array);
+    for (const std::int64_t number : {10, 20, 30}) {
+        Value item{};
+        _ZN3sce4Json5ValueC1Ev(&item);
+        Require(_ZN3sce4Json5Value3setEl(&item, number) == 0);
+        _ZN3sce4Json5Array9push_backERKNS0_5ValueE(&array, &item);
+        _ZN3sce4Json5ValueD1Ev(&item);
+    }
+    Iterator position{};
+    _ZN3sce4Json5Array8iteratorC1Ev(&position);
+    Iterator begin{};
+    Iterator end{};
+    _ZNK3sce4Json5Array5beginEv(&begin, &array);
+    _ZNK3sce4Json5Array3endEv(&end, &array);
+    Require(_ZN3sce4Json5Array8iteratoraSERKS2_(&position, &begin) == &position);
+    Require(*_ZNK3sce4Json5Value10getIntegerEv(_ZNK3sce4Json5Array8iteratordeEv(&position)) == 10);
+    Iterator previous{};
+    Require(_ZN3sce4Json5Array8iteratorppEi(&previous, &position, 0) == &previous);
+    Require(*_ZNK3sce4Json5Value10getIntegerEv(_ZNK3sce4Json5Array8iteratordeEv(&previous)) == 10);
+    Require(*_ZNK3sce4Json5Value10getIntegerEv(_ZNK3sce4Json5Array8iteratordeEv(&position)) == 20);
+    Require(*_ZNK3sce4Json5Value10getIntegerEv(_ZNK3sce4Json5Array8iteratordeEv(&begin)) == 10);
+    std::vector<std::int64_t> visited;
+    while (_ZNK3sce4Json5Array8iteratorneERKS2_(&position, &end)) {
+        Iterator current{};
+        _ZN3sce4Json5Array8iteratorppEi(&current, &position, 0);
+        visited.push_back(*_ZNK3sce4Json5Value10getIntegerEv(_ZNK3sce4Json5Array8iteratordeEv(&current)));
+        _ZN3sce4Json5Array8iteratorD1Ev(&current);
+    }
+    Require((visited == std::vector<std::int64_t>{20, 30}));
+    _ZN3sce4Json5Array8iteratorD1Ev(&previous);
+    _ZN3sce4Json5Array8iteratorD1Ev(&end);
+    _ZN3sce4Json5Array8iteratorD1Ev(&begin);
+    _ZN3sce4Json5Array8iteratorD1Ev(&position);
+    _ZN3sce4Json5ArrayD1Ev(&array);
+}
+
+static void ObjectPairOwnsCopies() {
+    String key{};
+    _ZN3sce4Json6StringC1EPKc(&key, "name");
+    Value value{};
+    _ZN3sce4Json5ValueC1Ev(&value);
+    Require(_ZN3sce4Json5Value3setEPKc(&value, "text") == 0);
+    Pair pair{};
+    std::memset(&pair, 0xcd, sizeof(pair));
+    _ZN3sce4Json6Object4PairC1ERKNS0_6StringERKNS0_5ValueE(&pair, &key, &value);
+    Require(pair.reserved == 0);
+    Require(pair.key.text != key.text);
+    Require(pair.value.node != value.node);
+    _ZN3sce4Json6StringD1Ev(&key);
+    Require(_ZN3sce4Json5Value3setEl(&value, 7) == 0);
+    Require(std::strcmp(_ZNK3sce4Json6String5c_strEv(&pair.key), "name") == 0);
+    Require(_ZNK3sce4Json5Value7getTypeEv(&pair.value) == TypeString);
+    Require(std::strcmp(_ZNK3sce4Json6String5c_strEv(_ZNK3sce4Json5Value9getStringEv(&pair.value)), "text") == 0);
+    _ZN3sce4Json5ValueD1Ev(&value);
+    _ZN3sce4Json6Object4PairD1Ev(&pair);
+}
+
 int main() {
     ParseAndRoundTrip();
     NestingDepth();
@@ -622,4 +686,6 @@ int main() {
     InitParameters();
     ValueClear();
     StreamParse();
+    ArrayIteratorCopyAndPostIncrement();
+    ObjectPairOwnsCopies();
 }

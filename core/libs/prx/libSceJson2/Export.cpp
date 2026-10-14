@@ -896,14 +896,15 @@ int APS5_VABI _ZNK3sce4Json5ValuecvbEv(void) {
     return 0;
 }
 
-int APS5_VABI _ZN3sce4Json6Object4PairC1ERKNS0_6StringERKNS0_5ValueE() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+void APS5_VABI _ZN3sce4Json6Object4PairC1ERKNS0_6StringERKNS0_5ValueE(Pair* self, const String* key, const Value* value) {
+    Construct(self->key, *key->text);
+    self->reserved = 0;
+    CopyInto(self->value, *value);
 }
 
-int APS5_VABI _ZN3sce4Json6Object4PairD1Ev() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+void APS5_VABI _ZN3sce4Json6Object4PairD1Ev(Pair* self) {
+    Destroy(self->key);
+    Destroy(self->value);
 }
 
 int APS5_VABI _ZN3sce4Json6Object6insertERKNS1_4PairE() {
@@ -911,18 +912,15 @@ int APS5_VABI _ZN3sce4Json6Object6insertERKNS1_4PairE() {
     return 0;
 }
 
-int APS5_VABI _ZN3sce4Json5Array8iteratorppEi() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+ArrayIterator* APS5_VABI _ZN3sce4Json5Array8iteratorppEi(ArrayIterator* result, ArrayIterator* self, int) {
+    result->it = self->it++;
+    return result;
 }
 
-int APS5_VABI _ZN3sce4Json5Array8iteratoraSERKS2_() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+ArrayIterator* APS5_VABI _ZN3sce4Json5Array8iteratoraSERKS2_(ArrayIterator* self, const ArrayIterator* other) {
+    self->it = other->it;
+    return self;
 }
 
-int APS5_VABI _ZN3sce4Json5Array8iteratorC1Ev() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
+void APS5_VABI _ZN3sce4Json5Array8iteratorC1Ev(ArrayIterator* self) { self->it = {}; }
 }
