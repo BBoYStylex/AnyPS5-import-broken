@@ -707,5 +707,10 @@ if(BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/RelocTableBoundsTests.cpp
         )
         add_test(NAME reloc_table_bounds COMMAND reloc_table_bounds_tests $<TARGET_FILE:relinker>)
+
+        add_test_executable(guest_executable_segment_bounds_tests
+            ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/GuestExecutableSegmentBoundsTests.cpp
+        )
+        add_test(NAME guest_executable_segment_bounds COMMAND guest_executable_segment_bounds_tests $<TARGET_FILE:relinker>)
     endif()
 endif()

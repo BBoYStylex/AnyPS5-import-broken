@@ -323,7 +323,15 @@ std::vector<GuestArtifact> GuestModuleBuilder::Build(const std::filesystem::path
         auto& image = images[index];
         progress.Report({Domain::ProgressStage::Modules, Io::Utf8Path(image.SourcePath), artifacts.size(), order.size()});
         std::vector<Domain::ProgramHeader> codeHeaders;
-        for (const auto& header : image.Headers) if (header.Type == 1 && (header.Flags & 1) != 0) codeHeaders.push_back(header);
+        for (const auto& header : image.Headers) {
+            if (header.Type == 1 && (header.Flags & 1) != 0) {
+                if (header.Offset > image.Bytes.size() || header.FileSize > image.Bytes.size() - header.Offset)
+                    throw Domain::RelinkerException("Guest executable segment exceeds image");
+                if (header.FileSize > std::numeric_limits<Domain::VirtualAddress>::max() - header.MappedAddress)
+                    throw Domain::RelinkerException("Guest executable segment range exceeds address space");
+                codeHeaders.push_back(header);
+            }
+        }
         if (toIntel) {
             auto converted = Codegen::MakeAmd64OnlyConverter(toRosetta ? Codegen::Amd64OnlyTarget::Rosetta : Codegen::Amd64OnlyTarget::Intel, [&](auto completed, auto total) { progress.Report({Domain::ProgressStage::Lowering, Io::Utf8Path(image.SourcePath), completed, total}); })->Convert(std::move(image.Bytes), image.Headers);
             image.Trampolines = std::move(converted.Trampolines);
