@@ -15,6 +15,7 @@
 #include <iostream>
 #include <memory>
 #include <map>
+#include <optional>
 #include <random>
 #include <string>
 #include <vector>
@@ -333,32 +334,43 @@ int Run(const int argc, char* argv[]) {
             }
         }
 
-        if (args.windowsDiagnostics) fileWriter.Write("windows-diagnostics-imports.txt", executables.front().Diagnostics);
-        const auto outputCount = guestArtifacts.size() + executables.size();
+        // The write-stage bar must cover every file this tool writes and report
+        // exactly once per write, so it reaches 100% only when the last file lands.
+        std::size_t outputCount = guestArtifacts.size() + executables.size();
+        if (args.writeRegistry) outputCount += registryPaths.size();
+        if (desktopEntry) ++outputCount;
+        if (args.windowsDiagnostics) ++outputCount;
         progress.Report({Domain::ProgressStage::Write, absPath, 0, outputCount});
         std::size_t written = 0;
+        const auto writeAndReport = [&](const auto& path, const auto& data) {
+            fileWriter.Write(path, data);
+            ++written;
+            progress.Report({Domain::ProgressStage::Write, absPath, written, outputCount});
+        };
+        if (args.windowsDiagnostics)
+            writeAndReport("windows-diagnostics-imports.txt", executables.front().Diagnostics);
         for (const auto& artifact : guestArtifacts) {
             std::filesystem::create_directories(artifact.Path.parent_path());
-            fileWriter.Write(Io::Utf8Path(artifact.Path), artifact.Bytes);
-            progress.Report({Domain::ProgressStage::Write, absPath, ++written, outputCount});
+            writeAndReport(Io::Utf8Path(artifact.Path), artifact.Bytes);
         }
-        for (const auto& executable : executables) {
-            fileWriter.Write(executable.OutputPath, executable.Bytes);
-            progress.Report({Domain::ProgressStage::Write, absPath, ++written, outputCount});
-        }
+        for (const auto& executable : executables)
+            writeAndReport(executable.OutputPath, executable.Bytes);
         if (args.writeRegistry) {
             const auto registryWriter = std::make_shared<Relinker::CallRegistryWriter>();
-            for (std::size_t index = 0; index < executables.size(); ++index) {
-                fileWriter.Write(Io::Utf8Path(registryPaths[index]), registryWriter->WriteCallRegistry(executables[index].Result.RegistryEntries));
-                fileWriter.Write(Io::Utf8Path(neededPaths[index]), registryWriter->WriteNeededLibraries(executables[index].Result.DynamicSection.NeededLibraries));
-            }
-            for (std::size_t index = 0; index < guestArtifacts.size(); ++index) {
-                fileWriter.Write(Io::Utf8Path(registryPaths[executables.size() + index]), registryWriter->WriteModuleImports(guestArtifacts[index].Imports));
-                fileWriter.Write(Io::Utf8Path(neededPaths[executables.size() + index]), registryWriter->WriteNeededLibraries(guestArtifacts[index].NeededLibraries));
-            }
+            for (std::size_t index = 0; index < executables.size(); ++index)
+                writeAndReport(Io::Utf8Path(registryPaths[index]), registryWriter->WriteCallRegistry(executables[index].Result.RegistryEntries));
+            for (std::size_t index = 0; index < guestArtifacts.size(); ++index)
+                writeAndReport(Io::Utf8Path(registryPaths[executables.size() + index]), registryWriter->WriteModuleImports(guestArtifacts[index].Imports));
+         }
+        std::optional<std::string> desktopEntryPath;
+        if (desktopEntry) {
+            desktopEntryPath = Io::Utf8Path(desktopEntryWriter.Write(*desktopEntry));
+            ++written;
+            progress.Report({Domain::ProgressStage::Write, absPath, written, outputCount});
         }
+        
         progress.Finish();
-        if (desktopEntry) std::cout << "Desktop entry: " << Io::Utf8Path(desktopEntryWriter.Write(*desktopEntry)) << '\n';
+        if (desktopEntryPath) std::cout << "Desktop entry: " << *desktopEntryPath << '\n';
         std::cout << "\nConversion complete\n"
                   << "Output file: " << absPath << '\n'
                   << "External prx references: " << executables.front().Result.RegistryEntries.size() << '\n'
