@@ -624,6 +624,13 @@ int main() {
         Require(open_nid_postfix(fileLink.string().c_str(), noFollow, 0) == -1 && *__error_nid_postfix() == 31);
         Require(open_nid_postfix(danglingLink.string().c_str(), noFollow | 0x201, 0600) == -1 && *__error_nid_postfix() == 31);
         Require(!std::filesystem::exists(missing));
+        Require(sceKernelOpen(directoryLink.string().c_str(), noFollow, 0) == static_cast<int>(0x8002001Fu));
+        Require(sceKernelOpen(directoryLink.string().c_str(), noFollow | 0x20000, 0) == static_cast<int>(0x8002001Fu));
+        for (const auto& plain : {presentName, targetDirectory.string(), fileLink.string(), directoryLink.string()}) {
+            const int opened = sceKernelOpen(plain.c_str(), plain == presentName || plain == targetDirectory.string() ? noFollow : 0, 0);
+            Require(opened >= 0 && sceKernelClose(opened) == 0);
+        }
+        Require(sceKernelOpen(missing.string().c_str(), noFollow, 0) == static_cast<int>(0x80020002u));
         Require(stat_nid_postfix(fileLink.string().c_str(), &status) == 0 && status.st_size == 5);
         Require(checkUnsupportedLink(fileLink));
         Require(checkUnsupportedLink(directoryLink));
