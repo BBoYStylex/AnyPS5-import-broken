@@ -1,4 +1,4 @@
-#include "prx/libc/include/general/AsmFunction.hpp"
+#include "prx/libc/include/general/AsmMacros.hpp"
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include <cstddef>
 #include <cstdint>
@@ -110,6 +110,16 @@ asm(".text\n"
     "    popq %rsi\n"
     "    popq %rdi\n"
     "2:\n"
+#ifdef _WIN32
+    "    pushq %rdi\n"
+    "    pushq %rsi\n"
+    "    movq 16(%rdi), %rdi\n"
+    "    subq $8, %rsp\n"
+    "    call GuestStackSwitch_nid_no_patch\n"
+    "    addq $8, %rsp\n"
+    "    popq %rsi\n"
+    "    popq %rdi\n"
+#endif
     "    movq %rdi, %rdx\n"
     "    movl %esi, %eax\n"
     "    movq 0(%rdx), %rcx\n"
