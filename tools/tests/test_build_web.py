@@ -1,90 +1,215 @@
-import contextlib
 import hashlib
-import io
 import json
-from pathlib import Path
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
 import warnings
 import zipfile
+from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import build_web
+import package_release
+
+FIRST = "a1" * 20
+SECOND = "b2" * 20
+REPOSITORY = "owner/AnyPS5"
 
 
-def library_zip(entries):
-    buffer = io.BytesIO()
-    with warnings.catch_warnings(), zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        warnings.simplefilter("ignore", UserWarning)
-        for name, data in entries:
-            archive.writestr(name, data)
-    return buffer.getvalue()
-
-
-class LibraryPublicationTests(unittest.TestCase):
+class SiteFixture(unittest.TestCase):
     def setUp(self):
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        self.output = Path(temporary.name)
-        self.libraries = self.output / "libraries"
-        self.libraries.mkdir()
-        self.manifest = self.output / "release.json"
-        self.previous = b'{"tag":"previous complete release"}\n'
-        self.manifest.write_bytes(self.previous)
-        self.existing = self.libraries / "previous.zip"
-        self.existing.write_bytes(b"previous archive")
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.root = Path(self.directory.name)
+        self.web = self.root / "build/web"
+        (self.web / "native").mkdir(parents=True)
+        (self.web / "native/relinker_wasm.mjs").write_bytes(b"converter module")
+        (self.web / "native/relinker_wasm.wasm").write_bytes(b"converter binary")
+        for name in build_web.FRONTEND:
+            (self.web / name).write_text(f"built {name}", encoding="utf-8")
+        (self.web / "index.html").write_text('<link href="app.css"><script src="app.mjs"></script>', encoding="utf-8")
+        self.dist = self.root / "dist"
+        self.dist.mkdir()
 
-    def publish(self, windows, linux):
-        assets = []
-        responses = {}
-        for platform, data in (("windows", windows), ("linux", linux)):
-            url = f"https://example.invalid/{platform}.zip"
-            assets.append({"name": f"prx-{platform}-v1.zip", "size": len(data),
-                           "digest": "sha256:" + hashlib.sha256(data).hexdigest(), "browser_download_url": url})
-            responses[url] = data
-        release = {"tag_name": "v1", "html_url": "https://example.invalid/v1", "assets": assets}
-        responses["https://api.github.com/repos/boykopovar/AnyPS5/releases/latest"] = json.dumps(release).encode()
-        with patch.object(build_web, "request", side_effect=lambda url: io.BytesIO(responses[url])), \
-                contextlib.redirect_stdout(io.StringIO()):
-            build_web.publish_libraries(self.output)
+    def archive(self, platform, commit, entries=None):
+        path = self.dist / f"prx-{platform}-vdev-{commit}.zip"
+        with warnings.catch_warnings(), zipfile.ZipFile(path, "w") as archive:
+            warnings.simplefilter("ignore", UserWarning)
+            for name, content in entries or [("libs/libc.prx", f"{platform} {commit}".encode())]:
+                archive.writestr(name, content)
+        return path
 
-    def test_colliding_paths_do_not_publish_a_release(self):
-        valid = library_zip([("libs/libc.prx", b"valid archive")])
-        for first, second in (("libs/libc.prx", "libs/libc.prx"),
-                              ("libs/libc.prx", "libs/LIBC.prx"),
-                              ("libs/extra/", "libs/EXTRA")):
-            with self.subTest(first=first, second=second):
-                invalid = library_zip([(first, b"" if first.endswith("/") else b"first"), (second, b"second")])
-                with self.assertRaisesRegex(ValueError, "Duplicate library archive path"):
-                    self.publish(invalid, valid)
-                self.assertEqual(self.manifest.read_bytes(), self.previous)
-                self.assertEqual(self.existing.read_bytes(), b"previous archive")
-                self.assertEqual(list(self.libraries.iterdir()), [self.existing])
+    def publish(self, commit):
+        build_web.publish_snapshot(self.web, self.dist, f"vdev-{commit}", commit, REPOSITORY)
 
-    def test_collision_in_second_platform_preserves_previous_manifest(self):
-        valid = library_zip([("libs/libc.prx", b"valid archive")])
-        invalid = library_zip([("libs/libc.prx", b"first"), ("libs/LIBC.prx", b"second")])
-        with self.assertRaisesRegex(ValueError, "Duplicate library archive path"):
-            self.publish(valid, invalid)
-        self.assertEqual(self.manifest.read_bytes(), self.previous)
-        self.assertEqual(self.existing.read_bytes(), b"previous archive")
-        self.assertFalse(any(file.suffix == ".download" for file in self.libraries.iterdir()))
+    def manifest(self):
+        return json.loads((self.web / "release.json").read_text(encoding="utf-8"))
 
-    def test_distinct_full_paths_publish_both_platforms(self):
-        payload = library_zip([("libs/", b""), ("libs/libc.prx", b"first"), ("libs/extra/libc.prx", b"second")])
-        self.publish(payload, payload)
-        manifest = json.loads(self.manifest.read_text(encoding="utf-8"))
-        self.assertEqual(manifest["tag"], "v1")
-        self.assertEqual(set(manifest["platforms"]), {"windows", "linux"})
-        for platform, asset in manifest["platforms"].items():
-            digest = hashlib.sha256(payload).hexdigest()
-            self.assertEqual(asset, {"path": f"libraries/{platform}-{digest}.zip", "size": len(payload),
-                                     "expandedBytes": 11, "sha256": digest})
-            self.assertEqual((self.output / asset["path"]).read_bytes(), payload)
-        self.assertEqual(self.existing.read_bytes(), b"previous archive")
-        self.assertFalse(any(file.suffix == ".download" for file in self.libraries.iterdir()))
+    def snapshot(self):
+        return {path.relative_to(self.web).as_posix(): path.read_bytes() for path in self.web.rglob("*") if path.is_file()}
+
+
+class SnapshotSiteTests(SiteFixture):
+    def test_local_archives_build_a_complete_same_commit_site_and_web_zip(self):
+        for platform in build_web.PLATFORMS:
+            self.archive(platform, FIRST)
+        self.publish(FIRST)
+        manifest = self.manifest()
+        self.assertEqual(manifest["tag"], f"vdev-{FIRST}")
+        self.assertEqual(manifest["commit"], FIRST)
+        self.assertEqual(manifest["url"], f"https://github.com/{REPOSITORY}/releases/tag/vdev-{FIRST}")
+        self.assertEqual(manifest["converter"], {"path": f"native/{FIRST}/relinker_wasm.mjs"})
+        self.assertEqual((self.web / f"native/{FIRST}/relinker_wasm.mjs").read_bytes(), b"converter module")
+        self.assertEqual((self.web / f"native/{FIRST}/relinker_wasm.wasm").read_bytes(), b"converter binary")
+        self.assertEqual((self.web / "native/relinker_wasm.mjs").read_bytes(), b"converter module")
+        for platform in build_web.PLATFORMS:
+            source = (self.dist / f"prx-{platform}-vdev-{FIRST}.zip").read_bytes()
+            checksum = hashlib.sha256(source).hexdigest()
+            entry = manifest["platforms"][platform]
+            self.assertEqual(entry["path"], f"libraries/{platform}-{checksum}.zip")
+            self.assertEqual(entry["size"], len(source))
+            self.assertEqual(entry["sha256"], checksum)
+            self.assertEqual(entry["expandedBytes"], len(f"{platform} {FIRST}"))
+            self.assertEqual((self.web / entry["path"]).read_bytes(), source)
+        (self.web / "progress.json").write_text("{}", encoding="utf-8")
+        package_release.package_web(self.web, self.dist, f"vdev-{FIRST}")
+        with zipfile.ZipFile(self.dist / f"web-vdev-{FIRST}.zip") as archive:
+            contents = {name: archive.read(name) for name in archive.namelist()}
+        self.assertEqual(contents, self.snapshot())
+        self.assertIn("progress.json", contents)
+        self.assertIn(f"native/{FIRST}/relinker_wasm.wasm", contents)
+
+    def test_new_snapshot_replaces_previous_commit_assets(self):
+        for platform in build_web.PLATFORMS:
+            self.archive(platform, FIRST)
+            self.archive(platform, SECOND)
+        self.publish(FIRST)
+        self.publish(SECOND)
+        manifest = self.manifest()
+        self.assertEqual(manifest["commit"], SECOND)
+        self.assertFalse((self.web / "native" / FIRST).exists())
+        self.assertEqual(sorted(path.name for path in (self.web / "libraries").iterdir()), sorted(entry["path"].removeprefix("libraries/") for entry in manifest["platforms"].values()))
+
+    def test_invalid_second_platform_preserves_previous_site(self):
+        for platform in build_web.PLATFORMS:
+            self.archive(platform, FIRST)
+        self.publish(FIRST)
+        previous = self.snapshot()
+        self.archive("windows", SECOND)
+        cases = {
+            "missing": None,
+            "layout": [("libc.prx", b"outside libs")],
+            "traversal": [("libs/../libc.prx", b"escape")],
+            "no modules": [("libs/readme.txt", b"text")],
+            "duplicate path": [("libs/libc.prx", b"first"), ("libs/libc.prx", b"second")],
+            "case collision": [("libs/libc.prx", b"first"), ("libs/LIBC.prx", b"second")],
+            "directory collision": [("libs/extra/", b""), ("libs/EXTRA", b"file"), ("libs/libc.prx", b"module")],
+        }
+        for case, entries in cases.items():
+            with self.subTest(case):
+                (self.dist / f"prx-linux-vdev-{SECOND}.zip").unlink(missing_ok=True)
+                if entries is not None:
+                    self.archive("linux", SECOND, entries)
+                with self.assertRaises(ValueError):
+                    self.publish(SECOND)
+                self.assertEqual(self.snapshot(), previous)
+                self.assertEqual(sorted(path.name for path in self.web.iterdir() if path.name.startswith(".libraries-")), [])
+        (self.dist / f"prx-linux-vdev-{SECOND}.zip").write_bytes(b"truncated archive")
+        with self.assertRaises(ValueError):
+            self.publish(SECOND)
+        self.assertEqual(self.snapshot(), previous)
+
+    def test_distinct_nested_paths_are_published(self):
+        entries = [("libs/", b""), ("libs/libc.prx", b"first"), ("libs/extra/libc.prx", b"second")]
+        for platform in build_web.PLATFORMS:
+            self.archive(platform, FIRST, entries)
+        self.publish(FIRST)
+        for entry in self.manifest()["platforms"].values():
+            self.assertEqual(entry["expandedBytes"], len(b"first") + len(b"second"))
+
+    def test_version_and_commit_must_match(self):
+        for platform in build_web.PLATFORMS:
+            self.archive(platform, FIRST)
+        for version, commit in ((f"vdev-{SECOND}", FIRST), (f"vdev-{FIRST}", FIRST.upper()), ("v1.0", FIRST), (f"vdev-{FIRST[:7]}", FIRST[:7])):
+            with self.subTest(version=version, commit=commit), self.assertRaises(ValueError):
+                build_web.publish_snapshot(self.web, self.dist, version, commit, REPOSITORY)
+        with self.assertRaises(ValueError):
+            build_web.publish_snapshot(self.web, self.dist, f"vdev-{FIRST}", FIRST, "owner/..")
+        self.assertFalse((self.web / "release.json").exists())
+        self.assertFalse((self.web / "libraries").exists())
+
+    def test_missing_built_frontend_is_not_replaced_from_sources(self):
+        for platform in build_web.PLATFORMS:
+            self.archive(platform, FIRST)
+        (self.web / "worker.mjs").unlink()
+        with self.assertRaisesRegex(ValueError, "worker.mjs"):
+            self.publish(FIRST)
+        self.assertFalse((self.web / "worker.mjs").exists())
+        self.assertFalse((self.web / "release.json").exists())
+
+    def test_partial_snapshot_arguments_are_rejected(self):
+        with patch.object(sys, "argv", ["build_web.py", "--build", str(self.web.parent), "--version", f"vdev-{FIRST}"]), patch("sys.stderr"), self.assertRaises(SystemExit):
+            build_web.main()
+        self.assertFalse((self.web / ".nojekyll").exists())
+
+
+class WebPackageTests(SiteFixture):
+    def setUp(self):
+        super().setUp()
+        for platform in build_web.PLATFORMS:
+            self.archive(platform, FIRST)
+        self.publish(FIRST)
+        self.output = self.root / "release"
+        self.version = f"vdev-{FIRST}"
+
+    def rewrite(self, change):
+        manifest = json.loads((self.web / "release.json").read_text(encoding="utf-8"))
+        change(manifest)
+        (self.web / "release.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    def assertRejected(self, version=None):
+        with self.assertRaises((RuntimeError, ValueError)):
+            package_release.package_web(self.web, self.output, version or self.version)
+        self.assertFalse((self.output / f"web-{version or self.version}.zip").exists())
+
+    def test_tag_without_matching_manifest_is_rejected(self):
+        self.assertRejected(f"vdev-{SECOND}")
+
+    def test_manifest_commit_must_match_snapshot_tag(self):
+        self.rewrite(lambda manifest: manifest.update(commit=SECOND))
+        self.assertRejected()
+
+    def test_converter_must_be_scoped_to_the_manifest_commit(self):
+        self.rewrite(lambda manifest: manifest.update(converter={"path": "native/relinker_wasm.mjs"}))
+        self.assertRejected()
+
+    def test_commit_scoped_converter_must_match_built_converter(self):
+        (self.web / f"native/{FIRST}/relinker_wasm.wasm").write_bytes(b"other converter")
+        self.assertRejected()
+
+    def test_tampered_library_is_rejected(self):
+        entry = json.loads((self.web / "release.json").read_text(encoding="utf-8"))["platforms"]["linux"]
+        library = self.web / entry["path"]
+        contents = bytearray(library.read_bytes())
+        contents[-1] ^= 1
+        library.write_bytes(contents)
+        self.assertRejected()
+
+    def test_missing_wasm_is_rejected(self):
+        (self.web / "native/relinker_wasm.wasm").unlink()
+        self.assertRejected()
+
+    def test_symbolic_links_are_rejected(self):
+        try:
+            (self.web / "linked.html").symlink_to(self.web / "index.html")
+        except (OSError, NotImplementedError):
+            self.skipTest("Symbolic links are unavailable")
+        self.assertRejected()
+
+    def test_worker_from_a_different_revision_cannot_be_published(self):
+        (self.web / f"native/{FIRST}/worker.mjs").write_bytes(b"other worker protocol")
+        self.assertRejected()
 
 
 if __name__ == "__main__":
