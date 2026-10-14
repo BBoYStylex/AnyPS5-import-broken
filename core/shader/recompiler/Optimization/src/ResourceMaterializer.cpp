@@ -192,9 +192,6 @@ DecodedImage decodeImageDescriptor(const DescriptorValue& descriptor, const Imag
         }
     }
     decoded.srgbDecode = !storage && !base.depthCompare && (srgbDecodeFormats & SrgbDecodeBit(format)) != 0u;
-    if (decoded.srgbDecode && !base.srgbDecodeCompatible) {
-        throw std::runtime_error("samples or gathers an sRGB image the device cannot sample, which is not implemented");
-    }
     if (storage || decoded.conversionFormat != IrBufferFormat::Invalid) {
         decoded.shaderSwizzle = descriptorImageSwizzle(descriptor);
     }
@@ -584,6 +581,53 @@ std::uint32_t emulatedCompareState(const ShaderInfo& info, const ResourceSnapsho
     return *samplerState | (reference << EmulatedCompare::ReferenceShift) | (singleLevel ? EmulatedCompare::SingleLevel : 0u);
 }
 
+std::uint32_t emulatedSrgbSampleState(const ShaderInfo& info, const ResourceSnapshot& snapshot, std::uint32_t index) {
+    const auto& image = info.images[index];
+    if (image.depthCompare || image.srgbDecodeFormats == 0u || snapshot.images.at(index).dwordCount != 8u || nullImageDescriptor(snapshot.images.at(index))) return 0u;
+    if (image.indirectRoot != ImageResource::NoIndirectImage) throw std::runtime_error("samples or gathers an sRGB image the device cannot sample: bindless image tables are not supported by the shader fallback");
+    const auto& descriptor = snapshot.images.at(index);
+    if ((image.srgbDecodeFormats & SrgbDecodeBit(rawImageFormat(descriptor))) == 0u) return 0u;
+    const bool pairedSampler = std::any_of(info.sampledPairs.begin(), info.sampledPairs.end(), [index](const auto& pair) { return pair.image == index; });
+    if (!pairedSampler) return 0u;
+    const auto type = rawImageType(descriptor);
+    if (type != ImageType::Color2D) throw std::runtime_error("samples or gathers an sRGB image the device cannot sample: the shader fallback currently supports only 2D images");
+    if (((descriptor.dwords[3] >> 12u) & 0xfu) != ((descriptor.dwords[3] >> 16u) & 0xfu)) throw std::runtime_error("samples or gathers an sRGB image the device cannot sample: the shader fallback requires a single mip level");
+    std::optional<std::uint32_t> samplerState;
+    for (const auto& pair : info.sampledPairs) {
+        if (pair.image != index) continue;
+        if (pair.sampler >= snapshot.samplers.size() || snapshot.samplers[pair.sampler].dwordCount != 4u) throw std::runtime_error("sRGB shader sampling fallback has no sampler descriptor");
+        const auto& words = snapshot.samplers[pair.sampler].dwords;
+        const auto clampX = words[0] & 0x7u;
+        const auto clampY = (words[0] >> 3u) & 0x7u;
+        const auto magFilter = (words[2] >> 20u) & 0x3u;
+        const auto minFilter = (words[2] >> 22u) & 0x3u;
+        const auto mipFilter = (words[2] >> 24u) & 0x3u;
+        if (((words[0] >> 12u) & 0x7u) != 0u || ((words[0] >> 15u) & 0x1u) != 0u) throw std::runtime_error("sRGB shader sampling fallback does not support comparison or unnormalized samplers");
+        if (((words[0] >> 29u) & 0x3u) != 0u) throw std::runtime_error("sRGB shader sampling fallback does not support min or max reduction samplers");
+        if ((words[2] & 0x3fu) != 0u) throw std::runtime_error("sRGB shader sampling fallback does not support anisotropic filtering");
+        if (magFilter != minFilter || magFilter > 1u || mipFilter > 1u) throw std::runtime_error("sRGB shader sampling fallback supports equal point or bilinear minification and magnification filters");
+        const auto addressMode = [](std::uint32_t clamp) {
+            if (clamp == 0u) return EmulatedCompare::AddressWrap;
+            if (clamp == 2u) return EmulatedCompare::AddressEdge;
+            if (clamp == 6u) return EmulatedCompare::AddressBorder;
+            throw std::runtime_error("sRGB shader sampling fallback supports only wrap, clamp-to-edge or clamp-to-border addressing");
+        };
+        const auto addressX = addressMode(clampX);
+        const auto addressY = addressMode(clampY);
+        const bool border = addressX == EmulatedCompare::AddressBorder || addressY == EmulatedCompare::AddressBorder;
+        const auto borderType = (words[3] >> 30u) & 0x3u;
+        if (border && borderType == 3u) throw std::runtime_error("sRGB shader sampling fallback does not support border color tables");
+        const auto state = (magFilter == 1u ? EmulatedSrgbSample::Linear : 0u)
+            | (addressX << EmulatedSrgbSample::ClampXShift) | (addressY << EmulatedSrgbSample::ClampYShift)
+            | (border && borderType == 2u ? EmulatedSrgbSample::BorderWhite : 0u)
+            | (border && borderType == 1u ? EmulatedSrgbSample::BorderOpaque : 0u);
+        if (samplerState.has_value() && *samplerState != state) throw std::runtime_error("sRGB shader sampling fallback requires paired samplers to agree");
+        samplerState = state;
+    }
+    if (!samplerState.has_value()) throw std::runtime_error("samples or gathers an sRGB image the device cannot sample: its fallback sampler cannot be resolved");
+    return *samplerState;
+}
+
 void materializeTables(const IrResourcePlan& plan, ResourceSnapshot& snapshot, const std::vector<TableResolution>& tables) {
     for (std::uint32_t i = 0u; i < plan.info.buffers.size(); ++i) {
         const auto decoded = decodeBufferDescriptor(snapshot.buffers.at(i));
@@ -742,7 +786,7 @@ std::vector<ImageResource> ResourceMaterializer::RuntimeImageModes(const ImageRe
             modes.push_back(mode);
         }
     }
-    if (image.srgbDecodeFormats != 0u && image.srgbDecodeCompatible && !image.depthCompare && !storage && !image.packed) {
+    if (image.srgbDecodeFormats != 0u && !image.depthCompare && !storage && !image.packed) {
         const auto count = modes.size();
         for (std::size_t index = 0; index < count; ++index) {
             const auto& base = modes[index];
@@ -832,6 +876,10 @@ std::uint32_t ResourceMaterializer::RuntimeImageMode(const ImageResource& image,
 
 std::uint32_t ResourceMaterializer::EmulatedCompareState(const ShaderInfo& info, const ResourceSnapshot& snapshot, std::uint32_t index) {
     return emulatedCompareState(info, snapshot, index);
+}
+
+std::uint32_t ResourceMaterializer::EmulatedSrgbSampleState(const ShaderInfo& info, const ResourceSnapshot& snapshot, std::uint32_t index) {
+    return emulatedSrgbSampleState(info, snapshot, index);
 }
 
 void ResourceMaterializer::ApplyStaticInterface(IrProgram& program, bool nativeSampleOffsets) const {

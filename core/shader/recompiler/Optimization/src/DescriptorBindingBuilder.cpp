@@ -262,12 +262,18 @@ DescriptorBindingPlan DescriptorBindingBuilder::Prepare(const IrBindingLayout& l
         if (SamplesBaseLevelIfUnnormalized(info.samplers[index])) plan.specialization.push_back({PipelineSpecialization::UnnormalizedBaseLevelBase + index, unnormalized.samplers[index] ? 1u : 0u});
     }
     std::vector<std::uint32_t> compareStates(info.images.size());
+    std::vector<std::uint32_t> srgbSampleStates(info.images.size());
     for (std::uint32_t index = 0; index < info.images.size(); ++index) {
-        if (!info.images[index].depthCompare) continue;
-        const auto compare = compareStates[index] = ResourceMaterializer::EmulatedCompareState(info, snapshot, index);
-        const auto first = PipelineSpecialization::CompareBase + index * PipelineSpecialization::CompareWords;
-        const std::array<std::uint32_t, 6> values{EmulatedCompare::Function(compare), (compare & EmulatedCompare::Linear) != 0u, EmulatedCompare::AddressX(compare), EmulatedCompare::AddressY(compare), EmulatedCompare::Reference(compare), (compare & EmulatedCompare::BorderWhite) != 0u};
-        for (std::uint32_t word = 0; word < values.size() && !registrationModules; ++word) plan.specialization.push_back({first + word, values[word]});
+        if (info.images[index].depthCompare) {
+            const auto compare = compareStates[index] = ResourceMaterializer::EmulatedCompareState(info, snapshot, index);
+            const auto first = PipelineSpecialization::CompareBase + index * PipelineSpecialization::CompareWords;
+            const std::array<std::uint32_t, 6> values{EmulatedCompare::Function(compare), (compare & EmulatedCompare::Linear) != 0u, EmulatedCompare::AddressX(compare), EmulatedCompare::AddressY(compare), EmulatedCompare::Reference(compare), (compare & EmulatedCompare::BorderWhite) != 0u};
+            for (std::uint32_t word = 0; word < values.size() && !registrationModules; ++word) plan.specialization.push_back({first + word, values[word]});
+        }
+        if (info.images[index].srgbDecodeFormats != 0u && !info.images[index].depthCompare) {
+            srgbSampleStates[index] = ResourceMaterializer::EmulatedSrgbSampleState(info, snapshot, index);
+            if (!registrationModules) plan.specialization.push_back({PipelineSpecialization::SrgbSampleBase + index, srgbSampleStates[index]});
+        }
     }
     std::vector<std::uint32_t> imageModes(info.images.size());
     for (std::size_t index = 0; index < info.images.size(); ++index) imageModes[index] = ResourceMaterializer::RuntimeImageMode(info.images[index], snapshot.images.at(index), info.runtimeImageModes.at(index));
@@ -421,7 +427,9 @@ DescriptorBindingPlan DescriptorBindingBuilder::Prepare(const IrBindingLayout& l
                 metadata.binding = static_cast<std::uint32_t>(compact.kind);
                 metadata.firstElement = static_cast<std::uint32_t>(element);
                 metadata.elementCount = 1u;
-                metadata.flags = imageModes[resource] << 1u | (registrationModules ? (compareStates[resource] & RuntimeAbi::CompareStateMask) << RuntimeAbi::CompareStateShift : 0u);
+                metadata.flags = imageModes[resource] << 1u
+                    | (registrationModules ? (compareStates[resource] & RuntimeAbi::CompareStateMask) << RuntimeAbi::CompareStateShift : 0u)
+                    | (registrationModules ? (srgbSampleStates[resource] & RuntimeAbi::SrgbSampleStateMask) << RuntimeAbi::SrgbSampleStateShift : 0u);
                 if (descriptor.dwords[0] == 0u && (descriptor.dwords[1] & 0xffu) == 0u) metadata.flags |= 1u;
                 const auto offset = layout.ImageMetadataDword() + resource * static_cast<std::uint32_t>(sizeof(metadata) / sizeof(std::uint32_t));
                 plan.imageMetadata.push_back({resource, offset, metadata});
@@ -453,7 +461,9 @@ DescriptorBindingPlan DescriptorBindingBuilder::Prepare(const IrBindingLayout& l
         if (descriptor.dwordCount != metadata.descriptor.size()) fail("invalid runtime image descriptor width");
         metadata.elementCount = 1u;
         if (imageModes[resource] > RuntimeAbi::ImageModeMask) fail("runtime image mode exceeds its metadata field");
-        metadata.flags = imageModes[resource] << 1u | (registrationModules ? (compareStates[resource] & RuntimeAbi::CompareStateMask) << RuntimeAbi::CompareStateShift : 0u);
+        metadata.flags = imageModes[resource] << 1u
+            | (registrationModules ? (compareStates[resource] & RuntimeAbi::CompareStateMask) << RuntimeAbi::CompareStateShift : 0u)
+            | (registrationModules ? (srgbSampleStates[resource] & RuntimeAbi::SrgbSampleStateMask) << RuntimeAbi::SrgbSampleStateShift : 0u);
         if (descriptor.dwords[0] == 0u && (descriptor.dwords[1] & 0xffu) == 0u) metadata.flags |= 1u;
         plan.imageMetadata.push_back({resource, layout.ImageMetadataDword() + resource * static_cast<std::uint32_t>(sizeof(metadata) / sizeof(std::uint32_t)), metadata});
     }

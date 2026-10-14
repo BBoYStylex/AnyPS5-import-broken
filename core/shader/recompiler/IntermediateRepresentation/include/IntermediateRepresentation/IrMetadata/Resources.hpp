@@ -57,6 +57,14 @@ inline constexpr std::uint32_t ReferenceZero = 3u;
 [[nodiscard]] inline std::uint32_t Reference(std::uint32_t state) { return (state >> ReferenceShift) & 0x3u; }
 }
 
+namespace EmulatedSrgbSample {
+inline constexpr std::uint32_t Linear = 1u << 0u;
+inline constexpr std::uint32_t ClampXShift = 1u;
+inline constexpr std::uint32_t ClampYShift = 3u;
+inline constexpr std::uint32_t BorderWhite = 1u << 5u;
+inline constexpr std::uint32_t BorderOpaque = 1u << 6u;
+}
+
 struct ImageResource {
     static constexpr std::uint32_t NoIndirectImage = std::numeric_limits<std::uint32_t>::max();
 
