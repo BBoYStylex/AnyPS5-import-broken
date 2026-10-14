@@ -830,7 +830,6 @@ public:
         }
         if (!found) return 0;
         for (IrValue* inst : order) {
-            if (halted) break;
             static_cast<void>(readerOf(*inst));
             components.From(inst->Id(), [this](std::uint32_t node, std::vector<std::uint32_t>& out) { expand(node, out); }, [this](const std::vector<std::uint32_t>& members, bool cyclic) { settle(members, cyclic); });
         }
@@ -921,7 +920,6 @@ private:
     }
 
     void settle(const std::vector<std::uint32_t>& members, bool cyclic) {
-        if (halted) return;
         if (!cyclic) {
             unread[members.front()] = evaluate(members.front());
             remove(members.front());
@@ -949,7 +947,7 @@ private:
         IrValue* select = values[node];
         const IrValue* mask = node < writes.size() ? writes[node] : nullptr;
         if (mask == nullptr || !select->HasUses() || select->Argument(0)->Resolve() != mask || !sets.Contains(unread[node], mask->Id())) return;
-        halted = implied.Follows(*select) || std::any_of(owned.begin(), owned.end(), [&](const auto& reads) { return reads && reads->Follows(*select); });
+        if (implied.Follows(*select) || std::any_of(owned.begin(), owned.end(), [&](const auto& reads) { return reads && reads->Follows(*select); })) return;
         select->ReplaceAllUsesWith(select->Argument(1));
         select->Invalidate();
         select->SetParent(nullptr);
@@ -978,7 +976,6 @@ private:
     std::uint32_t group = 0;
     std::uint32_t removed = 0;
     bool found = false;
-    bool halted = false;
     bool solving = false;
 };
 

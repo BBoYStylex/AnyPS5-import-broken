@@ -35,10 +35,14 @@ struct Builder {
         return created;
     }
 
-    IrValue& truth() {
+    IrValue& boolean(bool value) {
         auto& created = program.CreateValue(IrOpcode::Void, IrType::Bool);
-        created.SetImmediateBool(true);
+        created.SetImmediateBool(value);
         return created;
+    }
+
+    IrValue& truth() {
+        return boolean(true);
     }
 
     IrValue& emit(IrOpcode opcode, IrType type, std::initializer_list<IrValue*> arguments, std::uint64_t flags = 0) {
@@ -298,6 +302,48 @@ int main() {
             if (count != 0u || gone) return false;
         }
         return true;
+    });
+
+    const auto selfGuardedBooleanWrite = [](bool nested) {
+        Builder b;
+        auto& exec = b.mask(16u);
+        auto& written = b.emit(IrOpcode::SelectU1, IrType::Bool, {&exec, &b.mask(32u), &b.boolean(false)});
+        auto& guard = nested ? b.logicalAnd(written, b.mask(48u)) : written;
+        b.keep(b.select(b.logicalAnd(written, guard), b.constant(1u), b.constant(0u)));
+        return std::pair{b.eliminate(), removed(written)};
+    };
+
+    passed &= run("a boolean write guarded by its own value keeps its select", [&] {
+        for (bool nested : {false, true}) {
+            const auto [count, gone] = selfGuardedBooleanWrite(nested);
+            if (count != 0u || gone) return false;
+        }
+        return true;
+    });
+
+    const auto execGuardedBooleanWrite = [](bool narrower) {
+        Builder b;
+        auto& exec = b.mask(16u);
+        auto& guard = narrower ? b.logicalAnd(exec, b.mask(8u)) : exec;
+        auto& written = b.emit(IrOpcode::SelectU1, IrType::Bool, {&exec, &b.mask(32u), &b.boolean(false)});
+        b.keep(b.select(b.logicalAnd(written, guard), b.constant(1u), b.constant(0u)));
+        return std::pair{b.eliminate(), removed(written)};
+    };
+
+    passed &= run("a boolean write guarded by its exec or a narrower one loses its select", [&] {
+        for (bool narrower : {false, true}) {
+            const auto [count, gone] = execGuardedBooleanWrite(narrower);
+            if (count != 1u || !gone) return false;
+        }
+        return true;
+    });
+
+    passed &= run("a lane mask selected by a uniform condition and masked with itself keeps its select", [] {
+        Builder b;
+        auto& condition = b.mask(0u);
+        auto& written = b.emit(IrOpcode::SelectU1, IrType::Bool, {&condition, &b.mask(32u), &b.boolean(false)});
+        b.keep(b.select(b.logicalAnd(written, written), b.constant(1u), b.constant(0u)));
+        return b.eliminate() == 0u && !removed(written);
     });
 
     const auto rebuiltExec = [](bool mismatchedHigh) {
