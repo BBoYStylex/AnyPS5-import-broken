@@ -2543,7 +2543,16 @@ int main() {
     Require(munmap_nid_postfix(reinterpret_cast<void*>(0x800000000000), page) == -1 && *__error_nid_postfix() == 22);
     *__error_nid_postfix() = 0;
     Require(munmap_nid_postfix(reinterpret_cast<void*>(0x7fffffffc000), page * 2) == -1 && *__error_nid_postfix() == 22);
+    *__error_nid_postfix() = 0;
+    Require(munmap_nid_postfix(reinterpret_cast<void*>(0x800000004000), page) == -1 && *__error_nid_postfix() == 22);
+    *__error_nid_postfix() = 0;
+    Require(munmap_nid_postfix(reinterpret_cast<void*>(std::numeric_limits<std::uintptr_t>::max() - page * 2 + 1), page) == -1 && *__error_nid_postfix() == 22);
+    *__error_nid_postfix() = 0;
+    Require(munmap_nid_postfix(reinterpret_cast<void*>(page), std::size_t{1} << 47) == -1 && *__error_nid_postfix() == 22);
+    *__error_nid_postfix() = 0;
+    Require(munmap_nid_postfix(memory, std::numeric_limits<std::size_t>::max()) == -1 && *__error_nid_postfix() == 22);
     Require(munmap_nid_postfix(reinterpret_cast<void*>(0x7fffffffc000), page) == 0);
+    Require(munmap_nid_postfix(reinterpret_cast<void*>(0x7fffffffc000), 1) == 0);
     Require(memory[0] == 42);
     Require(munmap_nid_postfix(memory + page, 1) == 0); // round to one guest page
     Require(memory[0] == 42 && memory[page * 2] == 73);
