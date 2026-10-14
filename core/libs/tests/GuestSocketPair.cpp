@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <source_location>
 #include <stdexcept>
 
 struct PollDescriptor {
@@ -45,7 +46,12 @@ int APS5_VABI sceKernelFstat(int, FileStat*);
 int* APS5_VABI __error_nid_postfix();
 }
 
-static void Require(bool value) { if (!value) std::abort(); }
+static void Require(bool value, std::source_location location = std::source_location::current()) {
+    if (!value) {
+        std::fprintf(stderr, "socketpair check failed at %s:%u\n", location.file_name(), static_cast<unsigned>(location.line()));
+        std::abort();
+    }
+}
 
 template<typename TFunction>
 static bool ThrowsRuntimeError(TFunction function) {
@@ -153,7 +159,14 @@ int main() {
     Require(sceKernelFstat(pair[1], &status) == 0 && status.st_mode == 0140666 && status.st_size == 5);
     Require(shutdown_nid_postfix(pair[0], 1) == 0);
     Require(fstat_nid_disambig1_nid_postfix(pair[0], &status) == 0 && status.st_mode == 0140444);
-#ifndef _WIN32
+#ifdef __APPLE__
+    Require(recv_nid_postfix(pair[1], received, sizeof(received), 0) == 5);
+    Require(close_nid_postfix(pair[0]) == 0 && close_nid_postfix(pair[1]) == 0);
+    Require(socketpair_nid_postfix(Unix, Stream, 0, pair) == 0);
+    Require(send_nid_postfix(pair[0], "hello", 5, 0) == 5 && Readable(pair[1]));
+    Require(shutdown_nid_postfix(pair[1], 0) == 0);
+    Require(recv_nid_postfix(pair[1], received, sizeof(received), 0) == 0);
+#elif !defined(_WIN32)
     Require(shutdown_nid_postfix(pair[1], 0) == 0);
     Require(fstat_nid_disambig1_nid_postfix(pair[1], &status) == 0 && status.st_mode == 0140666 && status.st_size == 5);
     Require(recv_nid_postfix(pair[1], received, sizeof(received), 0) == 5);
