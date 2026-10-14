@@ -117,24 +117,15 @@ private:
 #endif
 
 bool SameOutputFile(const std::filesystem::path& first, const std::filesystem::path& second) {
-    if (std::filesystem::equivalent(first, second)) return true;
-#ifdef _WIN32
-    if (std::filesystem::status(first).permissions() != std::filesystem::status(second).permissions() &&
-        std::filesystem::hard_link_count(first) > 1 && std::filesystem::hard_link_count(second) > 1) {
-        for (const auto& path : {first, second}) {
-            if ((std::filesystem::status(path).permissions() & std::filesystem::perms::owner_write) == std::filesystem::perms::none)
-                throw Domain::RelinkerException("Cannot compare read-only output identities: " + Io::Utf8Path(path));
-        }
-        OutputIdentityDirectory firstDirectory(first.parent_path());
-        OutputIdentityDirectory secondDirectory(second.parent_path());
-        std::filesystem::create_hard_link(first, firstDirectory.GetPath());
-        std::filesystem::create_hard_link(second, secondDirectory.GetPath());
-        const bool same = std::filesystem::equivalent(firstDirectory.GetPath(), secondDirectory.GetPath());
-        secondDirectory.Remove();
-        firstDirectory.Remove();
-        return same;
-    }
-#endif
+    // equivalent() compares the volume serial and file index, so it already
+    // identifies one physical file behind hard links, case-insensitive names,
+    // symlinks, and 8.3 short names. A re-probe through freshly created hard
+    // links cannot add information: those links carry the very identity
+    // equivalent() just compared. The removed Windows branch could never return
+    // true (same file implies same permissions and link counts), and on MSVC it
+    // always threw "Cannot compare read-only output identities" for genuinely
+    // different read-only files.
+    return std::filesystem::equivalent(first, second);
     return false;
 }
 
