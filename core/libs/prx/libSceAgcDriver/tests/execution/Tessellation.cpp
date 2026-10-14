@@ -3,8 +3,10 @@
 #include "Recompiler.hpp"
 #include "SceShaders.hpp"
 #include "VulkanTestDevice.hpp"
+#include <spirv/unified1/spirv.hpp>
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cstdio>
 #include <cstdlib>
 #include <iostream>
@@ -40,9 +42,36 @@ alignas(256) constexpr std::array<std::uint32_t, 49> HullCode{
     0xbf810000,
 };
 
+alignas(256) constexpr std::array<std::uint32_t, 54> HullCompareBranch{
+    0xd4040016, 0x00020080, 0xbeea0416, 0xbf870001, 0xbf800000, 0xd7650000, 0x000100c1, 0xd7660000,
+    0x000200c1, 0xbf8a0000, 0x7da206f9, 0x81060000, 0xd5480014, 0x02151101, 0x362402ff, 0x000000ff,
+    0x160028a0, 0xd5430015, 0x040224ff, 0x00000060, 0xdbfc0000, 0x02000015, 0x162c2890, 0xd5430016,
+    0x045a24ff, 0x00000030, 0xbf8cc07f, 0xe0781000, 0x02020216, 0x7da82881, 0xbe94047e, 0xb06a0060,
+    0x162602f9, 0x0086066a, 0xd8d80008, 0x06000013, 0xd8dc1008, 0x07000013, 0xbf8cc07f, 0x7e300306,
+    0x7e320306, 0x7e340306, 0x7e360306, 0x34142484, 0xbefe0414, 0xe0781000, 0x0403180a, 0x4a162481,
+    0x16161690, 0x4c1616ff, 0x00008000, 0xe0741000, 0x0202070b, 0xbf810000,
+};
+
 alignas(256) constexpr std::array<std::uint32_t, 51> HullRestoredExecSaved{
     0xd7650000, 0x000100c1, 0xd7660000, 0x000200c1, 0xbf8a0000, 0x7da206f9, 0x81060000, 0xd5480014,
     0x02151101, 0x362402ff, 0x000000ff, 0x160028a0, 0xd5430015, 0x040224ff, 0x00000060, 0xdbfc0000,
+    0x02000015, 0x162c2890, 0xd5430016, 0x045a24ff, 0x00000030, 0xbf8cc07f, 0xe0781000, 0x02020216,
+    0x7da82881, 0xbe94047e, 0xb06a0060, 0x162602f9, 0x0086066a, 0xd8d80008, 0x06000013, 0xd8dc1008,
+    0x07000013, 0xbf8cc07f, 0x7e300306, 0x7e320306, 0x7e340306, 0x7e360306, 0x34142484, 0xbefe0414,
+    0xbe94047e, 0xbefe0414, 0xe0781000, 0x0403180a, 0x4a162481, 0x16161690, 0x4c1616ff, 0x00008000,
+    0xe0741000, 0x0202070b, 0xbf810000,
+};
+
+alignas(256) constexpr std::array<std::uint32_t, 29> LocalCodeStride24{
+    0xd5480004, 0x02090502, 0xd5480005, 0x02090102, 0xd5480006, 0x02110902, 0xd5480007, 0x02111102,
+    0x7e080d04, 0x7e0a0d05, 0x7e0c0d06, 0x7e0e0d07, 0x10100cff, 0x3f19999a, 0x061010ff, 0xbf666666,
+    0x3e1008ff, 0x3e800000, 0xd54b0009, 0x03c5e105, 0x16140698, 0xd9340000, 0x0000080a, 0xd8340008,
+    0x0000070a, 0xd8340010, 0x0000070a, 0xbf8cc07f, 0xbefd2106,
+};
+
+alignas(256) constexpr std::array<std::uint32_t, 51> HullNextInput{
+    0xd7650000, 0x000100c1, 0xd7660000, 0x000200c1, 0xbf8a0000, 0x7da206f9, 0x81060000, 0xd5480014,
+    0x02151101, 0x362402ff, 0x000000ff, 0x16002898, 0xd5430015, 0x040224ff, 0x00000060, 0xdbfc0018,
     0x02000015, 0x162c2890, 0xd5430016, 0x045a24ff, 0x00000030, 0xbf8cc07f, 0xe0781000, 0x02020216,
     0x7da82881, 0xbe94047e, 0xb06a0060, 0x162602f9, 0x0086066a, 0xd8d80008, 0x06000013, 0xd8dc1008,
     0x07000013, 0xbf8cc07f, 0x7e300306, 0x7e320306, 0x7e340306, 0x7e360306, 0x34142484, 0xbefe0414,
@@ -55,6 +84,14 @@ alignas(256) constexpr std::array<std::uint32_t, 30> DomainCode{
     0xe0341020, 0x04030e01, 0xbf8c3f70, 0x08040af2, 0x08040d02, 0x10201505, 0x3e201906, 0x3e201d02,
     0x10221705, 0x3e221b06, 0x3e221f02, 0xd5510012, 0x040a0d05, 0x102424ff, 0x40400000, 0x7e260280,
     0x7e2802f2, 0xf80008cf, 0x14131110, 0xf800020f, 0x14131214, 0xbf810000,
+};
+
+alignas(256) constexpr std::array<std::uint32_t, 35> DomainCompareBranch{
+    0xf8000941, 0x00000000, 0xd4040014, 0x00020a80, 0xbeea0414, 0xbf870001, 0xbf800000, 0x34020e84,
+    0x16020283, 0xe0341000, 0x04030a01, 0xe0341010, 0x04030c01, 0xe0341020, 0x04030e01, 0xbf8c3f70,
+    0x08040af2, 0x08040d02, 0x10201505, 0x3e201906, 0x3e201d02, 0x10221705, 0x3e221b06, 0x3e221f02,
+    0xd5510012, 0x040a0d05, 0x102424ff, 0x40400000, 0x7e260280, 0x7e2802f2, 0xf80008cf, 0x14131110,
+    0xf800020f, 0x14131214, 0xbf810000,
 };
 
 alignas(256) constexpr std::array<std::uint32_t, 29> LocalIndexAsData{
@@ -130,6 +167,27 @@ alignas(256) constexpr std::array<std::uint32_t, 49> HullAndSaveexec{
     0xd8dc1008, 0x07000013, 0xbf8cc07f, 0x7e300306, 0x7e320306, 0x7e340306, 0x7e360306, 0x34142484,
     0xe0781000, 0x0403180a, 0x4a162481, 0x16161690, 0x4c1616ff, 0x00008000, 0xe0741000, 0x0202070b,
     0xbf810000,
+};
+
+alignas(256) constexpr std::array<std::uint32_t, 57> HullSaveexecLoop{
+    0xd7650000, 0x000100c1, 0xd7660000, 0x000200c1, 0xbf8a0000, 0x7da206f9, 0x81060000, 0xd5480014,
+    0x02151101, 0x362402ff, 0x000000ff, 0x160028a0, 0xd5430015, 0x040224ff, 0x00000060, 0xdbfc0000,
+    0x02000015, 0x162c2890, 0xd5430016, 0x045a24ff, 0x00000030, 0xbf8cc07f, 0xbe980382, 0xbe9a0480,
+    0x7d882881, 0xbe96246a, 0x889a7e1a, 0xbefe0416, 0x80988118, 0xbf078018, 0xbf85fff9, 0xe0781000,
+    0x02020216, 0x7d882881, 0xbe94246a, 0xb06a0060, 0x162602f9, 0x0086066a, 0xd8d80008, 0x06000013,
+    0xd8dc1008, 0x07000013, 0xbf8cc07f, 0x7e300306, 0x7e320306, 0x7e340306, 0x7e360306, 0x34142484,
+    0xe0781000, 0x0403180a, 0x4a162481, 0x16161690, 0x4c1616ff, 0x00008000, 0xe0741000, 0x0202070b,
+    0xbf810000,
+};
+
+alignas(256) constexpr std::array<std::uint32_t, 50> HullLaneCount{
+    0xd7650000, 0x000100c1, 0xd7660000, 0x000200c1, 0xbf8a0000, 0x7da206f9, 0x81060000, 0xd5480014,
+    0x02151101, 0x362402ff, 0x000000ff, 0x160028a0, 0xd5430015, 0x040224ff, 0x00000060, 0xdbfc0000,
+    0x02000015, 0x162c2890, 0xd5430016, 0x045a24ff, 0x00000030, 0xbf8cc07f, 0xe0781000, 0x02020216,
+    0x7da82881, 0xbe98107e, 0xbe94047e, 0xb06a0060, 0x162602f9, 0x0086066a, 0xd8d80008, 0x06000013,
+    0xd8dc1008, 0x07000013, 0xbf8cc07f, 0x7e300218, 0x7e320306, 0x7e340306, 0x7e360306, 0x34142484,
+    0xbefe0414, 0xe0781000, 0x0403180a, 0x4a162481, 0x16161690, 0x4c1616ff, 0x00008000, 0xe0741000,
+    0x0202070b, 0xbf810000,
 };
 
 alignas(256) constexpr std::array<std::uint32_t, 39> DomainPatchRead{
@@ -223,7 +281,14 @@ struct PatchDraw {
     float maxLevel = 64.0f;
 };
 
+alignas(256) constexpr std::array<std::uint16_t, 12> NextInputIndices{
+    Corner(0, 0, 0), Corner(0, 0, 0), Corner(0, 2, 0), Corner(0, 1, 2),
+    Corner(1, 0, 0), Corner(1, 0, 0), Corner(1, 2, 0), Corner(1, 1, 2),
+    Corner(2, 0, 0), Corner(2, 0, 0), Corner(2, 2, 0), Corner(2, 1, 2),
+};
+
 const PatchDraw Triangles{Patches, Indices};
+const PatchDraw NextInputTriangles{{4u, 3u, 1u, 2u, 2u}, NextInputIndices};
 
 struct Stages {
     ShaderRecompiler::RecompileResult local;
@@ -275,6 +340,12 @@ void ExpectRefusal(const ShaderRecompiler::SpirvTarget& target, ShaderStage stag
         return;
     }
     Require(false, "a tessellation program was accepted although " + reason);
+}
+
+void RequireCompareBranches(const ShaderRecompiler::SpirvTarget& target) {
+    std::uint32_t cursor = 0;
+    Require(!Compile(target, ShaderStage::TessellationEvaluation, DomainCompareBranch, cursor).spirv.empty(), "a domain program branching on a compare copied to VCC was not compiled");
+    Require(!Compile(target, ShaderStage::TessellationControl, HullCompareBranch, cursor).spirv.empty(), "a hull program branching on a compare copied to VCC was not compiled");
 }
 
 std::array<std::uint8_t, 4> PixelAt(std::uint32_t x, std::uint32_t y) {
@@ -344,10 +415,10 @@ std::uint32_t CoveredPixels(std::uint32_t patch, bool interior) {
     return count;
 }
 
-void RequirePatches(AgcDriver::VulkanDevice& device, const ShaderRecompiler::SpirvTarget& target, std::span<const std::uint32_t> hull, const std::string& program, const PatchDraw& patches = Triangles) {
+void RequirePatches(AgcDriver::VulkanDevice& device, const ShaderRecompiler::SpirvTarget& target, std::span<const std::uint32_t> hull, const std::string& program, const PatchDraw& patches = Triangles, std::span<const std::uint32_t> local = LocalCode) {
     std::uint32_t cursor = 0;
     const Stages stages{
-        Compile(target, ShaderStage::Local, LocalCode, cursor, patches),
+        Compile(target, ShaderStage::Local, local, cursor, patches),
         Compile(target, ShaderStage::TessellationControl, hull, cursor, patches),
         Compile(target, ShaderStage::TessellationEvaluation, DomainCode, cursor, patches),
         Compile(target, ShaderStage::Fragment, PixelCode, cursor, patches),
@@ -384,9 +455,29 @@ void RequireCounterClockwise(AgcDriver::VulkanDevice& device, const ShaderRecomp
     Require(CoveredPixels(0, false) > 100 && CoveredPixels(2, false) > 100, "counter-clockwise output did not reverse the control points' winding");
 }
 
+bool HasInstruction(std::span<const std::uint32_t> words, spv::Op opcode, std::uint32_t length, std::uint32_t operand, std::uint32_t value) {
+    for (std::size_t cursor = 5; cursor < words.size();) {
+        const auto count = words[cursor] >> 16u;
+        Require(count != 0 && cursor + count <= words.size(), "malformed SPIR-V while scanning a tessellation module");
+        if ((words[cursor] & 0xffffu) == opcode && count == length && words[cursor + operand] == value) return true;
+        cursor += count;
+    }
+    return false;
+}
+
+bool HasSpacing(const ShaderRecompiler::RecompileResult& domain, spv::ExecutionMode spacing) {
+    return HasInstruction(domain.spirv.Words(), spv::OpExecutionMode, 3u, 2u, static_cast<std::uint32_t>(spacing));
+}
+
+bool HasLevelBound(const ShaderRecompiler::RecompileResult& hull, float bound) {
+    return HasInstruction(hull.spirv.Words(), spv::OpConstant, 4u, 3u, std::bit_cast<std::uint32_t>(bound));
+}
+
 void RequireLevelClamps(AgcDriver::VulkanDevice& device, const ShaderRecompiler::SpirvTarget& target) {
     const auto center = Row(-0.5f + 1.0f / 3.0f);
     const auto stages = CompileTriangles(target, Triangles);
+    Require(HasSpacing(stages.domain, spv::ExecutionModeSpacingFractionalOdd) && !HasSpacing(stages.domain, spv::ExecutionModeSpacingEqual), "fractional-odd partitioning did not compile to fractional-odd spacing");
+    Require(HasLevelBound(stages.hull, 63.0f) && !HasLevelBound(stages.hull, 64.0f), "fractional-odd partitioning did not bound its tessellation factors at 63");
     const PatchDraw flattened{Patches, Indices, 1.0f, 1.0f};
     Draw(device, stages, VK_CULL_MODE_NONE, VK_FRONT_FACE_COUNTER_CLOCKWISE, flattened);
     Require(CoveredPixels(2, false) > 100 && CoveredPixels(2, true) == 0, "VGT_HOS_MAX_TESS_LEVEL 1 did not flatten the level-5 patch, centre " + PixelText(PixelAt(Column(2, 0.25f), center)));
@@ -416,6 +507,18 @@ void RequirePatchConstants(AgcDriver::VulkanDevice& device, const ShaderRecompil
         Require(pixel[0] == 255 && std::abs(pixel[2] - blue) <= 1, "patch " + std::to_string(patch) + " did not take its blue channel from the patch constant its hull wrote, " + PixelText(pixel));
     }
     Require(PixelAt(Column(1, 0.25f), center) == Background, "the patch with level 0 was not culled");
+}
+
+void RequireIntegerPartitioning(AgcDriver::VulkanDevice& device, const ShaderRecompiler::SpirvTarget& target) {
+    const auto center = Row(-0.5f + 1.0f / 3.0f);
+    const PatchDraw patches{{3u, 3u, 1u, 0u, 2u}, Indices};
+    const auto stages = CompileTriangles(target, patches);
+    Require(HasSpacing(stages.domain, spv::ExecutionModeSpacingEqual) && !HasSpacing(stages.domain, spv::ExecutionModeSpacingFractionalOdd), "integer partitioning did not compile to equal spacing");
+    Require(HasLevelBound(stages.hull, 64.0f) && !HasLevelBound(stages.hull, 63.0f), "integer partitioning did not bound its tessellation factors at 64");
+    Draw(device, stages, VK_CULL_MODE_NONE, VK_FRONT_FACE_COUNTER_CLOCKWISE, patches);
+    Require(CoveredPixels(0, false) > 100 && CoveredPixels(0, true) == 0, "integer partitioning: the level-1 patch was not drawn as one flat triangle, centre " + PixelText(PixelAt(Column(0, 0.25f), center)));
+    Require(CoveredPixels(1, false) == 0, "integer partitioning: the patch with level 0 was not culled");
+    Require(CoveredPixels(2, false) > 100 && PixelAt(Column(2, 0.25f), center)[1] > 32, "integer partitioning: the level-5 patch has no interior domain points at its centre, " + PixelText(PixelAt(Column(2, 0.25f), center)));
 }
 
 void RequireQuads(AgcDriver::VulkanDevice& device, const ShaderRecompiler::SpirvTarget& target) {
@@ -504,7 +607,7 @@ int main() {
         ExpectRefusal(target, ShaderStage::TessellationControl, HullUnguardedFactors, "not written by control point 0 alone");
         ExpectRefusal(target, ShaderStage::TessellationControl, HullSquaredAddress, "not a whole number of control points");
         ExpectRefusal(target, ShaderStage::TessellationControl, HullHalfSlotIndex, "not a whole number of control points");
-        ExpectRefusal(target, ShaderStage::TessellationControl, HullAndSaveexec, "lane mask");
+        ExpectRefusal(target, ShaderStage::TessellationControl, HullLaneCount, "lane mask");
         ExpectRefusal(target, ShaderStage::TessellationEvaluation, DomainNeighbourRecord, "more than one patch-constant record", RecordPatches);
         ExpectRefusal(target, ShaderStage::TessellationEvaluation, DomainFixedPatchRead, "not indexed by its relative patch", RecordPatches);
         ExpectRefusal(target, ShaderStage::TessellationEvaluation, DomainNeighbourPoint, "neither its patch's control points nor a patch-constant record", RecordPatches);
@@ -517,12 +620,17 @@ int main() {
 
         RequirePatches(*device, target, HullCode, "hull program");
         RequirePatches(*device, target, HullRestoredExecSaved, "hull program saving its restored exec");
+        RequirePatches(*device, target, HullNextInput, "hull program reading the next of 4 input control points of 24 bytes", NextInputTriangles, LocalCodeStride24);
         RequirePatches(*device, target, HullDynamicIndex, "hull program reading a control point at a computed index");
+        RequirePatches(*device, target, HullAndSaveexec, "hull program narrowing exec with s_and_saveexec_b64");
+        RequirePatches(*device, target, HullSaveexecLoop, "hull program restoring exec through loop phis");
         RequirePatches(*device, target, HullDescendingRecords, "hull program with descending patch records in 128-patch groups", {{3u, 3u, 1u, 2u, 2u, 128u}, Indices});
         RequireCounterClockwise(*device, target);
         RequireLevelClamps(*device, target);
+        RequireIntegerPartitioning(*device, target);
         RequireQuads(*device, target);
         RequirePatchConstants(*device, target);
+        RequireCompareBranches(target);
         device.reset();
         RequireRegisteredStages();
         std::puts("Tessellation tests passed");
