@@ -150,6 +150,7 @@ struct ShaderPixelStageInfo {
     bool alphaToCoverage;
     bool stencilRefExportEnable;
     RasterPrimitive rasterPrimitive = RasterPrimitive::Triangle;
+    bool layerExported = false;
 };
 
 struct ShaderVertexBufferResource {
@@ -171,6 +172,7 @@ struct ShaderVertexStageInfo {
     std::uint32_t fetchAttribReg;
     std::uint32_t fetchBufferReg;
     bool fetchEmbedded;
+    std::uint32_t paClVsOutCntl = 0;
 };
 
 struct ShaderFloatMode {
@@ -241,6 +243,7 @@ struct SpirvTarget {
     bool registrationModules = false;
     std::uint32_t registrationWordLimit = 200000u;
     bool vertexSubgroups = true;
+    bool float16DenormPreserve = false;
 };
 
 struct BindingLayout {
@@ -285,10 +288,13 @@ struct TessellationConfiguration {
     std::uint32_t domain;
     std::uint32_t partitioning;
     std::uint32_t outputTopology;
+    std::uint32_t patchesPerGroup = 256;
 };
 
 inline constexpr std::uint32_t MeshDrawPushOffsetBytes = 104;
 inline constexpr std::uint32_t MeshDrawPushBytes = 24;
+inline constexpr std::uint32_t TessellationLevelPushOffsetBytes = 120;
+inline constexpr std::uint32_t TessellationLevelPushBytes = 8;
 inline constexpr std::uint32_t MeshArgumentAddressDword = 4;
 inline constexpr std::uint32_t MeshArgumentIndexCountDword = 3;
 inline constexpr std::uint32_t MeshArgumentFirstIndexDword = 4;
