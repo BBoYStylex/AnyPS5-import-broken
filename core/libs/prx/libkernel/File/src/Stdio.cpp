@@ -268,7 +268,7 @@ static bool RemoveEmptyDirectory(const std::filesystem::path& path) {
     return std::filesystem::remove(path, error);
 }
 static int NativeMkdir(const std::filesystem::path& path, std::uint16_t mode) {
-    return ::mkdir(path.c_str(), static_cast<mode_t>(mode));
+    return ::mkdir(path.c_str(), static_cast<mode_t>(mode & 0777));
 }
 static int NativeChmod(const std::filesystem::path& path, int mode) {
     return ::chmod(path.c_str(), static_cast<mode_t>(mode));

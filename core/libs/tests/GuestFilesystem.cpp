@@ -337,6 +337,10 @@ int main() {
     Require(mkdir_nid_postfix(root.string().c_str(), 0700) == -1 && *__error_nid_postfix() == 17);
     Require(mkdir_nid_postfix((root / "missing" / "child").string().c_str(), 0700) == -1 && *__error_nid_postfix() == 2);
     Require(mkdir_nid_postfix(nullptr, 0700) == -1 && *__error_nid_postfix() == 14);
+    const auto sticky = root / "sticky";
+    Require(mkdir_nid_postfix(sticky.string().c_str(), 01777) == 0);
+    Require((std::filesystem::status(sticky).permissions() & std::filesystem::perms::sticky_bit) == std::filesystem::perms::none);
+    Require(std::filesystem::remove(sticky));
     const auto file = root / "file.txt";
     { std::ofstream stream(file); stream << "retained until removal"; }
     Require(chflags_nid_postfix(nullptr, 0) == -1 && *__error_nid_postfix() == 14);
