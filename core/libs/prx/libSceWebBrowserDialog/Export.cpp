@@ -72,7 +72,10 @@ int APS5_VABI sceWebBrowserDialogSetCookie(void) {
 }
 
 int APS5_VABI sceWebBrowserDialogOpenForPredeterminedContent() {
-    NotImplemented_nid_no_patch(__func__);
+    const int status = g_status.load();
+    if (status == COMMON_DIALOG_STATUS_NONE) return COMMON_DIALOG_ERROR_NOT_INITIALIZED;
+    if (status == COMMON_DIALOG_STATUS_RUNNING) return COMMON_DIALOG_ERROR_BUSY;
+    g_status = COMMON_DIALOG_STATUS_FINISHED;
     return 0;
 }
 
