@@ -76,6 +76,13 @@ namespace NativeAotGlibcSupport {
 
 thread_local int guestErrno = 0;
 
+ErrnoScope::ErrnoScope() : before(errno) { errno = 0; }
+
+ErrnoScope::~ErrnoScope() {
+    if (errno != 0) SetGuestErrno(GuestErrno(errno));
+    errno = before;
+}
+
 [[noreturn]] void Unsupported(const std::string& message) {
     std::fprintf(stderr, "native AOT glibc provider: %s\n", message.c_str());
     std::fflush(stderr);
