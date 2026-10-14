@@ -14,6 +14,7 @@
 #include "SceTypes.hpp"
 #include <algorithm>
 #include <array>
+#include <barrier>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -21,6 +22,7 @@
 #include <cstring>
 #include <future>
 #include <initializer_list>
+#include <source_location>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -107,8 +109,11 @@ int APS5_VABI sceNetPoolDestroy(int);
 int APS5_VABI sceNetGetMemoryPoolStats(int, NetMemoryPoolStats*);
 }
 
-static void Require(bool condition) {
-    if (!condition) std::abort();
+static void Require(bool condition, std::source_location location = std::source_location::current()) {
+    if (!condition) {
+        std::fprintf(stderr, "Guest network check failed at %s:%u\n", location.file_name(), static_cast<unsigned>(location.line()));
+        std::abort();
+    }
 }
 
 static bool Failed(std::int64_t result, int error) {
@@ -566,6 +571,12 @@ static void CheckListenWithoutBind(int family) {
     std::uint32_t size = address.size();
     Require(sceNetGetsockname(listener, address.data(), &size) == 0 && size == addressSize);
     Require(address[1] == family && (address[2] != 0 || address[3] != 0));
+    const auto original = address;
+    for (const int backlog : {0, -1, 5}) {
+        Require(sceNetListen(listener, backlog) == 0);
+        size = address.size();
+        Require(sceNetGetsockname(listener, address.data(), &size) == 0 && size == addressSize && address == original);
+    }
     const auto hostBytes = family == 2 ? 4u : 16u;
     const auto hostOffset = family == 2 ? 4u : 8u;
     Require(std::all_of(address.begin() + hostOffset, address.begin() + hostOffset + hostBytes, [](auto byte) { return byte == 0; }));
@@ -797,6 +808,26 @@ static void CheckDatagramDisconnect() {
     for (const int descriptor : {peer, other, dissolved}) Require(sceNetSocketClose(descriptor) == 0);
 }
 
+static void CheckConcurrentListen() {
+    for (int round = 0; round < 16; ++round) {
+        const int listener = sceNetSocket(nullptr, 2, 1, 6);
+        Require(listener >= 0);
+        std::array<int, 8> results{};
+        std::array<std::thread, 8> callers;
+        std::barrier start(9);
+        for (std::size_t index = 0; index < callers.size(); ++index) {
+            callers[index] = std::thread([&, index] {
+                start.arrive_and_wait();
+                results[index] = sceNetListen(listener, 1);
+            });
+        }
+        start.arrive_and_wait();
+        for (auto& caller : callers) caller.join();
+        Require(std::all_of(results.begin(), results.end(), [](int result) { return result == 0; }));
+        Require(sceNetSocketClose(listener) == 0);
+    }
+}
+
 int main() {
     const auto epoch = std::chrono::steady_clock::time_point{};
     Require(KernelSocketSelect::DeadlineAfter(epoch, 2, 250000) == epoch + std::chrono::milliseconds(2250));
@@ -827,6 +858,7 @@ int main() {
     CheckUnspecifiedIpv6();
     if (!ipv6Unavailable) CheckIpv6SocketsAreIpv6Only();
     CheckDatagramDisconnect();
+    CheckConcurrentListen();
     const int closed = sceNetSocket("closed-by-kernel", 2, 2, 17);
     Require(closed >= 0);
     const int enabled = 1;

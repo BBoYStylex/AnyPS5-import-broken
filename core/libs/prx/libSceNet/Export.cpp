@@ -715,13 +715,10 @@ int APS5_VABI sceNetBind_nid_postfix(int s, const void* addr, uint32_t addrlen) 
 }
 
 int APS5_VABI sceNetListen(int s, int backlog) {
-    Sock socket;
-    {
-        std::lock_guard lk(g_mutex);
-        auto it = g_socks.find(s);
-        if (it == g_socks.end()) return fail(NET_EBADF);
-        socket = it->second;
-    }
+    std::lock_guard lk(g_mutex);
+    auto it = g_socks.find(s);
+    if (it == g_socks.end()) return fail(NET_EBADF);
+    auto& socket = it->second;
     if (socket.type != NET_SOCK_STREAM) return fail(NET_EOPNOTSUPP);
     if (!socket.bound && !has_local_port(socket.native->value)) {
         sockaddr_storage wildcard{};
@@ -739,12 +736,8 @@ int APS5_VABI sceNetListen(int s, int backlog) {
             return fail(native_error());
     }
     if (::listen(socket.native->value, backlog) != 0) return fail(native_error());
-    std::lock_guard lk(g_mutex);
-    auto it = g_socks.find(s);
-    if (it != g_socks.end()) {
-        it->second.bound = true;
-        it->second.listening = true;
-    }
+    socket.bound = true;
+    socket.listening = true;
     return 0;
 }
 
