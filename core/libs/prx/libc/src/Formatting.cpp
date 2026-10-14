@@ -91,10 +91,6 @@ bool HasGuestWideScan(const char* format) {
     return FindGuestWideScan(format).wide;
 }
 
-void RejectGuestWideScan(const char* format) {
-    if (FindGuestWideScan(format).wide) NotImplemented_nid_no_patch("fscanf 16-bit wide conversion on Linux");
-}
-
 void WidenGuestScan(const char* bytes, std::size_t count, bool terminate, void* target) {
     std::vector<std::uint16_t> units(count + (terminate ? 1 : 0), 0);
     for (std::size_t index = 0; index < count; ++index) mbrtowc_nid_postfix(&units[index], bytes + index, 1, nullptr);
@@ -139,10 +135,76 @@ int HostVfscanf(std::FILE* stream, const char* format, std::va_list args) {
 }
 #endif
 
-template <typename NextPointer, typename NextCapacity>
-int ScanGuest(const char* buffer, const char* format, bool secure, NextPointer nextPointer, NextCapacity nextCapacity) {
-    if (buffer == nullptr || format == nullptr) return EOF;
-    const char* input = buffer;
+#if defined(__GLIBC__)
+int HostFscanf(std::FILE* stream, const char* format, ...) {
+    std::va_list args;
+    va_start(args, format);
+    const int result = HostVfscanf(stream, format, args);
+    va_end(args);
+    return result;
+}
+#endif
+
+bool IsScanSpace(int character) {
+    return character != EOF && std::isspace(static_cast<unsigned char>(character));
+}
+
+class StringScanSource {
+public:
+    static constexpr bool allocatesWide = false;
+
+    explicit StringScanSource(const char* buffer) : start(buffer), input(buffer) {}
+
+    int Peek() const { return *input == '\0' ? EOF : static_cast<unsigned char>(*input); }
+    void Advance() { ++input; }
+    std::ptrdiff_t Count() const { return input - start; }
+    std::size_t Remaining() const { return std::strlen(input); }
+
+    int Scan(const std::string& directive, void* target, int& consumed) {
+        const int matched = target ? HostSscanf(input, directive.c_str(), target, &consumed) : HostSscanf(input, directive.c_str(), &consumed);
+        if (consumed > 0) input += consumed;
+        return matched;
+    }
+
+private:
+    const char* start;
+    const char* input;
+};
+
+#if defined(__GLIBC__)
+class StreamScanSource {
+public:
+    static constexpr bool allocatesWide = true;
+
+    explicit StreamScanSource(std::FILE* stream) : stream(stream) { flockfile(stream); }
+    ~StreamScanSource() { funlockfile(stream); }
+    StreamScanSource(const StreamScanSource&) = delete;
+    StreamScanSource& operator=(const StreamScanSource&) = delete;
+
+    int Peek() const {
+        const int character = std::getc(stream);
+        if (character != EOF) std::ungetc(character, stream);
+        return character;
+    }
+    void Advance() {
+        if (std::getc(stream) != EOF) ++count;
+    }
+    std::ptrdiff_t Count() const { return count; }
+
+    int Scan(const std::string& directive, void* target, int& consumed) {
+        const int matched = target ? HostFscanf(stream, directive.c_str(), target, &consumed) : HostFscanf(stream, directive.c_str(), &consumed);
+        if (consumed > 0) count += consumed;
+        return matched;
+    }
+
+private:
+    std::FILE* stream;
+    std::ptrdiff_t count = 0;
+};
+#endif
+
+template <typename TSource, typename NextPointer, typename NextCapacity>
+int ScanGuestSource(TSource& source, const char* format, bool secure, NextPointer nextPointer, NextCapacity nextCapacity) {
     int assigned = 0;
     bool converted = false;
     const char* cursor = format;
@@ -150,15 +212,16 @@ int ScanGuest(const char* buffer, const char* format, bool secure, NextPointer n
     while (*cursor != '\0') {
         if (std::isspace(static_cast<unsigned char>(*cursor))) {
             while (std::isspace(static_cast<unsigned char>(*cursor))) ++cursor;
-            while (std::isspace(static_cast<unsigned char>(*input))) ++input;
+            while (IsScanSpace(source.Peek())) source.Advance();
             continue;
         }
         if (*cursor != '%' || cursor[1] == '%') {
             const char expected = *cursor == '%' ? '%' : *cursor;
             cursor += *cursor == '%' ? 2 : 1;
-            if (expected == '%') while (std::isspace(static_cast<unsigned char>(*input))) ++input;
-            if (*input != expected) return finish(!converted && *input == '\0' ? EOF : assigned);
-            ++input;
+            if (expected == '%') while (IsScanSpace(source.Peek())) source.Advance();
+            const int next = source.Peek();
+            if (next != static_cast<unsigned char>(expected)) return finish(!converted && next == EOF ? EOF : assigned);
+            source.Advance();
             continue;
         }
         ++cursor;
@@ -191,7 +254,7 @@ int ScanGuest(const char* buffer, const char* format, bool secure, NextPointer n
         if (conversion == 'n') {
             if (!suppress) {
                 void* target = nextPointer();
-                const auto count = input - buffer;
+                const auto count = source.Count();
                 if (length == "hh") *static_cast<signed char*>(target) = static_cast<signed char>(count);
                 else if (length == "h") *static_cast<short*>(target) = static_cast<short>(count);
                 else if (length.empty()) *static_cast<int*>(target) = static_cast<int>(count);
@@ -203,9 +266,8 @@ int ScanGuest(const char* buffer, const char* format, bool secure, NextPointer n
             continue;
         }
         if (narrow != 'c' && narrow != '[') {
-            const char* probe = input;
-            while (std::isspace(static_cast<unsigned char>(*probe))) ++probe;
-            if (*probe == '\0') return finish(converted ? assigned : EOF);
+            while (IsScanSpace(source.Peek())) source.Advance();
+            if (source.Peek() == EOF) return finish(converted ? assigned : EOF);
         }
         const bool sized = secure && (narrow == 's' || narrow == 'c' || narrow == '[');
         bool capped = false;
@@ -233,27 +295,35 @@ int ScanGuest(const char* buffer, const char* format, bool secure, NextPointer n
             width = wanted == 0 ? limit : std::min(wanted, limit);
         }
         if (width != 0) directive += std::to_string(width);
+        if (wide && !suppress && TSource::allocatesWide) directive += 'm';
         if (!wide) directive += HostLength(length, conversion);
         directive += specifier;
         directive += "%n";
         std::string wideBytes;
-        if (wide && !suppress) {
-            const std::size_t remaining = std::strlen(input);
-            const std::size_t wanted = narrow == 'c' && width == 0 ? 1 : width;
-            wideBytes.assign((wanted == 0 ? remaining : std::min<std::size_t>(wanted, remaining)) + 1, '\0');
+        char* allocatedBytes = nullptr;
+        if constexpr (!TSource::allocatesWide) {
+            if (wide && !suppress) {
+                const std::size_t remaining = source.Remaining();
+                const std::size_t wanted = narrow == 'c' && width == 0 ? 1 : width;
+                wideBytes.assign((wanted == 0 ? remaining : std::min<std::size_t>(wanted, remaining)) + 1, '\0');
+            }
         }
-        void* hostTarget = wide && !suppress ? wideBytes.data() : target;
+        void* hostTarget = target;
+        if (wide && !suppress) hostTarget = TSource::allocatesWide ? static_cast<void*>(&allocatedBytes) : static_cast<void*>(wideBytes.data());
+        const bool exhausted = source.Peek() == EOF;
         int consumed = -1;
-        const int matched = suppress ? HostSscanf(input, directive.c_str(), &consumed) : HostSscanf(input, directive.c_str(), hostTarget, &consumed);
-        if (consumed < 0 || (!suppress && matched != 1)) return finish(!converted && *input == '\0' ? EOF : assigned);
+        const int matched = source.Scan(directive, suppress ? nullptr : hostTarget, consumed);
+        const std::unique_ptr<char, decltype(&std::free)> allocatedOwner(allocatedBytes, std::free);
+        if (consumed < 0 || (!suppress && matched != 1)) return finish(!converted && exhausted ? EOF : assigned);
         if (capped && narrow != 'c') {
-            const char next = input[consumed];
+            const int next = source.Peek();
             bool overflow = false;
-            if (narrow == 's') overflow = next != '\0' && !std::isspace(static_cast<unsigned char>(next));
-            else if (next != '\0') {
+            if (narrow == 's') overflow = next != EOF && !IsScanSpace(next);
+            else if (next != EOF) {
+                const char text[2] = {static_cast<char>(next), '\0'};
                 char probe[2];
                 const std::string test = "%1" + specifier;
-                overflow = std::sscanf(input + consumed, test.c_str(), probe) == 1;
+                overflow = std::sscanf(text, test.c_str(), probe) == 1;
             }
             if (overflow) {
                 clearTarget();
@@ -261,14 +331,23 @@ int ScanGuest(const char* buffer, const char* format, bool secure, NextPointer n
             }
         }
 #ifndef _WIN32
-        if (wide && !suppress)
-            WidenGuestScan(wideBytes.data(), narrow == 'c' ? static_cast<std::size_t>(consumed) : std::strlen(wideBytes.c_str()), narrow != 'c', target);
+        if (wide && !suppress) {
+            const char* bytes = TSource::allocatesWide ? allocatedBytes : wideBytes.data();
+            const std::size_t stored = TSource::allocatesWide || narrow == 'c' ? static_cast<std::size_t>(consumed) : std::strlen(bytes);
+            WidenGuestScan(bytes, stored, narrow != 'c', target);
+        }
 #endif
-        input += consumed;
         converted = true;
         if (!suppress) ++assigned;
     }
     return finish(assigned);
+}
+
+template <typename NextPointer, typename NextCapacity>
+int ScanGuest(const char* buffer, const char* format, bool secure, NextPointer nextPointer, NextCapacity nextCapacity) {
+    if (buffer == nullptr || format == nullptr) return EOF;
+    StringScanSource source(buffer);
+    return ScanGuestSource(source, format, secure, nextPointer, nextCapacity);
 }
 
 }
@@ -361,10 +440,23 @@ int APS5_VABI fscanf_nid_postfix(FileStream* stream, const char* format, ...) {
     const int result = LibcDetail::ScanFileWindows_nid_no_patch(native, format, args);
     __builtin_sysv_va_end(args);
 #else
-    RejectGuestWideScan(format);
+    const bool wide = HasGuestWideScan(format);
+#if !defined(__GLIBC__)
+    if (wide) throw std::runtime_error("fscanf: 16-bit wide conversions need the m modifier of glibc");
+#endif
     std::va_list args;
     va_start(args, format);
-    const int result = HostVfscanf(native, format, args);
+    int result = EOF;
+#if defined(__GLIBC__)
+    if (wide) {
+        StreamScanSource source(native);
+        result = ScanGuestSource(source, format, false, [&] { return va_arg(args, void*); }, [] { return 0u; });
+    } else {
+        result = HostVfscanf(native, format, args);
+    }
+#else
+    result = HostVfscanf(native, format, args);
+#endif
     va_end(args);
 #endif
     stream->SyncStatus();
