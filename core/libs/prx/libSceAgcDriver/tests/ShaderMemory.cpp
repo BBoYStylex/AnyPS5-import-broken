@@ -1102,6 +1102,31 @@ void verifyBindlessTable() {
     require(stridedCapture->snapshot.images[stridedRoot].dwords == heap[0] && stridedCapture->snapshot.images[stridedDirect].dwords == heap[1] && stridedCapture->snapshot.images[stridedDirect + 1u].dwords == heap[2] && stridedCapture->snapshot.images[stridedDirect + 2u].dwords == heap[3], "bindless: the 48-byte table slots are wrong");
     stridedRequest.context.memory = stridedMemory.Regions();
     require(!Recompile(stridedRequest, *stridedCapture)->spirv.empty(), "bindless: the 48-byte table did not compile");
+
+    static std::array<std::uint32_t, 64> leading{};
+    for (std::uint32_t entry = 0; entry < 4u; entry++) {
+        std::copy(heap[entry].begin(), heap[entry].end(), leading.begin() + entry * 16u);
+        std::fill_n(leading.begin() + entry * 16u + 8u, 8u, 0xdead0000u + entry);
+    }
+    const std::vector<std::uint32_t> leadingCode{0xf4080100u, 0xfa000000u, 0xf4080200u, 0xfa000010u, 0xf4080300u, 0xfa000020u, 0xf4080700u, 0xfa000030u, 0x7e200500u, 0x9310ff10u, 0x00000040u, 0xf42c0502u, 0x20000000u, 0xf09c0f08u, 0x00450000u, 0xe0700000u, 0x80070000u, 0xbf810000u};
+    const auto leadingHeapV = bufferDescriptor(leading.data(), 64u, 4u);
+    std::copy(leadingHeapV.begin(), leadingHeapV.end(), srt.begin());
+    auto leadingRequest = makeRequest(leadingCode);
+    const auto leadingPlan = GetResourcePlan(leadingRequest);
+    std::uint32_t leadingTables = 0;
+    for (const auto& source : leadingPlan->descriptorSources) {
+        if (!source.indirectImage.has_value()) continue;
+        leadingTables++;
+        require(!source.indirectImage->hasMaterial && source.indirectImage->entryStride == 64u && source.indirectImage->entryOffset == 0u, "bindless: the 64-byte table entries were not recorded");
+    }
+    require(leadingTables == 1, "bindless: a 64-byte table was not planned");
+    AgcDriver::ShaderMemory leadingMemory({});
+    const auto leadingCapture = leadingMemory.Capture(leadingRequest);
+    const auto leadingDirect = static_cast<std::uint32_t>(leadingPlan->info.images.size());
+    const auto leadingRoot = tableRoot(*leadingCapture, leadingDirect);
+    require(leadingCapture->snapshot.images[leadingRoot].dwords == heap[0] && leadingCapture->snapshot.images[leadingDirect].dwords == heap[1] && leadingCapture->snapshot.images[leadingDirect + 1u].dwords == heap[2] && leadingCapture->snapshot.images[leadingDirect + 2u].dwords == heap[3], "bindless: the 64-byte table with the T# first and data behind it has wrong slots");
+    leadingRequest.context.memory = leadingMemory.Regions();
+    require(!Recompile(leadingRequest, *leadingCapture)->spirv.empty(), "bindless: the 64-byte table did not compile");
     fillSrt(4u);
 
     // A table wider than the slots without a material pattern is rejected.
