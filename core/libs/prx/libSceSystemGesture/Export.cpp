@@ -1,5 +1,8 @@
 #include <cstdint>
 #include <cstddef>
+#include <cstring>
+#include <stdexcept>
+#include <string>
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
 
@@ -8,6 +11,30 @@ static constexpr int32_t GESTURE_HANDLE = 1;
 static constexpr int SCE_SYSTEM_GESTURE_ERROR_INVALID_ARGUMENT = static_cast<int>(0x80D10002);
 static constexpr int SCE_SYSTEM_GESTURE_ERROR_INVALID_HANDLE = static_cast<int>(0x80D10003);
 static constexpr int SCE_SYSTEM_GESTURE_ERROR_INDEX_OUT_OF_ARRAY = static_cast<int>(0x80D10005);
+static constexpr std::uint32_t RECOGNIZER_TAG = 0x52475341u;
+
+namespace {
+
+struct RecognizerState {
+    std::uint32_t tag;
+    std::int32_t type;
+    SystemGestureRectangle rectangle;
+};
+
+static_assert(sizeof(RecognizerState) <= sizeof(SystemGestureTouchRecognizer));
+
+RecognizerState ReadState(const SystemGestureTouchRecognizer* recognizer, const char* function) {
+    RecognizerState state;
+    std::memcpy(&state, recognizer, sizeof(state));
+    if (state.tag != RECOGNIZER_TAG) throw std::logic_error(std::string(function) + ": recognizer was not created by sceSystemGestureCreateTouchRecognizer");
+    return state;
+}
+
+void WriteState(SystemGestureTouchRecognizer* recognizer, const RecognizerState& state) {
+    std::memcpy(recognizer, &state, sizeof(state));
+}
+
+}
 
 extern "C" {
 
@@ -22,11 +49,11 @@ int APS5_VABI sceSystemGestureClose(int32_t gesture_handle) {
 }
 
 int APS5_VABI sceSystemGestureCreateTouchRecognizer(int32_t gesture_handle, SystemGestureTouchRecognizer* recognizer, int32_t type, const SystemGestureRectangle* rectangle, const void* param) {
-    (void)type;
-    (void)rectangle;
     (void)param;
     if (gesture_handle != GESTURE_HANDLE) return SCE_SYSTEM_GESTURE_ERROR_INVALID_HANDLE;
-    if (!recognizer) return SCE_SYSTEM_GESTURE_ERROR_INVALID_ARGUMENT;
+    if (!recognizer || !rectangle) return SCE_SYSTEM_GESTURE_ERROR_INVALID_ARGUMENT;
+    *recognizer = SystemGestureTouchRecognizer{};
+    WriteState(recognizer, RecognizerState{RECOGNIZER_TAG, type, *rectangle});
     return 0;
 }
 
@@ -42,11 +69,10 @@ int APS5_VABI sceSystemGestureGetPrimitiveTouchEventByIndex(int32_t gesture_hand
 }
 
 int APS5_VABI sceSystemGestureGetPrimitiveTouchEventByPrimitiveID(int32_t gesture_handle, uint16_t primitiveId, SystemGesturePrimitiveTouchEvent* event) {
- (void)gesture_handle;
- (void)primitiveId;
- (void)event;
- NotImplemented_nid_no_patch(__func__);
- return 0;
+    (void)primitiveId;
+    (void)event;
+    if (gesture_handle != GESTURE_HANDLE) return SCE_SYSTEM_GESTURE_ERROR_INVALID_HANDLE;
+    return SCE_SYSTEM_GESTURE_ERROR_INDEX_OUT_OF_ARRAY;
 }
 
 int APS5_VABI sceSystemGestureGetPrimitiveTouchEvents(int32_t gesture_handle, SystemGesturePrimitiveTouchEvent* event_buffer, uint32_t capacity_of_buffer, uint32_t* number_of_event) {
@@ -63,12 +89,11 @@ int APS5_VABI sceSystemGestureGetPrimitiveTouchEventsCount(int32_t gesture_handl
 }
 
 int APS5_VABI sceSystemGestureGetTouchEventByEventID(int32_t gesture_handle, const SystemGestureTouchRecognizer* recognizer, uint32_t eventId, SystemGestureTouchEvent* event) {
- (void)gesture_handle;
- (void)recognizer;
- (void)eventId;
- (void)event;
- NotImplemented_nid_no_patch(__func__);
- return 0;
+    (void)eventId;
+    (void)event;
+    if (gesture_handle != GESTURE_HANDLE) return SCE_SYSTEM_GESTURE_ERROR_INVALID_HANDLE;
+    if (!recognizer) return SCE_SYSTEM_GESTURE_ERROR_INVALID_ARGUMENT;
+    return SCE_SYSTEM_GESTURE_ERROR_INDEX_OUT_OF_ARRAY;
 }
 
 int APS5_VABI sceSystemGestureGetTouchEventByIndex(int32_t gesture_handle, const SystemGestureTouchRecognizer* recognizer, uint32_t index, SystemGestureTouchEvent* event) {
@@ -95,11 +120,13 @@ int APS5_VABI sceSystemGestureGetTouchEventsCount(int32_t gesture_handle, const 
 }
 
 int APS5_VABI sceSystemGestureGetTouchRecognizerInformation(int32_t gesture_handle, const SystemGestureTouchRecognizer* recognizer, SystemGestureTouchRecognizerInformation* information) {
- (void)gesture_handle;
- (void)recognizer;
- (void)information;
- NotImplemented_nid_no_patch(__func__);
- return 0;
+    if (gesture_handle != GESTURE_HANDLE) return SCE_SYSTEM_GESTURE_ERROR_INVALID_HANDLE;
+    if (!recognizer || !information) return SCE_SYSTEM_GESTURE_ERROR_INVALID_ARGUMENT;
+    const auto state = ReadState(recognizer, __func__);
+    *information = SystemGestureTouchRecognizerInformation{};
+    information->gesture_type = state.type;
+    information->rectangle = state.rectangle;
+    return 0;
 }
 
 int APS5_VABI sceSystemGestureInitializePrimitiveTouchRecognizer(const void* param) {
@@ -151,6 +178,9 @@ int APS5_VABI sceSystemGestureUpdateTouchRecognizerRectangle(int32_t gesture_han
     if (gesture_handle != GESTURE_HANDLE) return SCE_SYSTEM_GESTURE_ERROR_INVALID_HANDLE;
     if (!recognizer) return SCE_SYSTEM_GESTURE_ERROR_INVALID_ARGUMENT;
     if (!rectangle) return SCE_SYSTEM_GESTURE_ERROR_INVALID_ARGUMENT;
+    auto state = ReadState(recognizer, __func__);
+    state.rectangle = *rectangle;
+    WriteState(recognizer, state);
     return 0;
 }
 
