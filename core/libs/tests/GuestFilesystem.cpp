@@ -631,6 +631,18 @@ int main() {
             Require(opened >= 0 && sceKernelClose(opened) == 0);
         }
         Require(sceKernelOpen(missing.string().c_str(), noFollow, 0) == static_cast<int>(0x80020002u));
+        const auto relinkDirectory = [&] {
+            return CreateSymbolicLinkW(directoryLink.c_str(), L"target-directory",
+                SYMBOLIC_LINK_FLAG_DIRECTORY | SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE) != 0;
+        };
+        { std::ofstream stream(targetDirectory / "kept"); stream << "kept"; }
+        Require(sceKernelUnlink(directoryLink.string().c_str()) == 0);
+        Require(GetFileAttributesW(directoryLink.c_str()) == INVALID_FILE_ATTRIBUTES);
+        Require(std::filesystem::file_size(targetDirectory / "kept") == 4);
+        Require(relinkDirectory() && unlink_nid_postfix(directoryLink.string().c_str()) == 0);
+        Require(GetFileAttributesW(directoryLink.c_str()) == INVALID_FILE_ATTRIBUTES);
+        Require(std::filesystem::file_size(targetDirectory / "kept") == 4 && relinkDirectory());
+        Require(std::filesystem::file_size(targetDirectory / "kept") == 4 && std::filesystem::remove(targetDirectory / "kept"));
         Require(stat_nid_postfix(fileLink.string().c_str(), &status) == 0 && status.st_size == 5);
         Require(checkUnsupportedLink(fileLink));
         Require(checkUnsupportedLink(directoryLink));
