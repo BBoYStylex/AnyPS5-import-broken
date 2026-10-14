@@ -1,4 +1,6 @@
+#include "prx/libSceAgcDriver/Execution/include/GuestMemory.hpp"
 #include "prx/libSceAgcDriver/Execution/include/VulkanDevice.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/Recorder.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/ShaderResources.hpp"
 #include "prx/libc/include/GuestAllocations.hpp"
 #include "Recompiler.hpp"
@@ -10,12 +12,14 @@
 #include <cstdlib>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <span>
 #include <string>
 #include <vector>
 
 namespace {
 
+using AgcDriver::Graphics::Recorder;
 using AgcDriver::Graphics::Require;
 using AgcDriver::Graphics::StorageTexture;
 using ShaderRecompiler::ShaderStage;
@@ -51,8 +55,7 @@ std::array<std::uint32_t, 8> TextureDescriptor(std::uint64_t address) {
     };
 }
 
-std::shared_ptr<StorageTexture> Store(AgcDriver::VulkanDevice& device, std::uint64_t base, std::uint32_t surface) {
-    const auto address = base + surface * Stride;
+void Record(AgcDriver::VulkanDevice& device, std::uint64_t address) {
     std::vector<std::uint32_t> userData(16, 0u);
     const auto texture = TextureDescriptor(address);
     std::copy(texture.begin(), texture.end(), userData.begin() + 4);
@@ -67,7 +70,13 @@ std::shared_ptr<StorageTexture> Store(AgcDriver::VulkanDevice& device, std::uint
     };
     request.useCache = true;
     const auto result = ShaderRecompiler::Recompile(request);
+    std::lock_guard gpu(AgcDriver::GuestMemory::GpuMutex());
     device.Dispatch(result, 1, 1, 1, {}, reinterpret_cast<std::uintptr_t>(code.data()));
+}
+
+std::shared_ptr<StorageTexture> Store(AgcDriver::VulkanDevice& device, std::uint64_t base, std::uint32_t surface) {
+    const auto address = base + surface * Stride;
+    Record(device, address);
     device.WaitIdle();
     StorageTexture::FlushPending(address, static_cast<std::size_t>(SurfaceBytes), nullptr, "test");
     device.WaitIdle();
@@ -126,6 +135,14 @@ int main() {
                 Require(cached == (surface >= 2u), "surface " + std::to_string(surface) + (cached ? " is still cached" : " was evicted") + " after " + std::to_string(capacity + 2u) + " surfaces under a budget of " + std::to_string(capacity) + " of them");
                 Require(cached == !images[surface].expired(), "surface " + std::to_string(surface) + (cached ? " is cached but its weak image expired" : " was evicted but its resource cache image is still alive"));
             }
+            const auto fresh = capacity + 2u;
+            Require(fresh < MaxSurfaces, "the kept-bytes surface exceeds the test storage");
+            device->WaitIdle();
+            Record(*device, base + fresh * Stride);
+            const auto* recorder = Recorder::Active();
+            Require(recorder != nullptr && recorder->Recording(), "the storage image dispatch was not left in an open batch");
+            Require(recorder->OpenKeptBytes() >= held, "a dispatch that made a " + std::to_string(held >> 20u) + " MiB storage image left " + std::to_string(recorder->OpenKeptBytes()) + " bytes in its batch's kept bytes");
+            device->WaitIdle();
         } catch (...) {
             release();
             throw;
