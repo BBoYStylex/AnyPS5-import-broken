@@ -26,6 +26,12 @@ def native_flags(optimization, lto, cpu=None, generate=None, use=None):
     return flags
 
 
+def prepare_ir_sources(modules, input_hash):
+    for module in modules:
+        module.write_text(f'source_filename = "guest/{input_hash}/{module.name}"\n' + module.read_text())
+    return {module.name: digest(module) for module in modules}
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('input', type=Path)
@@ -76,6 +82,7 @@ def main():
     report = guest_emit.build(args.input, ir, concurrent=args.profile != 'single', memory_epochs=args.profile == 'epochs', optimize_calls=args.optimize_calls, seal_image=args.seal_image)
     lowered = time.monotonic()
     modules = sorted(ir.glob('*.ll'))
+    ir_hashes = prepare_ir_sources(modules, input_hash)
     from concurrent.futures import ThreadPoolExecutor
     def compile_ir(module):
         command = ['xcrun', 'clang', '-c', *flags, '-Wno-override-module', str(module), '-o', str(module) + '.o']
@@ -93,6 +100,7 @@ def main():
     if (compiler_hashes != {str(path.relative_to(worktree)): digest(path) for path in compiler_inputs}
             or runtime_hashes != {str(path.relative_to(worktree)): digest(path) for path in runtime_inputs}
             or builder_hash != digest(__file__) or input_hash != digest(args.input)
+            or ir_hashes != {module.name: digest(module) for module in modules}
             or (args.pgo_use is not None and profile_hash != digest(profile))):
         raise ValueError('build inputs changed during compilation; the output is not qualified')
     current_head = subprocess.run(['git', '-C', str(worktree), 'rev-parse', 'HEAD'], capture_output=True, text=True, check=True).stdout.strip()
@@ -103,6 +111,7 @@ def main():
     receipt = {'schema': 'anyps5.transfer.conversion-receipt.v1', 'input': str(args.input.resolve()), 'input_sha256': input_hash,
                'compiler_revision': head, 'compiler_dirty': bool(dirty), 'native_compiler': clang, 'optimization': args.optimization + ' '.join([''] + lto), 'profile': args.profile, 'optimized_calls': args.optimize_calls or args.profile == 'epochs', 'sealed_image': args.seal_image,
                'native_cpu': args.cpu, 'lto': lto_mode, 'commands': commands,
+               'ir_sources': ir_hashes,
                'pgo': {'mode': 'generate' if args.pgo_generate is not None else 'use' if args.pgo_use is not None else 'none',
                        'path': str(profile) if profile is not None else None, 'sha256': profile_hash,
                        'training_binary': args.pgo_generate is not None},
