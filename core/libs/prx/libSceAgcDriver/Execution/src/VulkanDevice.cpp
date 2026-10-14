@@ -6,6 +6,7 @@
 #include "SpirvBackend/SpirvOptimizer.hpp"
 #endif
 #include "prx/libSceAgcDriver/Graphics/include/PipelineJournal.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/PipelineLookahead.hpp"
 #include "prx/libSceAgcDriver/Execution/include/VulkanDevice.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver.hpp"
 #include "prx/libSceAgcDriver/Execution/include/PerformanceTimer.hpp"
@@ -69,6 +70,8 @@
 
 namespace AgcDriver {
 namespace {
+
+std::atomic<std::uint64_t> dispatchPipelineBuilds{0};
 
 void check(VkResult result, const char* operation) {
     if (result == VK_ERROR_DEVICE_LOST) Graphics::ReportDeviceLost();
@@ -369,6 +372,9 @@ struct VulkanDevice::State {
     std::shared_ptr<Graphics::PipelineJournalReplay> journalReplay;
     std::atomic<bool> journalReplayPending{false};
     std::atomic<std::uint64_t> computePipelinesCreated{0};
+    std::mutex lookaheadMutex;
+    std::unique_ptr<Graphics::PipelineLookaheadPool> lookahead;
+    bool lookaheadClosed = false;
     std::unique_ptr<Graphics::GpuColorTransfer> colorTransfer;
     std::shared_ptr<Graphics::BufferPool> bufferPool;
     std::unique_ptr<Graphics::Buffer> emptyBuffer;
@@ -675,7 +681,29 @@ struct VulkanDevice::State {
         }
     }
 
+    bool enqueueAhead(Graphics::PipelineLookaheadPool::Build build) {
+        std::lock_guard lock(lookaheadMutex);
+        if (lookaheadClosed || !Graphics::SubmitLookaheadEnabled()) return false;
+        if (lookahead == nullptr) lookahead = std::make_unique<Graphics::PipelineLookaheadPool>(Graphics::SubmitLookaheadThreads());
+        lookahead->Enqueue(std::move(build));
+        return true;
+    }
+
+    void closeLookahead() {
+        std::unique_ptr<Graphics::PipelineLookaheadPool> pool;
+        {
+            std::lock_guard lock(lookaheadMutex);
+            lookaheadClosed = true;
+            pool = std::move(lookahead);
+        }
+        if (pool == nullptr) return;
+        pool->Cancel();
+        pool->Wait();
+        Graphics::ReportPipelineLookahead();
+    }
+
     ~State() {
+        closeLookahead();
         if (journalReplay != nullptr) {
             journalReplay->Cancel();
             journalReplay->Wait();
@@ -1935,6 +1963,27 @@ bool VulkanDevice::ReplayComputePipeline(const ShaderRecompiler::RecompileResult
     return state->computePipelines.try_emplace(key, std::move(objects)).second;
 }
 
+void VulkanDevice::BuildDrawPipelineAhead(const Graphics::State& graphics, std::vector<AheadStage> stages) {
+    if (stages.empty()) return;
+    state->enqueueAhead([this, graphics, stages = std::move(stages)] {
+        std::vector<Graphics::CompiledShader> shaders;
+        shaders.reserve(stages.size());
+        for (const auto& stage : stages) shaders.push_back({stage.stage, stage.program.get(), stage.pushConstantOffset});
+        bool created = false;
+        Graphics::BuildDrawPipelineAhead(graphicsContext(), graphics, shaders, created);
+        return created;
+    });
+}
+
+void VulkanDevice::BuildComputePipelineAhead(std::shared_ptr<const ShaderRecompiler::RecompileResult> shader) {
+    if (shader == nullptr || shader->Identity().Empty()) return;
+    state->enqueueAhead([this, shader = std::move(shader)] { return ReplayComputePipeline(*shader, !shader->pushConstants.empty()); });
+}
+
+std::uint64_t VulkanDevice::DispatchPipelineBuilds() {
+    return dispatchPipelineBuilds.load(std::memory_order_relaxed);
+}
+
 bool VulkanDevice::ImportGuestMemory(const GuestAllocations::Mapped& ranges, std::uint64_t generation, bool adoptDevice) {
     if (adoptDevice) GuestMemory::AssertGpuLockHeld("VulkanDevice::ImportGuestMemory");
     return Graphics::ImportMappedRanges(graphicsContext(), ranges, generation, adoptDevice);
@@ -1943,6 +1992,7 @@ bool VulkanDevice::ImportGuestMemory(const GuestAllocations::Mapped& ranges, std
 void VulkanDevice::PrepareForReplacement() {
     GuestMemory::AssertGpuLockHeld("VulkanDevice::PrepareForReplacement");
     require(state->recorder != nullptr && Graphics::Recorder::Active() == state->recorder.get(), "device replacement requires its active recorder");
+    state->closeLookahead();
     state->journalReplayPending.store(false, std::memory_order_release);
     if (state->journalReplay != nullptr) {
         state->journalReplay->Cancel();
@@ -4627,6 +4677,7 @@ VulkanDevice::IndirectOutcome VulkanDevice::dispatch(const ShaderRecompiler::Rec
             std::fprintf(stderr, "[compute-capture] %s\n", path.string().c_str());
         }
         objects = createComputePipeline(shader, resources->Layout(), pushStages, programAddress);
+        dispatchPipelineBuilds.fetch_add(1, std::memory_order_relaxed);
         timing.Mark("pipeline_create");
         if (!pipelineKey.identity.Empty()) {
             // Find-or-insert: objects another dispatch of the module mapped meanwhile (or the journal

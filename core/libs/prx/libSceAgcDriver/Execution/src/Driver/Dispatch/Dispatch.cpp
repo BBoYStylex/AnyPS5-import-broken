@@ -210,6 +210,10 @@ void Driver::dispatch(QueueState& queue, std::span<const std::uint32_t> packet, 
     }
 
     mix(reinterpret_cast<std::uintptr_t>(registeredShader.get()));
+    if (resolving && resolvingForPipelines() && !noDispatchCache && dispatchSeen(key)) {
+        ++groupStats.dispatchesSeen;
+        return;
+    }
     if (fromAhead && key != ahead.key) {
         fromAhead = false;
         ++groupStats.keyMismatches;

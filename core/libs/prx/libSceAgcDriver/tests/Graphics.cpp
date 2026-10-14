@@ -4,6 +4,7 @@
 #include "prx/libSceAgcDriver/Graphics/include/Recorder.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Pipeline.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/PipelineJournal.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/PipelineLookahead.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/TextureDetiler.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/VertexInput.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Draw.hpp"
@@ -36,6 +37,7 @@
 #include <cstring>
 #include <exception>
 #include <filesystem>
+#include <future>
 #include <random>
 #include <initializer_list>
 #include <iostream>
@@ -6588,6 +6590,143 @@ void pipelineJournalTests() {
     Require(mock.live == 0, "the pipeline journal test leaked Vulkan objects");
 }
 
+void submitLookaheadTests() {
+    using namespace AgcDriver::Graphics;
+    using Stage = ShaderRecompiler::ShaderStage;
+    mock = MockVulkan{};
+    auto context = mockContext();
+    context.device = makeHandle<VkDevice>();
+    context.graphicsPipelineLibrary = true;
+    context.limits.maxColorAttachments = 8;
+    context.limits.maxPushConstantsSize = 256;
+    context.limits.maxVertexInputBindings = 16;
+    context.limits.maxVertexInputAttributes = 16;
+    context.limits.maxFramebufferWidth = 4096;
+    context.limits.maxFramebufferHeight = 4096;
+    context.limits.maxFramebufferLayers = 1;
+    {
+        DescriptorCache cache(context);
+        context.descriptorCache = &cache;
+        ShaderRecompiler::RecompileResult vertex;
+        vertex.spirv = makeModule({});
+        vertex.runtimeAbiVersion = ShaderRecompiler::RuntimeAbi::Version;
+        ShaderRecompiler::RecompileResult fragment;
+        fragment.spirv = makeModule({.fragment = true});
+        fragment.runtimeAbiVersion = ShaderRecompiler::RuntimeAbi::Version;
+        const std::array<CompiledShader, 2> shaders{{{Stage::Vertex, &vertex, 0}, {Stage::Fragment, &fragment, PipelinePushSlotBytes}}};
+        State state{};
+        state.stages = {ShaderPath::Vertex, 0u, 64u, 64u, std::nullopt, std::nullopt};
+        ColorTarget color{};
+        color.address = 0x1000;
+        color.extent = {64, 32};
+        color.format = VK_FORMAT_R8G8B8A8_UNORM;
+        color.bytes = 64 * 32 * 4;
+        state.colors = {color};
+        state.color = color;
+        state.hasColorTarget = true;
+        VkPipelineColorBlendAttachmentState blend{};
+        blend.colorWriteMask = 0xf;
+        state.blends = {blend};
+        state.blend = blend;
+        state.renderExtent = {64, 32};
+        state.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+        state.viewport = {0, 32, 64, -32, 0, 1};
+        state.scissor = {{0, 0}, {64, 32}};
+        state.cullMode = VK_CULL_MODE_NONE;
+        state.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+        state.samples = 1;
+        const auto storeBefore = PipelineStoreTotals();
+        const auto poolBefore = PipelineLookaheadTotals();
+        const auto createsBefore = mock.pipelineCreateCount;
+        {
+            PipelineLookaheadPool pool(2);
+            std::atomic<std::uint32_t> computeCalls{0};
+            pool.Enqueue([&] {
+                bool created = false;
+                BuildDrawPipelineAhead(context, state, shaders, created);
+                return created;
+            });
+            pool.Enqueue([&] {
+                ++computeCalls;
+                return true;
+            });
+            pool.Drain();
+            WaitForOptimizedPipelines(context.device);
+            const auto drained = PipelineLookaheadTotals();
+            Require(drained.enqueued == poolBefore.enqueued + 2 && drained.built == poolBefore.built + 2 && drained.failed == poolBefore.failed && drained.present == poolBefore.present && computeCalls == 1, "the pool did not build the draw's pipeline and run the compute build ahead");
+            const auto storeAhead = PipelineStoreTotals();
+            const auto createsAhead = mock.pipelineCreateCount;
+            Require(createsAhead > createsBefore && storeAhead.misses == storeBefore.misses + 1 && storeAhead.cached == storeBefore.cached + 1, "the pool's draw pipeline did not enter the store");
+            bool created = true;
+            const auto pipeline = BuildDrawPipelineAhead(context, state, shaders, created);
+            const auto storeHit = PipelineStoreTotals();
+            Require(pipeline != nullptr && !created && mock.pipelineCreateCount == createsAhead && storeHit.hits == storeAhead.hits + 1 && storeHit.misses == storeAhead.misses, "the draw did not find the pipeline the pool built ahead");
+            auto other = state;
+            other.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
+            bool workerCreated = false;
+            BuildDrawPipelineAhead(context, other, shaders, workerCreated);
+            WaitForOptimizedPipelines(context.device);
+            Require(workerCreated && mock.pipelineCreateCount > createsAhead, "the worker did not build the pipeline of a configuration the pool had not seen");
+            const auto createsWorker = mock.pipelineCreateCount;
+            pool.Enqueue([&] {
+                bool raced = false;
+                BuildDrawPipelineAhead(context, other, shaders, raced);
+                return raced;
+            });
+            pool.Drain();
+            WaitForOptimizedPipelines(context.device);
+            const auto raced = PipelineLookaheadTotals();
+            Require(raced.present == drained.present + 1 && raced.built == drained.built && mock.pipelineCreateCount == createsWorker, "the pool built a pipeline the worker had built first");
+            pool.Enqueue([] {
+                throw std::runtime_error("injected pipeline build failure");
+                return false;
+            });
+            pool.Enqueue([&] {
+                ++computeCalls;
+                return true;
+            });
+            pool.Drain();
+            const auto failed = PipelineLookaheadTotals();
+            Require(failed.failed == poolBefore.failed + 1 && failed.built == raced.built + 1 && computeCalls == 2, "a failed build stopped the pool or went uncounted");
+            Require(pool.Pending() == 0, "a drained pool still holds work");
+        }
+        {
+            const auto before = PipelineLookaheadTotals();
+            const auto creates = mock.pipelineCreateCount;
+            PipelineLookaheadPool pool(1);
+            std::promise<void> release;
+            const auto released = release.get_future().share();
+            std::atomic<bool> started{false};
+            pool.Enqueue([&] {
+                started.store(true);
+                released.wait();
+                return false;
+            });
+            for (std::uint32_t index = 0; index < 15; ++index) {
+                auto variant = state;
+                variant.blends[0].colorWriteMask = index + 1u;
+                pool.Enqueue([&, variant] {
+                    bool created = false;
+                    BuildDrawPipelineAhead(context, variant, shaders, created);
+                    return created;
+                });
+            }
+            while (!started.load()) std::this_thread::yield();
+            pool.Cancel();
+            release.set_value();
+            pool.Wait();
+            WaitForOptimizedPipelines(context.device);
+            const auto cancelled = PipelineLookaheadTotals();
+            Require(cancelled.dropped == before.dropped + 15 && cancelled.present == before.present + 1 && cancelled.built == before.built && mock.pipelineCreateCount == creates, "cancelling the pool did not drop the builds queued behind the running one");
+            Require(pool.Pending() == 0, "a cancelled pool still holds work");
+            pool.Enqueue([] { return true; });
+            Require(PipelineLookaheadTotals().dropped == cancelled.dropped + 1, "a cancelled pool accepted a build");
+        }
+        ClearCachedPipelines(context.device);
+    }
+    Require(mock.live == 0, "the submit lookahead test leaked Vulkan objects");
+}
+
 int main(int argc, char** argv) {
 #ifdef _WIN32
     _putenv_s("APS5_PIN_WAIT_MS", "200");
@@ -6600,6 +6739,11 @@ int main(int argc, char** argv) {
         if (argc == 2 && std::string_view(argv[1]) == "--pipeline-journal") {
             pipelineJournalTests();
             std::cout << "pipeline journal recipe, record and replay tests passed\n";
+            return 0;
+        }
+        if (argc == 2 && std::string_view(argv[1]) == "--submit-lookahead") {
+            submitLookaheadTests();
+            std::cout << "submit lookahead pool tests passed\n";
             return 0;
         }
         if (argc == 2 && std::string_view(argv[1]) == "--sparse-buffer-holes") {

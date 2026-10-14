@@ -72,6 +72,11 @@ public:
     };
     DispatchCacheFootprint DispatchCacheSize();
     static std::uint64_t DispatchCacheBytes();
+    struct SubmitLookaheadCounters {
+        std::uint64_t runs = 0, dispatches = 0, draws = 0, dispatchesSeen = 0, drawsSeen = 0, failures = 0, graphicsAhead = 0, computeAhead = 0;
+        double resolveMs = 0;
+    };
+    static SubmitLookaheadCounters SubmitLookaheadTotals();
 
 private:
     friend class SampledReadScope;
@@ -237,14 +242,19 @@ private:
     };
     struct GroupCaptureStats {
         std::uint64_t runs = 0, resolved = 0, resolvedHits = 0, adopted = 0, addressMismatches = 0, keyMismatches = 0, failures = 0, stale = 0, labelOverlaps = 0, writtenBefore = 0, deviceRejects = 0;
-        double resolveMs = 0, resolveMaxMs = 0, ageMs = 0, ageMaxMs = 0;
+        std::uint64_t drawsAhead = 0, drawsSeen = 0, dispatchesSeen = 0, drawFailures = 0, graphicsAhead = 0, computeAhead = 0;
+        double resolveMs = 0, resolveMaxMs = 0, ageMs = 0, ageMaxMs = 0, drawMs = 0;
         std::chrono::steady_clock::time_point reported = std::chrono::steady_clock::now();
     };
     static std::map<std::size_t, ResolvedDispatch>& resolvedAhead();
     static GroupCaptureStats& groupCaptureStats();
     static std::size_t& currentPacketOffset();
     static bool& resolvingAhead();
+    static bool& resolvingForPipelines();
+    static std::size_t& resolvedUpTo();
     static bool& gateOpened();
+    static bool submitLookahead();
+    bool dispatchSeen(std::uint64_t key);
     void resolveGroupAhead(const Submission& submission, const QueueState& live, std::size_t from);
     static void clearResolvedAhead();
     static void reportGroupCapture(std::uint32_t queue);
