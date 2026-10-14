@@ -1,5 +1,9 @@
 # Contributing
 
+## Questions
+
+Ask usage questions, build-help questions and general discussion in [Discord](https://discord.gg/BHFztBPUe). Use GitHub issues for reproducible bugs, scoped development tasks and reports with enough detail to act on.
+
 ## Code
 
 - Follow the [coding conventions](docs/dev/CONVENTIONS.md): naming, no comments except [technical debt](docs/dev/TechnicalDebt.md), Conventional Commits.
