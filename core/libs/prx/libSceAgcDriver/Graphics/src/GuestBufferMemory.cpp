@@ -299,17 +299,7 @@ const char* createHostPointerImport(const Context& context, HostImport& entry, V
     }
     const VkImportMemoryHostPointerInfoEXT import{VK_STRUCTURE_TYPE_IMPORT_MEMORY_HOST_POINTER_INFO_EXT, nullptr, VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT, host};
     bool allocated = false;
-#ifdef __APPLE__
-    // Tech debt (docs/dev/debt/libSceAgcDriver.md): Metal refuses a no-copy buffer over pages of
-    // mixed protection, so the watched pages are released for the import and count as written.
-    const auto bytes = static_cast<std::size_t>(entry.bytes);
-    GuestWriteWatch::GuestWriteWatchBeginHostWrite_nid_postfix(host, bytes);
-    const auto step = bindImport(context, entry, VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT, &import, pointer.memoryTypeBits, allocated, failure);
-    GuestWriteWatch::GuestWriteWatchEndHostWrite_nid_postfix(host, bytes);
-    return step;
-#else
     return bindImport(context, entry, VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT, &import, pointer.memoryTypeBits, allocated, failure);
-#endif
 }
 
 #ifndef _WIN32
