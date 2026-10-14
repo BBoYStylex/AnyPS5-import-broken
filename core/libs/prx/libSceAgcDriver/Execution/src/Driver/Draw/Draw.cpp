@@ -40,9 +40,10 @@ DrawVerdict Driver::draw(QueueState& queue, std::span<const std::uint32_t> packe
     static const std::uint64_t dumpSlot1 = [] { const char* text = std::getenv("APS5_DUMP_DRAW_SLOT1"); return text ? std::strtoull(text, nullptr, 16) : 0ull; }();
 
     static const bool lockedPrepare = std::getenv("APS5_LOCKED_DRAW_PREPARE") != nullptr;
+    const bool resolving = resolvingAhead();
     std::unique_lock gpuLock(GuestMemory::GpuMutex(), std::defer_lock);
     std::shared_ptr<VulkanDevice> localDevice;
-    if (lockedPrepare) {
+    if (lockedPrepare && !resolving) {
 
         GuestMemory::TagGpuLockSite(GuestMemory::GpuLockSite::Draw);
         gpuLock.lock();
@@ -88,6 +89,10 @@ DrawVerdict Driver::draw(QueueState& queue, std::span<const std::uint32_t> packe
         ++drawEntryCounters.absent;
         entry = nullptr;
         decode = nullptr;
+    }
+    if (resolving && resolvingForPipelines() && entry != nullptr) {
+        ++groupCaptureStats().drawsSeen;
+        return DrawVerdict::Nothing;
     }
     phaseTiming.Phase(DrawRowKeyLookupValidate);
 
@@ -174,6 +179,12 @@ DrawVerdict Driver::draw(QueueState& queue, std::span<const std::uint32_t> packe
     bool drawHit = false;
     bool verifyHit = false;
     lookupDraw(submission, localDevice, graphics, pixel, programs, roles, vertexInfos, useDrawEntries, registerKey, profile, drawKey, entry, matched, matchedRegions, drawHit, verifyHit, phaseTiming, phaseMs);
+    if (resolving && resolvingForPipelines() && !registerKey && entry != nullptr) {
+        ++groupCaptureStats().drawsSeen;
+        return DrawVerdict::Nothing;
+    }
+    std::vector<std::shared_ptr<const ShaderRecompiler::RecompileResult>> stageOwners;
+    stageOwners.reserve(programs.size() + 2u);
 
     if (registerKey) {
 
@@ -228,6 +239,7 @@ DrawVerdict Driver::draw(QueueState& queue, std::span<const std::uint32_t> packe
         const auto slotEnd = (pushCursorBytes / Graphics::PipelinePushSlotBytes + 1u) * Graphics::PipelinePushSlotBytes;
         require(result.pushConstants.size() <= slotEnd - pushCursorBytes, "stage push constants exceed the pipeline push constant block");
         stages.push_back({program.binary.stage, &result, result.pushConstants.empty() ? 0u : pushCursorBytes});
+        stageOwners.push_back(drawHit ? matched[i]->compiled : compiledStages.back());
         pushCursorBytes += static_cast<std::uint32_t>(result.pushConstants.size());
     }
 
@@ -238,7 +250,7 @@ DrawVerdict Driver::draw(QueueState& queue, std::span<const std::uint32_t> packe
         for (const auto& read : reads) memory.push_back({read.address, std::as_bytes(std::span(read.bytes))});
     }
 
-    if (recordQueuedLabelsAfterCapture(submission.queue, memory)) return draw(queue, packet, submission, rejected);
+    if (!resolving && recordQueuedLabelsAfterCapture(submission.queue, memory)) return draw(queue, packet, submission, rejected);
 
     bool rectListBuilt = false;
 
@@ -258,6 +270,7 @@ DrawVerdict Driver::draw(QueueState& queue, std::span<const std::uint32_t> packe
         results.push_back(std::move(rectangle.control));
         results.push_back(std::move(rectangle.evaluation));
         stages.insert(stages.begin() + 1, {{Stage::TessellationControl, &results[rectIndex], 0}, {Stage::TessellationEvaluation, &results[rectIndex + 1], 0}});
+        stageOwners.insert(stageOwners.begin() + 1, 2, nullptr);
         rectListBuilt = true;
         phaseTiming.Phase(DrawRowRectList);
     };
@@ -266,6 +279,7 @@ DrawVerdict Driver::draw(QueueState& queue, std::span<const std::uint32_t> packe
         require(!graphics.rectList && graphics.stages.path == Graphics::ShaderPath::Vertex && programs.size() == 2 && programResults[0] != nullptr && stages.size() == 2, "a pixel shader that reads barycentrics without VK_KHR_fragment_shader_barycentric needs a vertex shader before it");
         results.push_back(ShaderRecompiler::BuildBarycentricGeometryShader(*programResults[0], *programResults[1], localDevice->Target(), localDevice->GeometryLimits()));
         stages.insert(stages.begin() + 1, Graphics::CompiledShader{Stage::Geometry, &results.back(), 0});
+        stageOwners.insert(stageOwners.begin() + 1, nullptr);
     }
     std::vector<Graphics::GuestMemorySnapshot> snapshots;
     const auto snapshot = [&] {
@@ -274,6 +288,18 @@ DrawVerdict Driver::draw(QueueState& queue, std::span<const std::uint32_t> packe
     };
     snapshot();
     timing.Mark("post_compile_prepare");
+    if (resolving) {
+        if ((drawParameters.indirect && indirectCpu) || localDevice->KnownDrawRejection(graphics, stages)) return DrawVerdict::Nothing;
+        std::vector<VulkanDevice::AheadStage> ahead;
+        ahead.reserve(stages.size());
+        for (std::size_t i = 0; i < stages.size(); ++i) {
+            auto owner = i < stageOwners.size() && stageOwners[i] != nullptr ? stageOwners[i] : std::make_shared<const ShaderRecompiler::RecompileResult>(*stages[i].program);
+            ahead.push_back({stages[i].stage, std::move(owner), stages[i].pushConstantOffset});
+        }
+        localDevice->BuildDrawPipelineAhead(graphics, std::move(ahead));
+        ++groupCaptureStats().graphicsAhead;
+        return DrawVerdict::Drawn;
+    }
     const auto lockForDraw = [&] {
         if (gpuLock.owns_lock()) return;
         phaseTiming.Phase(DrawRowVectors);

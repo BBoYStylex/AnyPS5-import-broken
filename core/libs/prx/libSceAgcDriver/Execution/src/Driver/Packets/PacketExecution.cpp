@@ -110,10 +110,16 @@ void Driver::execute(const Submission& submission) {
 
     bumpEpoch(&EpochBumps::submissions);
     clearResolvedAhead();
+    resolvedUpTo() = 0;
     gateOpened() = true;
     struct ClearAhead {
         ~ClearAhead() { clearResolvedAhead(); }
     } clearAhead;
+    if (submitLookahead()) {
+        gateOpened() = false;
+        std::shared_lock walkUse(deviceReplacement);
+        timed(submission.queue == 0 ? &WorkerProfile::drawMs : &WorkerProfile::dispatchMs, [&] { resolveGroupAhead(submission, queue, 0); });
+    }
     for (std::size_t cursor = 0; cursor < submission.commands.size();) {
         if (packetEpoch()) bumpEpoch(&EpochBumps::packets);
         CheckFailure();
@@ -274,6 +280,10 @@ void Driver::execute(const Submission& submission) {
             }
         } else if (drawPacket) {
             landPendingWaits(submission.queue);
+            if (gateOpened()) {
+                gateOpened() = false;
+                timed(&WorkerProfile::drawMs, [&] { resolveGroupAhead(submission, queue, cursor); });
+            }
             bool drawn = false;
             timed(&WorkerProfile::drawMs, [&] {
                 static const bool traceDraws = std::getenv("APS5_TRACE_DRAWS") != nullptr;

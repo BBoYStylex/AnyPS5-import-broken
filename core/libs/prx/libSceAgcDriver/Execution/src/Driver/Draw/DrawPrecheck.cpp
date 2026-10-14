@@ -14,6 +14,7 @@ bool Driver::drawPrecheck() {
 std::optional<DrawVerdict> Driver::precheckDraw(const QueueState& queue, const Submission& submission, std::span<const std::uint32_t> packet, const Pm4::DrawParameters& drawParameters, std::string& rejected, bool& traceIndirect) {
     if (!drawParameters.indirect && !drawParameters.indexed && (drawParameters.indexCount == 0 || drawParameters.instanceCount == 0)) return DrawVerdict::Nothing;
     if (const auto pass = Graphics::DecodeColorMetadataPass(queue)) {
+        if (resolvingAhead()) return DrawVerdict::Nothing;
         require(!drawParameters.indirect, "indirect CB metadata passes are unsupported");
         GuestMemory::TagGpuLockSite(GuestMemory::GpuLockSite::Draw);
         std::lock_guard gpuLock(GuestMemory::GpuMutex());

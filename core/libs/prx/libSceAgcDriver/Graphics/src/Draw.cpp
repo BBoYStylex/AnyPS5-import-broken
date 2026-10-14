@@ -1826,6 +1826,28 @@ std::optional<State> maskedState(const State& state, const std::set<std::uint32_
     return masked;
 }
 
+template <typename TProxied>
+std::optional<State> pipelineStateOf(const Context& context, const State& state, const std::set<std::uint32_t>& fragmentOutputs, TProxied&& proxied) {
+    auto masked = maskedState(state, fragmentOutputs);
+    for (std::size_t index = 0; index < state.colors.size(); ++index) {
+        if (!proxied(index)) continue;
+        if (!masked.has_value()) masked = state;
+        masked->colors[index].format = AttachmentProxyFormat(context, state.colors[index].format);
+        masked->blends.at(state.colors[index].exportIndex).colorWriteMask &= VK_COLOR_COMPONENT_R_BIT;
+    }
+    return masked;
+}
+
+bool DrawTransitions() {
+    static const bool drawTransitions = std::getenv("APS5_DRAW_TRANSITIONS") != nullptr;
+    return drawTransitions;
+}
+
+bool ResidentTargets() {
+    static const bool residentTargets = std::getenv("APS5_NO_RESIDENT_TARGETS") == nullptr;
+    return residentTargets;
+}
+
 // Debug aid: APS5_DUMP_TARGETS=<n> saves the first n renders of every color target as a raw file
 // (u32 width, u32 height, u32 VkFormat, then tightly packed rows).
 int DumpTargetLimit() {
@@ -1852,6 +1874,22 @@ std::optional<std::string> KnownValidationFailure(const Context& context, std::s
     const auto& failures = validationFailures();
     if (const auto found = failures.find(key); found != failures.end()) return found->second;
     return std::nullopt;
+}
+
+std::shared_ptr<Pipeline> BuildDrawPipelineAhead(const Context& context, const State& state, std::span<const CompiledShader> shaders, bool& created) {
+    created = false;
+    Require(!shaders.empty() && shaders.front().program != nullptr, "a draw pipeline built ahead needs its stages");
+    Require(context.descriptorCache != nullptr, "a draw pipeline built ahead needs the descriptor cache");
+    bool memoized = false;
+    bool hit = false;
+    const auto fragmentOutputs = CachedFragmentOutputs(context, shaders, state, memoized, hit);
+    const auto resident = [&](const ColorTarget& color) { return color.samples <= 1 && color.tileMode != ColorTileMode::Linear && context.detiler != nullptr && ResidentTargets(); };
+    const auto masked = pipelineStateOf(context, state, fragmentOutputs, [&](std::size_t index) { return resident(state.colors[index]) && AttachmentProxyFormat(context, state.colors[index].format) != VK_FORMAT_UNDEFINED; });
+    const State& pipelineState = masked.has_value() ? *masked : state;
+    const auto vertexInput = BuildVertexInputLayout(context, shaders.front().program->vertexAttributes);
+    const auto layouts = DescribeSetLayouts(context, shaders);
+    const bool recordable = RecordDraws() && context.recorder != nullptr && DumpTargetLimit() == 0 && std::all_of(state.colors.begin(), state.colors.end(), [&](const ColorTarget& color) { return color.samples > 1 || resident(color); });
+    return CachedPipeline(context, pipelineState, vertexInput, layouts.View(), shaders, recordable && !DrawTransitions() ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, &created);
 }
 
 void Draw(const Context& context, const State& state, const Pm4::DrawParameters& draw, std::span<const CompiledShader> shaders, std::span<const GuestMemorySnapshot> snapshots, std::shared_ptr<const DrawRecipe>* recipeOut) {
@@ -1923,8 +1961,7 @@ void Draw(const Context& context, const State& state, const Pm4::DrawParameters&
         constexpr VkBufferUsageFlags copies = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
         timer.phase(PhaseSetup);
         // Debug aid: APS5_NO_RESIDENT_TARGETS=1 copies every target in and out again.
-        static const bool residentTargets = std::getenv("APS5_NO_RESIDENT_TARGETS") == nullptr;
-        if ((binding.gpuTiling || (color.tileMode != ColorTileMode::Linear && context.detiler != nullptr)) && residentTargets) {
+        if ((binding.gpuTiling || (color.tileMode != ColorTileMode::Linear && context.detiler != nullptr)) && ResidentTargets()) {
             // The lookup refreshes the image on every draw (StorageTexture::Refresh: FlushPending,
             // CollectWrites over the target's pages, the DCC key scan of TextureClearKeys, then
             // UnchangedSince). The page walk is skipped while the worker's collect epoch lasts
@@ -2101,8 +2138,7 @@ void Draw(const Context& context, const State& state, const Pm4::DrawParameters&
     // A recorded draw renders into its resident targets in the general layout (recordDraw). Debug
     // aid: APS5_DRAW_TRANSITIONS=1 keeps the per-draw upload and download barriers, the layout
     // transitions of every target and one pass per draw, as before.
-    static const bool drawTransitions = std::getenv("APS5_DRAW_TRANSITIONS") != nullptr;
-    const bool lean = recorded && !drawTransitions;
+    const bool lean = recorded && !DrawTransitions();
     const bool multisampled = std::any_of(targets.begin(), targets.end(), [](const TargetBinding& binding) { return binding.multisampled; });
     Require(lean || !multisampled, "multisampled draws are only rendered as recorded draws");
     if (!lean && !resolved.moved.empty()) {
@@ -2111,14 +2147,8 @@ void Draw(const Context& context, const State& state, const Pm4::DrawParameters&
     }
     APS5_LOG_CHARS_OUT_DEBUG("Creating Pipeline");
     // The state is copied only when a mask must change.
-    auto masked = maskedState(state, inputs.fragmentOutputs);
+    const auto masked = pipelineStateOf(context, state, inputs.fragmentOutputs, [&](std::size_t index) { return targets[index].proxied; });
     if (std::any_of(targets.begin(), targets.end(), [](const TargetBinding& binding) { return binding.proxied; })) recipeOut = nullptr;
-    for (std::size_t index = 0; index < targets.size(); ++index) {
-        if (!targets[index].proxied) continue;
-        if (!masked.has_value()) masked = state;
-        masked->colors[index].format = AttachmentProxyFormat(context, state.colors[index].format);
-        masked->blends.at(state.colors[index].exportIndex).colorWriteMask &= VK_COLOR_COMPONENT_R_BIT;
-    }
     const State& pipelineState = masked.has_value() ? *masked : state;
     static const bool verifySetLayouts = std::getenv("APS5_VERIFY_SET_LAYOUTS") != nullptr;
     if (verifySetLayouts && context.descriptorCache != nullptr) {
