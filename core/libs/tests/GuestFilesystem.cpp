@@ -642,6 +642,9 @@ int main() {
         Require(relinkDirectory() && unlink_nid_postfix(directoryLink.string().c_str()) == 0);
         Require(GetFileAttributesW(directoryLink.c_str()) == INVALID_FILE_ATTRIBUTES);
         Require(std::filesystem::file_size(targetDirectory / "kept") == 4 && relinkDirectory());
+        Require(sceKernelUnlink(targetDirectory.string().c_str()) == static_cast<int>(0x80020001u));
+        Require(sceKernelUnlink((directoryLink.string() + "/").c_str()) == static_cast<int>(0x80020001u));
+        Require(GetFileAttributesW(directoryLink.c_str()) != INVALID_FILE_ATTRIBUTES);
         Require(std::filesystem::file_size(targetDirectory / "kept") == 4 && std::filesystem::remove(targetDirectory / "kept"));
         Require(stat_nid_postfix(fileLink.string().c_str(), &status) == 0 && status.st_size == 5);
         Require(checkUnsupportedLink(fileLink));
