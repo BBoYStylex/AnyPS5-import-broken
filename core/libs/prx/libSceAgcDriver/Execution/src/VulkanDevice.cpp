@@ -1961,7 +1961,7 @@ bool VulkanDevice::AfterRecordedWork(std::function<void()> action, bool reapFirs
 bool VulkanDevice::DumpSamplesOnGpu(std::uint64_t address) {
     if (!state->recorder) return false;
     auto& recorder = *state->recorder;
-    constexpr std::size_t bytes = 15 * 16 + 8;
+    constexpr std::size_t bytes = Pm4::SampleDumpBytes;
     if (OpportunisticReap()) recorder.Reap();
     if (state->CopiedWriterOverlaps(address, bytes) || (Graphics::Recorder::PendingCompletionLabels() != 0 && recorder.CompletionLabelIn(address, bytes))) return false;
     const auto context = graphicsContext();

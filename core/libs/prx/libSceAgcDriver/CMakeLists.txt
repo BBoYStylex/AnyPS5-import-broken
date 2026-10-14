@@ -188,6 +188,7 @@ set(agcDriverSources
         ${CMAKE_CURRENT_SOURCE_DIR}/Execution/src/SubgroupClock.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Execution/src/ShaderDeviceProfile.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Execution/src/Pm4.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Execution/src/SubmissionCapture.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Execution/src/VulkanDevice.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Execution/src/AspectFit.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Execution/src/PresentationScaler.cpp
@@ -646,6 +647,19 @@ if(BUILD_TESTING)
     endif()
 endif()
 
+add_test_executable(agc_redundant_value_elimination_tests EXCLUDE_FROM_ALL tests/RedundantValueElimination.cpp)
+target_link_libraries(agc_redundant_value_elimination_tests PRIVATE shader_recompiler_agc_driver libc)
+set_target_properties(agc_redundant_value_elimination_tests PROPERTIES CXX_EXTENSIONS OFF)
+configure_windows_unwind(agc_redundant_value_elimination_tests)
+if(BUILD_TESTING)
+    set_target_properties(agc_redundant_value_elimination_tests PROPERTIES EXCLUDE_FROM_ALL OFF)
+    add_test(NAME agc_redundant_value_elimination COMMAND agc_redundant_value_elimination_tests)
+    if(WIN32)
+        set_tests_properties(agc_redundant_value_elimination PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+    endif()
+endif()
+
 add_test_executable(agc_vop1_control_decode_tests EXCLUDE_FROM_ALL tests/Vop1ControlDecode.cpp)
 target_link_libraries(agc_vop1_control_decode_tests PRIVATE shader_recompiler_agc_driver libc)
 set_target_properties(agc_vop1_control_decode_tests PROPERTIES CXX_EXTENSIONS OFF)
@@ -1009,6 +1023,12 @@ if(BUILD_TESTING)
     add_test(NAME agc_multisample_guest_access COMMAND agc_driver_recorder_tests --multisample-only)
     set_tests_properties(agc_multisample_guest_access PROPERTIES SKIP_RETURN_CODE 77)
     add_test(NAME agc_draw_inputs_in_place COMMAND agc_driver_recorder_tests --draw-inputs-in-place-only)
+    add_test(NAME agc_pending_write_snapshot COMMAND agc_driver_recorder_tests --pending-write-snapshot-only)
+    set_tests_properties(agc_pending_write_snapshot PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 30)
+    if(WIN32)
+        set_tests_properties(agc_pending_write_snapshot PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+    endif()
     set_tests_properties(agc_draw_inputs_in_place PROPERTIES SKIP_RETURN_CODE 77)
     add_test(NAME agc_resident_present COMMAND agc_driver_recorder_tests --resident-present-only)
     set_tests_properties(agc_resident_present PROPERTIES SKIP_RETURN_CODE 77)
@@ -1672,6 +1692,37 @@ if(ANYPS5_ENABLE_SPIRV_TOOLS)
 endif()
 set_target_properties(agc_shader_replay PROPERTIES CXX_EXTENSIONS OFF)
 configure_windows_unwind(agc_shader_replay)
+
+add_executable(agc_pm4_replay EXCLUDE_FROM_ALL
+        tools/Pm4Replay.cpp
+        tools/Pm4Analysis.cpp
+)
+target_include_directories(agc_pm4_replay PRIVATE ${LIBS_INCLUDE_DIR})
+target_link_libraries(agc_pm4_replay PRIVATE libSceAgcDriver libc)
+set_target_properties(agc_pm4_replay PROPERTIES CXX_EXTENSIONS OFF)
+configure_windows_unwind(agc_pm4_replay)
+
+if(BUILD_TESTING)
+    add_test_executable(agc_driver_pm4_replay_tests tests/Pm4Replay.cpp tools/Pm4Analysis.cpp)
+    target_include_directories(agc_driver_pm4_replay_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(agc_driver_pm4_replay_tests PRIVATE libSceAgc libSceAgcDriver libkernel libc)
+    set_target_properties(agc_driver_pm4_replay_tests PROPERTIES CXX_EXTENSIONS OFF)
+    configure_windows_unwind(agc_driver_pm4_replay_tests)
+    add_dependencies(agc_driver_pm4_replay_tests agc_pm4_replay)
+    set(agcPm4ReplayCapture "${CMAKE_CURRENT_BINARY_DIR}/pm4-replay-capture")
+    add_test(NAME agc_driver_pm4_replay COMMAND agc_driver_pm4_replay_tests)
+    set_tests_properties(agc_driver_pm4_replay PROPERTIES
+            ENVIRONMENT "ANYPS5_NO_SHADER_CACHE=1;APS5_DUMP_SUBMITS=${agcPm4ReplayCapture}"
+            FIXTURES_SETUP agc_pm4_replay_capture TIMEOUT 30)
+    add_test(NAME agc_driver_pm4_replay_tool COMMAND ${CMAKE_COMMAND} -DTOOL=$<TARGET_FILE:agc_pm4_replay> "-DCAPTURE=${agcPm4ReplayCapture}"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/Pm4ReplayTool.cmake)
+    set_tests_properties(agc_driver_pm4_replay_tool PROPERTIES
+            FIXTURES_REQUIRED agc_pm4_replay_capture TIMEOUT 30)
+    if(WIN32)
+        set_tests_properties(agc_driver_pm4_replay agc_driver_pm4_replay_tool PROPERTIES ENVIRONMENT_MODIFICATION
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+    endif()
+endif()
 
 add_executable(agc_compute_pipeline_replay EXCLUDE_FROM_ALL tools/ComputePipelineReplay.cpp)
 target_include_directories(agc_compute_pipeline_replay PRIVATE
