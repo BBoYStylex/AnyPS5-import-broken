@@ -18,6 +18,7 @@
 #include "SceTypes.hpp"
 #include "prx/libc/include/PreciseWait.hpp"
 #include "prx/libkernel/Time/include/Time.hpp"
+#include "prx/libSceAudioOut/include/AudioOutSdl.hpp"
 
 static constexpr int PORT_TYPE_MAIN = 0;
 static constexpr int PORT_TYPE_BGM = 1;
@@ -122,7 +123,7 @@ static bool ensureSdlAudio() {
     if (g_sdlInitialized) {
         return true;
     }
-    if (SDL_InitSubSystem(SDL_INIT_AUDIO) < 0) {
+    if (InitializeSdlAudio_nid_no_patch() < 0) {
         if (std::getenv("APS5_TRACE_AUDIOOUT") != nullptr)
             std::fprintf(stderr, "[audioout] SDL audio init failed: %s\n", SDL_GetError());
         return false;
