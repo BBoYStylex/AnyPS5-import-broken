@@ -10,6 +10,10 @@ int APS5_VABI sceAgcDriverSetSubmitValidationMode(std::uint32_t);
 int APS5_VABI sceAgcDriverGetSubmitValidationMode(std::uint32_t*);
 int APS5_VABI sceAgcDriverSetSubmitValidationConfig(const void*);
 int APS5_VABI sceAgcDriverGetSubmitValidationConfig(void*);
+bool APS5_VABI sceAgcDriverIsCaptureInProgress(void);
+int APS5_VABI sceAgcDriverRequestCaptureStart(const char*);
+int APS5_VABI sceAgcDriverRequestCaptureStop();
+int APS5_VABI sceAgcDriverTriggerCapture();
 }
 
 static constexpr int DebugUnavailable = static_cast<int>(0x8A6C1000);
@@ -35,4 +39,12 @@ int main() {
     Require(sceAgcDriverGetSubmitValidationConfig(config.data()) == DebugUnavailable);
     Require(sceAgcDriverGetSubmitValidationConfig(nullptr) == DebugUnavailable);
     for (const std::uint8_t byte : config) Require(byte == 0x5A);
+
+    Require(!sceAgcDriverIsCaptureInProgress());
+    Require(sceAgcDriverRequestCaptureStart(nullptr) == DebugUnavailable);
+    Require(sceAgcDriverRequestCaptureStart("/data/capture.rzrx") == DebugUnavailable);
+    Require(!sceAgcDriverIsCaptureInProgress());
+    Require(sceAgcDriverTriggerCapture() == DebugUnavailable);
+    Require(sceAgcDriverRequestCaptureStop() == DebugUnavailable);
+    Require(!sceAgcDriverIsCaptureInProgress());
 }
