@@ -10,6 +10,17 @@ on:
       - 'core/relinker/**'
       - 'tools/tests/test_import_audit.py'
       - 'tools/tests/test_stubgen.py'
+      - 'tools/tests/test_input_preservation.py'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/hardlink-validation.yml'
+      - 'CMakeLists.txt'
+      - 'core/relinker/**'
+      - 'tools/tests/test_import_audit.py'
+      - 'tools/tests/test_stubgen.py'
+      - 'tools/tests/test_input_preservation.py'
 
 permissions:
   contents: read
