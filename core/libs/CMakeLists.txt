@@ -320,6 +320,16 @@ if(BUILD_TESTING)
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceSsl>")
     endif()
 
+    add_test_executable(guest_video_recording_tests tests/GuestVideoRecording.cpp)
+    target_include_directories(guest_video_recording_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(guest_video_recording_tests PRIVATE libSceVideoRecordingP libc)
+    configure_windows_unwind(guest_video_recording_tests)
+    add_test(NAME guest_video_recording COMMAND guest_video_recording_tests)
+    if(WIN32)
+        set_tests_properties(guest_video_recording PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceVideoRecordingP>")
+    endif()
+
     add_test_executable(guest_system_gesture_tests tests/GuestSystemGesture.cpp)
     target_include_directories(guest_system_gesture_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_link_libraries(guest_system_gesture_tests PRIVATE libSceSystemGesture libc)

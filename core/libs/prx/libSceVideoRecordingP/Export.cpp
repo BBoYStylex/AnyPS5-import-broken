@@ -12,14 +12,19 @@
 namespace {
 std::mutex g_infoMutex;
 std::map<int32_t, std::vector<unsigned char>> g_info;
+constexpr int StatusNone = 0;
+constexpr int MaxMemSize = 4 * 1024;
+
+[[noreturn]] void NotOpen(const char* function) {
+    throw std::logic_error(std::string(function) + ": the recorder is not open, as the host has no gameplay video recorder; the console's error is unverified");
+}
 }
 
 extern "C" {
 
 int APS5_VABI sceVideoRecordingClose(int discard) {
- (void)discard;
- NotImplemented_nid_no_patch(__func__);
- return 0;
+    (void)discard;
+    NotOpen(__func__);
 }
 
 int APS5_VABI sceVideoRecordingGetInfo(int32_t info, void* data, size_t size) {
@@ -33,23 +38,19 @@ int APS5_VABI sceVideoRecordingGetInfo(int32_t info, void* data, size_t size) {
 }
 
 int APS5_VABI sceVideoRecordingGetStatus(void) {
- NotImplemented_nid_no_patch(__func__);
- return 0;
+    return StatusNone;
 }
 
 int APS5_VABI sceVideoRecordingOpen(const char* path, const void* param, void* heap, int heapSize) {
- (void)path;
- (void)param;
- (void)heap;
- (void)heapSize;
- NotImplemented_nid_no_patch(__func__);
- return 0;
+    (void)heap;
+    (void)heapSize;
+    if (path == nullptr || param == nullptr) APS5_INVALID_ARG_EX;
+    throw std::runtime_error(std::string(__func__) + ": the host has no gameplay video recorder to record " + path);
 }
 
 int APS5_VABI sceVideoRecordingQueryMemSize(const void* param) {
- (void)param;
- NotImplemented_nid_no_patch(__func__);
- return 0;
+    if (param == nullptr) APS5_INVALID_ARG_EX;
+    return MaxMemSize;
 }
 
 int APS5_VABI sceVideoRecordingSetInfo(int32_t info, const void* data, size_t size) {
@@ -61,13 +62,11 @@ int APS5_VABI sceVideoRecordingSetInfo(int32_t info, const void* data, size_t si
 }
 
 int APS5_VABI sceVideoRecordingStart(void) {
- NotImplemented_nid_no_patch(__func__);
- return 0;
+    NotOpen(__func__);
 }
 
 int APS5_VABI sceVideoRecordingStop(void) {
- NotImplemented_nid_no_patch(__func__);
- return 0;
+    NotOpen(__func__);
 }
 
 APS5_EXPORT("iQS6DUtLybE", videoRecordingUnknown_iQS6DUtLybE);
