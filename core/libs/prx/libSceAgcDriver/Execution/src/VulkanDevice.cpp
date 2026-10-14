@@ -2324,6 +2324,9 @@ bool VulkanDevice::AcquireImage() {
         state->extent = {0, 0};
         return false;
     }
+    if (acquired == VK_TIMEOUT || acquired == VK_NOT_READY) {
+        return false;
+    }
     if (acquired != VK_SUBOPTIMAL_KHR) check(acquired, "vkAcquireNextImageKHR");
     timing.Mark("acquire_image");
     APS5_LOG_OUT_DEBUG("vkAcquireNextImageKHR index=%u imageCount=%zu", index, state->images.size());
