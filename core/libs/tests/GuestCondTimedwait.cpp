@@ -135,9 +135,26 @@ static void AbsoluteWait() {
     Require(scePthreadMutexDestroy(&signalled.mutex) == SCE_OK);
 }
 
+static void AbsoluteWaitWithoutMutex() {
+    Signalled signalled;
+    Require(scePthreadMutexInit(&signalled.mutex, nullptr, nullptr) == SCE_OK);
+    Require(scePthreadCondInit(&signalled.cond, nullptr, nullptr) == SCE_OK);
+
+    KernelTimespec now{};
+    Require(clock_gettime_nid_postfix(0, &now) == 0);
+    const KernelTimespec invalid{-1, 0};
+    const KernelTimespec future{now.tv_sec + 1, now.tv_nsec};
+    Require(pthread_cond_timedwait_nid_postfix(&signalled.cond, &signalled.mutex, &invalid) == POSIX_EINVAL);
+    Require(pthread_cond_timedwait_nid_postfix(&signalled.cond, &signalled.mutex, &future) == POSIX_EPERM);
+
+    Require(scePthreadCondDestroy(&signalled.cond) == SCE_OK);
+    Require(scePthreadMutexDestroy(&signalled.mutex) == SCE_OK);
+}
+
 int main() {
     RelativeWait();
     AbsoluteWait();
+    AbsoluteWaitWithoutMutex();
 
     Context context;
     PthreadCond cond = nullptr;
