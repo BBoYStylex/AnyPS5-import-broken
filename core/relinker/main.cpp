@@ -14,6 +14,7 @@
 #include <filesystem>
 #include <iostream>
 #include <memory>
+#include <map>
 #include <random>
 #include <string>
 #include <vector>
@@ -262,9 +263,46 @@ int Run(const int argc, char* argv[]) {
                 const std::filesystem::path outFsPath = Io::NativePath(executable.OutputPath);
                 registryPaths.push_back(outFsPath.parent_path() / Io::NativePath(Io::Utf8Path(outFsPath.stem()) + ".registry.json"));
             }
-            const std::filesystem::path outFsPath = Io::NativePath(absPath);
-            for (const auto& artifact : guestArtifacts)
-                registryPaths.push_back(outFsPath.parent_path() / Io::NativePath(Io::Utf8Path(outFsPath.stem()) + "." + Io::Utf8Path(artifact.Path.filename()) + ".registry.json"));
+            const auto outParent = Io::NativePath(absPath).parent_path();
+            const auto outStem = Io::Utf8Path(Io::NativePath(absPath).stem());
+            std::map<std::string, std::pair<std::string, std::vector<std::size_t>>> byName;
+            for (std::size_t index = 0; index < guestArtifacts.size(); ++index) {
+                std::string name = Io::Utf8Path(guestArtifacts[index].Path.filename());
+                std::string key = name;
+                for (auto& character : key)
+                    if (character >= 'A' && character <= 'Z') character = static_cast<char>(character + ('a' - 'A'));
+                auto found = byName.find(key);
+                if (found == byName.end())
+                    found = byName.emplace(std::move(key), std::pair<std::string, std::vector<std::size_t>>{std::move(name), {}}).first;
+                found->second.second.push_back(index);
+            }
+            std::vector<std::filesystem::path> artifactRegistryPaths(guestArtifacts.size());
+            for (const auto& entry : byName) {
+                const auto& [name, indices] = entry.second;
+                if (indices.size() == 1) {
+                    artifactRegistryPaths[indices.front()] = outParent / Io::NativePath(outStem + "." + name + ".registry.json");
+                    continue;
+                }
+                for (const auto index : indices) {
+                    const auto relative = guestArtifacts[index].Path.lexically_relative(Io::NativePath(absPath).parent_path() / "app0");
+                    std::string flat;
+                    bool first = true;
+                    for (const auto& part : relative) {
+                        if (!first) flat += "--";
+                        for (const char character : Io::Utf8Path(part)) {
+                            if (character == '-') flat += "-0";
+                            else flat += character;
+                        }
+                        first = false;
+                    }
+                    for (auto& character : flat)
+                        if (character >= 'A' && character <= 'Z') character = static_cast<char>(character + ('a' - 'A'));
+                    artifactRegistryPaths[index] = outParent / Io::NativePath(outStem + "." + flat + ".registry.json");
+                }
+            }
+            registryPaths.insert(registryPaths.end(), artifactRegistryPaths.begin(), artifactRegistryPaths.end());
+             for (const auto& path : registryPaths) checkOutputInputs(path, "Registry");
+         }
             for (const auto& path : registryPaths) checkOutputInputs(path, "Registry");
             for (const auto& path : registryPaths) {
                 auto name = Io::Utf8Path(path.filename());
