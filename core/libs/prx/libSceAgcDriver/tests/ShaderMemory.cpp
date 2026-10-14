@@ -1129,6 +1129,34 @@ void verifyBindlessTable() {
     require(!Recompile(leadingRequest, *leadingCapture)->spirv.empty(), "bindless: the 64-byte table did not compile");
     fillSrt(4u);
 
+    // The material program with the selector scaled by s_lshl_b32 s16, s16, 4 and the key masked
+    // by s_and_b32 s16, s16, 0x7fff before the table read: the keys enumerated from the material
+    // records are masked the same way, so 0x8001 and 0xffff8003 select entries 1 and 3.
+    const std::vector<std::uint32_t> maskedCode{0xf4080100u, 0xfa000000u, 0xf4080200u, 0xfa000010u, 0xf4080300u, 0xfa000020u, 0xf4080700u, 0xfa000030u, 0x7e200500u, 0x8f108410u, 0xf4200406u, 0x20000004u, 0x8710ff10u, 0x00007fffu, 0x8f108510u, 0xf42c0502u, 0x20000000u, 0xf09c0f08u, 0x00450000u, 0xe0700000u, 0x80070000u, 0xbf810000u};
+    materials[0][1] = 0x8001u;
+    materials[2][1] = 0xffff8003u;
+    auto maskedRequest = makeRequest(maskedCode);
+    const auto maskedPlan = GetResourcePlan(maskedRequest);
+    std::uint32_t maskedTables = 0;
+    for (const auto& source : maskedPlan->descriptorSources) {
+        if (!source.indirectImage.has_value()) continue;
+        maskedTables++;
+        const auto& table = *source.indirectImage;
+        require(table.hasMaterial && table.selectorStride == 16u && table.selectorOffset == 4u && table.selectorMask == 0x7fffu, "bindless: the shifted selector and the key mask were not recorded");
+    }
+    require(maskedTables == 1, "bindless: a table with a masked material key was not planned");
+    AgcDriver::ShaderMemory maskedMemory({});
+    const auto maskedCapture = maskedMemory.Capture(maskedRequest);
+    const auto maskedDirect = static_cast<std::uint32_t>(maskedPlan->info.images.size());
+    const auto maskedRoot = tableRoot(*maskedCapture, maskedDirect);
+    const auto maskedMapping = mappingOf(maskedCapture->snapshot);
+    require(std::vector<std::uint32_t>(maskedMapping.begin(), maskedMapping.begin() + 7) == std::vector<std::uint32_t>{3u, 0u, 0u, 1u, 1u, 3u, 2u}, "bindless: the masked material keys are wrong");
+    require(maskedCapture->snapshot.images[maskedRoot].dwords == heap[0] && maskedCapture->snapshot.images[maskedDirect].dwords == heap[1] && maskedCapture->snapshot.images[maskedDirect + 1u].dwords == heap[3], "bindless: the masked material slots are wrong");
+    maskedRequest.context.memory = maskedMemory.Regions();
+    require(!Recompile(maskedRequest, *maskedCapture)->spirv.empty(), "bindless: the masked material table did not compile");
+    materials[0][1] = 1u;
+    materials[2][1] = 3u;
+
     // A table wider than the slots without a material pattern is rejected.
     fillSrt(100u);
     AgcDriver::ShaderMemory wideMemory({});

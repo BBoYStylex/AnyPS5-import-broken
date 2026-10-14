@@ -446,6 +446,15 @@ private:
             offset = immediate;
         }
         IrValue* multiply = value;
+        if (multiply->Opcode() == IrOpcode::ShiftLeftLogical32 && multiply->ArgumentCount() == 2u) {
+            std::uint32_t shift = 0;
+            if (!immediateU32(multiply->Argument(1), shift) || shift > 16u) {
+                return false;
+            }
+            stride = 1u << shift;
+            selector = multiply->Argument(0)->Resolve();
+            return selector->Opcode() == IrOpcode::ReadFirstLane;
+        }
         if (multiply->Opcode() != IrOpcode::IMul32 || multiply->ArgumentCount() != 2u) {
             return false;
         }
@@ -575,16 +584,26 @@ private:
         table.entryOffset = entryOffset;
         table.entryStride = entryStride;
         DescriptorSource materialSource = heapSource;
+        IrValue* materialRead = key;
+        std::uint32_t selectorMask = 0xffffffffu;
+        if (key->Opcode() == IrOpcode::BitwiseAnd32 && key->ArgumentCount() == 2u) {
+            if (immediateU32(key->Argument(1), selectorMask)) {
+                materialRead = key->Argument(0)->Resolve();
+            } else if (immediateU32(key->Argument(0), selectorMask)) {
+                materialRead = key->Argument(1)->Resolve();
+            }
+        }
         std::uint32_t materialMemoryIndex = 0;
-        const MemoryInfo* materialMemory = ScalarReadMemory(*key, materialMemoryIndex);
-        if (materialMemory != nullptr && MemoryIndexBelongsTo(materialMemoryIndex, *key)) {
+        const MemoryInfo* materialMemory = ScalarReadMemory(*materialRead, materialMemoryIndex);
+        if (materialMemory != nullptr && MemoryIndexBelongsTo(materialMemoryIndex, *materialRead)) {
             IrValue* selector = nullptr;
             std::uint32_t selectorStride = 0;
             std::uint32_t selectorOffset = 0;
             DescriptorSource candidateSource;
             std::uint32_t candidateIndex = 0;
-            if (MatchMaterialOffset(key->Argument(1), selector, selectorStride, selectorOffset) && MakeRuntimeBufferSource(*key->Argument(0)->Resolve(), candidateIndex, candidateSource)) {
+            if (MatchMaterialOffset(materialRead->Argument(1), selector, selectorStride, selectorOffset) && MakeRuntimeBufferSource(*materialRead->Argument(0)->Resolve(), candidateIndex, candidateSource)) {
                 table.hasMaterial = true;
+                table.selectorMask = selectorMask;
                 table.materialSource = candidateIndex;
                 table.selectorStride = selectorStride;
                 table.selectorOffset = selectorOffset + materialMemory->offset;

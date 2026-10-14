@@ -364,6 +364,7 @@ void resolveTableImage(const IrResourcePlan& plan, std::uint32_t imageIndex, con
                 if (offset + sizeof(std::uint32_t) > materialSize) throw std::runtime_error("bindless material selector exceeds its buffer");
                 std::uint32_t key = 0;
                 readWord(materialBase + offset, key);
+                key &= table.selectorMask;
                 if (key >= entries) {
                     outOfRange++;
                     continue;
