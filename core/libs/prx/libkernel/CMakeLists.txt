@@ -61,6 +61,7 @@ add_library(libkernel SHARED EXCLUDE_FROM_ALL
         ${CMAKE_CURRENT_SOURCE_DIR}/System/src/Rtld.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/System/src/Process.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/System/src/Sandbox.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/System/src/HostCpu.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/System/src/SystemConfiguration.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/System/src/Login.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/System/src/SoftwareVersion.cpp
@@ -983,6 +984,15 @@ if(BUILD_TESTING)
         set_tests_properties(guest_jit_shared_memory PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libkernel>")
     endif()
+    add_test_executable(host_cpu_tests ${LIBS_INCLUDE_DIR}/tests/HostCpu.cpp)
+    target_include_directories(host_cpu_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(host_cpu_tests PRIVATE libkernel libc)
+    configure_windows_unwind(host_cpu_tests)
+    add_test(NAME host_cpu COMMAND host_cpu_tests)
+    if(WIN32)
+        set_tests_properties(host_cpu PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libkernel>")
+    endif()
     add_test_executable(guest_system_configuration_tests ${LIBS_INCLUDE_DIR}/tests/GuestSystemConfiguration.cpp)
     target_include_directories(guest_system_configuration_tests PRIVATE ${LIBS_INCLUDE_DIR})
     target_link_libraries(guest_system_configuration_tests PRIVATE libkernel libc)
@@ -1062,6 +1072,16 @@ if(BUILD_TESTING)
     if(WIN32)
         target_link_libraries(guest_poll_tests PRIVATE ws2_32)
         set_tests_properties(guest_poll PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libkernel>")
+    endif()
+    add_test_executable(guest_select_wait_tests ${LIBS_INCLUDE_DIR}/tests/GuestSelectWait.cpp)
+    target_include_directories(guest_select_wait_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_select_wait_tests PRIVATE libkernel libc)
+    configure_windows_unwind(guest_select_wait_tests)
+    add_test(NAME guest_select_wait COMMAND guest_select_wait_tests)
+    set_tests_properties(guest_select_wait PROPERTIES TIMEOUT 20)
+    if(WIN32)
+        set_tests_properties(guest_select_wait PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libkernel>")
     endif()
     if(NOT WIN32)
