@@ -131,7 +131,7 @@ python3 tools/pad_input.py /tmp/anyps5-pad release --left-stick 128 0 --hold-ms 
 python3 tools/pad_input.py /tmp/anyps5-pad cross --left-stick 255 128 --right-stick 0 128
 ```
 
-Run the helper in a second terminal. Commands are polled at most every 100 ms during controller reads, and their buttons add to physical controller input. A press lasts 300 ms by default, starting when the application reads it, and releases automatically; `--hold-ms` accepts 1–5000 ms. `--left-stick X Y` and `--right-stick X Y` hold the sticks for the same time: each axis is 0-255, 128 is the centre, X grows to the right and Y grows downward. While such a command is active both sticks come from it instead of the physical controller, and a stick that was not named stays centred. Wait for the application to observe a release before sending another press. The file holds only the latest command; rapid commands can replace one another. Commands left over when the application first reads the controller are ignored. Without the environment variable, file input is disabled.
+Run the helper in a second terminal. Commands are polled at most every 100 ms during controller reads, and their buttons add to physical controller input. A press lasts 300 ms by default, starting when the application reads it, and releases automatically; `--hold-ms` accepts 1Ã¢â‚¬â€œ5000 ms. `--left-stick X Y` and `--right-stick X Y` hold the sticks for the same time: each axis is 0-255, 128 is the centre, X grows to the right and Y grows downward. While such a command is active both sticks come from it instead of the physical controller, and a stick that was not named stays centred. Wait for the application to observe a release before sending another press. The file holds only the latest command; rapid commands can replace one another. Commands left over when the application first reads the controller are ignored. Without the environment variable, file input is disabled.
 
 ### System fonts
 
@@ -210,3 +210,13 @@ The report also lists needed libraries that have no file in `--libs` or `--modul
 Exit codes: `0` nothing blocks loading, `1` there are `absent` imports or needed libraries without a file, `2` an input could not be read; the message names the file and the value.
 
 A module registry lists `nid`, `library` and `targetOffset` for each relocation against a function that no other bundled module exports, without the `#` suffix of the executable's NIDs.
+
+## Save and load dialogs
+
+On Windows or Linux, set `APS5_SAVEDATA_DIALOG_UI=1` before starting a title to enable experimental native save-slot lists and progress dialogs. Choose a slot with the mouse or arrow keys and confirm with the action button or Enter; Cancel, Escape or closing the list returns cancellation. Save and delete selections require a second confirmation. The title performs the selected operation. Progress dialogs close when the title closes them, including after reaching 100%.
+
+The setting is read at dialog initialization. Without it, existing automatic responses remain. The interactive path supports list and progress modes only; extended parameters and result metadata are unsupported. It has not been validated on a title. Linux uses X11 and requires a working `DISPLAY`; Wayland sessions need XWayland. A missing display fails explicitly. The Linux backend has no screen-reader integration; available X11 fonts determine glyph coverage.
+
+With `BUILD_TESTING=ON`, the Windows `guest_savedata_dialog_ui_tests` target provides a standalone demo. Run `build/tests/guest_savedata_dialog_ui_tests.exe --demo` for load selection, add `save` for save confirmation, or add `progress` for progress. Put `build/core/libs/libs/unpatched` and the MinGW runtime directory on `PATH` first. The demo uses synthetic slot names and writes no save data.
+
+On Linux, run `build/tests/guest_savedata_dialog_ui_tests --demo`, with the same optional `save` or `progress` argument. The Linux UI regression test uses the current display and skips if there is none. To run it headlessly with Xvfb installed, use `xvfb-run -a ctest --test-dir build -R guest_savedata_dialog --output-on-failure`. `guest_savedata_dialog_no_display` verifies failure and cleanup without a display.

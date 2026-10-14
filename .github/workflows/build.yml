@@ -244,8 +244,8 @@ jobs:
           key: linux
           save: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
           evict-old-files: job
-      - name: Install lavapipe and the SDL audio, XRandR and Wayland development files
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libvulkan1 mesa-vulkan-drivers libpipewire-0.3-dev libpulse-dev libasound2-dev libxrandr-dev libwayland-dev libxkbcommon-dev libegl-dev libdecor-0-dev
+      - name: Install lavapipe, SDL development files and the dialog test display
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libvulkan1 mesa-vulkan-drivers libpipewire-0.3-dev libpulse-dev libasound2-dev libxrandr-dev libwayland-dev libxkbcommon-dev libegl-dev libdecor-0-dev xvfb xauth xfonts-base
       - id: mesa
         run: |
           echo "version=$(dpkg-query -W -f='${Version}' mesa-vulkan-drivers)" >> "$GITHUB_OUTPUT"
@@ -261,6 +261,8 @@ jobs:
         run: python3 tools/check_test_registration.py build
       - run: cmake --build build
       - run: cmake --build build --target libs
+      - name: Test the Linux save dialog with a virtual display
+        run: xvfb-run -a ctest --test-dir build -R '^guest_savedata_dialog_ui$' --output-on-failure --no-tests=error --timeout 20
       - run: ctest --test-dir build --output-on-failure --timeout 120 --parallel 4 --output-log ctest.log --output-junit ctest.xml
         env:
           ANYPS5_REQUIRE_VULKAN: 1
