@@ -458,6 +458,9 @@ public:
                     const auto sharedStart = subphaseOn ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
                     if (subphaseOn) ++subphase.sharedPages;
                     view.page->comparedBytes.resize(pageBytes);
+                    // An open host write (BeginHostWrite on any alias) may land after the compare: keep
+                    // its page reported, as the faulting path does by leaving it untracked.
+                    const bool hostWriting = std::any_of(view.page->aliases.begin(), view.page->aliases.end(), [&](std::uintptr_t alias) { return views.at(alias).hostWrites != 0; });
                     for (auto chunk = (cursor - base) / subpageBytes; base + chunk * subpageBytes < stop; ++chunk) {
                         const auto at = std::max(cursor, base + chunk * subpageBytes);
                         const auto bit = static_cast<std::uint8_t>(1u << chunk);
@@ -478,7 +481,7 @@ public:
                             }
                             pages[(*count)++] = reinterpret_cast<void*>(at);
                             if (subphaseOn) ++subphase.returnedPages;
-                            if (clear) view.comparedSeen[chunk] = view.page->generation[chunk];
+                            if (clear && !hostWriting) view.comparedSeen[chunk] = view.page->generation[chunk];
                         }
                         if (clear) {
                             view.collected |= bit;

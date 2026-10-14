@@ -1666,20 +1666,22 @@ static void CheckSharedWriteTracking() {
     Require(collect(second, page * 3) == 0);
     if (std::getenv("APS5_TEST_SHARED_AVX") != nullptr) {
         CheckSharedAvxRedZone(first);
-        Require(collect(first, page * 3, false) == 4);
-        Require(collect(first, page * 3, false) == 4);
-        Require(collect(first, page * 3) == 4);
-        Require(collect(second, page * 3) == 4);
+        // Writes are tracked per 4 KiB subpage: the probe dirties only the first one.
+        Require(collect(first, page * 3, false) == 1);
+        Require(collect(first, page * 3, false) == 1);
+        Require(collect(first, page * 3) == 1);
+        Require(collect(second, page * 3) == 1);
         Require(collect(first, page * 3) == 0);
         // A partial clear must preserve dirty chunks not returned in that call.
         static_cast<volatile unsigned char*>(second)[1] = 7;
+        static_cast<volatile unsigned char*>(second)[4096 + 1] = 7;
         std::array<void*, 1> output{};
         std::size_t count = output.size();
         Require(GuestArena::GuestArenaCollectWrites_nid_postfix(reinterpret_cast<std::uintptr_t>(first), page, output.data(), &count, true));
         Require(count == 1 && output[0] == first);
-        Require(collect(static_cast<unsigned char*>(first) + 4096, page - 4096) == 3);
+        Require(collect(static_cast<unsigned char*>(first) + 4096, page - 4096) == 1);
         Require(collect(first, page) == 0);
-        Require(collect(second, page) == 4);
+        Require(collect(second, page) == 2);
         static_cast<volatile unsigned char*>(first)[1] = 7;
         Require(collect(first, page) == 0); // Identical contents require no upload.
     }
