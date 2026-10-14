@@ -35,4 +35,15 @@ std::uint32_t* WriteMemSemaphore(CommandBuffer* buffer, const volatile void* add
     return Emit(buffer, 0x39u, {static_cast<std::uint32_t>(guestAddress), static_cast<std::uint32_t>(guestAddress >> 32u), (static_cast<std::uint32_t>(operation) << 29u) | (static_cast<std::uint32_t>(signalType) << 20u) | (static_cast<std::uint32_t>(waitForMailbox) << 16u)}, function);
 }
 
+std::uint32_t* WriteAtomicGds(CommandBuffer* buffer, std::uint32_t engine, std::uint32_t control, std::uint32_t mode, std::uint32_t gdsOp, std::uint32_t src, std::uint16_t offset, std::uint16_t index, std::uint32_t mask, std::uint32_t data, std::uint64_t compareData, std::uint64_t extraData, const char* function) {
+    const auto operation = ((engine & 3u) << 30u) | (control & 0xffu) | ((control & 0x200u) << 7u) |
+        ((control & 0x20u) << 13u) | ((control & 0x40u) << 14u) |
+        ((control & 0x20u) == 0 && mode == 1 ? 0x20000u : 0u);
+    return Emit(buffer, 0x1du, {
+        operation, ((gdsOp & 1u) << 8u) | (src & 0x3fu), offset, index,
+        mask & 0x00ff00ffu, data, static_cast<std::uint32_t>(compareData),
+        static_cast<std::uint32_t>(compareData >> 32u), static_cast<std::uint32_t>(extraData),
+        static_cast<std::uint32_t>(extraData >> 32u)}, function);
+}
+
 }

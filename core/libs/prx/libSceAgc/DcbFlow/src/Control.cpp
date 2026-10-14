@@ -12,12 +12,9 @@
 
 extern "C" {
 
-// unknown signature
-void* APS5_VABI sceAgcDcbAtomicGds_0900(void) {
- NotImplemented_nid_no_patch(__func__);
- return nullptr;
+std::uint32_t* APS5_VABI sceAgcDcbAtomicGds_0900(CommandBuffer* buf, std::uint32_t engine, std::uint32_t control, std::uint32_t mode, std::uint32_t gdsOp, std::uint32_t src, std::uint16_t offset, std::uint16_t index, std::uint32_t mask, std::uint32_t data, std::uint64_t compareData, std::uint64_t extraData) {
+    return Agc::Command::WriteAtomicGds(buf, engine, control, mode, gdsOp, src, offset, index, mask, data, compareData, extraData, __func__);
 }
-
 
 uint32_t* APS5_VABI sceAgcDcbJump(CommandBuffer* buf, uint8_t mode, uint8_t cache_policy, const uint32_t* target, uint32_t size_in_dwords) {
     return Agc::Command::WriteJump(buf, mode, cache_policy, target, size_in_dwords, __func__);
