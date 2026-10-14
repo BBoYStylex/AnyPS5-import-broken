@@ -52,6 +52,7 @@ extern const std::uint32_t sce_net_in6addr_any[4];
 extern const std::uint8_t sce_net_in6addr_linklocal_allnodes[16];
 int APS5_VABI sceNetResolverCreate(const char*, int, int);
 int APS5_VABI sceNetResolverStartNtoa(int, const char*, void*, int, int, int);
+int APS5_VABI sceNetResolverStartNtoa6(int, const char*, void*, int, int, int);
 int APS5_VABI sceNetResolverStartNtoaMultipleRecordsEx(int, const char*, void*, int, int, int);
 int APS5_VABI sceNetResolverStartNtoaMultipleRecords(int, const char*, void*, int, int, int);
 int APS5_VABI sceNetResolverStartAton(int, const void*, char*, int, int, int, int);
@@ -324,6 +325,38 @@ static void CheckMessages(int receiver, int sender, const std::array<std::uint8_
         threw = true;
     }
     Require(threw);
+}
+
+static void CheckEpollWritable() {
+    std::array<std::uint8_t, 16> address{16, 2, 0, 0, 127, 0, 0, 1};
+    const int receiver = sceNetSocket("epoll-receiver", 2, 2, 17);
+    const int sender = sceNetSocket("epoll-sender", 2, 2, 17);
+    Require(receiver >= 0 && sender >= 0);
+    Require(sceNetBind_nid_postfix(receiver, address.data(), address.size()) == 0);
+    std::uint32_t size = address.size();
+    Require(sceNetGetsockname(receiver, address.data(), &size) == 0 && size == address.size());
+    const int epoll = sceNetEpollCreate("epoll-writable", 0);
+    Require(epoll >= 0);
+    NetEpollEvent registration{};
+    registration.events = 2;
+    registration.ident = static_cast<std::uint64_t>(sender);
+    registration.data.u32 = 41;
+    Require(sceNetEpollControl(epoll, 1, sender, &registration) == 0);
+    NetEpollEvent ready{};
+    Require(sceNetEpollWait(epoll, &ready, 1, 1000000) == 1);
+    Require(ready.events == 2 && ready.ident == static_cast<std::uint64_t>(sender) && ready.data.u32 == 41);
+    Require(sceNetEpollControl(epoll, 3, sender, nullptr) == 0);
+    const char payload[] = "epoll";
+    char peeked[sizeof(payload)]{};
+    Require(sceNetSendto(sender, payload, sizeof(payload), 0, address.data(), address.size()) == sizeof(payload));
+    Require(sceNetRecv(receiver, peeked, sizeof(peeked), 2) == sizeof(payload));
+    registration.events = 3;
+    registration.ident = static_cast<std::uint64_t>(receiver);
+    Require(sceNetEpollControl(epoll, 1, receiver, &registration) == 0);
+    Require(sceNetEpollWait(epoll, &ready, 1, 1000000) == 1);
+    Require(ready.events == 3 && ready.ident == static_cast<std::uint64_t>(receiver) && ready.data.u32 == 41);
+    Require(sceNetEpollDestroy(epoll) == 0);
+    Require(sceNetSocketClose(sender) == 0 && sceNetSocketClose(receiver) == 0);
 }
 
 static void RequireTimeout(int socket, int option, int expected) {
@@ -614,6 +647,7 @@ int main() {
         Require(in6addr_loopback_nid_postfix[i] == (i == 15 ? 1 : 0));
     }
     Require(sceNetInit_nid_postfix() == 0);
+    CheckEpollWritable();
     CheckPoolStats();
     CheckEmptyEpoll();
     CheckAddressText(2, "127.0.0.1");
@@ -804,6 +838,15 @@ int main() {
         resolver_error == static_cast<int>(0x804101E1));
     Require(sceNetResolverStartNtoa(resolver, "localhost", ipv4.data(), 5000000, 1, 0) == 0);
     Require(ipv4[0] == 127);
+    std::array<std::uint8_t, 16> resolved6{};
+    resolved6.fill(0xA5);
+    Require(sceNetResolverStartNtoa6(resolver, "::1", resolved6.data(), 5000000, 1, 0) == 0);
+    Require(std::all_of(resolved6.begin(), resolved6.end() - 1, [](std::uint8_t byte) { return byte == 0; }) && resolved6[15] == 1);
+    Require(sceNetResolverGetError(resolver, &resolver_error) == 0 && resolver_error == 0);
+    Require(sceNetResolverStartNtoa6(resolver, nullptr, resolved6.data(), 5000000, 1, 0) == static_cast<int>(0x80410116));
+    Require(sceNetResolverStartNtoa6(resolver, "127.0.0.1", resolved6.data(), 5000000, 1, 0) == static_cast<int>(0x804101E1));
+    Require(sceNetResolverGetError(resolver, &resolver_error) == 0 && resolver_error == static_cast<int>(0x804101E1));
+    Require(sceNetResolverStartNtoa(resolver, "localhost", ipv4.data(), 5000000, 1, 0) == 0);
     Require(sceNetResolverGetError(resolver, &resolver_error) == 0 && resolver_error == 0);
     std::array<std::uint8_t, 512> records{};
     records.fill(0xA5);

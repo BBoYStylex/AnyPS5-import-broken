@@ -116,8 +116,9 @@ if(BUILD_TESTING AND WIN32)
 endif()
 
 if(WIN32)
-    target_sources(relinker PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/relinker.rc)
+    add_library(relinker_resources OBJECT ${CMAKE_CURRENT_SOURCE_DIR}/relinker.rc)
     set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/relinker.rc PROPERTIES OBJECT_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/relinker.manifest)
+    target_sources(relinker PRIVATE $<TARGET_OBJECTS:relinker_resources>)
     target_compile_options(relinker PRIVATE -municode)
     target_link_options(relinker PRIVATE -municode)
 endif()
@@ -441,6 +442,8 @@ if(BUILD_TESTING)
         add_test(NAME windows_runpath COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_windows_runpath.py $<TARGET_FILE:relinker>)
         set_tests_properties(windows_runpath PROPERTIES TIMEOUT 30)
+        add_test(NAME windows_trace_imports COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_windows_trace_imports.py $<TARGET_FILE:relinker>)
         add_test(NAME windows_address_space COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_windows_address_space.py $<TARGET_FILE:relinker>)
         add_test(NAME windows_tls_thread_pointer COMMAND ${Python3_EXECUTABLE}
