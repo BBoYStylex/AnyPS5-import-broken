@@ -2,6 +2,7 @@
 #include <cstddef>
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
+#include "prx/libc/include/general/AsmMacros.hpp"
 #include <algorithm>
 #include <atomic>
 #include <cerrno>
@@ -207,19 +208,9 @@ static void UnpinStack(const void* context, std::uint64_t bytes) {
 extern "C" void Aps5FiberSwitchStack_nid_no_patch(void** save, void* load);
 extern "C" void Aps5FiberTrampoline_nid_no_patch();
 
-#ifdef __APPLE__
-#define APS5_FIBER_SYMBOL(name) "_" name
-#define APS5_FIBER_FUNCTION(name) ".globl _" name "\n_" name ":\n"
-#define APS5_FIBER_END(name) ""
-#else
-#define APS5_FIBER_SYMBOL(name) name
-#define APS5_FIBER_FUNCTION(name) ".globl " name "\n.type " name ", @function\n" name ":\n"
-#define APS5_FIBER_END(name) ".size " name ", .-" name "\n"
-#endif
-
 asm(".text\n"
-    APS5_FIBER_FUNCTION("Aps5FiberSwitchStack_nid_no_patch")
-    R"(    push %rbp
+    APS5_ASM_FUNCTION("Aps5FiberSwitchStack_nid_no_patch") R"(
+    push %rbp
     push %rbx
     push %r12
     push %r13
@@ -240,13 +231,13 @@ asm(".text\n"
     pop %rbx
     pop %rbp
     ret
-)"  APS5_FIBER_END("Aps5FiberSwitchStack_nid_no_patch")
-    APS5_FIBER_FUNCTION("Aps5FiberTrampoline_nid_no_patch")
-    "    mov %r12, %rdi\n"
-    "    and $-16, %rsp\n"
-    "    call " APS5_FIBER_SYMBOL("Aps5FiberMain_nid_no_patch") "\n"
-    "    ud2\n"
-    APS5_FIBER_END("Aps5FiberTrampoline_nid_no_patch"));
+)" APS5_ASM_FUNCTION_END("Aps5FiberSwitchStack_nid_no_patch")
+    APS5_ASM_FUNCTION("Aps5FiberTrampoline_nid_no_patch") R"(
+    mov %r12, %rdi
+    and $-16, %rsp
+    call )" APS5_ASM_SYMBOL("Aps5FiberMain_nid_no_patch") R"(
+    ud2
+)" APS5_ASM_FUNCTION_END("Aps5FiberTrampoline_nid_no_patch"));
 
 struct InitialFrame {
     std::uint32_t mxcsr;
@@ -518,7 +509,7 @@ int32_t APS5_VABI sceFiberGetInfo(FiberObject* object, FiberInfo* fiber_info) {
     if (fiber_info->size != sizeof(FiberInfo)) return SCE_FIBER_ERROR_INVALID;
     fiber_info->entry = reinterpret_cast<FiberEntry>(fiber->entry);
     fiber_info->arg_on_initialize = fiber->argOnInitialize;
-    fiber_info->addr_context = fiber->context;
+    fiber_info->addr_context = SizedWindow(fiber);
     fiber_info->size_context = fiber->contextSize;
     std::memcpy(fiber_info->name, fiber->name, sizeof(fiber_info->name));
     fiber_info->size_context_margin = static_cast<uint64_t>(-1);

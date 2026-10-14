@@ -11,6 +11,7 @@
 #include "prx/libkernel/File/include/FileLock.hpp"
 #include "prx/libkernel/Socket/include/SocketRuntime.hpp"
 #include "prx/libkernel/File/include/RandomDevice.hpp"
+#include "prx/libkernel/File/include/HostStreams.hpp"
 #include "prx/libkernel/KernelErrors.hpp"
 #include "prx/libkernel/Equeue/Equeue.hpp"
 #include "SceTypes.hpp"
@@ -59,6 +60,10 @@ static int NativeRead(int fd, void* buf, std::size_t n) {
     const auto positioned = File::LockPositionedTransfer(fd);
     const int result = ::_read(fd, buf, static_cast<unsigned int>(n));
     if (result < 0 && _doserrno == ERROR_NO_DATA) errno = EAGAIN;
+    if (result == 0 && File::DirectoryDescriptorPath(fd)) {
+        errno = EISDIR;
+        return -1;
+    }
     return result;
 }
 static int NativeWrite(int fd, const void* buf, std::size_t n) {
@@ -229,6 +234,7 @@ int OpenInDirectory_nid_no_patch(int directory, const char* path, int flags, std
 }
 
 int APS5_VABI sceKernelClose(int d) {
+    if (File::IsHostStream(d)) return SCE_KERNEL_ERROR_EBADF;
     if (GuestSockets::IsOpen(d)) return GuestSockets::Close(d) == 0 ? 0 : SceKernelError(*__error_nid_postfix());
     EqueueDescriptorClosed(d);
     File::ForgetRandomDevice(d);
@@ -294,15 +300,13 @@ int APS5_VABI sceKernelStat(const char* path, FileStat* sb) {
     if (path == nullptr) {
         throw std::invalid_argument(std::string(__func__) + ": path is null");
     }
-    if (sb == nullptr) {
-        throw std::invalid_argument(std::string(__func__) + ": sb is null");
-    }
     if (*path == '\0') return SceErrorFromErrno(2);
     std::filesystem::path native;
     if (const int error = ResolvePathError_nid_no_patch(path, native)) return SceKernelError(error);
     native = File::PathOrRelinkedModule(native);
     std::error_code error;
     constexpr int GuestEnotdir = 20;
+    constexpr int GuestEfault = 14;
     const auto status = std::filesystem::status(native, error);
     if (error == std::errc::not_a_directory) return SceErrorFromErrno(GuestEnotdir);
     if (!std::filesystem::exists(status)) {
@@ -310,6 +314,7 @@ int APS5_VABI sceKernelStat(const char* path, FileStat* sb) {
     }
     const std::string_view guestPath(path);
     if (!guestPath.empty() && guestPath.back() == '/' && !std::filesystem::is_directory(status)) return SceErrorFromErrno(GuestEnotdir);
+    if (sb == nullptr) return SceErrorFromErrno(GuestEfault);
     File::FillFileStat(native, sb);
     return 0;
 }
