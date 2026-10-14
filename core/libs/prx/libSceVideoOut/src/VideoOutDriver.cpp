@@ -16,6 +16,7 @@
 #include "prx/libSceVideoOut/include/MouseInput.hpp"
 #include "prx/libSceAgcDriver/Execution/include/AspectFit.hpp"
 #include "prx/libSceVideoOut/include/KeyboardInput.hpp"
+#include "prx/libSceVideoOut/include/ImeTextInput.hpp"
 #include "prx/libScePad/include/PadState.hpp"
 #include "prx/libkernel/Equeue/Equeue.hpp"
 #include "prx/libkernel/Time/include/Time.hpp"
@@ -607,6 +608,7 @@ void VideoOutDriver::presentLoop(std::stop_token token, std::promise<void>& star
     std::optional<PadInput> padInput;
     std::optional<MouseInput> mouseInput;
     std::optional<KeyboardInput> keyboardInput;
+    std::optional<ImeTextInput> imeTextInput;
 #if APS5_ENABLE_TIMING_LOG
     std::unique_ptr<FrameTimingLog> timingLog;
 #endif
@@ -618,6 +620,7 @@ void VideoOutDriver::presentLoop(std::stop_token token, std::promise<void>& star
             padInput.emplace();
             mouseInput.emplace();
             keyboardInput.emplace();
+            imeTextInput.emplace();
         });
         while (!token.stop_requested()) {
             {
@@ -639,6 +642,7 @@ void VideoOutDriver::presentLoop(std::stop_token token, std::promise<void>& star
                     if (window.Handle() != nullptr) {
                         mouseInput->HandleEvent(event, SDL_GetWindowID(window.Handle()));
                         keyboardInput->HandleEvent(event, SDL_GetWindowID(window.Handle()));
+                        imeTextInput->HandleEvent(event, SDL_GetWindowID(window.Handle()));
                     }
                 }
                 padInput->Update();
@@ -719,6 +723,7 @@ void VideoOutDriver::presentLoop(std::stop_token token, std::promise<void>& star
     OnMainThread([&] {
         padInput.reset();
         mouseInput.reset();
+        imeTextInput.reset();
         keyboardInput.reset();
         window.Destroy();
     });
