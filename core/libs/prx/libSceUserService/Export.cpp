@@ -6,6 +6,8 @@
 #include <cstring>
 #include "prx/libSceUserService/UserService.hpp"
 
+static std::atomic<bool> g_loginReported{false};
+
 static int ReportAccessibilitySetting(int user_id, int32_t* setting, int32_t value) {
  if (user_id != USER_SERVICE_INITIAL_USER_ID) {
   return USER_SERVICE_ERROR_NOT_LOGGED_IN;
@@ -60,8 +62,7 @@ int APS5_VABI sceUserServiceGetEvent(SceUserServiceEvent* event) {
  if (event == nullptr) {
   return USER_SERVICE_ERROR_INVALID_ARGUMENT;
  }
- static std::atomic<bool> loginReported{false};
- if (loginReported.exchange(true)) {
+ if (g_loginReported.exchange(true)) {
   return USER_SERVICE_ERROR_NO_EVENT;
  }
  constexpr std::uint32_t EventTypeLogin = 0;
@@ -140,13 +141,14 @@ int APS5_VABI sceUserServiceInitialize2(void) {
 }
 
 int APS5_VABI sceUserServiceTerminate(void) {
+ g_loginReported.store(false);
  return USER_SERVICE_OK;
 }
 
 // No PSN account exists, so the platform privacy setting reports the feature as not permitted.
 int APS5_VABI sceUserServiceGetPlatformPrivacyWs1(int32_t user_id, int32_t* value) {
-    (void)user_id;
     if (!value) return USER_SERVICE_ERROR_INVALID_ARGUMENT;
+    if (user_id != USER_SERVICE_INITIAL_USER_ID) return USER_SERVICE_ERROR_NOT_LOGGED_IN;
     *value = 0;
     return 0;
 }

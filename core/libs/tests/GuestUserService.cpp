@@ -15,6 +15,15 @@ int APS5_VABI sceUserServiceGetAccessibilityTriggerEffect(int user_id, std::int3
 int APS5_VABI sceUserServiceGetAccessibilityVibration(int user_id, std::int32_t* value);
 int APS5_VABI sceUserServiceGetAccessibilityZoomEnabled(int user_id, std::int32_t* value);
 int APS5_VABI sceUserServiceGetAccessibilityZoomFollowFocus(int user_id, std::int32_t* value);
+int APS5_VABI sceUserServiceInitialize(const void*);
+int APS5_VABI sceUserServiceInitialize2(void);
+int APS5_VABI sceUserServiceTerminate(void);
+int APS5_VABI sceUserServiceGetEvent(SceUserServiceEvent*);
+int APS5_VABI sceUserServiceGetPlatformPrivacyWs1(std::int32_t, std::int32_t*);
+int APS5_VABI sceUserServiceGetInitialUser(int*);
+int APS5_VABI sceUserServiceGetLoginUserIdList(UserServiceLoginUserIdList*);
+int APS5_VABI sceUserServiceGetUserNumber(int, std::int32_t*);
+int APS5_VABI sceUserServiceGetGamePresets(int, UserServiceGamePresets*);
 }
 
 namespace {
@@ -83,4 +92,47 @@ int main() {
         Require(setting.get(USER_SERVICE_INITIAL_USER_ID, &value) == USER_SERVICE_OK);
         Require(value == setting.value);
     }
+
+    Require(sceUserServiceInitialize(nullptr) == USER_SERVICE_OK);
+    Require(sceUserServiceInitialize2() == USER_SERVICE_OK);
+
+    Require(sceUserServiceGetEvent(nullptr) == USER_SERVICE_ERROR_INVALID_ARGUMENT);
+    SceUserServiceEvent event{};
+    Require(sceUserServiceGetEvent(&event) == USER_SERVICE_OK);
+    Require(event.event_type == 0 && event.user_id == USER_SERVICE_INITIAL_USER_ID);
+    Require(sceUserServiceGetEvent(&event) == USER_SERVICE_ERROR_NO_EVENT);
+
+    Require(sceUserServiceTerminate() == USER_SERVICE_OK);
+    Require(sceUserServiceGetEvent(&event) == USER_SERVICE_OK);
+    Require(event.event_type == 0 && event.user_id == USER_SERVICE_INITIAL_USER_ID);
+
+    Require(sceUserServiceGetPlatformPrivacyWs1(USER_SERVICE_INITIAL_USER_ID, nullptr) == USER_SERVICE_ERROR_INVALID_ARGUMENT);
+    std::int32_t privacy = -1;
+    for (int user_id : absent_users) {
+        Require(sceUserServiceGetPlatformPrivacyWs1(user_id, &privacy) == USER_SERVICE_ERROR_NOT_LOGGED_IN);
+    }
+    Require(sceUserServiceGetPlatformPrivacyWs1(USER_SERVICE_INITIAL_USER_ID, &privacy) == 0 && privacy == 0);
+
+    Require(sceUserServiceGetInitialUser(nullptr) == USER_SERVICE_ERROR_INVALID_ARGUMENT);
+    int initialUser = -1;
+    Require(sceUserServiceGetInitialUser(&initialUser) == USER_SERVICE_OK && initialUser == USER_SERVICE_INITIAL_USER_ID);
+
+    Require(sceUserServiceGetLoginUserIdList(nullptr) == USER_SERVICE_ERROR_INVALID_ARGUMENT);
+    UserServiceLoginUserIdList loginList{};
+    Require(sceUserServiceGetLoginUserIdList(&loginList) == USER_SERVICE_OK);
+    Require(loginList.user_id[0] == USER_SERVICE_INITIAL_USER_ID);
+    for (int i = 1; i < 4; ++i) {
+        Require(loginList.user_id[i] == USER_SERVICE_USER_ID_INVALID);
+    }
+
+    Require(sceUserServiceGetUserNumber(USER_SERVICE_INITIAL_USER_ID, nullptr) == USER_SERVICE_ERROR_INVALID_ARGUMENT);
+    std::int32_t userNumber = -1;
+    Require(sceUserServiceGetUserNumber(123, &userNumber) == USER_SERVICE_ERROR_INVALID_ARGUMENT);
+    Require(sceUserServiceGetUserNumber(USER_SERVICE_INITIAL_USER_ID, &userNumber) == USER_SERVICE_OK && userNumber == 1);
+
+    Require(sceUserServiceGetGamePresets(USER_SERVICE_INITIAL_USER_ID, nullptr) == USER_SERVICE_ERROR_INVALID_ARGUMENT);
+    UserServiceGamePresets presets{};
+    Require(sceUserServiceGetGamePresets(123, &presets) == USER_SERVICE_ERROR_INVALID_ARGUMENT);
+    Require(sceUserServiceGetGamePresets(USER_SERVICE_INITIAL_USER_ID, &presets) == USER_SERVICE_OK);
+    Require(presets.difficulty == 0 && presets.priority == 0 && presets.audio_language == 0);
 }
