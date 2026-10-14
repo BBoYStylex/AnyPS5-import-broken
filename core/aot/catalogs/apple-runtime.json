@@ -184,7 +184,7 @@
       "sources": [
         {
           "path": "core/libs/prx/libScePad/Export.cpp",
-          "sha256": "22760b327ac2867401c137cc28da6c6d06652d0863a31afff4d002aa6293492e",
+          "sha256": "1b509665b1a9136126a7517a1b8f5cae5de1924e466e994cb8911c323decaffc",
           "excerpt": "int APS5_VABI scePadInit_nid_postfix("
         },
         {
@@ -203,7 +203,7 @@
           "excerpt": "#define APS5_VABI"
         }
       ],
-      "facts_sha256": "a8858a5c99d9b49a2fa6dc7b579a94bae5ea45bd0a355e9ab4b0cd3b43cb81a7"
+      "facts_sha256": "524fc65e078bc6219bd6d9c6a9bb2e30bb4469fc312bb28fde04e3f1ac55a90f"
     },
     {
       "identity": {
@@ -226,7 +226,7 @@
       "sources": [
         {
           "path": "core/libs/prx/libScePad/Export.cpp",
-          "sha256": "22760b327ac2867401c137cc28da6c6d06652d0863a31afff4d002aa6293492e",
+          "sha256": "1b509665b1a9136126a7517a1b8f5cae5de1924e466e994cb8911c323decaffc",
           "excerpt": "int APS5_VABI scePadOpen_nid_postfix("
         },
         {
@@ -245,7 +245,7 @@
           "excerpt": "#define APS5_VABI"
         }
       ],
-      "facts_sha256": "a5e4a5d71757c5f0918dac8ab08751bcca7f6c6b1d8b12647c64daaaddb5bd62"
+      "facts_sha256": "a55fafa86bfe4050a0a0ca5187556d8119e1c0d391c172948c6c1fa7554aaef9"
     },
     {
       "identity": {
@@ -266,7 +266,7 @@
       "sources": [
         {
           "path": "core/libs/prx/libScePad/Export.cpp",
-          "sha256": "22760b327ac2867401c137cc28da6c6d06652d0863a31afff4d002aa6293492e",
+          "sha256": "1b509665b1a9136126a7517a1b8f5cae5de1924e466e994cb8911c323decaffc",
           "excerpt": "int APS5_VABI scePadReadState("
         },
         {
@@ -285,7 +285,7 @@
           "excerpt": "#define APS5_VABI"
         }
       ],
-      "facts_sha256": "7fd53d73ccba73bce5a83bb237009e1d7120bb7b09fe5d8a7dca302830c601c2"
+      "facts_sha256": "9d731fec143f1caf32ed00cd07d5ff9bcc9a49c58798367c2812b4f418260e9b"
     },
     {
       "identity": {
@@ -339,7 +339,7 @@
       "sources": [
         {
           "path": "core/libs/prx/libScePad/Export.cpp",
-          "sha256": "22760b327ac2867401c137cc28da6c6d06652d0863a31afff4d002aa6293492e",
+          "sha256": "1b509665b1a9136126a7517a1b8f5cae5de1924e466e994cb8911c323decaffc",
           "excerpt": "int APS5_VABI scePadClose_nid_postfix("
         },
         {
@@ -358,7 +358,7 @@
           "excerpt": "#define APS5_VABI"
         }
       ],
-      "facts_sha256": "00a778b75746ae962160389c7211c7160e4e59f7534a0a44027ef6ed3815462a"
+      "facts_sha256": "fe3068f42b21f53ada1163dc4a7bccd11e03aa23a0cec75a57a4feecf145b0dc"
     },
     {
       "identity": {
