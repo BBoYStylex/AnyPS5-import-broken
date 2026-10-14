@@ -12,6 +12,11 @@ extern "C" int APS5_VABI sceContentExportGetProgress(std::int32_t expId);
 extern "C" int APS5_VABI sceContentExportCancel(std::int32_t expId);
 extern "C" int APS5_VABI sceContentExportFromDataWithThumbnail(std::int32_t expId, const ContentExportParam* param, const ContentExportCallbackParam* contentCallbackParam,
     const char* thumbnailType, const ContentExportCallbackParam* thumbnailCallbackParam, char* path, std::size_t pathBufferLength);
+extern "C" int APS5_VABI sceContentExportFromData(std::int32_t expId, const ContentExportParam* param, std::size_t contentLength,
+    int (APS5_VABI* func)(void**, std::size_t*, void*), void* userData, char* path, std::size_t pathBufferLength);
+extern "C" int APS5_VABI sceContentExportFromFile(std::int32_t expId, const ContentExportParam* param, const char* srcPath, char* path, std::size_t pathBufferLength);
+extern "C" int APS5_VABI sceContentExportFromFileWithThumbnail(std::int32_t expId, const ContentExportParam* param, const char* srcPath, const char* thumbnailPath,
+    char* path, std::size_t pathBufferLength);
 
 namespace {
 
@@ -30,11 +35,35 @@ bool Throws(TAction action) {
 int allocator = 0;
 char path[1024]{};
 
+int providerCalls = 0;
+
+int APS5_VABI Provide(void** data, std::size_t* length, void*) {
+    ++providerCalls;
+    *data = nullptr;
+    *length = 0;
+    return 1;
+}
+
 void Export(std::int32_t expId) {
     ContentExportParam param{};
     ContentExportCallbackParam content{};
     ContentExportCallbackParam thumbnail{};
     sceContentExportFromDataWithThumbnail(expId, &param, &content, "image/png", &thumbnail, path, sizeof(path));
+}
+
+void ExportData(std::int32_t expId) {
+    ContentExportParam param{};
+    sceContentExportFromData(expId, &param, 16, Provide, nullptr, path, sizeof(path));
+}
+
+void ExportFile(std::int32_t expId) {
+    ContentExportParam param{};
+    sceContentExportFromFile(expId, &param, "/app0/screenshot.png", path, sizeof(path));
+}
+
+void ExportFileWithThumbnail(std::int32_t expId) {
+    ContentExportParam param{};
+    sceContentExportFromFileWithThumbnail(expId, &param, "/app0/clip.mp4", "/app0/clip.png", path, sizeof(path));
 }
 
 }
@@ -69,12 +98,19 @@ int main() {
     Require(Throws<std::runtime_error>([&] { sceContentExportGetProgress(first); }));
     Require(Throws<std::runtime_error>([&] { sceContentExportCancel(first); }));
     Require(Throws<std::runtime_error>([&] { Export(first); }));
+    Require(Throws<std::runtime_error>([&] { ExportData(first); }));
+    Require(Throws<std::runtime_error>([&] { ExportFile(first); }));
+    Require(Throws<std::runtime_error>([&] { ExportFileWithThumbnail(first); }));
     Require(path[0] == 0);
+    Require(providerCalls == 0);
     Require(sceContentExportFinish(first) == 0);
     Require(Throws<std::invalid_argument>([&] { sceContentExportFinish(first); }));
     Require(Throws<std::invalid_argument>([&] { sceContentExportGetProgress(first); }));
     Require(Throws<std::invalid_argument>([&] { sceContentExportCancel(first); }));
     Require(Throws<std::invalid_argument>([&] { Export(first); }));
+    Require(Throws<std::invalid_argument>([&] { ExportData(first); }));
+    Require(Throws<std::invalid_argument>([&] { ExportFile(first); }));
+    Require(Throws<std::invalid_argument>([&] { ExportFileWithThumbnail(first); }));
     Require(Throws<std::invalid_argument>([] { sceContentExportFinish(0); }));
     Require(Throws<std::invalid_argument>([] { sceContentExportFinish(-1); }));
     sessions.erase(first);
@@ -85,4 +121,5 @@ int main() {
     Require(sceContentExportTerm() == 0);
     Require(Throws([] { sceContentExportStart(); }));
     Require(Throws([&] { sceContentExportFinish(reopened); }));
+    Require(Throws([&] { ExportFile(reopened); }));
 }

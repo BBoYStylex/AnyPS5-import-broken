@@ -16,6 +16,8 @@ std::mutex g_sessionMutex;
 std::set<std::int32_t> g_sessions;
 std::int32_t g_lastSessionId = 0;
 
+using ContentExportDataProvideFunction = int (APS5_VABI*)(void** data, std::size_t* length, void* userData);
+
 void RequireSession(const char* function, std::int32_t expId) {
     if (!g_initialized.load()) throw std::logic_error(std::string(function) + ": not initialized");
     if (!g_sessions.contains(expId)) throw std::invalid_argument(std::string(function) + ": unknown export session");
@@ -40,19 +42,24 @@ int APS5_VABI sceContentExportFinish(std::int32_t expId) {
     return 0;
 }
 
-int APS5_VABI sceContentExportFromData(void) {
- NotImplemented_nid_no_patch(__func__);
- return 0;
+int APS5_VABI sceContentExportFromData(std::int32_t expId, const ContentExportParam* param, std::size_t contentLength,
+    ContentExportDataProvideFunction func, void* userData, char* path, std::size_t pathBufferLength) {
+    std::lock_guard lock(g_sessionMutex);
+    RequireSession(__func__, expId);
+    throw std::runtime_error(std::string(__func__) + ": the host has no media library to export into");
 }
 
-int APS5_VABI sceContentExportFromFile(void) {
- NotImplemented_nid_no_patch(__func__);
- return 0;
+int APS5_VABI sceContentExportFromFile(std::int32_t expId, const ContentExportParam* param, const char* srcPath, char* path, std::size_t pathBufferLength) {
+    std::lock_guard lock(g_sessionMutex);
+    RequireSession(__func__, expId);
+    throw std::runtime_error(std::string(__func__) + ": the host has no media library to export into");
 }
 
-int APS5_VABI sceContentExportFromFileWithThumbnail(void) {
- NotImplemented_nid_no_patch(__func__);
- return 0;
+int APS5_VABI sceContentExportFromFileWithThumbnail(std::int32_t expId, const ContentExportParam* param, const char* srcPath, const char* thumbnailPath,
+    char* path, std::size_t pathBufferLength) {
+    std::lock_guard lock(g_sessionMutex);
+    RequireSession(__func__, expId);
+    throw std::runtime_error(std::string(__func__) + ": the host has no media library to export into");
 }
 
 int APS5_VABI sceContentExportStart(void) {
