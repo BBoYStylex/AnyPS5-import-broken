@@ -58,12 +58,14 @@ def collect(ref):
     return points
 
 
-def labelled(day, span):
+def labelled(day, previous, span):
     if span <= 31:
         return day.strftime("%m-%d")
     if span <= 150:
-        return day.strftime("%m-%d") if day.weekday() == 0 else ""
-    return day.strftime("%Y-%m") if day.day <= 7 and day.weekday() == 0 else ""
+        new_week = previous is None or day.isocalendar()[:2] != previous.isocalendar()[:2]
+        return day.strftime("%m-%d") if new_week else ""
+    new_month = previous is None or (day.year, day.month) != (previous.year, previous.month)
+    return day.strftime("%Y-%m") if new_month else ""
 
 
 def chart(points):
@@ -79,9 +81,9 @@ def chart(points):
     for tick in range(0, top + 1, 10):
         out.append(f'<line x1="{LEFT}" x2="{WIDTH - RIGHT}" y1="{py(tick):.1f}" y2="{py(tick):.1f}" stroke="{GRID}"/>'
                    f'<text x="{LEFT - 6}" y="{py(tick) + 4:.1f}" text-anchor="end">{tick}%</text>')
-    for d, p in zip(days, points):
+    for index, d in enumerate(days):
         x = px(d)
-        label = labelled(date.fromordinal(d), span)
+        label = labelled(date.fromordinal(d), date.fromordinal(days[index - 1]) if index else None, span)
         if label:
             out.append(f'<line x1="{x:.1f}" x2="{x:.1f}" y1="{TOP}" y2="{base:.1f}" stroke="{GRID}" stroke-width="0.5"/>'
                        f'<text transform="translate({x + 4:.1f} {base + 8:.1f}) rotate(60)" font-size="10">{label}</text>')

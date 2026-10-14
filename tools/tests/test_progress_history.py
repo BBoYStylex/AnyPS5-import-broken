@@ -51,8 +51,22 @@ class ProgressHistoryTests(unittest.TestCase):
                     for i in range(count)]
         short, medium, long = (progress_history.chart(series(count)) for count in (20, 100, 400))
         self.assertEqual((short.count("rotate(60)"), short.count("<circle")), (20, 40))
-        self.assertEqual((medium.count("rotate(60)"), medium.count("<circle")), (14, 0))
+        self.assertEqual((medium.count("rotate(60)"), medium.count("<circle")), (15, 0))
         self.assertEqual((long.count("rotate(60)"), long.count("<circle")), (14, 0))
+
+    def test_weeks_and_months_without_a_monday_point_are_labelled(self):
+        def series(days):
+            return [{"date": day.isoformat(), **{name: {"done": 1, "total": 2, "percent": 50.0}
+                                                 for name in ("libraries", "shaders")}} for day in days]
+        start = date(2026, 1, 1).toordinal()
+        weekdays = [date.fromordinal(day) for day in range(start, start + 400) if date.fromordinal(day).weekday() in (1, 3)]
+        medium = progress_history.chart(series([day for day in weekdays if day.toordinal() < start + 100]))
+        long = progress_history.chart(series(weekdays))
+        self.assertEqual(medium.count("rotate(60)"), 15)
+        months = sorted({day.strftime("%Y-%m") for day in weekdays})
+        self.assertEqual(long.count("rotate(60)"), len(months))
+        for month in months:
+            self.assertIn(f">{month}</text>", long)
 
 
 if __name__ == "__main__":
