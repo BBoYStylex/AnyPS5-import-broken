@@ -3,7 +3,7 @@
 #include "prx/libSceVideoOut/include/Output.hpp"
 #include "prx/libSceAgcDriver/Execution/include/DisplayBuffer.hpp"
 #include "prx/libc/include/Shutdown.hpp"
-#include "tests/VideoOutTestEnvironment.hpp"
+#include "tests/graphics/VideoOutTestEnvironment.hpp"
 #include <chrono>
 #include <cstdint>
 #include <cstdio>

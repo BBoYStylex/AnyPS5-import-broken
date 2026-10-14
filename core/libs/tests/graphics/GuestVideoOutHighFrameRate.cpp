@@ -1,6 +1,6 @@
 #include "SceTypes.hpp"
 #include "prx/libc/include/Shutdown.hpp"
-#include "tests/VideoOutTestEnvironment.hpp"
+#include "tests/graphics/VideoOutTestEnvironment.hpp"
 #include <chrono>
 #include <cstdio>
 #include <cstring>

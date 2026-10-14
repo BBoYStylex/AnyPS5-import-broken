@@ -6,7 +6,7 @@ if(BUILD_TESTING)
     target_include_directories(ngs2_core_render_tests PRIVATE ${LIBS_INCLUDE_DIR} ${CMAKE_SOURCE_DIR}/3rdparty/LibAtrac9/C/src)
     target_link_libraries(ngs2_core_render_tests PRIVATE libSceNgs2 atrac9 libkernel libc)
     configure_windows_unwind(ngs2_core_render_tests)
-    add_test(NAME ngs2_core_render COMMAND ngs2_core_render_tests)
+    add_library_test(media NAME ngs2_core_render COMMAND ngs2_core_render_tests)
     if(WIN32)
         set_tests_properties(ngs2_core_render PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceNgs2>")

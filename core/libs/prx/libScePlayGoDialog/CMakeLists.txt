@@ -4,11 +4,11 @@ set_target_properties(libScePlayGoDialog PROPERTIES CXX_EXTENSIONS OFF)
 configure_windows_unwind(libScePlayGoDialog)
 
 if(BUILD_TESTING)
-    add_test_executable(guest_playgo_dialog_tests ${LIBS_INCLUDE_DIR}/tests/GuestPlayGoDialog.cpp)
+    add_test_executable(guest_playgo_dialog_tests ${LIBS_INCLUDE_DIR}/tests/services/GuestPlayGoDialog.cpp)
     target_include_directories(guest_playgo_dialog_tests PRIVATE ${LIBS_INCLUDE_DIR})
     target_link_libraries(guest_playgo_dialog_tests PRIVATE libScePlayGoDialog libc)
     configure_windows_unwind(guest_playgo_dialog_tests)
-    add_test(NAME guest_playgo_dialog COMMAND guest_playgo_dialog_tests)
+    add_library_test(services NAME guest_playgo_dialog COMMAND guest_playgo_dialog_tests)
     if(WIN32)
         set_tests_properties(guest_playgo_dialog PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libScePlayGoDialog>")

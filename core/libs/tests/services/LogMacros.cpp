@@ -66,7 +66,7 @@ std::string Join(const std::vector<std::string>& messages) {
 }
 
 bool HasLine(const std::string& text, const std::string& tail, bool timestamped) {
-    const std::string head = "[tests/LogMacros.cpp:";
+    const std::string head = "[services/LogMacros.cpp:";
     std::size_t headStart = 0;
     if (timestamped) {
         const auto timestampEnd = text.find(" s] ");

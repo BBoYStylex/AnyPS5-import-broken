@@ -9,10 +9,10 @@ if(MINGW)
 endif()
 
 if(BUILD_TESTING)
-    add_test_executable(guest_player_review_dialog_tests ${LIBS_INCLUDE_DIR}/tests/GuestPlayerReviewDialog.cpp)
+    add_test_executable(guest_player_review_dialog_tests ${LIBS_INCLUDE_DIR}/tests/services/GuestPlayerReviewDialog.cpp)
     target_include_directories(guest_player_review_dialog_tests PRIVATE ${LIBS_INCLUDE_DIR})
     target_link_libraries(guest_player_review_dialog_tests PRIVATE libSceCdlgPlayerReview)
-    add_test(NAME guest_player_review_dialog COMMAND guest_player_review_dialog_tests)
+    add_library_test(services NAME guest_player_review_dialog COMMAND guest_player_review_dialog_tests)
     if(WIN32)
         set_tests_properties(guest_player_review_dialog PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceCdlgPlayerReview>")

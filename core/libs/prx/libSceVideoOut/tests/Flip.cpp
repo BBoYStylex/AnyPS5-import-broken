@@ -7,7 +7,7 @@
 #include "prx/libSceAgcDriver/Execution/include/VulkanDevice.hpp"
 #include "prx/libSceAgcDriver/Submit/include/Dcb.hpp"
 #include "prx/libc/include/Shutdown.hpp"
-#include "tests/VideoOutTestEnvironment.hpp"
+#include "tests/graphics/VideoOutTestEnvironment.hpp"
 #include <algorithm>
 #include <array>
 #include <atomic>

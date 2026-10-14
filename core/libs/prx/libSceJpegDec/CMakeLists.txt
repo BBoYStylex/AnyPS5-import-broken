@@ -9,11 +9,11 @@ configure_windows_unwind(libSceJpegDec)
 target_link_libraries(libSceJpegDec PRIVATE decoder_jpeg)
 
 if(BUILD_TESTING)
-    add_test_executable(guest_jpeg_dec_tests ${LIBS_INCLUDE_DIR}/tests/GuestJpegDec.cpp)
+    add_test_executable(guest_jpeg_dec_tests ${LIBS_INCLUDE_DIR}/tests/media/GuestJpegDec.cpp)
     target_include_directories(guest_jpeg_dec_tests PRIVATE ${LIBS_INCLUDE_DIR})
     target_link_libraries(guest_jpeg_dec_tests PRIVATE libSceJpegDec decoder_jpeg libc)
     configure_windows_unwind(guest_jpeg_dec_tests)
-    add_test(NAME guest_jpeg_dec COMMAND guest_jpeg_dec_tests)
+    add_library_test(media NAME guest_jpeg_dec COMMAND guest_jpeg_dec_tests)
     if(WIN32)
         set_tests_properties(guest_jpeg_dec PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceJpegDec>")

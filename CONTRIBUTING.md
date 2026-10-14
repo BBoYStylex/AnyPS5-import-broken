@@ -21,6 +21,36 @@ Toolchains are listed in the [build instructions](docs/dev/BUILD.md).
 
 For relinker changes, use the [relinker-only build](docs/dev/BUILD.md#relinker-only) to build and test without third-party submodules, system libraries or a GPU. It also works on macOS. Changes to system libraries or shaders still need the full build and relevant runtime tests.
 
+Shared system-library tests live under `core/libs/tests`. Use these subject directories:
+
+- [files](core/libs/tests/files): file and directory I/O, paths and descriptors.
+- [memory](core/libs/tests/memory): allocation, mappings, shared memory and write tracking.
+- [threads](core/libs/tests/threads): thread lifecycle, synchronization, scheduling and thread-local storage.
+- [networking](core/libs/tests/networking): sockets, HTTP, TLS, name resolution and network configuration.
+- [graphics](core/libs/tests/graphics): shaders, graphics resources, display output and presentation.
+- [media](core/libs/tests/media): audio, video, image codecs, fonts and speech.
+- [input](core/libs/tests/input): controllers, keyboards, input methods and input devices.
+- [savedata](core/libs/tests/savedata): save storage, metadata, search, dialogs and write failures.
+- [runtime](core/libs/tests/runtime): strings, formatting, math, locale, containers and runtime utilities.
+- [exceptions](core/libs/tests/exceptions): exception handling, unwinding, register contexts and backtraces.
+- [modules](core/libs/tests/modules): dynamic loading, module identity, initialization and patched-library integration.
+- [process](core/libs/tests/process): process lifecycle, arguments, environment, CPU information, signals and resource limits.
+- [time](core/libs/tests/time): clocks, timers, sleeps and time conversion.
+- [services](core/libs/tests/services): application metadata, platform services, dialogs and diagnostics.
+
+Keep fixtures with the tests that use them. Library-local tests stay beside their implementations. The standalone `shared_memory`, `write_watch` and `register_context` CMake entry points retain their existing paths. Test executable names and CTest names are independent of these source directories.
+
+Every project CTest case has a component label: `libs`, `relinker`, `tools`, `shader` or `decoder`. Library cases also have a subject label matching the directories above; NID patcher cases use `nid`. These labels describe the code being tested, not hardware requirements.
+
+Register library cases with `add_library_test(memory NAME guest_memory COMMAND guest_memory_tests)` to receive `libs` and `memory`. Register other components with `add_component_test(relinker NAME relinker_conversion COMMAND relinker_conversion_tests)`. Both helpers live in `cmake/TestLabels.cmake`, included by the root build and standalone library test entry points. Add further labels with `set_property(TEST guest_memory APPEND PROPERTY LABELS extra_label)` to preserve the existing labels.
+
+List or run a group using its exact label:
+
+```sh
+ctest --test-dir build -N -L "^memory$"
+ctest --test-dir build --output-on-failure -L "^memory$"
+```
+
 ```
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
 cmake --build build

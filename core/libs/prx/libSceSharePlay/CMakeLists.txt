@@ -3,11 +3,11 @@ target_include_directories(libSceSharePlay PRIVATE ${LIBS_INCLUDE_DIR})
 configure_windows_unwind(libSceSharePlay)
 
 if(BUILD_TESTING)
-    add_test_executable(guest_share_play_tests ${LIBS_INCLUDE_DIR}/tests/GuestSharePlay.cpp)
+    add_test_executable(guest_share_play_tests ${LIBS_INCLUDE_DIR}/tests/services/GuestSharePlay.cpp)
     target_include_directories(guest_share_play_tests PRIVATE ${LIBS_INCLUDE_DIR})
     target_link_libraries(guest_share_play_tests PRIVATE libSceSharePlay libc)
     configure_windows_unwind(guest_share_play_tests)
-    add_test(NAME guest_share_play COMMAND guest_share_play_tests)
+    add_library_test(services NAME guest_share_play COMMAND guest_share_play_tests)
     if(WIN32)
         set_tests_properties(guest_share_play PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceSharePlay>")

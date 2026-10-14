@@ -1,4 +1,4 @@
-#include "tests/GuestUnwindModuleInfoFixture.hpp"
+#include "tests/exceptions/GuestUnwindModuleInfoFixture.hpp"
 
 #include <cstdint>
 #include <windows.h>

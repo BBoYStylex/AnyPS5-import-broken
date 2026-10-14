@@ -14,7 +14,7 @@ if(BUILD_TESTING)
     target_include_directories(keyboard_tests PRIVATE ${LIBS_INCLUDE_DIR} ${ANYPS5_SDL2_INCLUDE_DIR})
     target_link_libraries(keyboard_tests PRIVATE libSceKeyboard libkernel libc)
     configure_windows_unwind(keyboard_tests)
-    add_test(NAME keyboard_input COMMAND keyboard_tests)
+    add_library_test(input NAME keyboard_input COMMAND keyboard_tests)
     if(WIN32)
         set_tests_properties(keyboard_input PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceKeyboard>")

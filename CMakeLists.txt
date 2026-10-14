@@ -12,6 +12,8 @@ function(add_test_executable target)
     set_target_properties(${target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "$<1:${ANYPS5_TEST_OUTPUT_DIRECTORY}>")
 endfunction()
 
+include(cmake/TestLabels.cmake)
+
 option(BUILD_TESTING "Build and register relinker tests" OFF)
 option(ANYPS5_RELINKER_ONLY "Build the relinker without system libraries or third-party dependencies" OFF)
 option(ANYPS5_BUILD_WASM "Build the browser relinker" OFF)
@@ -75,7 +77,7 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}/core/shader/recompiler/tests/CacheFileReadTests.cpp)
     target_include_directories(shader_cache_file_read_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/core/shader/recompiler)
-    add_test(NAME shader_cache_file_read COMMAND shader_cache_file_read_tests)
+    add_component_test(shader NAME shader_cache_file_read COMMAND shader_cache_file_read_tests)
     set_tests_properties(shader_cache_file_read PROPERTIES TIMEOUT 20)
     add_test_executable(request_serializer_tests
         ${CMAKE_CURRENT_SOURCE_DIR}/core/shader/recompiler/tests/RequestSerializerTests.cpp
@@ -83,91 +85,91 @@ if(BUILD_TESTING)
     target_include_directories(request_serializer_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/core/shader/recompiler
         ${CMAKE_CURRENT_SOURCE_DIR}/core/shader/recompiler/ControlFlow/include)
-    add_test(NAME request_serializer COMMAND request_serializer_tests)
+    add_component_test(shader NAME request_serializer COMMAND request_serializer_tests)
     set_tests_properties(request_serializer PROPERTIES TIMEOUT 20)
     find_package(Python3 QUIET COMPONENTS Interpreter)
     if(Python3_Interpreter_FOUND)
-        add_test(NAME shader_cache_native_paths COMMAND ${Python3_EXECUTABLE}
+        add_component_test(shader NAME shader_cache_native_paths COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/core/shader/recompiler/tests/test_shader_cache_native_paths.py
             ${CMAKE_CURRENT_SOURCE_DIR}/core/shader/recompiler/ShaderCacheVersion.cmake ${CMAKE_COMMAND})
         set_tests_properties(shader_cache_native_paths PROPERTIES TIMEOUT 20)
-        add_test(NAME pr_overlap_encoding COMMAND ${Python3_EXECUTABLE}
+        add_component_test(tools NAME pr_overlap_encoding COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_pr_overlap_encoding.py)
-        add_test(NAME pr_overlap_dependencies COMMAND ${Python3_EXECUTABLE}
+        add_component_test(tools NAME pr_overlap_dependencies COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_pr_overlap_dependencies.py)
-        add_test(NAME pr_overlap_tools COMMAND ${Python3_EXECUTABLE}
+        add_component_test(tools NAME pr_overlap_tools COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_pr_overlap.py)
-        add_test(NAME progress_history COMMAND ${Python3_EXECUTABLE}
+        add_component_test(tools NAME progress_history COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_progress_history.py)
-        add_test(NAME progress_report COMMAND ${Python3_EXECUTABLE}
+        add_component_test(tools NAME progress_report COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_progress.py)
-        add_test(NAME progress_encoding COMMAND ${Python3_EXECUTABLE}
+        add_component_test(tools NAME progress_encoding COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_progress_encoding.py)
-        add_test(NAME progress_render_sliver COMMAND ${Python3_EXECUTABLE}
+        add_component_test(tools NAME progress_render_sliver COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_progress_render_sliver.py)
-        add_test(NAME progress_wrappers COMMAND ${Python3_EXECUTABLE}
+        add_component_test(tools NAME progress_wrappers COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_progress_wrappers.py)
-        add_test(NAME progress_read_encoding COMMAND ${Python3_EXECUTABLE}
+        add_component_test(tools NAME progress_read_encoding COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_progress_read_encoding.py)
-        add_test(NAME import_audit COMMAND ${Python3_EXECUTABLE}
+        add_component_test(tools NAME import_audit COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_import_audit.py)
-        add_test(NAME unwrap_self COMMAND ${Python3_EXECUTABLE}
+        add_component_test(tools NAME unwrap_self COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_unwrap_self.py)
-        add_test(NAME conventions_function_bodies COMMAND ${Python3_EXECUTABLE}
+        add_component_test(tools NAME conventions_function_bodies COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_check_conventions_comments.py)
-        add_test(NAME conventions_wrapped_declarations COMMAND ${Python3_EXECUTABLE}
+        add_component_test(tools NAME conventions_wrapped_declarations COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_check_conventions_wrapped_declarations.py)
-        add_test(NAME conventions_ci_gate COMMAND ${Python3_EXECUTABLE}
+        add_component_test(tools NAME conventions_ci_gate COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_check_conventions_ci_gate.py)
-        add_test(NAME conventions_doc_links COMMAND ${Python3_EXECUTABLE}
+        add_component_test(tools NAME conventions_doc_links COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_check_conventions_doc_links.py)
-        add_test(NAME test_registration COMMAND ${Python3_EXECUTABLE}
+        add_component_test(tools NAME test_registration COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_test_registration.py)
-        add_test(NAME check_skips COMMAND ${Python3_EXECUTABLE}
+        add_component_test(tools NAME check_skips COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_check_skips.py)
-        add_test(NAME check_main_sync COMMAND ${Python3_EXECUTABLE}
+        add_component_test(tools NAME check_main_sync COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_check_main_sync.py)
-        add_test(NAME stubgen COMMAND ${Python3_EXECUTABLE}
+        add_component_test(tools NAME stubgen COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_stubgen.py)
-        add_test(NAME debt_split COMMAND ${Python3_EXECUTABLE}
+        add_component_test(tools NAME debt_split COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_debt_split.py)
-        add_test(NAME stubgen_stdout_newlines COMMAND ${Python3_EXECUTABLE}
+        add_component_test(tools NAME stubgen_stdout_newlines COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_stubgen_stdout_newlines.py)
-        add_test(NAME hardware_oracle COMMAND ${Python3_EXECUTABLE}
+        add_component_test(tools NAME hardware_oracle COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/hw-oracle/test_hw_oracle.py)
-        add_test(NAME hardware_oracle_compare COMMAND ${Python3_EXECUTABLE}
+        add_component_test(tools NAME hardware_oracle_compare COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/hw-oracle/test_compare_results.py)
         set_tests_properties(hardware_oracle_compare PROPERTIES TIMEOUT 20)
-        add_test(NAME pr_overlap_exports COMMAND ${Python3_EXECUTABLE}
+        add_component_test(tools NAME pr_overlap_exports COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_pr_overlap_exports.py)
-        add_test(NAME pr_overlap_wrapped_exports COMMAND ${Python3_EXECUTABLE}
+        add_component_test(tools NAME pr_overlap_wrapped_exports COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_pr_overlap_wrapped_exports.py)
-        add_test(NAME pr_overlap_own_branch COMMAND ${Python3_EXECUTABLE}
+        add_component_test(tools NAME pr_overlap_own_branch COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_pr_overlap_own_branch.py)
-        add_test(NAME nid_database_cache COMMAND ${Python3_EXECUTABLE}
+        add_component_test(tools NAME nid_database_cache COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_nid_names.py)
-        add_test(NAME release_package COMMAND ${Python3_EXECUTABLE}
+        add_component_test(tools NAME release_package COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_package_release.py)
-        add_test(NAME web_library_assets COMMAND ${Python3_EXECUTABLE}
+        add_component_test(tools NAME web_library_assets COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_build_web.py)
         set_tests_properties(web_library_assets PROPERTIES TIMEOUT 20)
-        add_test(NAME pad_input COMMAND ${Python3_EXECUTABLE}
+        add_component_test(tools NAME pad_input COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_pad_input.py)
         set_tests_properties(pad_input PROPERTIES TIMEOUT 20)
-        add_test(NAME trace_digest COMMAND ${Python3_EXECUTABLE}
+        add_component_test(tools NAME trace_digest COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_trace_digest.py)
-        add_test(NAME conventions_bom_shebang COMMAND ${Python3_EXECUTABLE}
+        add_component_test(tools NAME conventions_bom_shebang COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_check_conventions_bom_shebang.py)
         set_tests_properties(conventions_bom_shebang PROPERTIES TIMEOUT 20)
-        add_test(NAME conventions_body_bom COMMAND ${Python3_EXECUTABLE}
+        add_component_test(tools NAME conventions_body_bom COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_check_conventions_body_bom.py)
-        add_test(NAME conventions_blob_reads COMMAND ${Python3_EXECUTABLE}
+        add_component_test(tools NAME conventions_blob_reads COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_check_conventions_blob_reads.py)
-        add_test(NAME conventions_agent_files COMMAND ${Python3_EXECUTABLE}
+        add_component_test(tools NAME conventions_agent_files COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_check_conventions_agent_files.py)
-        add_test(NAME check_compile COMMAND ${Python3_EXECUTABLE}
+        add_component_test(tools NAME check_compile COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_check_compile.py)
-        add_test(NAME performance_compare COMMAND ${Python3_EXECUTABLE}
+        add_component_test(tools NAME performance_compare COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_performance_compare.py)
         set_tests_properties(performance_compare PROPERTIES TIMEOUT 20)
     endif()

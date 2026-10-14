@@ -4,11 +4,11 @@ target_link_libraries(libSceHttp2 PRIVATE libc libkernel)
 configure_windows_unwind(libSceHttp2)
 
 if(BUILD_TESTING)
-    add_test_executable(guest_http2_tests ${LIBS_INCLUDE_DIR}/tests/GuestHttp2.cpp)
+    add_test_executable(guest_http2_tests ${LIBS_INCLUDE_DIR}/tests/networking/GuestHttp2.cpp)
     target_include_directories(guest_http2_tests PRIVATE ${LIBS_INCLUDE_DIR})
     target_link_libraries(guest_http2_tests PRIVATE libSceHttp2 libkernel libc)
     configure_windows_unwind(guest_http2_tests)
-    add_test(NAME guest_http2 COMMAND guest_http2_tests)
+    add_library_test(networking NAME guest_http2 COMMAND guest_http2_tests)
     if(WIN32)
         set_tests_properties(guest_http2 PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceHttp2>")

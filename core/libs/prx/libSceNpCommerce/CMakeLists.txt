@@ -3,11 +3,11 @@ target_include_directories(libSceNpCommerce PRIVATE ${LIBS_INCLUDE_DIR})
 configure_windows_unwind(libSceNpCommerce)
 
 if(BUILD_TESTING)
-    add_test_executable(guest_np_commerce_dialog_tests ${LIBS_INCLUDE_DIR}/tests/GuestNpCommerceDialog.cpp)
+    add_test_executable(guest_np_commerce_dialog_tests ${LIBS_INCLUDE_DIR}/tests/services/GuestNpCommerceDialog.cpp)
     target_include_directories(guest_np_commerce_dialog_tests PRIVATE ${LIBS_INCLUDE_DIR})
     target_link_libraries(guest_np_commerce_dialog_tests PRIVATE libSceNpCommerce libc)
     configure_windows_unwind(guest_np_commerce_dialog_tests)
-    add_test(NAME guest_np_commerce_dialog COMMAND guest_np_commerce_dialog_tests)
+    add_library_test(services NAME guest_np_commerce_dialog COMMAND guest_np_commerce_dialog_tests)
     if(WIN32)
         set_tests_properties(guest_np_commerce_dialog PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceNpCommerce>")
