@@ -81,6 +81,15 @@ std::vector<std::uint8_t> LinuxElfPatcher::Patch(
 
     std::vector<std::uint8_t> buf = sourceElf;
 
+    if (buf.size() < kElfHeaderSize)
+        throw Domain::RelinkerException("ELF binary is smaller than 64-byte ELF header");
+    if (dynSection.DynSymData.size() % kSymEntrySize != 0)
+        throw Domain::RelinkerException("DynSymData size is not a multiple of symbol entry size");
+    if (dynSection.RelaData.size() % kRelaEntrySize != 0)
+        throw Domain::RelinkerException("RelaData size is not a multiple of relocation entry size");
+    if (dynSection.RelaPltData.size() % kRelaEntrySize != 0)
+        throw Domain::RelinkerException("RelaPltData size is not a multiple of relocation entry size");
+
     buf[kEhdrOsAbiOffset] = 0;
     buf[kEhdrAbiVersionOffset] = 0;
     buf[kEhdrTypeOffset] = static_cast<std::uint8_t>(ET_DYN & 0xFF);
@@ -89,9 +98,9 @@ std::vector<std::uint8_t> LinuxElfPatcher::Patch(
     _byteWriter->WriteU16(buf, kEhdrShNumOffset, 0);
     _byteWriter->WriteU16(buf, kEhdrShStrNdxOffset, 0);
 
-    const std::uint64_t phOff = *reinterpret_cast<const std::uint64_t*>(buf.data() + kEhdrPhOffOffset);
-    const std::uint16_t phEntSize = *reinterpret_cast<const std::uint16_t*>(buf.data() + kEhdrPhEntSizeOffset);
-    const std::uint16_t phNum = *reinterpret_cast<const std::uint16_t*>(buf.data() + kEhdrPhNumOffset);
+    const std::uint64_t phOff = Io::ReadU64(buf, kEhdrPhOffOffset);
+    const std::uint16_t phEntSize = Io::ReadU16(buf, kEhdrPhEntSizeOffset);
+    const std::uint16_t phNum = Io::ReadU16(buf, kEhdrPhNumOffset);
 
     const auto alignBuf = [](std::vector<std::uint8_t>& b, std::size_t alignment) {
         while (b.size() % alignment != 0)
@@ -170,7 +179,7 @@ std::vector<std::uint8_t> LinuxElfPatcher::Patch(
     for (std::uint8_t b : dynSegBuf)
         buf.push_back(b);
 
-    const std::uint64_t realEntryVaddr = *reinterpret_cast<const std::uint64_t*>(buf.data() + kEhdrEntryOffset);
+    const std::uint64_t realEntryVaddr = Io::ReadU64(buf, kEhdrEntryOffset);
     const auto stubOff = static_cast<std::uint64_t>(buf.size());
     const auto stubVaddr = vaddrOfExtraBlockOffset(stubOff);
     const auto stubBytes = _entryStubBuilder->BuildEntryStub(stubVaddr, realEntryVaddr);

@@ -20,6 +20,7 @@ std::vector<std::uint8_t> GuestModuleWriter::WriteWindows(const Relinker::GuestI
     std::vector<std::pair<std::uint64_t, std::uint32_t>> tlsModules;
     std::map<std::uint64_t, std::uint64_t> targets;
     const auto apply = [&](const std::vector<std::uint8_t>& table) {
+        if (table.size() % 24 != 0) throw Domain::RelinkerException("Invalid guest relocation table size");
         for (std::size_t offset = 0; offset < table.size(); offset += 24) {
             const auto target = Io::ReadU64(table, offset);
             const auto info = Io::ReadU64(table, offset + 8);

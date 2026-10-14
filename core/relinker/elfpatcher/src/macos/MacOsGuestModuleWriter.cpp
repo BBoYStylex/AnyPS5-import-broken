@@ -13,7 +13,7 @@ namespace {
 
 std::string DynamicName(const Relinker::GuestImage& guest, const std::size_t index) {
     const auto& symbols = guest.Dynamic.DynSymData;
-    if ((index + 1) * 24 > symbols.size()) throw Domain::RelinkerException("Guest symbol index outside the dynamic symbol table");
+    if (index >= symbols.size() / 24) throw Domain::RelinkerException("Guest symbol index outside the dynamic symbol table");
     const auto offset = Io::ReadU32(symbols, index * 24);
     if (offset >= guest.Dynamic.DynStrData.size()) throw Domain::RelinkerException("Guest symbol name offset is out of bounds", offset);
     return Windows::ReadString(guest.Dynamic.DynStrData, offset);
@@ -22,6 +22,7 @@ std::string DynamicName(const Relinker::GuestImage& guest, const std::size_t ind
 }
 
 std::vector<std::uint8_t> GuestModuleWriter::WriteMacOs(const Relinker::GuestImage& guest, const std::vector<std::string>& dependencies, const std::string& runPath) const {
+    if (guest.Dynamic.DynSymData.size() % 24 != 0) throw Domain::RelinkerException("Invalid guest symbol table size");
     using namespace MacOs;
     Windows::WindowsLoadImage image(guest.Bytes, guest.Headers, false);
     MacOsImageInput input;
@@ -34,6 +35,7 @@ std::vector<std::uint8_t> GuestModuleWriter::WriteMacOs(const Relinker::GuestIma
     const auto tls = std::find_if(guest.Headers.begin(), guest.Headers.end(), [](const auto& header) { return header.Type == 7; });
     std::map<std::uint64_t, std::uint64_t> targets;
     const auto apply = [&](const std::vector<std::uint8_t>& table) {
+        if (table.size() % 24 != 0) throw Domain::RelinkerException("Invalid guest relocation table size");
         for (std::size_t offset = 0; offset < table.size(); offset += 24) {
             const auto target = Io::ReadU64(table, offset);
             const auto info = Io::ReadU64(table, offset + 8);

@@ -16,6 +16,8 @@ std::vector<std::uint8_t> GuestModuleWriter::WriteLinux(const Relinker::GuestIma
     for (auto header : image.Headers) {
         if (header.Type != 1 && header.Type != 7 && header.Type != 0x6474e550 && header.Type != PT_GNU_STACK) continue;
         if (header.Type == 1) {
+            if (header.MemorySize > std::numeric_limits<std::uint64_t>::max() - header.MappedAddress)
+                throw Domain::RelinkerException("Guest virtual address overflow");
             end = std::max(end, header.MappedAddress + header.MemorySize);
             if (header.Flags == 0) continue;
             header.Flags |= 4;
@@ -39,6 +41,9 @@ std::vector<std::uint8_t> GuestModuleWriter::WriteLinux(const Relinker::GuestIma
         resultSlot = address();
         bytes.insert(bytes.end(), 8, 0);
     }
+    if (image.Dynamic.DynSymData.size() % 24 != 0) throw Domain::RelinkerException("Invalid guest symbol table size");
+    if (image.Dynamic.RelaData.size() % 24 != 0) throw Domain::RelinkerException("Invalid guest relocation table size");
+    if (image.Dynamic.RelaPltData.size() % 24 != 0) throw Domain::RelinkerException("Invalid guest PLT relocation table size");
     auto strings = image.Dynamic.DynStrData;
     auto symbols = image.Dynamic.DynSymData;
     constexpr std::uint64_t kGlobDat = 6;
