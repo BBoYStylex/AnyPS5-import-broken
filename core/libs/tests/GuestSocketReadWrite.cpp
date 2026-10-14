@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #ifndef _WIN32
 #include <csignal>
 #endif
@@ -130,12 +131,16 @@ int main() {
     *__error_nid_postfix() = 0;
     Require(pread_nid_postfix(server, received, 1, 0) == -1 && *__error_nid_postfix() == 29);
     Require(pwrite_nid_disambig1_nid_postfix(client, positionedWrite, 1, 0) == -1 && *__error_nid_postfix() == 29);
-    Require(preadv_nid_postfix(server, positionedIov, 1, 0) == -1 && *__error_nid_postfix() == 29);
-    Require(pwritev_nid_postfix(client, positionedIov, 1, 0) == -1 && *__error_nid_postfix() == 29);
     Require(sceKernelPread(server, received, 1, 0) == KernelIllegalSeek);
     Require(sceKernelPwrite(client, positionedWrite, 1, 0) == KernelIllegalSeek);
-    Require(sceKernelPreadv(server, positionedIov, 1, 0) == KernelIllegalSeek);
-    Require(sceKernelPwritev(client, positionedIov, 1, 0) == KernelIllegalSeek);
+    for (const auto offset : {std::int64_t{0}, std::int64_t{-1}, std::numeric_limits<std::int64_t>::min()}) {
+        Require(preadv_nid_postfix(server, positionedIov, 1, offset) == -1 && *__error_nid_postfix() == 29);
+        Require(pwritev_nid_postfix(client, positionedIov, 1, offset) == -1 && *__error_nid_postfix() == 29);
+        Require(sceKernelPreadv(server, positionedIov, 1, offset) == KernelIllegalSeek);
+        Require(sceKernelPwritev(client, positionedIov, 1, offset) == KernelIllegalSeek);
+        Require(sceKernelPreadv(server, nullptr, 0, offset) == KernelIllegalSeek);
+        Require(sceKernelPwritev(client, nullptr, 0, offset) == KernelIllegalSeek);
+    }
 
     Require(fcntl_nid_postfix(server, 4, 4) == 0);
     *__error_nid_postfix() = 0;

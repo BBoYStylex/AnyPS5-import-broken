@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <string>
 #ifdef _WIN32
 #include <fcntl.h>
@@ -190,12 +191,24 @@ int main() {
     const int readOnly = sceKernelOpen(path.string().c_str(), SCE_KERNEL_O_RDONLY, 0);
     Require(readOnly >= 0);
     Require(sceKernelPwrite(readOnly, "X", 1, 0) == ErrorEbadf);
+    for (const auto offset : {std::int64_t{-1}, std::numeric_limits<std::int64_t>::min()}) {
+        Require(sceKernelPwritev(readOnly, writes, 2, offset) == ErrorEbadf);
+        Require(pwritev_nid_postfix(readOnly, writes, 2, offset) == -1 && *__error_nid_postfix() == 9);
+        Require(sceKernelPwritev(readOnly, nullptr, 0, offset) == ErrorEbadf);
+        Require(sceKernelPreadv(readOnly, reads, 2, offset) == ErrorEinval);
+    }
     Require(sceKernelFtruncate(readOnly, 0) == ErrorEinval);
     Require(sceKernelClose(readOnly) == 0);
     const int writeOnly = sceKernelOpen(path.string().c_str(), SCE_KERNEL_O_WRONLY, 0);
     Require(writeOnly >= 0);
     Require(sceKernelPread(writeOnly, &byte, 1, 0) == ErrorEbadf);
     Require(pread_nid_postfix(writeOnly, &byte, 1, 0) == -1 && *__error_nid_postfix() == 9);
+    for (const auto offset : {std::int64_t{-1}, std::numeric_limits<std::int64_t>::min()}) {
+        Require(sceKernelPreadv(writeOnly, reads, 2, offset) == ErrorEbadf);
+        Require(preadv_nid_postfix(writeOnly, reads, 2, offset) == -1 && *__error_nid_postfix() == 9);
+        Require(sceKernelPreadv(writeOnly, nullptr, 0, offset) == ErrorEbadf);
+        Require(sceKernelPwritev(writeOnly, writes, 2, offset) == ErrorEinval);
+    }
     Require(sceKernelClose(writeOnly) == 0);
     Require(Contents(path) == "01ABCDE7ABCDE");
     Require(sceKernelFtruncate(file, 5) == 0);
@@ -209,10 +222,25 @@ int main() {
     Require(sceKernelPreadv(file, reads, 2, -1) == ErrorEbadf);
     Require(sceKernelPwritev(file, writes, 2, -1) == ErrorEbadf);
     Require(preadv_nid_postfix(file, reads, 2, -1) == -1 && *__error_nid_postfix() == 9);
+    for (const auto offset : {std::int64_t{-1}, std::numeric_limits<std::int64_t>::min()}) {
+        Require(sceKernelPreadv(file, nullptr, 0, offset) == ErrorEbadf);
+        Require(sceKernelPwritev(file, nullptr, 0, offset) == ErrorEbadf);
+        Require(pwritev_nid_postfix(file, writes, 2, offset) == -1 && *__error_nid_postfix() == 9);
+        Require(sceKernelPreadv(file, nullptr, 1, offset) == ErrorEfault);
+        Require(sceKernelPwritev(file, writes, -1, offset) == ErrorEinval);
+    }
     int unseekable[2] = {};
     Require(MakePipe(unseekable) == 0);
     Require(sceKernelPreadv(unseekable[0], reads, 2, -1) == ErrorEspipe);
     Require(sceKernelPwritev(unseekable[1], writes, 2, -1) == ErrorEspipe);
+    for (const auto offset : {std::int64_t{-1}, std::numeric_limits<std::int64_t>::min()}) {
+        Require(preadv_nid_postfix(unseekable[0], reads, 2, offset) == -1 && *__error_nid_postfix() == 29);
+        Require(pwritev_nid_postfix(unseekable[1], writes, 2, offset) == -1 && *__error_nid_postfix() == 29);
+        Require(sceKernelPreadv(unseekable[0], nullptr, 0, offset) == ErrorEspipe);
+        Require(sceKernelPwritev(unseekable[1], nullptr, 0, offset) == ErrorEspipe);
+        Require(sceKernelPreadv(unseekable[1], reads, 2, offset) == ErrorEbadf);
+        Require(sceKernelPwritev(unseekable[0], writes, 2, offset) == ErrorEbadf);
+    }
     Require(ClosePipe(unseekable[0]) == 0 && ClosePipe(unseekable[1]) == 0);
     Require(sceKernelPread(file, &byte, 1, 0) == ErrorEbadf);
     Require(sceKernelPwrite(file, &byte, 1, 0) == ErrorEbadf);
