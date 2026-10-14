@@ -109,7 +109,7 @@ static int MapFlags(int sceFlags) {
 #include <fcntl.h>
 #include <unistd.h>
 static int NativeOpen(const std::filesystem::path& p, int nativeFlags, std::uint16_t mode) {
-    return ::open(p.c_str(), nativeFlags, static_cast<mode_t>(mode));
+    return ::open(p.c_str(), nativeFlags, static_cast<mode_t>(mode & 06777));
 }
 static std::int64_t NativeLseek(int fd, std::int64_t offset, int whence) {
     const auto result = File::SeekSharedMemory_nid_no_patch(fd, offset, whence);

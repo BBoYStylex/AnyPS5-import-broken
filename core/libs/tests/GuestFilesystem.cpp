@@ -745,6 +745,10 @@ int main() {
     Require(truncatedDescriptor >= 0 && close_nid_postfix(truncatedDescriptor) == 0);
     Require(std::filesystem::file_size(created) == 0);
     Require(unlink_nid_postfix(created.string().c_str()) == 0);
+    const int stickyDescriptor = open_nid_postfix(created.string().c_str(), 0x601, 01666);
+    Require(stickyDescriptor >= 0 && close_nid_postfix(stickyDescriptor) == 0);
+    Require((std::filesystem::status(created).permissions() & std::filesystem::perms::sticky_bit) == std::filesystem::perms::none);
+    Require(unlink_nid_postfix(created.string().c_str()) == 0);
     Require(creat_nid_postfix((root / "absent" / "child.txt").string().c_str(), 0644) == -1 &&
         *__error_nid_postfix() == 2);
     Require(creat_nid_postfix(rootName.c_str(), 0644) == -1 && *__error_nid_postfix() == 21);
