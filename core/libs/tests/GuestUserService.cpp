@@ -4,6 +4,8 @@
 #include <cstdlib>
 
 extern "C" {
+int APS5_VABI sceUserServiceInitialize(const void* params);
+int APS5_VABI sceUserServiceTerminate(void);
 int APS5_VABI sceUserServiceGetEvent(SceUserServiceEvent* event);
 int APS5_VABI sceUserServiceGetForegroundUser(int* user_id);
 int APS5_VABI sceUserServiceGetRegisteredUserIdList(UserServiceRegisteredUserIdList* user_id_list);
@@ -25,9 +27,11 @@ void Require(bool value) { if (!value) std::abort(); }
 }
 
 int main() {
+    SceUserServiceEvent event{0xffffffffu, -1};
+    Require(sceUserServiceGetEvent(&event) == USER_SERVICE_ERROR_NOT_INITIALIZED);
+    Require(sceUserServiceInitialize(nullptr) == USER_SERVICE_OK);
     Require(sceUserServiceGetEvent(nullptr) == USER_SERVICE_ERROR_INVALID_ARGUMENT);
 
-    SceUserServiceEvent event{0xffffffffu, -1};
     Require(sceUserServiceGetEvent(&event) == USER_SERVICE_OK);
     Require(event.event_type == 0);
     Require(event.user_id == USER_SERVICE_INITIAL_USER_ID);
@@ -96,4 +100,5 @@ int main() {
         Require(setting.get(USER_SERVICE_INITIAL_USER_ID, &value) == USER_SERVICE_OK);
         Require(value == setting.value);
     }
+    Require(sceUserServiceTerminate() == USER_SERVICE_OK);
 }
