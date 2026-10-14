@@ -243,7 +243,7 @@ set(agcDriverSources
 add_custom_target(agc_shader_headers DEPENDS
     "${agcTextureDetileShaderHeader}" "${agcTextureDetileImageShaderHeader}"
     "${agcMeshArgumentsShaderHeader}" "${agcCmaskClearShaderHeader}"
-    "${agcSampleCounterShaderHeader}" "${agcSampleDumpsShaderHeader}")
+    "${agcSampleCounterShaderHeader}" "${agcSampleDumpsShaderHeader}" ${agcPresentationShaderHeaders})
 find_package(Git QUIET)
 set(agcTraceRevisionHeader ${agcTextureDetileGeneratedRoot}/prx/libSceAgcDriver/TraceRevision.hpp)
 add_custom_target(agc_trace_revision
