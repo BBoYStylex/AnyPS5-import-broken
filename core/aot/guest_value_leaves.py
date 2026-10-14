@@ -185,4 +185,3 @@ def invoke(lowering, address):
     target = lowering.load(rsp, 64)
     lowering.set_gpr('rsp', lowering.v(f'add i64 {rsp}, 8'))
     return target
-

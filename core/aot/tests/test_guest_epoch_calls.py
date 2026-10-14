@@ -118,7 +118,7 @@ back:
     jne fail
 ''', stub='inc r13\njmp qword ptr [rip + strlen_slot]')
     def test_fast_provider_reads_the_post_call_return_address(self):
-        self.execute(''' 
+        self.execute('''
     xor eax, eax
     test eax, eax
     jne other
