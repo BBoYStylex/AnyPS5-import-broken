@@ -35,7 +35,7 @@ private:
     std::unique_ptr<Buffer> tiled;
     std::unique_ptr<DeviceBuffer> tiledDevice;
     std::unique_ptr<DeviceBuffer> linear;
-    std::unique_ptr<Buffer> thresholds;
+    std::unique_ptr<DeviceBuffer> scanoutCodes;
     std::uint32_t width = 0;
     std::uint32_t height = 0;
     ColorTileMode mode = ColorTileMode::Linear;

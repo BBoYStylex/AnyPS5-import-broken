@@ -38,6 +38,23 @@ inline const std::array<std::uint32_t, 2 * HalfFloatScanoutCodes>& HalfFloatScan
     return thresholds;
 }
 
+inline const std::array<std::uint32_t, (HalfFloatPositiveInfinity + 2u) / 2u>& HalfFloatScanoutPackedCodes() {
+    static const auto codes = [] {
+        std::array<std::uint32_t, (HalfFloatPositiveInfinity + 2u) / 2u> table{};
+        const auto& thresholds = HalfFloatScanoutThresholds();
+        std::uint32_t color = 0;
+        std::uint32_t alpha = 0;
+        for (std::uint32_t half = 0; half <= HalfFloatPositiveInfinity; ++half) {
+            while (color < HalfFloatScanoutCodes && thresholds[color] <= half) ++color;
+            while (alpha < HalfFloatScanoutCodes && thresholds[HalfFloatScanoutCodes + alpha] <= half) ++alpha;
+            const auto packed = color | (alpha << 8u);
+            table[half >> 1u] |= packed << ((half & 1u) * 16u);
+        }
+        return table;
+    }();
+    return codes;
+}
+
 inline std::uint8_t HalfFloatScanoutCode(std::uint16_t bits, bool alpha) {
     static std::array<std::array<std::uint8_t, 65536>, 2> codes{};
     static const bool filled = [] {
