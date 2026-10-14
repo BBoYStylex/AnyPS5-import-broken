@@ -102,9 +102,9 @@ int APS5_VABI sceRudpEnableInternalIOThread(uint32_t stack_size, uint32_t priori
     return g_inited ? 0 : RUDP_ERROR_NOT_INITIALIZED;
 }
 
-int APS5_VABI sceRudpEnableInternalIOThread2() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+int APS5_VABI sceRudpEnableInternalIOThread2(uint32_t stackSize, uint32_t priority, KernelCpumask affinityMask) {
+    (void)affinityMask;
+    return sceRudpEnableInternalIOThread(stackSize, priority);
 }
 
 int APS5_VABI sceRudpSetEventHandler(GuestRudpEventHandler handler, void* arg) {

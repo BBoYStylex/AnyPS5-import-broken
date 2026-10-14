@@ -13,6 +13,8 @@ int APS5_VABI sceRudpProcessEvents();
 int APS5_VABI sceRudpNetFlush();
 int APS5_VABI sceRudpGetMaxSegmentSize(std::uint16_t*);
 int APS5_VABI sceRudpNetReceived();
+int APS5_VABI sceRudpEnableInternalIOThread(std::uint32_t, std::uint32_t);
+int APS5_VABI sceRudpEnableInternalIOThread2(std::uint32_t, std::uint32_t, std::uint64_t);
 }
 
 static void Require(bool value, int line) {
@@ -32,6 +34,8 @@ int main() {
     CHECK(sceRudpGetMaxSegmentSize(&segmentSize) == notInitialized);
     CHECK(segmentSize == 0x5a5a);
     CHECK(sceRudpGetMaxSegmentSize(nullptr) == notInitialized);
+    CHECK(sceRudpEnableInternalIOThread(0x4000, 700) == notInitialized);
+    CHECK(sceRudpEnableInternalIOThread2(0x4000, 700, 0x1) == notInitialized);
 
     alignas(8) static unsigned char pool[0xC58];
     CHECK(sceRudpInit_nid_postfix(pool, sizeof(pool)) == 0);
@@ -43,7 +47,14 @@ int main() {
     std::uint16_t segment[3] = {0, 0, 0x5a5a};
     CHECK(sceRudpGetMaxSegmentSize(&segment[1]) == 0);
     CHECK(segment[0] == 0 && segment[1] == 1410 && segment[2] == 0x5a5a);
+    CHECK(sceRudpEnableInternalIOThread(0x4000, 700) == 0);
     CHECK(sceRudpEnd() == 0);
+    CHECK(sceRudpEnableInternalIOThread(0x4000, 700) == notInitialized);
+
+    CHECK(sceRudpInit_nid_postfix(pool, sizeof(pool)) == 0);
+    CHECK(sceRudpEnableInternalIOThread2(0x4000, 700, 0x1) == 0);
+    CHECK(sceRudpEnd() == 0);
+    CHECK(sceRudpEnableInternalIOThread2(0x4000, 700, 0x1) == notInitialized);
 
     segmentSize = 0x5a5a;
     CHECK(sceRudpGetMaxSegmentSize(&segmentSize) == notInitialized);
