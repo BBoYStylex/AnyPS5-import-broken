@@ -1244,14 +1244,14 @@
           },
           "evidence": {
             "path": "core/libs/prx/libc/src/Process.cpp",
-            "sha256": "e7d59f8520d3d38e441fac9e695fe003e6b7dabdcdaf8b9448587527f895207d",
+            "sha256": "91d160de0112dc5af034cb07d0deb356ee2011d480be3f7eef4fd3e3b114fb0f",
             "excerpt": "int APS5_VABI atexit_nid_postfix(GuestExitCallback func) {"
           },
           "reason": "Bind the original AnyPS5 guest libc export so guest shutdown and registered callbacks run before host process exit.",
           "dependencies": [
             {
               "path": "core/libs/prx/libc/src/RuntimeSupport.cpp",
-              "sha256": "68157f1e8844eebceb0b169447729dc3b9c8996723b7be54cce0c28ef19f7f70",
+              "sha256": "0111efaefef6ced3e9e0ec77515458f74f3870276ea2583d990e811bda225010",
               "excerpt": "int APS5_VABI __cxa_atexit_nid_postfix(void (APS5_VABI *func)(void*), void* arg, void* dsoHandle) {"
             }
           ]
@@ -1280,7 +1280,7 @@
           },
           "evidence": {
             "path": "core/libs/prx/libc/src/Process.cpp",
-            "sha256": "e7d59f8520d3d38e441fac9e695fe003e6b7dabdcdaf8b9448587527f895207d",
+            "sha256": "91d160de0112dc5af034cb07d0deb356ee2011d480be3f7eef4fd3e3b114fb0f",
             "excerpt": "void APS5_VABI exit_nid_postfix(int code) {"
           },
           "reason": "Bind the original AnyPS5 guest libc export so guest shutdown and registered callbacks run before host process exit."
@@ -1869,7 +1869,7 @@
     }
   },
   "qualification": {
-    "facts_sha256": "0a3ab14312c14ea004f49e4ea322c9e1495588a6c80d7c919788b3edb52b6fbf",
+    "facts_sha256": "204d2f5081f7037462bbbc71ddf00f5ba29b9a3f11ba3eccbd0db78b4badee2b",
     "sources": [
       {
         "path": "core/aot/examples/gpu_cube/variant.py",
