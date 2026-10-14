@@ -5805,11 +5805,6 @@ int main(int argc, char** argv) {
             std::cout << "sparse buffer hole tests " << (passed ? "passed" : "failed") << '\n';
             return passed ? 0 : 1;
         }
-        if (argc == 2 && std::string_view(argv[1]) == "--address-space-teardown") {
-            addressSpaceTeardownTests();
-            std::cout << "address-space device teardown releases cached guest allocations\n";
-            return 0;
-        }
         if (argc == 2 && std::string_view(argv[1]) == "--heap-mirror-unwatched-window") {
             {
                 const auto context = mockBdaContext();
@@ -5817,6 +5812,11 @@ int main(int argc, char** argv) {
             }
             Require(mock.live == 0, "heap mirror tests over an unwatched import window leaked Vulkan objects");
             std::cout << "heap mirror over an import window that left the write watch tests passed\n";
+            return 0;
+        }
+        if (argc == 2 && std::string_view(argv[1]) == "--address-space-teardown") {
+            addressSpaceTeardownTests();
+            std::cout << "address-space device teardown releases cached guest allocations\n";
             return 0;
         }
         {
