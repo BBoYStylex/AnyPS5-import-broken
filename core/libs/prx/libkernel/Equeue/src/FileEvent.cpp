@@ -186,6 +186,10 @@ bool TakeSnapshot(HANDLE handle, Snapshot& snapshot) {
     return true;
 }
 
+bool IsDeleted(const Snapshot& snapshot) {
+    return snapshot.deletePending || snapshot.links == 0;
+}
+
 std::vector<std::uint32_t> SnapshotHints(const Snapshot& before, const Snapshot& after, bool directory) {
     std::vector<std::uint32_t> hints;
     if (!directory) {
@@ -206,7 +210,7 @@ std::vector<std::uint32_t> SnapshotHints(const Snapshot& before, const Snapshot&
     if ((after.deletePending && !before.deletePending) || after.links < before.links) {
         hints.push_back(NOTE_DELETE);
     }
-    if (!after.path.empty() && after.path != before.path) {
+    if (!after.path.empty() && after.path != before.path && !IsDeleted(after)) {
         hints.push_back(NOTE_RENAME);
     }
     return hints;
@@ -300,7 +304,9 @@ void RunHostWatch(std::shared_ptr<VnodeWatch> watch, HostWatch host) {
             }
             if (current.path != host.last.path) {
                 CloseChange(host.parent);
-                host.parent = WatchParent(current.path);
+                if (!IsDeleted(current)) {
+                    host.parent = WatchParent(current.path);
+                }
             }
             host.last = std::move(current);
         }
@@ -583,8 +589,8 @@ int VnodeDescriptorError(int descriptor) {
     if (descriptor < 0) {
         return GUEST_EBADF;
     }
-    if (descriptor >= GuestSockets::FirstDescriptor) {
-        return GuestSockets::IsOpen(descriptor) ? GUEST_EINVAL : GUEST_EBADF;
+    if (GuestSockets::IsOpen(descriptor)) {
+        return GUEST_EINVAL;
     }
     if (!DescriptorIsOpen_nid_no_patch(descriptor)) {
         return GUEST_EBADF;
@@ -671,7 +677,7 @@ int APS5_VABI sceKernelDeleteFileEvent(KernelEqueue eq, int fd) {
     if (!EqueuePin_nid_postfix(eq)) {
         return SCE_KERNEL_ERROR_EBADF;
     }
-    if (fd < 0 || (fd >= GuestSockets::FirstDescriptor ? !GuestSockets::IsOpen(fd) : !DescriptorIsOpen_nid_no_patch(fd))) {
+    if (fd < 0 || (!GuestSockets::IsOpen(fd) && !DescriptorIsOpen_nid_no_patch(fd))) {
         return SCE_KERNEL_ERROR_EBADF;
     }
     return EqueueDeleteEvent_nid_postfix(eq, static_cast<std::uintptr_t>(fd), EVFILT_VNODE);
