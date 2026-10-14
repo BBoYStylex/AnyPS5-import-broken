@@ -3,6 +3,7 @@
 #include "prx/libc/include/General.hpp"
 #include "prx/libc/include/FilesystemError.hpp"
 #include "prx/libc/include/GuestArena.hpp"
+#include "prx/libc/include/SymbolicLink.hpp"
 #include "prx/libkernel/DirectMemory/DirectMemory.hpp"
 #include "prx/libkernel/File/include/File.hpp"
 #include "prx/libkernel/File/include/SharedMemory.hpp"
@@ -90,15 +91,6 @@ static int NativeUnlink(const std::filesystem::path& p) {
     if (unlocked) ::_wchmod(path.c_str(), _S_IREAD);
     errno = error;
     return -1;
-}
-static bool IsSymbolicLink(const std::filesystem::path& native) {
-    const auto handle = CreateFileW(native.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
-        OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, nullptr);
-    if (handle == INVALID_HANDLE_VALUE) return false;
-    FILE_ATTRIBUTE_TAG_INFO information{};
-    const bool read = GetFileInformationByHandleEx(handle, FileAttributeTagInfo, &information, sizeof(information)) != 0;
-    CloseHandle(handle);
-    return read && (information.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0 && information.ReparseTag == IO_REPARSE_TAG_SYMLINK;
 }
 static int MapFlags(int sceFlags) {
     int f = 0;
@@ -188,7 +180,7 @@ static int OpenNative(const std::filesystem::path& native, int flags, std::uint1
     if ((flags & SCE_KERNEL_O_NOFOLLOW) != 0 && (flags & (SCE_KERNEL_O_CREAT | SCE_KERNEL_O_EXCL)) != (SCE_KERNEL_O_CREAT | SCE_KERNEL_O_EXCL)) {
         constexpr int GuestEmlink = 31;
 #ifdef _WIN32
-        if (IsSymbolicLink(native)) return SceErrorFromErrno(GuestEmlink);
+        if (IsSymbolicLink_nid_no_patch(native)) return SceErrorFromErrno(GuestEmlink);
 #else
         std::error_code error;
         if (std::filesystem::is_symlink(native, error)) return SceErrorFromErrno(GuestEmlink);
@@ -335,7 +327,7 @@ int APS5_VABI sceKernelUnlink(const char* path) {
     std::filesystem::path native;
     if (const int error = ResolvePathError_nid_no_patch(path, native)) return SceKernelError(error);
 #ifdef _WIN32
-    if (native.has_filename() && IsSymbolicLink(native)) {
+    if (native.has_filename() && IsSymbolicLink_nid_no_patch(native)) {
         const auto attributes = GetFileAttributesW(native.c_str());
         if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
             if (!RemoveDirectoryW(native.c_str())) return SceErrorFromErrno(WindowsOpenError_nid_no_patch(GetLastError()));
