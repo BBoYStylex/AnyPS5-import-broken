@@ -42,7 +42,9 @@
 #endif
 #include <windows.h>
 #else
+#include <fcntl.h>
 #include <sys/mman.h>
+#include <unistd.h>
 #endif
 #include <functional>
 #include <algorithm>
@@ -52,7 +54,6 @@
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
-#include <filesystem>
 #include <iostream>
 #include <memory>
 #include <random>
@@ -200,9 +201,11 @@ public:
                 extensionsEnabled.push_back(VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME);
                 context.dmaBufImport = true;
 #ifdef __linux__
-                if (!std::filesystem::exists("/dev/udmabuf")) {
+                if (const int udmabuf = open("/dev/udmabuf", O_RDWR | O_CLOEXEC); udmabuf >= 0) {
+                    close(udmabuf);
+                } else {
                     context.dmaBufImport = false;
-                    std::cout << "No /dev/udmabuf: DMA-BUF imports are unavailable\n";
+                    std::cout << "/dev/udmabuf cannot be opened read-write: DMA-BUF imports are unavailable\n";
                 }
 #endif
             }
