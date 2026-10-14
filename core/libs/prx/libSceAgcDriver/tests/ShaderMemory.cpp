@@ -3196,7 +3196,7 @@ void verifyVertexInfoVersion19() {
     while (flagOffset < legacyPixel.size() && legacyPixel[flagOffset] == exportedBytes[flagOffset]) ++flagOffset;
     require(flagOffset < legacyPixel.size(), "the pixel layer export flag is not serialized");
     legacyPixel.erase(legacyPixel.begin() + static_cast<std::ptrdiff_t>(flagOffset), legacyPixel.begin() + static_cast<std::ptrdiff_t>(flagOffset + 2u));
-    legacyPixel.resize(legacyPixel.size() - sizeof(std::uint64_t));
+    legacyPixel.resize(legacyPixel.size() - sizeof(std::uint64_t) - 2u);
     for (const auto version : {19u, 20u, 21u, 22u}) {
         auto versionPixel = legacyPixel;
         versionPixel[4] = static_cast<std::uint8_t>(version);
