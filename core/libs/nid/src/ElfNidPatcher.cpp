@@ -358,16 +358,20 @@ void ElfNidPatcher::PatchNids(std::vector<std::uint8_t>& elf, const std::string&
         }
         throw std::runtime_error("cannot find dynsym sh_link");
     }();
+    if (dynStrSectionLink >= ehdr.e_shnum) throw std::runtime_error("dynsym sh_link is outside the section header table");
 
     std::size_t dynStrOffset = 0u, dynStrSize = 0u;
     {
         const std::size_t shOffset = static_cast<std::size_t>(ehdr.e_shoff) + dynStrSectionLink * sizeof(Elf64_Shdr);
         const auto shdr = Read<Elf64_Shdr>(elf, shOffset);
+        if (shdr.sh_type != kShtStrtab) throw std::runtime_error("dynsym sh_link is not a string table");
         dynStrOffset = static_cast<std::size_t>(shdr.sh_offset);
         dynStrSize = static_cast<std::size_t>(shdr.sh_size);
     }
 
     if (dynStrOffset == 0u) throw std::runtime_error("no .dynstr section");
+    if (dynStrOffset > elf.size() || dynStrSize > elf.size() - dynStrOffset)
+        throw std::runtime_error(".dynstr extends past the end of the file");
 
     const std::vector<std::uint8_t> origDynStr(
         elf.begin() + static_cast<std::ptrdiff_t>(dynStrOffset),

@@ -90,6 +90,7 @@ constexpr std::int64_t kDtNull = 0;
 inline bool IsDynamicNameTag(std::int64_t tag) {
     return tag == kDtNeeded || tag == kDtSoname || tag == kDtRpath || tag == kDtRunpath;
 }
+constexpr std::uint32_t kShtStrtab = 3u;
 constexpr std::uint32_t kShtDynamic = 6u;
 constexpr std::uint32_t kShtGnuVerdef = 0x6ffffffdu;
 constexpr std::uint32_t kShtGnuVerneed = 0x6ffffffeu;
