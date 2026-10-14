@@ -548,6 +548,14 @@ private:
         if (entryOffset + 8u * sizeof(std::uint32_t) > entryStride) {
             return false;
         }
+        if (entryStride != 32u) {
+            DescriptorSource direct;
+            MakeSource(handle, 8u, false, false, direct);
+            std::uint32_t badDword = 0;
+            if (ValidateSource(direct, badDword)) {
+                return false;
+            }
+        }
 
         for (const auto* read : heapReads) {
             if (!usedOnlyAsImage(*read, heapReads)) {
