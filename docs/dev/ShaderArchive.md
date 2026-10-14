@@ -35,14 +35,14 @@ $tool = '.\build\tools\shader-archive\agc_shader_archive.exe'
 ```
 
 `build --paks PATH_TO_PAKS` fuses extraction and compilation in memory.
-`build --extracted` accepts both this tool's extraction and the Rust extractor's
-`shaders.jsonl` plus `groups/*.bin`. Both routes create `programs.jsonl` and
-`programs.idx`. The JSON preserves all library aliases; the compact index stores
-one verified byte location per unique code/header identity.
+`build --extracted` accepts this tool's own `extract` output. Both routes
+create `programs.jsonl` and `programs.idx`. The JSON preserves all library
+aliases; the compact index stores one verified byte location per unique
+code/header identity.
 
-For iteration, put full C++ program IDs or code SHA256s in `selection.txt`, one
+For iteration, put full program IDs or code SHA256s in `selection.txt`, one
 per line. Program IDs are SHA256 of the concatenated hexadecimal code and header
-SHA256 strings; Rust compilation job IDs use a different identity scheme.
+SHA256 strings.
 
 ```powershell
 & $tool build --extracted extracted --catalog first\programs.idx `
@@ -56,8 +56,8 @@ matching header variant. `--sample N` samples deterministically;
 `--limit N` takes the first N eligible jobs. `--native-target 14` selects primary
 variants, `15` secondary variants, and `0` both (the default).
 
-Use `--offline --profile profile.json` for CPU translation and validation with
-the Rust tool's explicit static-target profile. `replay --requests paths.txt`
+Use `--offline --profile profile.json` for CPU translation and validation
+against an explicit static-target profile. `replay --requests paths.txt`
 accepts existing serialized requests; in offline mode their recorded targets
 are preserved. Supply a matching profile for the validation environment.
 
@@ -145,17 +145,13 @@ still match. A standalone archive variant may therefore miss a live request;
 replaying captured requests with `--offline` preserves their actual targets.
 
 The renderer maps each pack once, checks its small sorted index, and reads only
-requested entries. Windows uses positioned reads on the retained file handle
-and a reusable per-thread buffer; this avoids repeated file opens and performs
-better than mapped payload faults in the measured small batch. Linux uses mapped
-payloads. `ANYPS5_PREBUILT_MAPPED_READ=1` selects the mapped Windows path for paired
-measurements. Full keys and payload checksums are checked on a hit. Misses
-or rejected entries fall through to the existing writable cache and compiler.
-No all-shader decompression, directory scan or cache copying occurs per draw.
-`ANYPS5_PREBUILT_SHADER_CACHE` adds pack files or folders (semicolon-separated on
-Windows, colon-separated on Linux); normal loose cache files and versioned
-cache folders are supported. `ANYPS5_NO_PREBUILT_SHADERS=1` disables this path.
-Publish before launching; running processes keep their current mapped snapshot.
+requested entries from the mapped pack. Full keys and payload checksums are
+checked on a hit. Misses or rejected entries fall through to the existing
+writable cache and compiler. No all-shader decompression, directory scan or
+cache copying occurs per draw. The emulator reads packs and loose entry files
+only from `shader_cache/prebuilt` next to the writable cache; there is no
+environment-variable override. Publish before launching; running processes
+keep their current mapped snapshot.
 
 `[shader-prebuilt]` logs startup mapping time, the first exact hit, and interval
 hits/misses/rejections with lookup, file-read, decode, total and maximum load
