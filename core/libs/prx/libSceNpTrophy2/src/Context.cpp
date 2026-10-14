@@ -1,3 +1,4 @@
+#include <cstddef>
 #include <cstdint>
 #include <stdexcept>
 #include <string>
@@ -35,9 +36,14 @@ int APS5_VABI sceNpTrophy2UnregisterUnlockCallback() {
 }
 
 
-int APS5_VABI sceNpTrophy2GetRewardIcon(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+int APS5_VABI sceNpTrophy2GetRewardIcon(int context, int handle, int trophy_id, void* buffer, size_t* size) {
+    (void)context;
+    (void)handle;
+    (void)buffer;
+    if (size != nullptr) {
+        *size = NP_TROPHY2_ICON_SIZE_NONE;
+    }
+    throw std::runtime_error(std::string(__func__) + ": trophy " + std::to_string(trophy_id) + " has no reward, so it has no reward icon file");
 }
 
 int APS5_VABI sceNpTrophy2ShowTrophyList(int context) {
