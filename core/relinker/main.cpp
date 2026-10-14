@@ -131,24 +131,28 @@ bool SameOutputFile(const std::filesystem::path& first, const std::filesystem::p
     return false;
 }
 
-bool SameOutputDestination(const std::filesystem::path& first, const std::filesystem::path& second) {
-    const auto firstPath = std::filesystem::weakly_canonical(first);
-    const auto secondPath = std::filesystem::weakly_canonical(second);
-    if (firstPath == secondPath) return true;
-    if (std::filesystem::exists(first) && std::filesystem::exists(second)) return SameOutputFile(first, second);
+struct OutputDestination {
+    std::filesystem::path Path;
+    std::filesystem::path Canonical;
+    bool Exists;
+};
+
+bool SameOutputDestination(const OutputDestination& first, const OutputDestination& second) {
+    if (first.Canonical == second.Canonical) return true;
+    if (first.Exists && second.Exists) return SameOutputFile(first.Path, second.Path);
 #ifdef _WIN32
-    auto firstName = Io::Utf8Path(firstPath.filename());
-    auto secondName = Io::Utf8Path(secondPath.filename());
+    auto firstName = Io::Utf8Path(first.Canonical.filename());
+    auto secondName = Io::Utf8Path(second.Canonical.filename());
     for (auto* name : {&firstName, &secondName})
         for (auto& character : *name)
             if (character >= 'A' && character <= 'Z') character = static_cast<char>(character + ('a' - 'A'));
-    if (firstName == secondName && std::filesystem::exists(firstPath.parent_path()) &&
-        std::filesystem::exists(secondPath.parent_path()) && std::filesystem::equivalent(firstPath.parent_path(), secondPath.parent_path())) {
-        OutputIdentityDirectory probe(firstPath.parent_path());
+    if (firstName == secondName && std::filesystem::exists(first.Canonical.parent_path()) &&
+        std::filesystem::exists(second.Canonical.parent_path()) && std::filesystem::equivalent(first.Canonical.parent_path(), second.Canonical.parent_path())) {
+        OutputIdentityDirectory probe(first.Canonical.parent_path());
         auto alternateName = Io::Utf8Path(probe.GetDirectory().filename());
         for (auto& character : alternateName)
             if (character >= 'a' && character <= 'z') character = static_cast<char>(character - ('a' - 'A'));
-        const auto alternate = firstPath.parent_path() / Io::NativePath(alternateName);
+        const auto alternate = first.Canonical.parent_path() / Io::NativePath(alternateName);
         const bool same = std::filesystem::exists(alternate) && std::filesystem::equivalent(probe.GetDirectory(), alternate);
         probe.Remove();
         return same;
@@ -325,12 +329,20 @@ int Run(const int argc, char* argv[]) {
             outputPaths.push_back(desktopEntry->EntryPath);
         }
         if (args.windowsDiagnostics) outputPaths.push_back(std::filesystem::absolute("windows-diagnostics-imports.txt"));
-        for (std::size_t index = 0; index < outputPaths.size(); ++index) {
+         // Canonical resolution and existence are per-path properties, not per-pair,
+        // so they are computed once per path. Braced-init-list elements are
+        // guaranteed to evaluate left-to-right, so Canonical is ready before the
+        // exists() snapshot is taken.
+        std::vector<OutputDestination> outputDestinations;
+        outputDestinations.reserve(outputPaths.size());
+        for (const auto& path : outputPaths)
+            outputDestinations.push_back({path, std::filesystem::weakly_canonical(path), std::filesystem::exists(path)});
+        for (std::size_t index = 0; index < outputDestinations.size(); ++index) {
             for (std::size_t previous = 0; previous < index; ++previous) {
-                const auto& first = outputPaths[index];
-                const auto& second = outputPaths[previous];
+                const auto& first = outputDestinations[index];
+                const auto& second = outputDestinations[previous];
                 if (SameOutputDestination(first, second))
-                    throw Domain::RelinkerException("Output paths collide: " + Io::Utf8Path(first) + " and " + Io::Utf8Path(second));
+                    throw Domain::RelinkerException("Output paths collide: " + Io::Utf8Path(first.Path) + " and " + Io::Utf8Path(second.Path));
             }
         }
 
