@@ -619,6 +619,11 @@ int main() {
             const bool statusUnchanged = std::all_of(bytes, bytes + sizeof(untouched), [](unsigned char value) { return value == 0x5a; });
             return rejected && errorUnchanged && statusUnchanged;
         };
+        constexpr int noFollow = 0x100;
+        Require(sceKernelOpen(fileLink.string().c_str(), noFollow, 0) == static_cast<int>(0x8002001Fu));
+        Require(open_nid_postfix(fileLink.string().c_str(), noFollow, 0) == -1 && *__error_nid_postfix() == 31);
+        Require(open_nid_postfix(danglingLink.string().c_str(), noFollow | 0x201, 0600) == -1 && *__error_nid_postfix() == 31);
+        Require(!std::filesystem::exists(missing));
         Require(stat_nid_postfix(fileLink.string().c_str(), &status) == 0 && status.st_size == 5);
         Require(checkUnsupportedLink(fileLink));
         Require(checkUnsupportedLink(directoryLink));
