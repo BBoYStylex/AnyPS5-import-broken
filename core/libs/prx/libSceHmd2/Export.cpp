@@ -6,6 +6,8 @@
 namespace {
 
 constexpr std::int32_t SCE_HMD2_ERROR_UNSUPPORTED_FEATURE = static_cast<std::int32_t>(0x81110016);
+constexpr std::int32_t SCE_HMD2_ERROR_NOT_INITIALIZED = static_cast<std::int32_t>(0x8A720002);
+constexpr std::int32_t SCE_HMD2_ERROR_REPROJECTION_NOT_INITIALIZED = static_cast<std::int32_t>(0x8A72000B);
 
 }
 
@@ -51,14 +53,14 @@ int APS5_VABI sceHmd2GazeGetResultForFoveatedRendering() {
     return 0;
 }
 
-int APS5_VABI sceHmd2GetDeviceInformation() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+std::int32_t APS5_VABI sceHmd2GetDeviceInformation(void* info) {
+    (void)info;
+    return SCE_HMD2_ERROR_NOT_INITIALIZED;
 }
 
-int APS5_VABI sceHmd2GetFieldOfViewWithoutHandle() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+std::int32_t APS5_VABI sceHmd2GetFieldOfViewWithoutHandle(void* fieldOfView) {
+    (void)fieldOfView;
+    return SCE_HMD2_ERROR_NOT_INITIALIZED;
 }
 
 int APS5_VABI sceHmd2Open() {
@@ -86,9 +88,9 @@ int APS5_VABI sceHmd2ReprojectionEnableMirroring() {
     return 0;
 }
 
-int APS5_VABI sceHmd2ReprojectionEnableVrMode() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+std::int32_t APS5_VABI sceHmd2ReprojectionEnableVrMode(std::uint64_t outputMode) {
+    (void)outputMode;
+    return SCE_HMD2_ERROR_REPROJECTION_NOT_INITIALIZED;
 }
 
 int APS5_VABI sceHmd2ReprojectionGetMirroringDisplayBufferSizeAlign() {
@@ -146,9 +148,9 @@ int APS5_VABI sceHmd2ReprojectionSetRenderConfig() {
     return 0;
 }
 
-int APS5_VABI sceHmd2ReprojectionSetTiming() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+std::int32_t APS5_VABI sceHmd2ReprojectionSetTiming(std::int32_t timing) {
+    (void)timing;
+    return SCE_HMD2_ERROR_REPROJECTION_NOT_INITIALIZED;
 }
 
 int APS5_VABI sceHmd2ReprojectionTerminate() {
