@@ -1,0 +1,52 @@
+name: Hard-link validation
+
+on:
+  push:
+    branches:
+      - 'ci/hardlink-validation-*'
+    paths:
+      - '.github/workflows/hardlink-validation.yml'
+      - 'CMakeLists.txt'
+      - 'core/relinker/**'
+      - 'tools/tests/test_import_audit.py'
+      - 'tools/tests/test_stubgen.py'
+
+permissions:
+  contents: read
+
+jobs:
+  hardlink-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Verify hard-link support
+        run: |
+          python -c 'import os; assert hasattr(os, "link"); print("os.link available")'
+          mkdir -p "$RUNNER_TEMP/hardlink-check"
+          printf 'original\n' > "$RUNNER_TEMP/hardlink-check/original"
+          ln "$RUNNER_TEMP/hardlink-check/original" "$RUNNER_TEMP/hardlink-check/alias"
+          test "$(stat -c %i "$RUNNER_TEMP/hardlink-check/original")" = \
+               "$(stat -c %i "$RUNNER_TEMP/hardlink-check/alias")"
+
+      - name: Configure
+        run: |
+          cmake -S . -B build-hardlink-ci -G Ninja \
+            -DANYPS5_RELINKER_ONLY=ON \
+            -DBUILD_TESTING=ON \
+            -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build-hardlink-ci --parallel 2
+
+      - name: Run targeted tests
+        run: |
+          ctest --test-dir build-hardlink-ci --output-on-failure \
+            -R '^(import_audit|stubgen|input_preservation)$'
