@@ -33,6 +33,34 @@ static std::vector<std::int16_t> RenderI16(uintptr_t system) {
     return out;
 }
 
+static bool AddBlocksThrows(uintptr_t voice, const Ngs2SamplerVoiceWaveformBlocksParam& param) {
+    try {
+        Control(voice, SCE_NGS2_SAMPLER_VOICE_PARAM_ADD_WAVEFORM_BLOCKS, param);
+    } catch (const std::invalid_argument&) {
+        return true;
+    }
+    return false;
+}
+
+static void TestEmptyBlocksBeforeSetup() {
+    const auto system = CreateSystem();
+    const auto voice = Voice(CreateRack(system, SCE_NGS2_RACK_ID_SAMPLER));
+    const std::vector<std::int16_t> pcm(Grain, 1000);
+    const Ngs2WaveformBlock block{0, pcm.size() * sizeof(std::int16_t), 0, 0, static_cast<std::uint32_t>(pcm.size()), 0, 0};
+    Require(AddBlocksThrows(voice, Ngs2SamplerVoiceWaveformBlocksParam{{}, pcm.data(), 0, 1, &block}));
+    Require(AddBlocksThrows(voice, Ngs2SamplerVoiceWaveformBlocksParam{{}, pcm.data(), SCE_NGS2_WAVEFORM_BLOCKS_FLAG_APPEND, 0, &block}));
+    Control(voice, SCE_NGS2_SAMPLER_VOICE_PARAM_ADD_WAVEFORM_BLOCKS, Ngs2SamplerVoiceWaveformBlocksParam{{}, pcm.data(), SCE_NGS2_WAVEFORM_BLOCKS_FLAG_CONTINUE, 0, &block});
+    Control(voice, SCE_NGS2_SAMPLER_VOICE_PARAM_ADD_WAVEFORM_BLOCKS, Ngs2SamplerVoiceWaveformBlocksParam{{}, pcm.data(), 0, 0, &block});
+    Require(AddBlocksThrows(voice, Ngs2SamplerVoiceWaveformBlocksParam{{}, pcm.data(), 0, 0, &block}));
+    Control(voice, SCE_NGS2_SAMPLER_VOICE_PARAM_SETUP, Ngs2SamplerVoiceSetupParam{{}, {SCE_NGS2_WAVEFORM_TYPE_PCM_I16L, 1, 48000, 0, 0, 0}});
+    Control(voice, SCE_NGS2_SAMPLER_VOICE_PARAM_ADD_WAVEFORM_BLOCKS, Ngs2SamplerVoiceWaveformBlocksParam{{}, pcm.data(), 0, 1, &block});
+    Patch(voice, Mastering(system, 1));
+    Event(voice, SCE_NGS2_VOICE_EVENT_PLAY);
+    const auto out = RenderI16(system);
+    Require(out[0] == 1000 && out[Grain - 1] == 1000);
+    Require(sceNgs2SystemDestroy(system, nullptr) == SCE_NGS2_OK);
+}
+
 static void TestErrorsAndInfo() {
     Ngs2SystemOption option{};
     Require(sceNgs2SystemResetOption(&option) == SCE_NGS2_OK);
@@ -907,6 +935,7 @@ static void RenderAfterStaticTeardown() {
 int main() {
     Require(std::atexit(RenderAfterStaticTeardown) == 0);
     TestErrorsAndInfo();
+    TestEmptyBlocksBeforeSetup();
     TestPcmBlockEnd();
     TestPatchToRackHandle();
     TestPan();
