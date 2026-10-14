@@ -1355,7 +1355,7 @@ IrResourcePlan handBuiltPlan() {
     DescriptorSource table;
     table.dwordCount = 8u;
     table.dwords[0] = &readConst(3);
-    table.indirectImage = DescriptorSource::IndirectImage{3u, 2u, 16u, 4u, 2u, 32u, true};
+    table.indirectImage = DescriptorSource::IndirectImage{3u, 2u, 16u, 4u, 2u, 32u, true, true, true, true, 127u, 396u, 0u, true};
     DescriptorSource heap;
     heap.dwordCount = 4u;
     heap.dwords[1] = &readConst(6);
@@ -1602,6 +1602,7 @@ void verifyMalformedPlans() {
     rejects("an image past the sources", [](IrResourcePlan& plan) { plan.info.images[0].source = 5u; });
     rejects("a descriptor of nine dwords", [](IrResourcePlan& plan) { plan.descriptorSources[1].dwordCount = 9u; });
     rejects("a uniform fill of five words", [](IrResourcePlan& plan) { plan.uniformFill.fill.words = 5u; });
+    rejects("an image table count past the sources", [](IrResourcePlan& plan) { plan.descriptorSources[1].indirectImage->selectorCountSource = 4u; });
     rejects("an image table heap past the sources", [](IrResourcePlan& plan) { plan.descriptorSources[1].indirectImage->heapSource = 4u; });
     rejects("an image table material past the sources", [](IrResourcePlan& plan) { plan.descriptorSources[1].indirectImage->materialSource = 4u; });
     auto foreign = handBuiltPlan();

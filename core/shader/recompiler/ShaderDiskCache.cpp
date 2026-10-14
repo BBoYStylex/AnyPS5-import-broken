@@ -107,8 +107,8 @@ static_assert(sizeof(IrResourcePlan) == 584, "IrResourcePlan changed: update Enc
 static_assert(sizeof(IrValue) == 152, "IrValue changed: update the plan value encoder");
 static_assert(sizeof(GuestRegister) == 8, "GuestRegister changed: update the plan value encoder");
 static_assert(sizeof(MemoryInfo) == 80, "MemoryInfo changed: update the plan encoder");
-static_assert(sizeof(DescriptorSource) == 104, "DescriptorSource changed: update the plan encoder");
-static_assert(sizeof(DescriptorSource::IndirectImage) == 28, "IndirectImage changed: update the plan encoder");
+static_assert(sizeof(DescriptorSource) == 120, "DescriptorSource changed: update the plan encoder");
+static_assert(sizeof(DescriptorSource::IndirectImage) == 44, "IndirectImage changed: update the plan encoder");
 static_assert(sizeof(ResourceBlock) == 80, "ResourceBlock changed: update the plan encoder");
 static_assert(sizeof(SrtRead) == 16, "SrtRead changed: update the plan encoder");
 static_assert(sizeof(UniformFill) == 28, "UniformFill changed: update the plan encoder");
@@ -147,7 +147,7 @@ static_assert(fieldCount<IrResourcePlan>() == 21, "IrResourcePlan changed: updat
 static_assert(fieldCount<GuestRegister>() == 2, "GuestRegister changed: update the plan value encoder");
 static_assert(fieldCount<MemoryInfo>() == 30, "MemoryInfo changed: update the plan encoder");
 static_assert(fieldCount<DescriptorSource>() == 3, "DescriptorSource changed: update the plan encoder");
-static_assert(fieldCount<DescriptorSource::IndirectImage>() == 7, "IndirectImage changed: update the plan encoder");
+static_assert(fieldCount<DescriptorSource::IndirectImage>() == 14, "IndirectImage changed: update the plan encoder");
 static_assert(fieldCount<ResourceBlock>() == 4, "ResourceBlock changed: update the plan encoder");
 static_assert(fieldCount<SrtRead>() == 2, "SrtRead changed: update the plan encoder");
 static_assert(fieldCount<UniformFill>() == 5, "UniformFill changed: update the plan encoder");
@@ -973,6 +973,13 @@ bool encodePlan(Writer& writer, const IrResourcePlan& plan) {
         out.Value(table.keyArg);
         out.Value(table.entryOffset);
         out.Value(table.hasMaterial);
+        out.Value(table.heapAddress);
+        out.Value(table.materialStrideFromDescriptor);
+        out.Value(table.materialIncludesZero);
+        out.Value(table.keyMax);
+        out.Value(table.selectorLimit);
+        out.Value(table.selectorCountSource);
+        out.Value(table.hasSelectorCount);
     });
     writer.List(plan.controlFlow, [&](Writer& out, const ResourceBlock& block) {
         out.Value(valueIndex(block.condition));
@@ -1115,6 +1122,13 @@ bool decodePlan(Reader& reader, IrResourcePlan& plan) {
         in.Value(table.keyArg);
         in.Value(table.entryOffset);
         in.Value(table.hasMaterial);
+        in.Value(table.heapAddress);
+        in.Value(table.materialStrideFromDescriptor);
+        in.Value(table.materialIncludesZero);
+        in.Value(table.keyMax);
+        in.Value(table.selectorLimit);
+        in.Value(table.selectorCountSource);
+        in.Value(table.hasSelectorCount);
         source.indirectImage = indirect ? std::optional(table) : std::nullopt;
     });
     reader.List(plan.controlFlow, 28, [&](Reader& in, ResourceBlock& block) {
@@ -1146,7 +1160,7 @@ bool decodePlan(Reader& reader, IrResourcePlan& plan) {
     if (!valid || !reader.Done() || fill.words > plan.uniformFill.values.size()) return false;
     const auto knownSource = [&](std::uint32_t source) { return source < plan.descriptorSources.size(); };
     if (!std::ranges::all_of(plan.materializationSources, knownSource)) return false;
-    if (!std::ranges::all_of(plan.descriptorSources, [&](const DescriptorSource& source) { return source.dwordCount <= source.dwords.size() && (!source.indirectImage.has_value() || (knownSource(source.indirectImage->heapSource) && knownSource(source.indirectImage->materialSource))); })) return false;
+    if (!std::ranges::all_of(plan.descriptorSources, [&](const DescriptorSource& source) { return source.dwordCount <= source.dwords.size() && (!source.indirectImage.has_value() || (knownSource(source.indirectImage->heapSource) && knownSource(source.indirectImage->materialSource) && (!source.indirectImage->hasSelectorCount || knownSource(source.indirectImage->selectorCountSource)))); })) return false;
     if (!std::ranges::all_of(plan.info.buffers, [&](const BufferResource& buffer) { return knownSource(buffer.source); })) return false;
     if (!std::ranges::all_of(plan.info.images, [&](const ImageResource& image) { return knownSource(image.source); })) return false;
     if (!std::ranges::all_of(plan.info.samplers, [&](const SamplerResource& sampler) { return knownSource(sampler.source); })) return false;
