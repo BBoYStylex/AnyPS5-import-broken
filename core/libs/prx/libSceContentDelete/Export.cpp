@@ -19,14 +19,15 @@ int APS5_VABI sceContentDeleteInitialize(const ContentDeleteInitParam* init_para
     return 0;
 }
 
-int APS5_VABI sceContentDeleteByPath(void) {
- NotImplemented_nid_no_patch(__func__);
- return 0;
+int APS5_VABI sceContentDeleteByPath(const char* contentPath) {
+    if (contentPath == nullptr) APS5_INVALID_ARG_EX;
+    if (!g_initialized.load()) throw std::logic_error(std::string(__func__) + ": not initialized");
+    throw std::runtime_error(std::string(__func__) + ": no content is ever exported or captured on the host, so " + contentPath + " does not exist and the console's error for it is unverified");
 }
 
-int APS5_VABI sceContentDeleteById(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+int APS5_VABI sceContentDeleteById(std::int64_t contentId) {
+    if (!g_initialized.load()) throw std::logic_error(std::string(__func__) + ": not initialized");
+    throw std::runtime_error(std::string(__func__) + ": no content is ever exported or captured on the host, so content " + std::to_string(contentId) + " does not exist and the console's error for it is unverified");
 }
 
 int APS5_VABI sceContentDeleteTerminate(void) {
