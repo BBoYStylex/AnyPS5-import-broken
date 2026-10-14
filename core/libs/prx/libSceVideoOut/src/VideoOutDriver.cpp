@@ -269,6 +269,9 @@ VideoOutDriver& VideoOutDriver::Get() {
 VideoOutDriver::VideoOutDriver() {
     OnMainThread([] {
         SDL_SetHint(SDL_HINT_WINDOWS_DPI_AWARENESS, "permonitorv2");
+#ifdef _WIN32
+        SDL_SetHintWithPriority(SDL_HINT_DIRECTINPUT_ENABLED, "0", SDL_HINT_DEFAULT);
+#endif
         if (SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) < 0) {
             throw std::runtime_error(std::string("SDL_InitSubSystem(VIDEO | GAMECONTROLLER) failed: ") + SDL_GetError());
         }
@@ -348,7 +351,7 @@ int VideoOutDriver::Open(int busType) {
     uint64_t generation = 1;
     if (previous) {
         std::lock_guard cfgLock(previous->mutex);
-        require(!previous->opened, "port already open");
+        if (previous->opened) return -1;
         require(previous->generation != std::numeric_limits<uint64_t>::max(), "port generation overflow");
         generation = previous->generation + 1;
     }
@@ -638,6 +641,7 @@ void VideoOutDriver::presentLoop(std::stop_token token, std::promise<void>& star
                 padInput->Update();
                 mouseInput->UpdateCapture(!padInput->MouseModeEnabled());
                 updateDisplayRefreshRate();
+                mouseInput->UpdateCapture(!padInput->MouseModeEnabled());
                 return false;
             });
             if (quit) {
@@ -650,13 +654,15 @@ void VideoOutDriver::presentLoop(std::stop_token token, std::promise<void>& star
                 const auto dequeued = AgcDriver::FrameTiming::Clock::now();
                 current->timing->Add(current->timing->Get("VideoOut", "queue"), dequeued - current->queuedAt);
                 processFlip(*current);
-                int windowWidth = 0;
-                int windowHeight = 0;
-                if (window.Handle() != nullptr) SDL_GetWindowSize(window.Handle(), &windowWidth, &windowHeight);
-                if (windowWidth > 0 && windowHeight > 0) {
-                    const auto presented = AgcDriver::ComputeContainSize_nid_postfix(current->width, current->height, static_cast<std::uint32_t>(windowWidth), static_cast<std::uint32_t>(windowHeight), true);
-                    OnMainThread([&] { mouseInput->SetPresentation(current->width, current->height, presented.width, presented.height); });
-                }
+                OnMainThread([&] {
+                    int windowWidth = 0;
+                    int windowHeight = 0;
+                    if (window.Handle() != nullptr) SDL_GetWindowSize(window.Handle(), &windowWidth, &windowHeight);
+                    if (windowWidth > 0 && windowHeight > 0) {
+                        const auto presented = AgcDriver::ComputeContainSize_nid_postfix(current->width, current->height, static_cast<std::uint32_t>(windowWidth), static_cast<std::uint32_t>(windowHeight), true);
+                        mouseInput->SetPresentation(current->width, current->height, presented.width, presented.height);
+                    }
+                });
                 const auto finished = AgcDriver::FrameTiming::Clock::now();
                 AgcDriver::FrameTiming::Clock::duration interval{};
                 {

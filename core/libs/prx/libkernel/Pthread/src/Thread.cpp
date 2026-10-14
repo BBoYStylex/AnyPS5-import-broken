@@ -129,8 +129,8 @@ static void AllocateGuestStack(PthreadPrivate* thread, std::size_t usableBytes) 
 static void FreeGuestStack(PthreadPrivate* thread) {
     if (thread->guestStack == nullptr) return;
     void* const mapping = thread->guestStack;
-    DoMunmap(thread->guestStack, thread->guestStackBytes);
     UnregisterGuestStackMapping(mapping);
+    DoMunmap(thread->guestStack, thread->guestStackBytes);
     thread->guestStack = nullptr;
     thread->guestStackBytes = 0;
 }
@@ -156,8 +156,8 @@ static void ReapRetiredStacks() {
         }
     }
     for (const auto& stack : ready) {
-        DoMunmap(stack.address, stack.bytes);
         UnregisterGuestStackMapping(stack.address);
+        DoMunmap(stack.address, stack.bytes);
     }
 }
 
