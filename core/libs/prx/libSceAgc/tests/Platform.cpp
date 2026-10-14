@@ -2,10 +2,13 @@
 #include "prx/libc/include/Shutdown.hpp"
 
 #include <array>
+#include <cstdint>
 #include <cstdio>
 #include <stdexcept>
 
 extern "C" int APS5_VABI sceAgcGetIsTrinityMode(bool* isTrinityMode);
+extern "C" std::uint32_t APS5_VABI sceAgcGetShaderInstrumentation();
+extern "C" int APS5_VABI sceAgcSetShaderInstrumentation(std::uint32_t flags);
 
 namespace {
 
@@ -31,6 +34,16 @@ void testTrinityMode() {
     check(flags[0] && flags[2], "Trinity mode query wrote past its one-byte flag");
 }
 
+void testShaderInstrumentation() {
+    check(sceAgcGetShaderInstrumentation() == 0, "shader instrumentation reported enabled before any call");
+    check(sceAgcSetShaderInstrumentation(0) == 0, "disabling shader instrumentation did not return 0");
+    check(sceAgcGetShaderInstrumentation() == 0, "shader instrumentation reported enabled after disabling it");
+    expectFailure([] { sceAgcSetShaderInstrumentation(1); });
+    expectFailure([] { sceAgcSetShaderInstrumentation(0x80000000u); });
+    expectFailure([] { sceAgcSetShaderInstrumentation(0xffffffffu); });
+    check(sceAgcGetShaderInstrumentation() == 0, "a rejected flag set changed the reported shader instrumentation");
+}
+
 void testRejections() {
     expectFailure([] { sceAgcGetIsTrinityMode(nullptr); });
 }
@@ -40,6 +53,7 @@ void testRejections() {
 int main() {
     try {
         testTrinityMode();
+        testShaderInstrumentation();
         testRejections();
         LibcRunShutdown_nid_postfix();
         std::puts("AGC platform tests passed");
