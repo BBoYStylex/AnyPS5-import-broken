@@ -138,7 +138,7 @@ static void CheckFlexibleMappingIgnoresFlag8000() {
     Require(sceKernelAvailableFlexibleMemorySize(&available) == 0 && available == before);
     bool rejected = false;
     void* unknown = nullptr;
-    try { sceKernelMapFlexibleMemory(&unknown, length, 3, 0x20000); } catch (const std::exception&) { rejected = true; }
+    try { rejected = sceKernelMapFlexibleMemory(&unknown, length, 3, 0x20000) != 0; } catch (const std::exception&) { rejected = true; }
     Require(rejected && unknown == nullptr);
     Require(sceKernelAvailableFlexibleMemorySize(&available) == 0 && available == before);
 }
