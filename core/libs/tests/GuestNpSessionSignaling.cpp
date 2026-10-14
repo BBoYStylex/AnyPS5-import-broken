@@ -10,6 +10,10 @@ int APS5_VABI sceNpSessionSignalingCreateContext2(const void* param, std::uint32
 std::int32_t APS5_VABI sceNpSessionSignalingGetLocalNetInfo(std::int32_t contextId, void* info);
 int APS5_VABI sceNpSessionSignalingRequestPrepare(std::uint32_t contextId, std::uint32_t* requestId);
 std::int32_t APS5_VABI sceNpSessionSignalingGetConnectionStatus(std::int32_t contextId, std::int32_t connectionId, std::int32_t* status, void* peerAddress, std::uint16_t* peerPort);
+int APS5_VABI sceNpSessionSignalingGetMemoryInfo(void);
+int APS5_VABI sceNpSessionSignalingGetConnectionStatistics(void);
+int APS5_VABI sceNpSessionSignalingGetConnectionFromPeerAddress(void);
+int APS5_VABI sceNpSessionSignalingGetGroupFromSessionId(void);
 int APS5_VABI sceNpSessionSignalingTerminate(void);
 }
 
@@ -56,6 +60,11 @@ int main() {
     Require(sceNpSessionSignalingGetConnectionStatus(netContextId, 1, &status, &peerAddress, &peerPort) == ConnectionNotFound, "connection without network");
     Require(sceNpSessionSignalingGetConnectionStatus(netContextId, 1, &status, nullptr, nullptr) == ConnectionNotFound, "connection without peer outputs");
     Require(status == 0x5a5a5a5a && peerAddress == 0xa5a5a5a5u && peerPort == 0xa5a5, "failed status query wrote an output");
+
+    Require(sceNpSessionSignalingGetMemoryInfo() == Unavailable, "memory info without network");
+    Require(sceNpSessionSignalingGetConnectionStatistics() == Unavailable, "connection statistics without network");
+    Require(sceNpSessionSignalingGetConnectionFromPeerAddress() == Unavailable, "connection from peer address without network");
+    Require(sceNpSessionSignalingGetGroupFromSessionId() == Unavailable, "group from session id without network");
 
     Require(sceNpSessionSignalingTerminate() == 0, "terminate failed");
 }
