@@ -1,5 +1,6 @@
 #include "ShaderDiskCache.hpp"
 #include "CacheKey.hpp"
+#include "ShaderCachePack.hpp"
 #include "ShaderCacheDirectory.hpp"
 #include "ThreadOwned.hpp"
 #include "Optimization/ResourceMaterializer.hpp"
@@ -724,6 +725,7 @@ public:
         if (root.empty()) return;
         this->root = root;
         directory = root / hex(SourceVersion());
+        discoverPrebuilt();
         std::thread([this] { run(); }).detach();
     }
 
@@ -732,32 +734,55 @@ public:
 
     bool Load(std::span<const std::byte> key, CompiledVariant& variant) {
         const auto started = std::chrono::steady_clock::now();
-        const auto name = EntryName(key);
         thread_local std::vector<std::byte>* fileSlot = nullptr;
         auto& file = ThreadOwned(fileSlot);
         bool loaded = false;
-        if (!ReadWholeFile(directory / name, file)) {
-            misses.fetch_add(1, std::memory_order_relaxed);
-        } else {
-            switch (DecodeEntry(file, key, variant)) {
-                case LoadStatus::Loaded:
-                    hits.fetch_add(1, std::memory_order_relaxed);
-                    bytesRead.fetch_add(file.size(), std::memory_order_relaxed);
-                    loaded = true;
-                    break;
-                case LoadStatus::Absent:
-                case LoadStatus::KeyMismatch:
-                    misses.fetch_add(1, std::memory_order_relaxed);
-                    break;
-                case LoadStatus::Rejected: {
-                    const auto failures = loadFailures.fetch_add(1, std::memory_order_relaxed);
-                    if (failures < 8) std::fprintf(stderr, "[shader-disk-cache] rejected %s (%zu bytes): truncated, corrupt or another format; recompiling\n", name.c_str(), file.size());
-                    break;
-                }
-            }
+        PackLoadTimings timing;
+        const auto elapsed = [](auto start) { return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start).count()); };
+        for (const auto& pack : packs) {
+            const auto status = pack->Load(key, variant, timing);
+            if (status == LoadStatus::Loaded) { loaded = true; break; }
+            if (status == LoadStatus::Rejected) prebuiltRejected.fetch_add(1, std::memory_order_relaxed);
         }
+        lookupNanoseconds.fetch_add(timing.lookupNanoseconds, std::memory_order_relaxed);
+        readNanoseconds.fetch_add(timing.readNanoseconds, std::memory_order_relaxed);
+        decodeNanoseconds.fetch_add(timing.decodeNanoseconds, std::memory_order_relaxed);
+        bytesRead.fetch_add(timing.bytes, std::memory_order_relaxed);
+        std::string name;
+        if (!loaded) name = EntryName(key);
+        const auto loadFile = [&](const std::filesystem::path& base, bool prebuilt) {
+            const auto start = std::chrono::steady_clock::now();
+            const auto read = ReadWholeFile(base / name, file);
+            readNanoseconds.fetch_add(elapsed(start), std::memory_order_relaxed);
+            if (!read) return false;
+            const auto decode = std::chrono::steady_clock::now();
+            const auto status = DecodeEntry(file, key, variant);
+            decodeNanoseconds.fetch_add(elapsed(decode), std::memory_order_relaxed);
+            bytesRead.fetch_add(file.size(), std::memory_order_relaxed);
+            if (status == LoadStatus::Rejected) {
+                const auto failures = loadFailures.fetch_add(1, std::memory_order_relaxed);
+                if (prebuilt) prebuiltRejected.fetch_add(1, std::memory_order_relaxed);
+                if (failures < 8) std::fprintf(stderr, "[shader-disk-cache] rejected %s (%zu bytes): truncated, corrupt or another format; recompiling\n", name.c_str(), file.size());
+            }
+            return status == LoadStatus::Loaded;
+        };
+        for (const auto& path : looseDirectories) {
+            if (loaded) break;
+            loaded = loadFile(path, true);
+        }
+        if (!packs.empty() || !looseDirectories.empty()) {
+            if (loaded) {
+                const auto previous = prebuiltHits.fetch_add(1, std::memory_order_relaxed);
+                if (previous == 0) std::fprintf(stderr, "[shader-prebuilt] first exact-key hit loaded in %.3f ms\n", elapsed(started) / 1e6);
+            } else prebuiltMisses.fetch_add(1, std::memory_order_relaxed);
+        }
+        if (!loaded) loaded = loadFile(directory, false);
+        (loaded ? hits : misses).fetch_add(1, std::memory_order_relaxed);
         if (file.capacity() > (4u << 20u)) std::vector<std::byte>().swap(file);
-        loadNanoseconds.fetch_add(static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - started).count()), std::memory_order_relaxed);
+        const auto duration = elapsed(started);
+        loadNanoseconds.fetch_add(duration, std::memory_order_relaxed);
+        auto maximum = maxLoadNanoseconds.load(std::memory_order_relaxed);
+        while (maximum < duration && !maxLoadNanoseconds.compare_exchange_weak(maximum, duration, std::memory_order_relaxed)) {}
         report(false);
         return loaded;
     }
@@ -784,10 +809,50 @@ public:
         counters.writeFailures = writeFailures.load(std::memory_order_relaxed);
         counters.bytesRead = bytesRead.load(std::memory_order_relaxed);
         counters.bytesWritten = bytesWritten.load(std::memory_order_relaxed);
+        counters.prebuiltHits = prebuiltHits.load(std::memory_order_relaxed);
+        counters.prebuiltMisses = prebuiltMisses.load(std::memory_order_relaxed);
+        counters.prebuiltRejected = prebuiltRejected.load(std::memory_order_relaxed);
+        counters.lookupNanoseconds = lookupNanoseconds.load(std::memory_order_relaxed);
+        counters.readNanoseconds = readNanoseconds.load(std::memory_order_relaxed);
+        counters.decodeNanoseconds = decodeNanoseconds.load(std::memory_order_relaxed);
+        counters.loadNanoseconds = loadNanoseconds.load(std::memory_order_relaxed);
+        counters.maxLoadNanoseconds = maxLoadNanoseconds.load(std::memory_order_relaxed);
         return counters;
     }
 
 private:
+    void discoverPrebuilt() {
+        const auto start = std::chrono::steady_clock::now();
+        std::size_t entries = 0;
+        const auto addPack = [&](const std::filesystem::path& path) {
+            auto pack = std::make_unique<CachePack>(path);
+            if (!pack->Valid()) {
+                std::fprintf(stderr, "[shader-prebuilt] ignored %s: %s\n", path.string().c_str(), pack->Error().c_str());
+                return;
+            }
+            entries += pack->Count();
+            packs.push_back(std::move(pack));
+        };
+        for (const auto& path : PrebuiltCachePaths(root)) {
+            std::error_code error;
+            if (std::filesystem::is_regular_file(path, error)) { addPack(path); continue; }
+            if (!std::filesystem::is_directory(path, error)) continue;
+            bool loose = false;
+            std::vector<std::filesystem::path> packPaths;
+            for (std::filesystem::directory_iterator it(path, error), end; !error && it != end; it.increment(error)) {
+                const auto extension = it->path().extension();
+                if (extension == ".pack") packPaths.push_back(it->path());
+                if (extension == ".bin" && it->path().stem().string().size() == 32) loose = true;
+            }
+            std::sort(packPaths.begin(), packPaths.end());
+            for (const auto& item : packPaths) addPack(item);
+            if (loose) looseDirectories.push_back(path);
+            const auto versioned = path / hex(SourceVersion());
+            if (std::filesystem::is_directory(versioned, error)) looseDirectories.push_back(versioned);
+        }
+        if (!packs.empty() || !looseDirectories.empty()) std::fprintf(stderr, "[shader-prebuilt] mapped %zu packs, %zu entries, %zu loose folders in %.3f ms; exact source/ABI/request keys required\n", packs.size(), entries, looseDirectories.size(), std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count());
+    }
+
     struct Job {
         std::vector<std::byte> key;
         std::shared_ptr<const CompiledVariant> variant;
@@ -874,18 +939,25 @@ private:
                      delta(totals.hits, reported.hits), delta(totals.misses, reported.misses), delta(totals.writes, reported.writes), static_cast<double>(totals.bytesWritten - reported.bytesWritten) / (1024.0 * 1024.0),
                      delta(totals.loadFailures, reported.loadFailures), delta(totals.writeFailures, reported.writeFailures), static_cast<double>(totals.bytesRead - reported.bytesRead) / (1024.0 * 1024.0), static_cast<double>(loadNs - reportedLoadNs) / 1e6,
                      static_cast<unsigned long long>(totals.hits), static_cast<unsigned long long>(totals.misses), static_cast<unsigned long long>(totals.writes));
+        if (!packs.empty() || !looseDirectories.empty()) std::fprintf(stderr, "[shader-prebuilt] interval: %llu hits, %llu misses, %llu rejected; lookup %.3f ms, file read %.3f ms, decode %.3f ms; total load %.3f ms, max %.3f ms (lifetime hits %llu)\n",
+                     delta(totals.prebuiltHits, reported.prebuiltHits), delta(totals.prebuiltMisses, reported.prebuiltMisses), delta(totals.prebuiltRejected, reported.prebuiltRejected),
+                     (totals.lookupNanoseconds - reported.lookupNanoseconds) / 1e6, (totals.readNanoseconds - reported.readNanoseconds) / 1e6, (totals.decodeNanoseconds - reported.decodeNanoseconds) / 1e6,
+                     (totals.loadNanoseconds - reported.loadNanoseconds) / 1e6, totals.maxLoadNanoseconds / 1e6, static_cast<unsigned long long>(totals.prebuiltHits));
         reported = totals;
         reportedLoadNs = loadNs;
     }
 
     std::filesystem::path root;
     std::filesystem::path directory;
+    std::vector<std::unique_ptr<CachePack>> packs;
+    std::vector<std::filesystem::path> looseDirectories;
     std::mutex mutex;
     std::condition_variable wake;
     std::condition_variable idle;
     std::deque<Job> jobs;
     bool writing = false;
     std::atomic<std::uint64_t> hits{0}, misses{0}, writes{0}, loadFailures{0}, writeFailures{0}, bytesRead{0}, bytesWritten{0}, loadNanoseconds{0};
+    std::atomic<std::uint64_t> prebuiltHits{0}, prebuiltMisses{0}, prebuiltRejected{0}, lookupNanoseconds{0}, readNanoseconds{0}, decodeNanoseconds{0}, maxLoadNanoseconds{0};
     std::atomic<std::int64_t> lastReport{0};
     std::mutex reportMutex;
     Counters reported;
@@ -956,6 +1028,25 @@ std::vector<std::byte> EncodeEntry(std::span<const std::byte> key, const Compile
     std::memcpy(file.data() + sizeof(header), key.data(), key.size());
     std::memcpy(file.data() + sizeof(header) + key.size(), payload.data(), payload.size());
     return file;
+}
+
+std::span<const std::byte> EntryKey(std::span<const std::byte> file) {
+    if (file.size() < sizeof(FileHeader)) return {};
+    FileHeader header;
+    std::memcpy(&header, file.data(), sizeof(header));
+    if (header.magic != FileMagic || header.format != FormatVersion || header.sourceVersion != SourceVersion()) return {};
+    const auto body = file.size() - sizeof(header);
+    if (header.keyBytes == 0 || header.keyBytes > body || header.payloadBytes != body - header.keyBytes) return {};
+    const auto key = file.subspan(sizeof(header), header.keyBytes);
+    return HashBytes(key) == header.keyHash ? key : std::span<const std::byte>{};
+}
+
+bool IsCurrentEntryHeader(std::span<const std::byte> bytes, std::uint64_t fileBytes) {
+    if (bytes.size() < sizeof(FileHeader) || fileBytes < sizeof(FileHeader)) return false;
+    FileHeader header;
+    std::memcpy(&header, bytes.data(), sizeof(header));
+    const auto body = fileBytes - sizeof(header);
+    return header.magic == FileMagic && header.format == FormatVersion && header.sourceVersion == SourceVersion() && header.keyBytes > 0 && header.keyBytes <= body && header.payloadBytes == body - header.keyBytes;
 }
 
 LoadStatus DecodeEntry(std::span<const std::byte> file, std::span<const std::byte> key, CompiledVariant& variant) {
