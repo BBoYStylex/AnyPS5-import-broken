@@ -16,7 +16,7 @@ struct Binding {
 using BoundaryObserver = void (*)(const char*, const NativeAotGuestState&);
 void Register(std::span<const Binding> bindings);
 void SetBoundaryObserver(BoundaryObserver observer);
-std::uint64_t InvokeCallback(std::uint64_t target, std::uint64_t argument = 0);
+std::uint64_t InvokeCallback(std::uint64_t target, std::uint64_t argument = 0, std::uint64_t second = 0);
 
 }
 

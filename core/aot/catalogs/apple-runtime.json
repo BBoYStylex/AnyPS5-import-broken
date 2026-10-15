@@ -421,17 +421,17 @@
             }
           ],
           "callbacks": false,
-          "evidence": "Reviewed AnyPS5 wrapper delegates directly to host std::memset. Valid C objects and, for memcpy, nonoverlap are caller preconditions. Host libc binding uses the same LP64 signature."
+          "evidence": "Reviewed AnyPS5 wrapper delegates directly to host std::memset. Valid C objects and, for memcpy, nonoverlap are caller preconditions. Host libc binding uses the same LP64 signature. Rechecked after ARM64 x87-export exclusion: the complete memcpy and memset definitions, LP64 signatures and memory effects are unchanged."
         }
       },
       "sources": [
         {
           "path": "core/libs/prx/libc/src/Strings.cpp",
-          "sha256": "3bbf865de2e7ce8f657f17f18b56ba834735eb84f11967200bada10c5a07e222",
+          "sha256": "258c5e4c89c755124a2f0993b14a17560a2278aed1ef3bc3bcaf99d79b0a8be1",
           "excerpt": "return std::memset(s, c, n);"
         }
       ],
-      "facts_sha256": "ee18dd2f077255fa6c1ea1d2f8a4d50be235e6fc2f9f5f4ff86420e1f49f16ff"
+      "facts_sha256": "e4fdd775cd9eb50864559e4bab1d342d59e5aa38d40749adc3579124ac602bec"
     },
     {
       "identity": {
@@ -457,17 +457,17 @@
             }
           ],
           "callbacks": false,
-          "evidence": "Reviewed AnyPS5 wrapper delegates directly to host std::memcpy. Valid C objects and, for memcpy, nonoverlap are caller preconditions. Host libc binding uses the same LP64 signature."
+          "evidence": "Reviewed AnyPS5 wrapper delegates directly to host std::memcpy. Valid C objects and, for memcpy, nonoverlap are caller preconditions. Host libc binding uses the same LP64 signature. Rechecked after ARM64 x87-export exclusion: the complete memcpy and memset definitions, LP64 signatures and memory effects are unchanged."
         }
       },
       "sources": [
         {
           "path": "core/libs/prx/libc/src/Strings.cpp",
-          "sha256": "3bbf865de2e7ce8f657f17f18b56ba834735eb84f11967200bada10c5a07e222",
+          "sha256": "258c5e4c89c755124a2f0993b14a17560a2278aed1ef3bc3bcaf99d79b0a8be1",
           "excerpt": "return std::memcpy(dest, src, n);"
         }
       ],
-      "facts_sha256": "2bd242babfc81000f4a3f9ab38df9d40e4404436b1706081369c011d83fbd8ad"
+      "facts_sha256": "b3c70e4f54f20f5ade90b48927f7697be3f914917faa9cc510d1adca82b38ae4"
     },
     {
       "identity": {

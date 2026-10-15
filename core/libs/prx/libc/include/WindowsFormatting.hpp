@@ -66,6 +66,9 @@ private:
                 args.overflow_arg_area = static_cast<char*>(args.overflow_arg_area) + 8;
             }
         } else if constexpr (std::is_same_v<T, long double>) {
+#if defined(__aarch64__)
+            throw std::invalid_argument("x87 extended format arguments require a qualified conversion");
+#endif
             const auto aligned = (reinterpret_cast<std::uintptr_t>(args.overflow_arg_area) + 15) & ~std::uintptr_t(15);
             address = reinterpret_cast<const void*>(aligned);
             args.overflow_arg_area = reinterpret_cast<void*>(aligned + 16);
@@ -339,11 +342,15 @@ inline int FormatWindows(char* buffer, size_t size, const char* format, const vo
         } else if (std::strchr("aAeEfFgG", conversion)) {
             const char* nan = conversion >= 'a' ? "nan" : "NAN";
             if (length == "L") {
+#if defined(__aarch64__)
+                throw std::invalid_argument("x87 extended formatting is not qualified on ARM64");
+#else
                 static_assert(sizeof(long double) == 16);
                 static_assert(std::numeric_limits<long double>::digits == 64);
                 const long double value = args.Next<long double>();
                 if (std::isnan(value)) output.Value(NanSpec(spec), nan);
                 else output.Value(spec + "L" + conversion, value);
+#endif
             } else {
                 if (!length.empty() && length != "l") throw std::invalid_argument("Invalid floating length");
                 const double value = args.Next<double>();

@@ -458,6 +458,55 @@ for the supplied PRX is linked. The shim's many exports are aliases and metadata
 not a complete third-party C library. System functions come from AnyPS5 providers.
 
 
+### Original DOOM package on Apple ARM64
+
+The `doom` consumer uses [lowbit/ps5-doom v1.1.1](https://github.com/lowbit/ps5-doom/releases/tag/v1.1.1),
+PPSA99666, and its supplied libc module. Keep the release package, source and
+reference captures outside this repository. Extract the original SELF files as
+for `original_sce`; `doom/build.py` checks both ELF identities. It does not
+substitute a source-built game for the original executable.
+
+Use source commit `ba6e305bd315828c0980ff93eb54e35c8ebf397b` for the reference and capture-addressing header.
+The manifest pins the shareware `doom1.wad`, six reference frames and the consumed
+provider definitions. Changed inputs or provider sources require review; do not
+update identities without requalifying their contracts.
+
+```sh
+cmake -S . -B /path/native-build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 -DANYPS5_NATIVE_AOT=ON -DANYPS5_NATIVE_GRAPHICS=ON -DBUILD_TESTING=OFF
+python3 core/aot/examples/doom/build.py --app /path/eboot.elf --module /path/libc.elf --build-root /path/native-build --output /path/doom-artifacts
+cmake --build /path/native-build --target native_sce_crt_tests native_audio_shutdown_tests
+ctest --test-dir /path/native-build -R 'native_(sce_crt|audio_shutdown)$' --output-on-failure
+```
+
+Build the pinned external source's `host` target. For each of `demo1`, `demo2`
+and `demo3`, create `/path/references/DEMO` and run the host executable with
+`DOOM_WADDIR=/path/PPSA99666/wads`, `DOOM_OUT=/path/references/DEMO`,
+`DOOM_CAPTURE=120,900` and arguments `-timedemo DEMO`. The source reference exits
+1 at timedemo completion; check its log and generated captures. The verifier
+requires the exact qualified raw reference hashes, not only that exit code.
+Do not enable source-reference audio or compare its timing with the full runtime.
+
+Set `SDL_VULKAN_LIBRARY`, `VK_ICD_FILENAMES` and the loader search path as for the
+cube check. Then run:
+
+```sh
+python3 core/aot/examples/doom/verify.py --binary /path/doom-artifacts/doom --package /path/PPSA99666 --source-root /path/ps5-doom --references /path/references --output /path/doom-verification
+```
+
+The verifier copies the package into fresh run directories and selects its
+existing CPU scaler and capture server. It receives captures over localhost,
+checks 5,026/3,836/2,134 gametics, six exact 1920x1080 RGB images, native execution,
+module finalization and Vulkan teardown. Alpha is excluded. The original PS5
+exit path logs status 1 then requests system-service exit, yielding host status 0.
+Each replay has a 180-second laboratory deadline; these are manual integration
+checks, not a CTest job or a performance benchmark. The title's capture server
+binds its selected port for the duration of each run.
+
+This qualifies the recorded demos with the CPU scaler. AGC presentation, other
+WADs, real controller input, AudioOut2 teardown and native-source performance
+remain separate work. The runtime's ordered memory and guarded instruction
+profile remain active; unknown callable ABIs and nonfinite scalar FMA reject.
+
 ### Reproduce standalone consumer builds and measurements
 
 `LIBCAPSTONE_PATH=/path/build/core/aot/capstone python3 core/aot/examples/guest_build.py input.elf /path/fresh-output --name app` builds an ARM64-only Mach-O executable and a receipt with input, compiler/runtime and executable identities. The default profile is ordered; `--profile single` rejects worker creation, while `--profile epochs` enables checked monotonic promotion. Add `--optimize-calls` and optionally `--thin-lto` for the qualified call experiment. `--seal-image` additionally requires the epochs profile. This helper links the native TLS implementation required by descriptor v9. Conversion is offline; the distributed executable contains no x86 decoder, interpreter or JIT.
