@@ -33,6 +33,7 @@ std::optional<DrawVerdict> Driver::precheckDraw(const QueueState& queue, const S
     if (!metadata) expand = Graphics::DecodeDepthExpandPass(queue);
     if (metadata || expand) {
         require(!metadata || !drawParameters.indirect, "indirect CB metadata passes are unsupported");
+        if (expand && !drawParameters.indirect && (drawParameters.indexCount == 0 || drawParameters.instanceCount == 0)) return DrawVerdict::Nothing;
         if (DrawPipeline::Active()) DrawPipeline::Queue0().Drain(DrawPipeline::DrainReason::Packet, (packet[0] >> 8u) & 0xffu);
         if (expand && drawParameters.indirect) {
             recordQueuedLabelsBeforeRead(submission.queue);

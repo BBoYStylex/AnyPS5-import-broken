@@ -56,6 +56,8 @@ constexpr std::uint32_t DrawIndexIndirect = 0x25u;
 constexpr std::uint32_t IndexBase = 0x26u;
 constexpr std::uint32_t IndexType = 0x2au;
 constexpr std::uint32_t DrawIndexAuto = 0x2du;
+constexpr std::uint32_t DrawIndex2 = 0x27u;
+constexpr std::uint32_t NumInstances = 0x2fu;
 constexpr std::uint32_t DispatchDirect = 0x15u;
 constexpr std::size_t Block = 65536;
 constexpr std::uint32_t CompressDisable = 0x60u;
@@ -262,6 +264,8 @@ struct Launch {
     std::uint32_t opcode = DrawIndexAuto;
     std::uint64_t record = 0;
     std::uint64_t indices = 0;
+    std::uint32_t count = 3;
+    std::uint32_t instances = 1;
 };
 
 std::vector<std::uint32_t> DepthDraw(const Surfaces& surfaces, bool expand, bool twoSamples, const Launch& launch = {}, float clearDepth = 1.0f, const Triangle& vertices = Vertices) {
@@ -300,8 +304,14 @@ std::vector<std::uint32_t> DepthDraw(const Surfaces& surfaces, bool expand, bool
     const auto address = Address(vertices.data());
     const std::array<std::uint32_t, 4> descriptor{static_cast<std::uint32_t>(address), static_cast<std::uint32_t>((address >> 32u) & 0xffffu) | (16u << 16u), static_cast<std::uint32_t>(vertices.size()), 0x01016facu};
     for (std::uint32_t i = 0; i < descriptor.size(); ++i) SetRegister(words, SetShReg, 0x08c + i, descriptor[i]);
+    words.insert(words.end(), {0xc0000000u | (NumInstances << 8u), launch.instances});
     if (launch.opcode == DrawIndexAuto) {
         words.insert(words.end(), {0xc0000000u | (1u << 16u) | (DrawIndexAuto << 8u), static_cast<std::uint32_t>(Vertices.size()), 2u});
+        return words;
+    }
+    if (launch.opcode == DrawIndex2) {
+        words.insert(words.end(), {0xc0000000u | (IndexType << 8u), 1u});
+        words.insert(words.end(), {0xc0000000u | (4u << 16u) | (DrawIndex2 << 8u), static_cast<std::uint32_t>(Vertices.size()), static_cast<std::uint32_t>(launch.indices), static_cast<std::uint32_t>(launch.indices >> 32u), launch.count, 0u});
         return words;
     }
     words.insert(words.end(), {0xc0000000u | (2u << 16u) | (SetIndirectBase << 8u), 1u, static_cast<std::uint32_t>(launch.record), static_cast<std::uint32_t>(launch.record >> 32u)});
@@ -532,6 +542,35 @@ bool RunEmptyIndirect(TexelReader& reader) {
     const auto words = static_cast<std::uint32_t>(raw.size() / sizeof(std::uint32_t));
     std::printf("  raw read of the write base after a flush: %u of %u dwords hold what the CPU wrote (%s)\n", kept, words, Hex(CpuWritten).c_str());
     return kept == words;
+}
+
+bool RunDirectIndexed(TexelReader& reader) {
+    const auto name = std::string("the game's expand as DRAW_INDEX_2");
+    auto* indices = NewBlock(Block);
+    const std::array<std::uint32_t, 3> triangle{0u, 1u, 2u};
+    std::memcpy(indices, triangle.data(), sizeof(triangle));
+    bool kept = true;
+    for (const auto& [count, instances] : {std::pair{0u, 1u}, {3u, 0u}}) {
+        const auto surfaces = NewSurfaces();
+        Fill(surfaces.written, PlaneBytes(), CpuWritten);
+        Submit(DepthDraw(surfaces, false, false), name + ": depth draw at the read base");
+        Submit(DepthDraw(surfaces, true, true, {DrawIndex2, 0u, Address(indices), count, instances}), name + ": DB expand of " + std::to_string(count) + " indices and " + std::to_string(instances) + " instances");
+        const auto raw = GuestBytes(surfaces.written, PlaneBytes());
+        std::uint32_t untouched = 0;
+        for (std::size_t at = 0; at < raw.size(); at += sizeof(std::uint32_t)) {
+            std::uint32_t word = 0;
+            std::memcpy(&word, raw.data() + at, sizeof(word));
+            if (word == CpuWritten) ++untouched;
+        }
+        const auto words = static_cast<std::uint32_t>(raw.size() / sizeof(std::uint32_t));
+        std::printf("%s with %u indices and %u instances: %u of %u dwords of the write base hold what the CPU wrote\n", name.c_str(), count, instances, untouched, words);
+        kept = kept && untouched == words;
+    }
+    const auto surfaces = NewSurfaces();
+    std::printf("%s of three indices: read base 0x%llx, write base 0x%llx\n", name.c_str(), static_cast<unsigned long long>(surfaces.depth), static_cast<unsigned long long>(surfaces.written));
+    Submit(DepthDraw(surfaces, false, false), name + ": depth draw at the read base");
+    Submit(DepthDraw(surfaces, true, true, {DrawIndex2, 0u, Address(indices)}), name + ": DB expand of three indices");
+    return Expanded(reader, surfaces.written, DrawnDepth(reader, surfaces, name), name) && kept;
 }
 
 bool RunClearedReadBase(TexelReader& reader) {
@@ -768,6 +807,7 @@ int main(int argc, char** argv) {
             {"draw-indirect", [](TexelReader& reader) { return RunIndirect(reader, DrawIndirect); }, "depth expand: the write base does not hold the read surface's depth after the DB expand as DRAW_INDIRECT"},
             {"draw-index-indirect", [](TexelReader& reader) { return RunIndirect(reader, DrawIndexIndirect); }, "depth expand: the write base does not hold the read surface's depth after the DB expand as DRAW_INDEX_INDIRECT"},
             {"empty-indirect", RunEmptyIndirect, "depth expand: an indirect DB expand whose record draws nothing changed the write base"},
+            {"direct-indexed", RunDirectIndexed, "depth expand: a DRAW_INDEX_2 DB expand of no indices or no instances changed the write base, or one of three indices did not expand"},
             {"cleared-read-base", RunClearedReadBase, "depth expand: the write base does not hold DB_DEPTH_CLEAR after the DB expand of an HTILE-cleared read base without a depth surface"},
             {"guest-read-base", RunGuestReadBase, "depth expand: the write base does not hold the read base's guest bytes after the DB expand of a read base without a depth surface"},
             {"buffer-read", [](TexelReader& reader) { return RunBufferRead(reader, false); }, "depth expand: a buffer copy of the write base right after the DB expand does not hold the read surface's depth"},
