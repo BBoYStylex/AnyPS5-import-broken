@@ -2067,6 +2067,10 @@ void recordDraw(const Context& context, const State& state, const Pm4::DrawParam
         const auto fragmentSet = drawBindings->fragmentAllocation.set;
         if (set != VK_NULL_HANDLE) context.Resolved(&DeviceFunctions::cmdBindDescriptorSets, "vkCmdBindDescriptorSets")(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, record.pipeline->Layout(), 0, 1, &set, 0, nullptr);
         if (fragmentSet != VK_NULL_HANDLE) context.Resolved(&DeviceFunctions::cmdBindDescriptorSets, "vkCmdBindDescriptorSets")(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, record.pipeline->Layout(), ShaderRecompiler::RuntimeAbi::FragmentDescriptorSet, 1, &fragmentSet, 0, nullptr);
+        static const bool reuseDescSets = std::getenv("APS5_DESC_SET_REUSE") != nullptr;
+        if (reuseDescSets) {
+            context.descSetCache.noteBind(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, record.pipeline->Layout(), set, fragmentSet);
+        }
     } else {
         resources.Bind(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, record.pipeline->Layout());
     }

@@ -2875,12 +2875,23 @@ DescriptorCache::SetAllocation DescriptorCache::Allocate(VkDescriptorSetLayout l
 }
 
 void DescriptorCache::Free(const SetAllocation& allocation) noexcept {
-    if (context.descSetCache.valid) context.descSetCache.reset();
+    std::lock_guard lock(mutex);
     if (const auto found = std::find(dedicated.begin(), dedicated.end(), allocation.pool); found != dedicated.end()) {
         dedicated.erase(found);
         destroyPool(context.device, allocation.pool, nullptr);
-        return;
+    } else {
+        auto& chain = allocation.updateAfterBind ? updateAfterBindPools : pools;
+        if (allocation.poolIndex < chain.size()) {
+            auto& pool = chain[allocation.poolIndex];
+            if (pool.handle == allocation.pool && pool.liveSets > 0) {
+                if (--pool.liveSets == 0) {
+                    if (resetPool(context.device, pool.handle, 0) != VK_SUCCESS) std::terminate();
+                    pool.exhausted = false;
+                }
+            }
+        }
     }
+    if (context.descSetCache.valid) context.descSetCache.reset();
 }
 
 DescriptorCache::Stats DescriptorCache::Counters() const {
