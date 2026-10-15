@@ -154,6 +154,22 @@ std::uint8_t* NewBlock(std::size_t bytes) {
     return block;
 }
 
+std::uint8_t* NewIsolatedBlock(std::size_t bytes) {
+    const auto span = bytes + 3u * Block;
+#ifdef _WIN32
+    auto* raw = static_cast<std::uint8_t*>(VirtualAlloc(nullptr, span, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
+    Require(raw != nullptr, "depth expand: cannot allocate an isolated guest block");
+#else
+    void* mapped = mmap(nullptr, span, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    Require(mapped != MAP_FAILED, "depth expand: cannot map an isolated guest block");
+    auto* raw = static_cast<std::uint8_t*>(mapped);
+#endif
+    auto* block = reinterpret_cast<std::uint8_t*>((reinterpret_cast<std::uintptr_t>(raw) + 2u * Block - 1u) & ~std::uintptr_t{Block - 1});
+    std::memset(block, 0, bytes);
+    GuestAllocations::Mutation().Add(block, bytes, true, true, true);
+    return block;
+}
+
 std::uint8_t* NewSplitBlock(std::size_t first, std::size_t second) {
     auto* block = AllocateBlock(first + second);
     GuestAllocations::Mutation().Add(block, first, true, true, true);
@@ -703,6 +719,36 @@ bool RunStorageImageRead(TexelReader& reader) {
     return copied && (cached != 0 || !AddressSpaceCounters().enabled);
 }
 
+bool RunStoreWithoutImportRoom(TexelReader& reader) {
+    const auto name = std::string("a pointer copy of a write base after an address-based copy with no room for its import");
+    struct Restore {
+        ~Restore() { SetHostImportBudget(0); }
+    } restore;
+    auto surfaces = NewSurfaces();
+    const auto scratch = Address(NewBlock(Block));
+    const auto copy = Address(NewBlock(PlaneBytes()));
+    Fill(copy, PlaneBytes(), 0xffffffffu);
+    reader.CopyBuffer(scratch, scratch + Block / 2, static_cast<std::uint32_t>(Block / 2), true, name + ": an address-based copy that imports the registered blocks");
+    Submit(DepthDraw(surfaces, false, false), name + ": depth draw at the read base");
+    SetHostImportBudget(1);
+    surfaces.written = Address(NewIsolatedBlock(PlaneBytes()));
+    std::printf("%s: read base 0x%llx, write base 0x%llx registered with no room for imports, copy at 0x%llx\n", name.c_str(), static_cast<unsigned long long>(surfaces.depth), static_cast<unsigned long long>(surfaces.written), static_cast<unsigned long long>(copy));
+    Submit(DepthDraw(surfaces, true, true), name + ": DB expand from the read base to the write base");
+    const auto live = HostImportLiveBytes();
+    const auto dissolvedBefore = AddressSpaceCounters().dissolvedImports;
+    const auto before = DepthExpandCounts().stored;
+    reader.CopyBuffer(scratch, scratch + Block / 2, static_cast<std::uint32_t>(Block / 2), true, name + ": an address-based copy that does not read the write base");
+    const auto stored = DepthExpandCounts().stored - before;
+    const auto dissolved = AddressSpaceCounters().dissolvedImports - dissolvedBefore;
+    const auto imported = HostImportLiveBytes() > live;
+    SetHostImportBudget(0);
+    reader.CopyThroughPointer(surfaces.written, copy, static_cast<std::uint32_t>(PlaneBytes()), name + ": pointer copy of the write base");
+    std::printf("  the copy that does not read the write base: %llu expanded planes stored, %llu address spaces dissolved by retired imports, imports %s (expected 0, 0 and none made)\n", static_cast<unsigned long long>(stored), static_cast<unsigned long long>(dissolved), imported ? "made" : "none made");
+    const auto depth = DrawnDepth(reader, surfaces, name);
+    const bool copied = Compare(DetileRaw(surfaces.written, GuestBytes(copy, PlaneBytes())), depth, "  pointer copy of the write base, detiled with the SW_64KB_Z_X equation") == Texels;
+    return copied && stored == 0 && dissolved == 0 && !imported;
+}
+
 struct Case {
     const char* name;
     std::function<bool(TexelReader&)> run;
@@ -734,6 +780,7 @@ int main(int argc, char** argv) {
             {"split-copied-buffer-read", [](TexelReader& reader) { return RunSplitRead(reader, SecondHalf::Copied, false); }, "depth expand: address-based buffer copies of a write base imported in part and copied in part do not hold the read surface's depth"},
             {"repeated-expand", RunRepeatedExpand, "depth expand: a repeated DB expand wrote the plane when nothing changed, or did not write it after a change"},
             {"address-based-storage-image-read", RunStorageImageRead, "depth expand: an address-based buffer copy of an image did not hold what a compute shader stored to it, or no copy went through the cached address space"},
+            {"store-without-import-room", RunStoreWithoutImportRoom, "depth expand: an address-based build with no room for the write base's import stored or imported something for it, or a later pointer copy did not hold the read surface's depth"},
         };
         const std::string_view only = argc == 2 ? std::string_view(argv[1]) : std::string_view();
         Require(argc <= 2 && (only.empty() || std::any_of(cases.begin(), cases.end(), [&](const Case& entry) { return only == entry.name; })), "usage: [case name]");

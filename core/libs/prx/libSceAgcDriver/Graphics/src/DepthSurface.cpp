@@ -1465,10 +1465,18 @@ void StoreDepthExpandWrites(const Context& context) {
             entry = unstored.erase(entry);
         }
     }
+    std::vector<std::pair<std::uint64_t, std::size_t>> kept;
     for (const auto& [address, bytes] : planes) {
-        if (HostImportFor(context, address, bytes) == nullptr && !HostImportOverlaps(context, address, bytes)) continue;
+        if (!HostImportOverlaps(context, address, bytes)) {
+            const std::array<std::pair<std::uint64_t, std::uint64_t>, 1> range{{{address, address + bytes}}};
+            if (StorageTexture::AnyPendingOverlaps(range)) kept.emplace_back(address, bytes);
+            continue;
+        }
         if (StorageTexture::FlushPending(address, bytes, nullptr, "DB expand")) expandsStored.fetch_add(1, std::memory_order_relaxed);
     }
+    if (kept.empty()) return;
+    std::lock_guard lock(surfacesMutex());
+    for (const auto& [address, bytes] : kept) unstoredExpands().try_emplace({context.device, address}, bytes);
 }
 
 DepthExpandStatistics DepthExpandCounts() {
