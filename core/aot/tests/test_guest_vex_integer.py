@@ -88,7 +88,8 @@ class VexIntegerTests(unittest.TestCase):
         self.binary_cases(['vpaddd', 'vpcmpgtq', 'vpminsd'])
 
     def test_evex_masks_are_rejected(self):
-        for instruction in ('vpaddd xmm0 {k1}, xmm1, xmm2', 'vpaddd ymm0 {k1}{z}, ymm1, ymm2'):
+        for instruction in ('vpaddd xmm0 {k1}, xmm1, xmm2', 'vpaddd ymm0 {k1}{z}, ymm1, ymm2',
+                            'vmovups xmm0 {k1}, xmm1', 'vmovups ymm0 {k1}{z}, ymm1'):
             with self.subTest(instruction=instruction), guest_lab.lab_directory() as directory:
                 with self.assertRaisesRegex(ValueError, 'only unmasked VEX encodings'):
                     guest_lab.Lab(directory).lifted_binary([{'asm': [instruction]}])

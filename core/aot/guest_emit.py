@@ -499,6 +499,8 @@ class Lowering(Vector):
         if self.unit.program.abi != 'glibc' and any(operand.type == X86_OP_MEM and ins.reg_name(operand.mem.segment) in ('fs', 'gs') for operand in ins.operands):
             self.unsupported('SCE static TLS addressing requires a separate host ABI')
         mnemonic = ins.mnemonic
+        if mnemonic.startswith('v') and ins.bytes[0] == 0x62:
+            self.unsupported('only unmasked VEX encodings are qualified')
         if mnemonic in ('call', 'ret', 'jmp', 'hlt', 'ud2', 'int3') or (mnemonic.startswith('j') and mnemonic[1:]):
             self.control(ins)
             return
