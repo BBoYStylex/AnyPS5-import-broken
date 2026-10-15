@@ -150,11 +150,16 @@ struct Context {
     SamplerCache* samplerCache = nullptr;
     // Descriptor set cache for reuse optimization (APS5_DESC_SET_REUSE=1)
     struct DescriptorSetCache {
+        VkCommandBuffer lastCommandBuffer = VK_NULL_HANDLE;
+        VkPipelineBindPoint lastBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
         VkPipelineLayout lastLayout = VK_NULL_HANDLE;
         VkDescriptorSet lastSet0 = VK_NULL_HANDLE;
         VkDescriptorSet lastSet1 = VK_NULL_HANDLE;
         bool valid = false;
-        void reset() { lastLayout = VK_NULL_HANDLE; lastSet0 = VK_NULL_HANDLE; lastSet1 = VK_NULL_HANDLE; valid = false; }
+        void reset() { lastCommandBuffer = VK_NULL_HANDLE; lastBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS; lastLayout = VK_NULL_HANDLE; lastSet0 = VK_NULL_HANDLE; lastSet1 = VK_NULL_HANDLE; valid = false; }
+        void noteBind(VkCommandBuffer cb, VkPipelineBindPoint bp, VkPipelineLayout layout, VkDescriptorSet set0, VkDescriptorSet set1) {
+            lastCommandBuffer = cb; lastBindPoint = bp; lastLayout = layout; lastSet0 = set0; lastSet1 = set1; valid = true;
+        }
     };
     mutable DescriptorSetCache descSetCache;
     // Indirect draw features of the device: records with a non-zero first instance, several records

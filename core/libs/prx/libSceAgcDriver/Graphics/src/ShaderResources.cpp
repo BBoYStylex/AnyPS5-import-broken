@@ -2768,6 +2768,7 @@ ResourceCache& SharedResourceCache() {
 DescriptorCache::DescriptorCache(const Context& context) : context(context), destroyLayout(context.Function<PFN_vkDestroyDescriptorSetLayout>("vkDestroyDescriptorSetLayout")), destroyPool(context.Function<PFN_vkDestroyDescriptorPool>("vkDestroyDescriptorPool")), resetPool(context.Function<PFN_vkResetDescriptorPool>("vkResetDescriptorPool")) {}
 
 DescriptorCache::~DescriptorCache() {
+    if (context.descSetCache.valid) context.descSetCache.reset();
     for (const auto& pool : pools) destroyPool(context.device, pool.handle, nullptr);
     for (const auto& pool : updateAfterBindPools) destroyPool(context.device, pool.handle, nullptr);
     for (const auto pool : dedicated) destroyPool(context.device, pool, nullptr);
@@ -2874,20 +2875,12 @@ DescriptorCache::SetAllocation DescriptorCache::Allocate(VkDescriptorSetLayout l
 }
 
 void DescriptorCache::Free(const SetAllocation& allocation) noexcept {
-    if (allocation.set == VK_NULL_HANDLE || allocation.pool == VK_NULL_HANDLE) return;
-    std::lock_guard lock(mutex);
+    if (context.descSetCache.valid) context.descSetCache.reset();
     if (const auto found = std::find(dedicated.begin(), dedicated.end(), allocation.pool); found != dedicated.end()) {
         dedicated.erase(found);
         destroyPool(context.device, allocation.pool, nullptr);
         return;
     }
-    auto& chain = allocation.updateAfterBind ? updateAfterBindPools : pools;
-    if (allocation.poolIndex >= chain.size()) std::terminate();
-    auto& pool = chain[allocation.poolIndex];
-    if (pool.handle != allocation.pool || pool.liveSets == 0) std::terminate();
-    if (--pool.liveSets != 0) return;
-    if (resetPool(context.device, pool.handle, 0) != VK_SUCCESS) std::terminate();
-    pool.exhausted = false;
 }
 
 DescriptorCache::Stats DescriptorCache::Counters() const {
@@ -3656,17 +3649,15 @@ std::shared_ptr<ShaderResources::DrawBindings> ShaderResources::PrepareDrawBindi
 
 void ShaderResources::Bind(VkCommandBuffer commands, VkPipelineBindPoint bindPoint, VkPipelineLayout layout) const {
     static const bool reuseDescSets = std::getenv("APS5_DESC_SET_REUSE") != nullptr;
-    if (reuseDescSets && context.descSetCache.valid && context.descSetCache.lastLayout == layout &&
+    if (reuseDescSets && context.descSetCache.valid && context.descSetCache.lastCommandBuffer == commands &&
+        context.descSetCache.lastBindPoint == bindPoint && context.descSetCache.lastLayout == layout &&
         context.descSetCache.lastSet0 == _set && context.descSetCache.lastSet1 == fragment.set) {
         return;
     }
     if (_set != VK_NULL_HANDLE) context.Resolved(&DeviceFunctions::cmdBindDescriptorSets, "vkCmdBindDescriptorSets")(commands, bindPoint, layout, 0, 1, &_set, 0, nullptr);
     if (fragment.set != VK_NULL_HANDLE) context.Resolved(&DeviceFunctions::cmdBindDescriptorSets, "vkCmdBindDescriptorSets")(commands, bindPoint, layout, ShaderRecompiler::RuntimeAbi::FragmentDescriptorSet, 1, &fragment.set, 0, nullptr);
     if (reuseDescSets) {
-        context.descSetCache.lastLayout = layout;
-        context.descSetCache.lastSet0 = _set;
-        context.descSetCache.lastSet1 = fragment.set;
-        context.descSetCache.valid = true;
+        context.descSetCache.noteBind(commands, bindPoint, layout, _set, fragment.set);
     }
 }
 
