@@ -5,7 +5,9 @@
 #include <deque>
 #include <map>
 #include <memory>
+#include <chrono>
 #include <mutex>
+#include <thread>
 #include <stdexcept>
 #include <vector>
 #include "SceTypes.hpp"
@@ -354,6 +356,14 @@ int APS5_VABI sceVdecswTrySyncDecodeOutput(std::uint64_t handle, OutputInfo* out
     output->framePitchInBytes = picture.output.framePitchInBytes;
     decoder->delivered[target.frameBuffer] = picture.info;
     return 0;
+}
+
+int APS5_VABI sceVdecswSyncDecodeOutput(std::uint64_t handle, OutputInfo* output) {
+    for (;;) {
+        const int result = sceVdecswTrySyncDecodeOutput(handle, output);
+        if (result != VdecswErrorOutputPending) return result;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
 }
 
 int APS5_VABI sceVdecswGetAvcPictureInfo(const OutputInfo* output, AvcPictureInfo* first, AvcPictureInfo* second) {
