@@ -28,20 +28,14 @@ bool Driver::drawPrecheck() {
 
 std::optional<DrawVerdict> Driver::precheckDraw(const QueueState& queue, const Submission& submission, std::span<const std::uint32_t> packet, const Pm4::DrawParameters& drawParameters, std::string& rejected, bool& traceIndirect) {
     if (!drawParameters.indirect && !drawParameters.indexed && (drawParameters.indexCount == 0 || drawParameters.instanceCount == 0)) return DrawVerdict::Nothing;
-    if (const auto pass = Graphics::DecodeColorMetadataPass(queue)) {
-        require(!drawParameters.indirect, "indirect CB metadata passes are unsupported");
+    const auto metadata = Graphics::DecodeColorMetadataPass(queue);
+    std::optional<Graphics::DepthExpandPass> expand;
+    if (!metadata) expand = Graphics::DecodeDepthExpandPass(queue);
+    if (metadata || expand) {
+        require(!metadata || !drawParameters.indirect, "indirect CB metadata passes are unsupported");
+        if (expand && !drawParameters.indirect && (drawParameters.indexCount == 0 || drawParameters.instanceCount == 0)) return DrawVerdict::Nothing;
         if (DrawPipeline::Active()) DrawPipeline::Queue0().Drain(DrawPipeline::DrainReason::Packet, (packet[0] >> 8u) & 0xffu);
-        GuestMemory::TagGpuLockSite(GuestMemory::GpuLockSite::Draw);
-        std::lock_guard gpuLock(GuestMemory::GpuMutex());
-        if (device == nullptr) device = std::make_shared<VulkanDevice>();
-        const std::shared_ptr<VulkanDevice> localDevice = device;
-        recordLabelsForPacket(localDevice.get(), submission.queue);
-        localDevice->ColorMetadataPass(*pass);
-        return DrawVerdict::Drawn;
-    }
-    if (const auto pass = Graphics::DecodeDepthExpandPass(queue)) {
-        if (DrawPipeline::Active()) DrawPipeline::Queue0().Drain(DrawPipeline::DrainReason::Packet, (packet[0] >> 8u) & 0xffu);
-        if (drawParameters.indirect) {
+        if (expand && drawParameters.indirect) {
             recordQueuedLabelsBeforeRead(submission.queue);
             if (!indirectRecordsDraw(*drawParameters.indirect)) return DrawVerdict::Nothing;
         }
@@ -50,7 +44,8 @@ std::optional<DrawVerdict> Driver::precheckDraw(const QueueState& queue, const S
         if (device == nullptr) device = std::make_shared<VulkanDevice>();
         const std::shared_ptr<VulkanDevice> localDevice = device;
         recordLabelsForPacket(localDevice.get(), submission.queue);
-        localDevice->DepthExpandPass(*pass);
+        if (metadata) localDevice->ColorMetadataPass(*metadata);
+        else localDevice->DepthExpandPass(*expand);
         return DrawVerdict::Drawn;
     }
     if (Graphics::DepthResummarizeDrawsNothing(queue)) return DrawVerdict::Nothing;

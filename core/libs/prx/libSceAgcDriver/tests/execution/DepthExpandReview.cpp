@@ -15,6 +15,7 @@
 #endif
 #include <windows.h>
 #endif
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <bit>
@@ -53,6 +54,8 @@ constexpr std::uint32_t DispatchDirect = 0x15u;
 constexpr std::size_t Block = 65536;
 constexpr std::uint32_t CompressDisable = 0x60u;
 constexpr std::uint32_t ZInfo = 0x20000183u;
+constexpr std::uint32_t Z16Info = 0x20000181u;
+constexpr std::uint32_t Format16Unorm = 7;
 constexpr std::uint32_t StencilInfo = 0x20000181u;
 constexpr std::uint32_t NoStencilInfo = 0x20000180u;
 constexpr std::uint32_t ColorDisabled = 0x00cc0000u;
@@ -89,6 +92,10 @@ alignas(256) Triangle Gradient{{
 
 alignas(256) Triangle SecondGradient{{
     {-1.0f, -1.0f, SecondOffset, 1.0f}, {3.0f, -1.0f, SecondOffset + XSlope, 1.0f}, {-1.0f, 3.0f, SecondOffset + YSlope, 1.0f},
+}};
+
+alignas(256) Triangle Corner{{
+    {-1.0f, -1.0f, 0.0f, 1.0f}, {1.0f, -1.0f, 0.0f, 1.0f}, {-1.0f, 1.0f, 0.0f, 1.0f},
 }};
 
 alignas(256) Triangle Flat{{
@@ -216,10 +223,13 @@ std::uint64_t NewPlane() {
 struct DrawState {
     std::uint32_t renderControl = 0;
     std::uint32_t depthControl = DepthWriteAlways;
+    std::uint32_t zInfo = ZInfo;
+    std::uint32_t view = 0;
     std::uint32_t stencilInfo = StencilInfo;
     std::uint32_t stencilControl = 0;
     std::uint32_t stencilReference = 0;
     std::uint64_t writeBase = 0;
+    std::uint64_t stencilWriteBase = 0;
     const Triangle* vertices = &Gradient;
     bool pixelShader = false;
 };
@@ -253,8 +263,8 @@ std::vector<std::uint32_t> Draw(const Surfaces& surfaces, const DrawState& state
         {0x10f, std::bit_cast<std::uint32_t>(Width / 2.0f)}, {0x110, std::bit_cast<std::uint32_t>(Width / 2.0f)},
         {0x111, std::bit_cast<std::uint32_t>(Height / 2.0f)}, {0x112, std::bit_cast<std::uint32_t>(Height / 2.0f)},
         {0xd, extent}, {0x82, extent}, {0x91, extent}, {0x95, extent},
-        {0x002, 0}, {0x007, ((Height - 1u) << 16u) | (Width - 1u)}, {0x00a, 0}, {0x00b, std::bit_cast<std::uint32_t>(1.0f)},
-        {0x010, ZInfo}, {0x011, state.stencilInfo}, {0x201, 0}, {0x10b, state.stencilControl}, {0x10c, state.stencilReference}, {0x10d, 0},
+        {0x002, state.view}, {0x007, ((Height - 1u) << 16u) | (Width - 1u)}, {0x00a, 0}, {0x00b, std::bit_cast<std::uint32_t>(1.0f)},
+        {0x010, state.zInfo}, {0x011, state.stencilInfo}, {0x201, 0}, {0x10b, state.stencilControl}, {0x10c, state.stencilReference}, {0x10d, 0},
         {0x000, state.renderControl}, {0x200, state.depthControl},
         {0x8e, state.pixelShader ? 0xffffffffu : 0u}, {0x2f8, 0u}, {0x292, 2u},
     };
@@ -265,7 +275,7 @@ std::vector<std::uint32_t> Draw(const Surfaces& surfaces, const DrawState& state
     SetBase(words, 0x012, 0x01a, surfaces.depth);
     SetBase(words, 0x014, 0x01c, state.writeBase);
     SetBase(words, 0x013, 0x01b, surfaces.stencil);
-    SetBase(words, 0x015, 0x01d, surfaces.stencil);
+    SetBase(words, 0x015, 0x01d, state.stencilWriteBase != 0 ? state.stencilWriteBase : surfaces.stencil);
     SetRegister(words, SetUconfigReg, 0x242, 4u);
     const auto pixel = state.pixelShader ? Address(PixelCode.data()) : 0u;
     const auto vertex = Address(VertexCode.data());
@@ -374,21 +384,21 @@ std::uint64_t EquationOffset(const TextureSwizzleEquation& equation, std::uint32
     return offset;
 }
 
-std::vector<std::uint32_t> Detiled(std::uint64_t surface, std::span<const std::byte> raw) {
-    const auto descriptor = DecodeTextureResource(TextureDescriptor(surface, Format32Float));
+std::vector<std::uint32_t> Detiled(std::uint64_t surface, std::span<const std::byte> raw, std::uint32_t format = Format32Float, std::uint32_t texelBytes = 4u) {
+    const auto descriptor = DecodeTextureResource(TextureDescriptor(surface, format));
     const auto geometry = DescribeSurface(descriptor);
-    Require(geometry.guestBytes == raw.size(), "depth expand review: the R32F view of the plane is not the size of the depth plane");
-    const auto* equation = FindTextureSwizzleEquation(XorSwizzleMode(descriptor.tileMode), 4u);
-    Require(equation != nullptr, "depth expand review: the SW_64KB_Z_X equation for 32-bit texels is missing");
+    Require(geometry.guestBytes == raw.size(), "depth expand review: the view of the plane is not the size of the plane");
+    const auto* equation = FindTextureSwizzleEquation(XorSwizzleMode(descriptor.tileMode), texelBytes);
+    Require(equation != nullptr, "depth expand review: the SW_64KB_Z_X equation for the plane's texels is missing");
     const auto& mip = geometry.mips.at(0);
-    const auto layout = ThinBlockLayout(descriptor.tileMode, 4u);
+    const auto layout = ThinBlockLayout(descriptor.tileMode, texelBytes);
     std::vector<std::uint32_t> texels(Texels);
     for (std::uint32_t y = 0; y < Height; ++y) {
         for (std::uint32_t x = 0; x < Width; ++x) {
             auto offset = mip.tiledOffset;
             if (mip.tail) offset += EquationOffset(*equation, x + mip.tailX, y + mip.tailY);
             else offset += (static_cast<std::uint64_t>(y / layout[2]) * mip.blocksPerRow + x / layout[1]) * layout[0] + EquationOffset(*equation, x, y);
-            std::memcpy(&texels[y * Width + x], raw.data() + offset, sizeof(std::uint32_t));
+            std::memcpy(&texels[y * Width + x], raw.data() + offset, texelBytes);
         }
     }
     return texels;
@@ -595,6 +605,86 @@ void QueuedDraws(TexelReader& reader) {
     Require(failed == 0, "depth expand review: " + std::to_string(failed) + " of " + std::to_string(cases.size()) + " expands after queued depth draws failed");
 }
 
+void SixteenBitPlane(TexelReader& reader) {
+    std::puts("an expand of a Z_16 surface");
+    const auto surfaces = NewSurfaces();
+    const auto written = NewPlane();
+    auto draw = DepthDrawn(surfaces, Gradient, NoStencilInfo);
+    draw.zInfo = Z16Info;
+    Submit(Draw(surfaces, draw), "Z_16 surface: depth draw");
+    auto expand = Expand(written, NoStencilInfo);
+    expand.zInfo = Z16Info;
+    Submit(Draw(surfaces, expand), "Z_16 surface: DB expand");
+    const auto depth = reader.Read(surfaces.depth, Format16Unorm, "Z_16 surface: read base");
+    std::uint32_t drawn = 0;
+    for (std::uint32_t texel = 0; texel < Texels; ++texel) {
+        if (std::fabs(std::bit_cast<float>(depth[texel]) - Expected(texel % Width, texel / Width, 0.0f)) <= 1.0f / 65535.0f) ++drawn;
+    }
+    std::printf("  Z_16 surface: read base: %u of %u texels hold the drawn depth within one 16-bit step; texel (0, 0) %s\n", drawn, Texels, Hex(depth.front()).c_str());
+    Require(drawn == Texels, "depth expand review: Z_16 surface: the read base does not hold the drawn depth");
+    RequireSame(reader.Read(written, Format16Unorm, "Z_16 surface: texture read of the write base"), depth, "Z_16 surface: texture read of the write base (R16 UNORM)");
+    std::vector<std::byte> raw(static_cast<std::size_t>(DepthSliceBytes({Width, Height}, 2u)));
+    AgcDriver::GuestMemory::Read(written, raw);
+    std::vector<std::uint32_t> quantized(Texels);
+    for (std::uint32_t texel = 0; texel < Texels; ++texel) quantized[texel] = static_cast<std::uint32_t>(std::lround(std::bit_cast<float>(depth[texel]) * 65535.0f));
+    RequireSame(Detiled(written, raw, Format16Unorm, 2u), quantized, "Z_16 surface: raw read of the write base after a flush, detiled with the 16-bit SW_64KB_Z_X equation");
+}
+
+void SecondSlice(TexelReader& reader) {
+    std::puts("an expand of the second slice of a depth array");
+    const auto depthSlice = static_cast<std::size_t>(DepthSliceBytes({Width, Height}, 4u));
+    const Surfaces surfaces{Address(NewBlock(2u * depthSlice)), Address(NewBlock(2u * static_cast<std::size_t>(DepthSliceBytes({Width, Height}, 1u)))), Address(NewBlock(2u * Block))};
+    const auto written = Address(NewBlock(2u * depthSlice));
+    const std::vector<std::uint32_t> marker(depthSlice / sizeof(std::uint32_t), 0x3f000000u);
+    std::memcpy(reinterpret_cast<void*>(static_cast<std::uintptr_t>(written)), marker.data(), depthSlice);
+    constexpr std::uint32_t SliceOne = 1u | (1u << 13u);
+    auto draw = DepthDrawn(surfaces, Gradient);
+    draw.view = SliceOne;
+    Submit(Draw(surfaces, draw), "second slice: depth draw into slice 1");
+    auto expand = Expand(written);
+    expand.view = SliceOne;
+    Submit(Draw(surfaces, expand), "second slice: DB expand of slice 1");
+    const auto depth = RequireDepth(reader, surfaces.depth + depthSlice, Gradient, "second slice: slice 1 of the read base");
+    RequireExpanded(reader, written + depthSlice, depth, "second slice: slice 1 of the write base");
+    const auto first = GuestBytes(written, depthSlice);
+    Require(std::memcmp(first.data(), marker.data(), depthSlice) == 0, "depth expand review: second slice: the expand of slice 1 changed slice 0 of the write base");
+    std::puts("  slice 0 of the write base still holds what the CPU wrote");
+}
+
+void StencilMoved(TexelReader& reader, bool depthMoves) {
+    const auto name = std::string(depthMoves ? "depth and stencil expand" : "stencil-only expand");
+    std::puts(depthMoves ? "an out-of-place expand of the depth and stencil planes" : "an out-of-place expand of the stencil plane alone, the depth plane in place");
+    const auto surfaces = NewSurfaces();
+    const auto written = NewPlane();
+    const auto stencilBytes = static_cast<std::size_t>(DepthSliceBytes({Width, Height}, 1u));
+    const auto stencilWritten = Address(NewBlock(stencilBytes));
+    auto draw = DepthDrawn(surfaces, Gradient);
+    draw.depthControl = StencilReplaceAlways;
+    draw.stencilControl = StencilPassReplace;
+    draw.stencilReference = StencilValue | (0xffu << 8u) | (0xffu << 16u);
+    Submit(Draw(surfaces, draw), name + ": depth and stencil draw");
+    auto corner = draw;
+    corner.depthControl = StencilReplaceAlways & ~4u;
+    corner.vertices = &Corner;
+    corner.stencilReference = 0xa5u | (0xffu << 8u) | (0xffu << 16u);
+    Submit(Draw(surfaces, corner), name + ": stencil draw over half the surface");
+    const auto stencil = reader.Read(surfaces.stencil, Format8Uint, name + ": stencil of the read surface");
+    const auto first = static_cast<std::uint32_t>(std::count(stencil.begin(), stencil.end(), StencilValue));
+    const auto second = static_cast<std::uint32_t>(std::count(stencil.begin(), stencil.end(), 0xa5u));
+    std::printf("  %s: read stencil: %u texels hold 0x%02x and %u hold 0xa5\n", name.c_str(), first, StencilValue, second);
+    Require(first != 0 && second != 0 && first + second == Texels, "depth expand review: " + name + ": the stencil draws did not leave both values");
+    auto expand = Expand(depthMoves ? written : surfaces.depth);
+    expand.stencilWriteBase = stencilWritten;
+    Submit(Draw(surfaces, expand), name + ": DB expand");
+    RequireSame(reader.Read(surfaces.stencil, Format8Uint, name + ": stencil of the read surface after the expand"), stencil, name + ": stencil of the read surface after the expand");
+    RequireSame(reader.Read(stencilWritten, Format8Uint, name + ": texture read of the stencil write base"), stencil, name + ": texture read of the stencil write base (R8 UINT)");
+    std::vector<std::byte> raw(stencilBytes);
+    AgcDriver::GuestMemory::Read(stencilWritten, raw);
+    RequireSame(Detiled(stencilWritten, raw, Format8Uint, 1u), stencil, name + ": raw read of the stencil write base after a flush, detiled with the 8-bit SW_64KB_Z_X equation");
+    const auto depth = RequireDepth(reader, surfaces.depth, Gradient, name + ": read base");
+    if (depthMoves) RequireExpanded(reader, written, depth, name);
+}
+
 }
 
 int main() {
@@ -611,6 +701,10 @@ int main() {
         BufferReadAfterExpand(reader);
         TwoDestinations(reader);
         QueuedDraws(reader);
+        SixteenBitPlane(reader);
+        SecondSlice(reader);
+        StencilMoved(reader, true);
+        StencilMoved(reader, false);
         AgcDriverShutdown_nid_postfix();
         std::puts("depth expand review tests passed");
         return 0;
