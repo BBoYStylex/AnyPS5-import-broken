@@ -354,17 +354,14 @@ Outcome Run(const Case& test) {
         settledLive(source->Address(), Block);
         std::fill(surface.Texels(), surface.Texels() + SurfaceBytes / 4u, Untouched);
         Store(surface.Texels());
-        // Pending results are the surface image's alone once it exists.
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
         while (true) {
             hold.lock();
-            if (StorageTexture::FindLive(address, SurfaceBytes) != nullptr) {
-                if (StorageTexture::AnyPending()) break;
-                hold.unlock();
-                return Outcome::Missed;
-            }
+            const auto image = StorageTexture::FindLive(address, SurfaceBytes);
+            if (image != nullptr && StorageTexture::FindPending(address, SurfaceBytes) == image) break;
             hold.unlock();
-            Require(std::chrono::steady_clock::now() < deadline, "store over untracked: the surface's storage image was never created");
+            if (Holds(surface.Texels(), Stored)) return Outcome::Missed;
+            Require(std::chrono::steady_clock::now() < deadline, "store over untracked: the result neither became pending nor reached guest memory");
             std::this_thread::yield();
         }
         const auto from = StorageTexture::FindLive(source->Address(), Block);
