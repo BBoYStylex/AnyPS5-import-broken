@@ -540,7 +540,24 @@ static void RequireContextInsensitive(std::string message, std::string context) 
     }
 }
 
+static void DropPrivilege(HANDLE token, const wchar_t* name) {
+    TOKEN_PRIVILEGES privileges{};
+    privileges.PrivilegeCount = 1;
+    privileges.Privileges[0].Attributes = SE_PRIVILEGE_REMOVED;
+    Require(::LookupPrivilegeValueW(nullptr, name, &privileges.Privileges[0].Luid) != FALSE);
+    Require(::AdjustTokenPrivileges(token, FALSE, &privileges, 0, nullptr, nullptr) != FALSE);
+}
+
+static void DropBackupPrivileges() {
+    HANDLE token = nullptr;
+    Require(::OpenProcessToken(::GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &token) != FALSE);
+    DropPrivilege(token, L"SeBackupPrivilege");
+    DropPrivilege(token, L"SeRestorePrivilege");
+    Require(::CloseHandle(token) != FALSE);
+}
+
 static void DeniedParentWatch() {
+    DropBackupPrivileges();
     const auto path = TemporaryName("denied");
     Require(mkdir_nid_postfix(path.c_str(), 0755) == 0);
     const int file = open_nid_postfix((path + "/watched.bin").c_str(), ReadWrite | Create, 0644);
