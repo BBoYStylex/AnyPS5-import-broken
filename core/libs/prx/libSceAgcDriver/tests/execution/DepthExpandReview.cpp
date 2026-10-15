@@ -1,5 +1,6 @@
 #include "prx/libSceAgcDriver/Execution/include/Driver.hpp"
 #include "prx/libSceAgcDriver/Execution/include/GuestMemory.hpp"
+#include "prx/libSceAgcDriver/Execution/include/Driver/Draw/DrawPipeline.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/DepthSurface.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Draw.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/GuestTextureResource.hpp"
@@ -15,21 +16,27 @@
 #include <windows.h>
 #endif
 #include <array>
+#include <atomic>
 #include <bit>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <future>
 #include <iostream>
+#include <mutex>
 #include <span>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
 namespace {
 
 using namespace AgcDriver::Graphics;
+using AgcDriver::DriverDetail::DrawPipeline;
 
 constexpr std::uint32_t Width = 160;
 constexpr std::uint32_t Height = 96;
@@ -135,6 +142,43 @@ void Submit(std::vector<std::uint32_t> words, const std::string& what) {
     Packet packet{words.data(), static_cast<std::uint32_t>(words.size()), 0, {}};
     Require(sceAgcDriverSubmitDcb(&packet) == 0, what + ": the DCB submission failed");
     AgcDriverWaitIdle_nid_postfix();
+}
+
+struct Blocker {
+    std::atomic<bool> release{false};
+    void Enqueue() {
+        DrawPipeline::Queue0().Enqueue([this] {
+            while (!release.load()) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            std::lock_guard gpuLock(AgcDriver::GuestMemory::GpuMutex());
+        }, {});
+    }
+};
+
+void SubmitBehind(Blocker& blocker, std::vector<std::uint32_t>& words) {
+    std::unique_lock gpuLock(AgcDriver::GuestMemory::GpuMutex());
+    Packet packet{words.data(), static_cast<std::uint32_t>(words.size()), 0, {}};
+    AgcDriver::Submit(&packet, 0);
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    blocker.Enqueue();
+}
+
+void ReleaseWhenQueued(Blocker& blocker, std::size_t items, const std::string& what) {
+    const auto start = std::chrono::steady_clock::now();
+    bool queued = false;
+    while (!(queued = DrawPipeline::Queue0().Outstanding() >= items) && std::chrono::steady_clock::now() - start < std::chrono::seconds(20)) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    if (queued) std::this_thread::sleep_for(std::chrono::seconds(2));
+    blocker.release = true;
+    Require(queued, "depth expand review: " + what + ": the depth draw was not queued behind the held draw pipeline");
+}
+
+void FinishQueued(const std::string& what) {
+    auto idle = std::async(std::launch::async, [] { AgcDriverWaitIdle_nid_postfix(); });
+    if (idle.wait_for(std::chrono::seconds(20)) != std::future_status::ready) {
+        std::fprintf(stderr, "depth expand review: %s: the queue worker and the draw pipeline deadlocked\n", what.c_str());
+        std::fflush(stderr);
+        std::_Exit(1);
+    }
+    idle.get();
 }
 
 std::array<std::uint32_t, 4> BufferDescriptor(std::uint64_t address, std::uint32_t bytes) {
@@ -245,28 +289,32 @@ public:
         std::memcpy(bufferKernel, BufferLoadCode.data(), sizeof(BufferLoadCode));
     }
 
+    std::vector<std::uint32_t> BufferLoad(std::uint64_t address, std::uint32_t bytes) {
+        std::array<std::uint32_t, 16> userData{};
+        const auto input = BufferDescriptor(address, bytes);
+        const auto stored = BufferDescriptor(Address(output), Threads * 16u);
+        std::copy(input.begin(), input.end(), userData.begin());
+        std::copy(stored.begin(), stored.end(), userData.begin() + 4);
+        std::vector<std::uint32_t> packet;
+        const auto code = Address(bufferKernel);
+        SetRegister(packet, SetShReg, 0x20c, static_cast<std::uint32_t>(code >> 8u));
+        SetRegister(packet, SetShReg, 0x20d, static_cast<std::uint32_t>(code >> 40u) & 0xffu);
+        SetRegister(packet, SetShReg, 0x207, Threads);
+        SetRegister(packet, SetShReg, 0x208, 1u);
+        SetRegister(packet, SetShReg, 0x209, 1u);
+        SetRegister(packet, SetShReg, 0x213, 16u << 1u);
+        for (std::uint32_t i = 0; i < userData.size(); ++i) SetRegister(packet, SetShReg, 0x240 + i, userData[i]);
+        packet.insert(packet.end(), {0xc0000000u | (3u << 16u) | (DispatchDirect << 8u), 1u, 1u, 1u, 0x41u});
+        return packet;
+    }
+
     std::vector<std::byte> ReadBuffer(std::uint64_t address, std::size_t bytes, const std::string& what) {
         std::vector<std::byte> data(bytes);
         std::array<std::uint32_t, Threads * 4> words{};
         for (std::size_t first = 0; first < bytes; first += Threads * 4u) {
             const auto count = static_cast<std::uint32_t>(std::min<std::size_t>(Threads * 4u, bytes - first));
             std::memset(output, 0xff, sizeof(words));
-            std::array<std::uint32_t, 16> userData{};
-            const auto input = BufferDescriptor(address + first, count);
-            const auto stored = BufferDescriptor(Address(output), sizeof(words));
-            std::copy(input.begin(), input.end(), userData.begin());
-            std::copy(stored.begin(), stored.end(), userData.begin() + 4);
-            std::vector<std::uint32_t> packet;
-            const auto code = Address(bufferKernel);
-            SetRegister(packet, SetShReg, 0x20c, static_cast<std::uint32_t>(code >> 8u));
-            SetRegister(packet, SetShReg, 0x20d, static_cast<std::uint32_t>(code >> 40u) & 0xffu);
-            SetRegister(packet, SetShReg, 0x207, Threads);
-            SetRegister(packet, SetShReg, 0x208, 1u);
-            SetRegister(packet, SetShReg, 0x209, 1u);
-            SetRegister(packet, SetShReg, 0x213, 16u << 1u);
-            for (std::uint32_t i = 0; i < userData.size(); ++i) SetRegister(packet, SetShReg, 0x240 + i, userData[i]);
-            packet.insert(packet.end(), {0xc0000000u | (3u << 16u) | (DispatchDirect << 8u), 1u, 1u, 1u, 0x41u});
-            Submit(std::move(packet), what);
+            Submit(BufferLoad(address + first, count), what);
             AgcDriver::GuestMemory::Read(Address(output), std::as_writable_bytes(std::span(words)));
             for (std::uint32_t thread = 0; thread * 4u < count; ++thread) std::memcpy(data.data() + first + thread * 4u, &words[thread * 4u], sizeof(std::uint32_t));
         }
@@ -492,6 +540,61 @@ void TwoDestinations(TexelReader& reader) {
     RequireExpanded(reader, second, depth, "two write bases, second");
 }
 
+void SubmitQueued(TexelReader& reader, const std::vector<std::uint32_t>& draw, const std::vector<std::uint32_t>& expand, const std::string& what) {
+    auto words = reader.BufferLoad(Address(NewBlock(Block)), 64u);
+    words.insert(words.end(), draw.begin(), draw.end());
+    words.insert(words.end(), expand.begin(), expand.end());
+    Blocker blocker;
+    SubmitBehind(blocker, words);
+    ReleaseWhenQueued(blocker, 2, what);
+    FinishQueued(what);
+}
+
+void ExpandBehindQueuedDraw(TexelReader& reader) {
+    std::puts("an expand right after a depth draw still queued for the draw pipeline's committer");
+    const auto surfaces = NewSurfaces();
+    const auto written = NewPlane();
+    Submit(Draw(surfaces, DepthDrawn(surfaces, Gradient)), "queued draw: first depth draw");
+    SubmitQueued(reader, Draw(surfaces, DepthDrawn(surfaces, SecondGradient)), Draw(surfaces, Expand(written)), "queued draw");
+    RequireExpanded(reader, written, RequireDepth(reader, surfaces.depth, SecondGradient, "queued draw: read base"), "queued draw");
+}
+
+void RepeatedExpandBehindQueuedDraw(TexelReader& reader) {
+    std::puts("a repeated expand right after a queued depth draw changed its read surface");
+    const auto surfaces = NewSurfaces();
+    const auto written = NewPlane();
+    Submit(Draw(surfaces, DepthDrawn(surfaces, Gradient)), "queued repeat: first depth draw");
+    Submit(Draw(surfaces, Expand(written)), "queued repeat: first DB expand");
+    SubmitQueued(reader, Draw(surfaces, DepthDrawn(surfaces, SecondGradient)), Draw(surfaces, Expand(written)), "queued repeat");
+    RequireExpanded(reader, written, RequireDepth(reader, surfaces.depth, SecondGradient, "queued repeat: read base"), "queued repeat");
+}
+
+void FirstDrawQueuedBeforeExpand(TexelReader& reader) {
+    std::puts("an expand right after the queued depth draw that creates its read surface");
+    const auto surfaces = NewSurfaces();
+    const auto written = NewPlane();
+    SubmitQueued(reader, Draw(surfaces, DepthDrawn(surfaces, Gradient)), Draw(surfaces, Expand(written)), "queued first draw");
+    RequireExpanded(reader, written, RequireDepth(reader, surfaces.depth, Gradient, "queued first draw: read base"), "queued first draw");
+}
+
+void QueuedDraws(TexelReader& reader) {
+    if (DrawPipeline::Depth() < 2) {
+        std::puts("expands after queued depth draws: skipped, pipelined draws are off");
+        return;
+    }
+    const std::array<void (*)(TexelReader&), 3> cases{ExpandBehindQueuedDraw, RepeatedExpandBehindQueuedDraw, FirstDrawQueuedBeforeExpand};
+    std::size_t failed = 0;
+    for (const auto run : cases) {
+        try {
+            run(reader);
+        } catch (const std::exception& error) {
+            std::printf("  failed: %s\n", error.what());
+            ++failed;
+        }
+    }
+    Require(failed == 0, "depth expand review: " + std::to_string(failed) + " of " + std::to_string(cases.size()) + " expands after queued depth draws failed");
+}
+
 }
 
 int main() {
@@ -507,6 +610,7 @@ int main() {
         ExpandedAgain(reader);
         BufferReadAfterExpand(reader);
         TwoDestinations(reader);
+        QueuedDraws(reader);
         AgcDriverShutdown_nid_postfix();
         std::puts("depth expand review tests passed");
         return 0;
