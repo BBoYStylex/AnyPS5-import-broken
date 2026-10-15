@@ -864,6 +864,36 @@ class Integer(Emitter):
         value = self.read(source)
         self.write(destination, self.v(f'call i{bits} @llvm.fshr.i{bits}(i{bits} {value}, i{bits} {value}, i{bits} {amount})'))
 
+    def op_movbe(self):
+        destination, source = self.operands()
+        bits = destination.size * 8
+        if bits not in (16, 32, 64) or (destination.type == X86_OP_MEM) == (source.type == X86_OP_MEM):
+            self.unsupported('MOVBE requires one memory operand')
+        value = self.read(source, bits)
+        self.write(destination, self.v(f'call i{bits} @llvm.bswap.i{bits}(i{bits} {value})'), bits)
+
+    def op_bextr(self):
+        destination, source, control = self.operands()
+        bits = destination.size * 8
+        if bits not in (32, 64) or control.type != X86_OP_REG:
+            self.unsupported('only BMI BEXTR register control is qualified')
+        value, selector = self.read(source, bits), self.read(control, bits)
+        start = self.v(f'and i{bits} {selector}, 255')
+        length = self.v(f'and i{bits} {self.v(f"lshr i{bits} {selector}, 8")}, 255')
+        outside = self.v(f'icmp uge i{bits} {start}, {bits}')
+        safe_start = self.v(f'and i{bits} {start}, {bits - 1}')
+        shifted = self.v(f'lshr i{bits} {value}, {safe_start}')
+        large = self.v(f'icmp uge i{bits} {length}, {bits}')
+        safe_length = self.v(f'and i{bits} {length}, {bits - 1}')
+        low_mask = self.v(f'sub i{bits} {self.v(f"shl i{bits} 1, {safe_length}")}, 1')
+        low_mask = self.v(f'select i1 {large}, i{bits} -1, i{bits} {low_mask}')
+        result = self.v(f'and i{bits} {shifted}, {low_mask}')
+        result = self.v(f'select i1 {outside}, i{bits} 0, i{bits} {result}')
+        self.write(destination, result, bits)
+        self.set_flag('zf', self.v(f'icmp eq i{bits} {result}, 0'))
+        for flag in ('cf', 'of', 'sf', 'pf', 'af'):
+            self.set_flag(flag, 'false')
+
     def op_bzhi(self):
         destination, source, index_operand = self.operands()
         bits = destination.size * 8
@@ -1211,6 +1241,268 @@ INDEFINITE = {32: 0xffc00000, 64: 0xfff8000000000000}
 
 
 class Vector(Integer):
+    def vex_encoding(self):
+        if self.ins.bytes[0] not in (0xc4, 0xc5):
+            self.unsupported('only unmasked VEX encodings are qualified')
+
+    def op_vpextrb(self):
+        self.vex_encoding()
+        destination, source, immediate = self.operands()
+        bits = {'vpextrb': 8, 'vpextrw': 16, 'vpextrd': 32, 'vpextrq': 64}[self.ins.mnemonic]
+        if immediate.type != X86_OP_IMM:
+            self.unsupported('vector extraction requires an immediate')
+        offset = (immediate.imm & (128 // bits - 1)) * bits
+        value = self.trunc(self.v(f'lshr i128 {self.vex_read(source, 128)}, {offset}'), bits, 128)
+        width = destination.size * 8
+        self.write(destination, self.zext(value, bits, width), width)
+
+    op_vpextrw = op_vpextrb
+    op_vpextrd = op_vpextrb
+    op_vpextrq = op_vpextrb
+
+    def op_vpinsrb(self):
+        self.vex_encoding()
+        destination, left, source, immediate = self.operands()
+        bits = {'vpinsrb': 8, 'vpinsrw': 16, 'vpinsrd': 32, 'vpinsrq': 64}[self.ins.mnemonic]
+        if immediate.type != X86_OP_IMM:
+            self.unsupported('vector insertion requires an immediate')
+        offset = (immediate.imm & (128 // bits - 1)) * bits
+        old = self.vex_read(left, 128)
+        value = self.read(source)
+        value = self.trunc(value, bits, source.size * 8)
+        cleared = self.v(f'and i128 {old}, {self.const(~(mask(bits) << offset), 128)}')
+        inserted = self.v(f'shl i128 {self.zext(value, bits, 128)}, {offset}')
+        self.vex_write(destination, self.v(f'or i128 {cleared}, {inserted}'), 128)
+
+    op_vpinsrw = op_vpinsrb
+    op_vpinsrd = op_vpinsrb
+    op_vpinsrq = op_vpinsrb
+
+    def op_vpaddb(self):
+        self.vex_encoding()
+        destination, left, right = self.operands()
+        operation = self.ins.mnemonic
+        bits = LANES[operation[-1]][1]
+        _, width = self.vex_register(destination)
+        lanes = width // bits
+        kind = f'<{lanes} x i{bits}>'
+        a = self.v(f'bitcast i{width} {self.vex_read(left, width)} to {kind}')
+        b = self.v(f'bitcast i{width} {self.vex_read(right, width)} to {kind}')
+        if operation.startswith(('vpadd', 'vpsub', 'vpmull')):
+            instruction = 'add' if operation.startswith('vpadd') else 'sub' if operation.startswith('vpsub') else 'mul'
+            result = self.v(f'{instruction} {kind} {a}, {b}')
+        elif operation.startswith(('vpcmpeq', 'vpcmpgt')):
+            predicate = 'eq' if operation.startswith('vpcmpeq') else 'sgt'
+            compared = self.v(f'icmp {predicate} {kind} {a}, {b}')
+            result = self.v(f'sext <{lanes} x i1> {compared} to {kind}')
+        else:
+            signed = operation[-2] == 's'
+            predicate = ('s' if signed else 'u') + ('lt' if operation.startswith('vpmin') else 'gt')
+            compared = self.v(f'icmp {predicate} {kind} {a}, {b}')
+            result = self.v(f'select <{lanes} x i1> {compared}, {kind} {a}, {kind} {b}')
+        self.vex_write(destination, self.v(f'bitcast {kind} {result} to i{width}'), width)
+
+    op_vpaddw = op_vpaddb
+    op_vpaddd = op_vpaddb
+    op_vpaddq = op_vpaddb
+    op_vpsubb = op_vpaddb
+    op_vpsubw = op_vpaddb
+    op_vpsubd = op_vpaddb
+    op_vpsubq = op_vpaddb
+    op_vpmullw = op_vpaddb
+    op_vpmulld = op_vpaddb
+    op_vpcmpeqb = op_vpaddb
+    op_vpcmpeqw = op_vpaddb
+    op_vpcmpeqd = op_vpaddb
+    op_vpcmpeqq = op_vpaddb
+    op_vpcmpgtb = op_vpaddb
+    op_vpcmpgtw = op_vpaddb
+    op_vpcmpgtd = op_vpaddb
+    op_vpcmpgtq = op_vpaddb
+    op_vpminsb = op_vpaddb
+    op_vpminsw = op_vpaddb
+    op_vpminsd = op_vpaddb
+    op_vpminub = op_vpaddb
+    op_vpminuw = op_vpaddb
+    op_vpminud = op_vpaddb
+    op_vpmaxsb = op_vpaddb
+    op_vpmaxsw = op_vpaddb
+    op_vpmaxsd = op_vpaddb
+    op_vpmaxub = op_vpaddb
+    op_vpmaxuw = op_vpaddb
+    op_vpmaxud = op_vpaddb
+
+    def op_vextracti128(self):
+        self.vex_encoding()
+        destination, source, immediate = self.operands()
+        if immediate.type != X86_OP_IMM:
+            self.unsupported('128-bit extraction requires an immediate')
+        value = self.vex_read(source, 256)
+        value = self.v(f'lshr i256 {value}, {(immediate.imm & 1) * 128}')
+        self.vex_write(destination, self.trunc(value, 128, 256), 128)
+
+    op_vextractf128 = op_vextracti128
+
+    def op_vinserti128(self):
+        self.vex_encoding()
+        destination, left, right, immediate = self.operands()
+        if immediate.type != X86_OP_IMM:
+            self.unsupported('128-bit insertion requires an immediate')
+        offset = (immediate.imm & 1) * 128
+        a, b = self.vex_read(left, 256), self.vex_read(right, 128)
+        cleared = self.v(f'and i256 {a}, {self.const(~(mask(128) << offset), 256)}')
+        shifted = self.v(f'shl i256 {self.zext(b, 128, 256)}, {offset}')
+        self.vex_write(destination, self.v(f'or i256 {cleared}, {shifted}'), 256)
+
+    op_vinsertf128 = op_vinserti128
+
+    def op_vpshufb(self):
+        self.vex_encoding()
+        destination, left, right = self.operands()
+        _, width = self.vex_register(destination)
+        count = width // 8
+        kind = f'<{count} x i8>'
+        data = self.v(f'bitcast i{width} {self.vex_read(left, width)} to {kind}')
+        control = self.v(f'bitcast i{width} {self.vex_read(right, width)} to {kind}')
+        result = 'poison'
+        for lane in range(count):
+            index = self.v(f'extractelement {kind} {control}, i32 {lane}')
+            low = self.v(f'and i8 {index}, 15')
+            selected = self.v(f'add i8 {low}, {(lane // 16) * 16}')
+            byte = self.v(f'extractelement {kind} {data}, i8 {selected}')
+            byte = self.v(f'select i1 {self.v(f"icmp slt i8 {index}, 0")}, i8 0, i8 {byte}')
+            result = self.v(f'insertelement {kind} {result}, i8 {byte}, i32 {lane}')
+        self.vex_write(destination, self.v(f'bitcast {kind} {result} to i{width}'), width)
+
+    def op_vpermq(self):
+        self.vex_encoding()
+        destination, source, immediate = self.operands()
+        if immediate.type != X86_OP_IMM:
+            self.unsupported('VPERMQ requires an immediate')
+        value = self.v(f'bitcast i256 {self.vex_read(source, 256)} to <4 x i64>')
+        indices = '<' + ', '.join(f'i32 {(immediate.imm >> (2 * n)) & 3}' for n in range(4)) + '>'
+        result = self.v(f'shufflevector <4 x i64> {value}, <4 x i64> poison, <4 x i32> {indices}')
+        self.vex_write(destination, self.v(f'bitcast <4 x i64> {result} to i256'), 256)
+
+    def op_vpsllw(self):
+        self.vex_encoding()
+        destination, left, right = self.operands()
+        _, width = self.vex_register(destination)
+        bits = LANES[self.ins.mnemonic[-1]][1]
+        count, kind = width // bits, f'<{width // bits} x i{bits}>'
+        operation = {'vpsll': 'shl', 'vpsrl': 'lshr', 'vpsra': 'ashr'}[self.ins.mnemonic[:-1]]
+        data = self.v(f'bitcast i{width} {self.vex_read(left, width)} to {kind}')
+        amount = self.const(right.imm & 255, 64) if right.type == X86_OP_IMM else self.trunc(self.vex_read(right, 128), 64, 128)
+        large = self.v(f'icmp uge i64 {amount}, {bits}')
+        safe = self.v(f'select i1 {large}, i64 {bits - 1 if operation == "ashr" else 0}, i64 {amount}')
+        scalar = self.trunc(safe, bits, 64)
+        shifts = self.v(f'insertelement {kind} poison, i{bits} {scalar}, i32 0')
+        shifts = self.v(f'shufflevector {kind} {shifts}, {kind} poison, <{count} x i32> zeroinitializer')
+        result = self.v(f'{operation} {kind} {data}, {shifts}')
+        if operation != 'ashr':
+            result = self.v(f'select i1 {large}, {kind} zeroinitializer, {kind} {result}')
+        self.vex_write(destination, self.v(f'bitcast {kind} {result} to i{width}'), width)
+
+    op_vpslld = op_vpsllw
+    op_vpsllq = op_vpsllw
+    op_vpsrlw = op_vpsllw
+    op_vpsrld = op_vpsllw
+    op_vpsrlq = op_vpsllw
+    op_vpsraw = op_vpsllw
+    op_vpsrad = op_vpsllw
+
+    def op_vpacksswb(self):
+        self.vex_encoding()
+        destination, left, right = self.operands()
+        _, width = self.vex_register(destination)
+        bits = 16 if self.ins.mnemonic.endswith('wb') else 32
+        target = bits // 2
+        signed = self.ins.mnemonic.startswith('vpackss')
+        count, block = width // bits, 128 // bits
+        source_kind, wide_kind, narrow_kind = f'<{count} x i{bits}>', f'<{2 * count} x i{bits}>', f'<{2 * count} x i{target}>'
+        a = self.v(f'bitcast i{width} {self.vex_read(left, width)} to {source_kind}')
+        b = self.v(f'bitcast i{width} {self.vex_read(right, width)} to {source_kind}')
+        indices = [i // (2 * block) * block + i % block + (count if i % (2 * block) >= block else 0) for i in range(2 * count)]
+        indices = '<' + ', '.join(f'i32 {i}' for i in indices) + '>'
+        joined = self.v(f'shufflevector {source_kind} {a}, {source_kind} {b}, <{2 * count} x i32> {indices}')
+        low, high = (-(1 << (target - 1)), (1 << (target - 1)) - 1) if signed else (0, (1 << target) - 1)
+        for bound, predicate in ((low, 'slt'), (high, 'sgt')):
+            vector = '<' + ', '.join(f'i{bits} {bound}' for _ in range(2 * count)) + '>'
+            compared = self.v(f'icmp {predicate} {wide_kind} {joined}, {vector}')
+            joined = self.v(f'select <{2 * count} x i1> {compared}, {wide_kind} {vector}, {wide_kind} {joined}')
+        narrowed = self.v(f'trunc {wide_kind} {joined} to {narrow_kind}')
+        self.vex_write(destination, self.v(f'bitcast {narrow_kind} {narrowed} to i{width}'), width)
+
+    op_vpackssdw = op_vpacksswb
+    op_vpackuswb = op_vpacksswb
+    op_vpackusdw = op_vpacksswb
+
+    def op_vmovss(self):
+        self.vex_encoding()
+        args = self.operands()
+        bits = 32 if self.ins.mnemonic == 'vmovss' else 64
+        if len(args) == 3:
+            destination, left, right = args
+            if any(operand.type != X86_OP_REG for operand in args):
+                self.unsupported('three-operand scalar move requires vector registers')
+            a, b = self.vex_read(left, 128), self.low(right, bits)
+            self.vex_write(destination, self.merge_low(a, b, bits), 128)
+        elif len(args) == 2:
+            destination, source = args
+            if source.type == X86_OP_MEM:
+                self.vex_write(destination, self.zext(self.low(source, bits), bits, 128), 128)
+            elif destination.type == X86_OP_MEM:
+                self.store(self.address(destination), self.low(source, bits), bits)
+            else:
+                self.unsupported('two-operand scalar move requires memory')
+        else:
+            self.unsupported('scalar move operand count')
+
+    op_vmovsd = op_vmovss
+
+    def op_vpbroadcastb(self):
+        self.vex_encoding()
+        destination, source = self.operands()
+        _, width = self.vex_register(destination)
+        bits = {'vpbroadcastb': 8, 'vpbroadcastw': 16, 'vpbroadcastq': 64,
+                'vbroadcastss': 32, 'vbroadcastsd': 64, 'vbroadcasti128': 128}[self.ins.mnemonic]
+        count, kind = width // bits, f'<{width // bits} x i{bits}>'
+        value = self.low(source, bits)
+        first = self.v(f'insertelement {kind} poison, i{bits} {value}, i32 0')
+        result = self.v(f'shufflevector {kind} {first}, {kind} poison, <{count} x i32> zeroinitializer')
+        self.vex_write(destination, self.v(f'bitcast {kind} {result} to i{width}'), width)
+
+    op_vpbroadcastw = op_vpbroadcastb
+    op_vpbroadcastq = op_vpbroadcastb
+    op_vbroadcastss = op_vpbroadcastb
+    op_vbroadcastsd = op_vpbroadcastb
+    op_vbroadcasti128 = op_vpbroadcastb
+
+    def op_vpmovzxbw(self):
+        self.vex_encoding()
+        destination, source = self.operands()
+        _, width = self.vex_register(destination)
+        source_bits, target_bits = [LANES[k][1] for k in self.ins.mnemonic[-2:]]
+        count = width // target_bits
+        raw = self.low(source, source_bits * count)
+        small, large = f'<{count} x i{source_bits}>', f'<{count} x i{target_bits}>'
+        vector = self.v(f'bitcast i{source_bits * count} {raw} to {small}')
+        operation = 'sext' if self.ins.mnemonic.startswith('vpmovsx') else 'zext'
+        result = self.v(f'{operation} {small} {vector} to {large}')
+        self.vex_write(destination, self.v(f'bitcast {large} {result} to i{width}'), width)
+
+    op_vpmovzxbd = op_vpmovzxbw
+    op_vpmovzxbq = op_vpmovzxbw
+    op_vpmovzxwd = op_vpmovzxbw
+    op_vpmovzxwq = op_vpmovzxbw
+    op_vpmovzxdq = op_vpmovzxbw
+    op_vpmovsxbw = op_vpmovzxbw
+    op_vpmovsxbd = op_vpmovzxbw
+    op_vpmovsxbq = op_vpmovzxbw
+    op_vpmovsxwd = op_vpmovzxbw
+    op_vpmovsxwq = op_vpmovzxbw
+    op_vpmovsxdq = op_vpmovzxbw
+
     def vex_register(self, operand):
         if operand.type != X86_OP_REG:
             self.unsupported('VEX destination must be a vector register')
@@ -2269,7 +2561,7 @@ class Vector(Integer):
 ALL_FLAGS = frozenset(FLAGS)
 STATUS_WRITERS = {'add', 'sub', 'adc', 'sbb', 'cmp', 'neg', 'and', 'or', 'xor', 'test', 'imul', 'mul', 'popcnt', 'andn',
                   'bzhi', 'blsr', 'blsi', 'blsmsk', 'ucomisd', 'comisd', 'ucomiss', 'comiss', 'popfq', 'xadd', 'cmpxchg', 'vptest',
-                  'vucomisd', 'vucomiss'}
+                  'vucomisd', 'vucomiss', 'bextr'}
 COUNTED = {'shl', 'sal', 'shr', 'sar', 'shld', 'shrd', 'rol', 'ror'}
 
 
