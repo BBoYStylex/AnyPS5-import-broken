@@ -1625,7 +1625,7 @@
     "core/libs/SceTypes.hpp": "4f2b951ff102099f24f1666821dd2b6a9ef2f1817f82678698a2921e0e291692",
     "core/libs/native/NativeAotSce.cpp": "152d960b3cda033f568840553fbf5832ab68af8ce1dadac1c7aa2f3672a50a1c",
     "core/libs/native/NativeAotSce.hpp": "2d51a2a231298c4380340f145a15bd166d4ab60015c53232671d4baf9b545332",
-    "core/libs/native/NativeAotSceAbi.hpp": "eef0dfdea7b3d4261e9ce1fa17034f9111b8284c5279b65b0b75a84df4c5d717",
+    "core/libs/native/NativeAotSceAbi.hpp": "b455886f8e3272d2f0aea1b91854cbb5056d64c84629fac4180785ee34b11957",
     "core/libs/native/NativeAotSceCrt.cpp": "13e0e62c09c9834e8a309e26bbface863a1b9e16b308abc7fa0d9d21a2856fc6",
     "core/libs/native/NativeAotSceCrt.hpp": "480addb14ebcb680d8b27f70677b120c96003c18b4fc63323fcfe97e41da8d5e",
     "core/libs/prx/libSceAgc/Cb/src/Dispatch.cpp": "819d24d079dabeac9bc6a1d2fdd25f4d9d428070da5b51f17769911648672428",

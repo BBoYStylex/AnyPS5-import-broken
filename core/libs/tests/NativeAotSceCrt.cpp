@@ -17,6 +17,8 @@ extern "C" int pthread_join_nid_postfix(Pthread, void**);
 
 namespace {
 using State = NativeAotGuestState;
+static_assert(!NativeAotSce::ScalarArgument<long double>);
+static_assert(!NativeAotSce::ScalarArgument<void (*)()>);
 void Require(bool value) { if (!value) std::abort(); }
 void Set(State& state, unsigned index, std::uint64_t value) {
     constexpr unsigned registers[] = {7,6,2,1,8,9};

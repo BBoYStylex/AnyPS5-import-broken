@@ -11,7 +11,7 @@
 namespace NativeAotSce {
 
 template<class T>
-inline constexpr bool ScalarArgument = (std::is_integral_v<T> || std::is_floating_point_v<T> ||
+inline constexpr bool ScalarArgument = (std::is_integral_v<T> || std::is_same_v<T, float> || std::is_same_v<T, double> ||
     (std::is_pointer_v<T> && !std::is_function_v<std::remove_pointer_t<T>>)) && sizeof(T) <= 8;
 
 template<class Value, std::size_t Index, class... Values>
