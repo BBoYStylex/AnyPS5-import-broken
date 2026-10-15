@@ -347,6 +347,13 @@ int fail(int err) {
     return NET_ERROR_BASE | err;
 }
 
+int hex_digit_value(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
 int set_native_timeout(NativeSocket native, int optname, std::int64_t microseconds) {
     const int native_option = optname == NET_SO_RCVTIMEO ? SO_RCVTIMEO : SO_SNDTIMEO;
 #ifdef _WIN32
@@ -1421,6 +1428,28 @@ int APS5_VABI sceNetEtherNtostr(const NetEtherAddr* n, char* str, size_t len) {
         return fail(NET_EINVAL);
     }
     std::snprintf(str, len, "%02x:%02x:%02x:%02x:%02x:%02x", n->data[0], n->data[1], n->data[2], n->data[3], n->data[4], n->data[5]);
+    return 0;
+}
+
+int APS5_VABI sceNetEtherStrton(const char* str, NetEtherAddr* n) {
+    if (str == nullptr || n == nullptr) {
+        return fail(NET_EINVAL);
+    }
+    std::uint8_t parsed[6];
+    for (std::size_t i = 0; i < 6; ++i) {
+        const char* part = str + i * 3;
+        const int high = hex_digit_value(part[0]);
+        const int low = high < 0 ? -1 : hex_digit_value(part[1]);
+        if (low < 0) {
+            return fail(NET_EINVAL);
+        }
+        const char terminator = i < 5 ? ':' : '\0';
+        if (part[2] != terminator) {
+            return fail(NET_EINVAL);
+        }
+        parsed[i] = static_cast<std::uint8_t>(high << 4 | low);
+    }
+    std::memcpy(n->data, parsed, sizeof(parsed));
     return 0;
 }
 
