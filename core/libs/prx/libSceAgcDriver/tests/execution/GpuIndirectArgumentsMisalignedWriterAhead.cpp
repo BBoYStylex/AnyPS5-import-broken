@@ -2,8 +2,15 @@
 #include "prx/libSceAgcDriver/Execution/include/Driver.hpp"
 #include "prx/libSceAgcDriver/Submit/include/Acb.hpp"
 #include "prx/libc/include/GuestAllocations.hpp"
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 #include <array>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <initializer_list>
 #include <iostream>
@@ -22,7 +29,48 @@ alignas(256) std::array<std::uint32_t, 7> CounterCode{0xf4080200u, 0xfa000000u, 
 
 constexpr std::size_t BlockBytes = 65536;
 constexpr std::uint32_t ArgumentsOffset = 4;
-alignas(BlockBytes) std::array<std::uint8_t, BlockBytes> Block{};
+
+class GuestBlock {
+public:
+    GuestBlock() {
+#ifdef _WIN32
+        block = static_cast<std::uint8_t*>(VirtualAlloc(nullptr, BlockBytes, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
+#else
+        block = static_cast<std::uint8_t*>(std::aligned_alloc(BlockBytes, BlockBytes));
+#endif
+        Require(block != nullptr, "gpu indirect arguments misaligned writer ahead: cannot allocate the guest block");
+        std::memset(block, 0, BlockBytes);
+    }
+
+    ~GuestBlock() {
+#ifdef _WIN32
+        VirtualFree(block, 0, MEM_RELEASE);
+#else
+        std::free(block);
+#endif
+    }
+
+    GuestBlock(const GuestBlock&) = delete;
+    GuestBlock& operator=(const GuestBlock&) = delete;
+
+    std::uint8_t* Data() { return block; }
+    const std::uint8_t* Data() const { return block; }
+
+    std::uint32_t Argument(std::size_t index) const {
+        std::uint32_t value = 0;
+        std::memcpy(&value, block + ArgumentsOffset + index * sizeof(value), sizeof(value));
+        return value;
+    }
+
+    void SetArguments(std::uint32_t x, std::uint32_t y, std::uint32_t z) {
+        const std::array<std::uint32_t, 3> values{x, y, z};
+        std::memcpy(block + ArgumentsOffset, values.data(), sizeof(values));
+    }
+
+private:
+    std::uint8_t* block = nullptr;
+};
+
 alignas(256) std::array<std::uint32_t, 4> WriterDescriptor{};
 alignas(256) std::array<std::uint32_t, 4> Counter{};
 alignas(256) std::array<std::uint32_t, 4> CounterDescriptor{};
@@ -39,17 +87,6 @@ std::uint32_t High(const volatile void* pointer) {
 
 std::array<std::uint32_t, 4> Descriptor(const void* pointer, std::uint32_t bytes) {
     return {Low(pointer), High(pointer) & 0xffffu, bytes, 0x31016facu};
-}
-
-std::uint32_t Argument(std::size_t index) {
-    std::uint32_t value = 0;
-    std::memcpy(&value, Block.data() + ArgumentsOffset + index * sizeof(value), sizeof(value));
-    return value;
-}
-
-void SetArguments(std::uint32_t x, std::uint32_t y, std::uint32_t z) {
-    const std::array<std::uint32_t, 3> values{x, y, z};
-    std::memcpy(Block.data() + ArgumentsOffset, values.data(), sizeof(values));
 }
 
 void SetShaderRegister(std::vector<std::uint32_t>& words, std::uint32_t offset, std::uint32_t value) {
@@ -74,9 +111,10 @@ int main() {
         auto device = OpenVulkanTestDevice();
         if (!device) return VulkanTestSkipped;
         device.reset();
-        GuestAllocations::Mutation().Add(Block.data(), BlockBytes, true, true, true);
-        SetArguments(1, 1, 1);
-        const auto* arguments = Block.data() + ArgumentsOffset;
+        GuestBlock block;
+        GuestAllocations::Mutation().Add(block.Data(), BlockBytes, true, true, true);
+        block.SetArguments(1, 1, 1);
+        const auto* arguments = block.Data() + ArgumentsOffset;
         WriterDescriptor = Descriptor(arguments, 16);
         CounterDescriptor = Descriptor(Counter.data(), sizeof(Counter));
         std::vector<std::uint32_t> warmUp;
@@ -100,11 +138,11 @@ int main() {
         Require(sceAgcDriverSubmitAcb(0x20, &packet) == 0, "compute submit failed");
         AgcDriverWaitIdle_nid_postfix();
         Require(Done == 1, "the submission did not finish");
-        Require(Argument(0) == 2 && Argument(1) == 3 && Argument(2) == 4, "the first dispatch did not write the indirect arguments through its misaligned binding");
+        Require(block.Argument(0) == 2 && block.Argument(1) == 3 && block.Argument(2) == 4, "the first dispatch did not write the indirect arguments through its misaligned binding");
         Require(Counter[0] == 24, "an indirect dispatch whose arguments the dispatch before it writes through a misaligned binding ran " + std::to_string(Counter[0]) + " groups, expected 24");
         const auto adopted = AgcDriverDispatchesAdoptedAhead_nid_postfix() - adoptedBefore;
         Require(adopted == 2, "the gated group adopted " + std::to_string(adopted) + " dispatches resolved at the gate, expected 2: a GPU-read indirect dispatch whose registered arguments an earlier dispatch writes through a misaligned binding must still be captured at the gate");
-        GuestAllocations::Mutation().Remove(Block.data());
+        GuestAllocations::Mutation().Remove(block.Data());
         std::cout << "gpu indirect arguments misaligned writer ahead test passed\n";
         AgcDriverShutdown_nid_postfix();
         return 0;
