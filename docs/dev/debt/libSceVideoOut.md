@@ -5,6 +5,7 @@
 - [sceVideoOutOpen](../../../core/libs/prx/libSceVideoOut/src/Output.cpp) validates the priority and CPU affinity that the open param requests for the VideoOut service thread but does not apply them: the port's present and vblank threads are host threads, and guest priorities and affinities do not reach host scheduling
 - [sceVideoOutAddVrrStatusFlagsPrivilege](../../../core/libs/prx/libSceVideoOut/src/Output.cpp) returns 0 and does nothing: the host output has no VRR state to report. The name comes from an assert message in a title that requires `SCE_VIDEO_OUT_OK`; the NID hashes to it, the arguments are unknown (it is called without any)
 - [sceVideoOutVrrPegToFixedRate, sceVideoOutVrrUnpegFromFixedRate](../../../core/libs/prx/libSceVideoOut/src/Output.cpp) (libSceVideoOut) - PPSA05684 passes the handle to both, two further zero arguments to `sceVideoOutVrrPegToFixedRate`, and ignores the results. The meaning of those two arguments is unknown, so only zeros are accepted. VRR is not modelled and the output always runs at a fixed rate, so both calls only validate the handle and return 0
+- [sceVideoOutSetFlipMaster, sceVideoOutClearFlipMaster](../../../core/libs/prx/libSceVideoOut/Unimplemented.cpp) (libSceVideoOut) return 0 and do nothing: signatures are unknown (PPSA29866 imports them with no arguments) and the host has no flip-master ownership to transfer. Covered by `guest_video_out_flip_master`
 
 ### Unknown function info
 
