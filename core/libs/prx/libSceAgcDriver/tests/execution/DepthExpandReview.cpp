@@ -219,6 +219,7 @@ struct DrawState {
     std::uint32_t renderControl = 0;
     std::uint32_t depthControl = DepthWriteAlways;
     std::uint32_t zInfo = ZInfo;
+    std::uint32_t view = 0;
     std::uint32_t stencilInfo = StencilInfo;
     std::uint32_t stencilControl = 0;
     std::uint32_t stencilReference = 0;
@@ -256,7 +257,7 @@ std::vector<std::uint32_t> Draw(const Surfaces& surfaces, const DrawState& state
         {0x10f, std::bit_cast<std::uint32_t>(Width / 2.0f)}, {0x110, std::bit_cast<std::uint32_t>(Width / 2.0f)},
         {0x111, std::bit_cast<std::uint32_t>(Height / 2.0f)}, {0x112, std::bit_cast<std::uint32_t>(Height / 2.0f)},
         {0xd, extent}, {0x82, extent}, {0x91, extent}, {0x95, extent},
-        {0x002, 0}, {0x007, ((Height - 1u) << 16u) | (Width - 1u)}, {0x00a, 0}, {0x00b, std::bit_cast<std::uint32_t>(1.0f)},
+        {0x002, state.view}, {0x007, ((Height - 1u) << 16u) | (Width - 1u)}, {0x00a, 0}, {0x00b, std::bit_cast<std::uint32_t>(1.0f)},
         {0x010, state.zInfo}, {0x011, state.stencilInfo}, {0x201, 0}, {0x10b, state.stencilControl}, {0x10c, state.stencilReference}, {0x10d, 0},
         {0x000, state.renderControl}, {0x200, state.depthControl},
         {0x8e, state.pixelShader ? 0xffffffffu : 0u}, {0x2f8, 0u}, {0x292, 2u},
@@ -623,6 +624,27 @@ void SixteenBitPlane(TexelReader& reader) {
     RequireSame(Detiled(written, raw, Format16Unorm, 2u), quantized, "Z_16 surface: raw read of the write base after a flush, detiled with the 16-bit SW_64KB_Z_X equation");
 }
 
+void SecondSlice(TexelReader& reader) {
+    std::puts("an expand of the second slice of a depth array");
+    const auto depthSlice = static_cast<std::size_t>(DepthSliceBytes({Width, Height}, 4u));
+    const Surfaces surfaces{Address(NewBlock(2u * depthSlice)), Address(NewBlock(2u * static_cast<std::size_t>(DepthSliceBytes({Width, Height}, 1u)))), Address(NewBlock(2u * Block))};
+    const auto written = Address(NewBlock(2u * depthSlice));
+    const std::vector<std::uint32_t> marker(depthSlice / sizeof(std::uint32_t), 0x3f000000u);
+    std::memcpy(reinterpret_cast<void*>(static_cast<std::uintptr_t>(written)), marker.data(), depthSlice);
+    constexpr std::uint32_t SliceOne = 1u | (1u << 13u);
+    auto draw = DepthDrawn(surfaces, Gradient);
+    draw.view = SliceOne;
+    Submit(Draw(surfaces, draw), "second slice: depth draw into slice 1");
+    auto expand = Expand(written);
+    expand.view = SliceOne;
+    Submit(Draw(surfaces, expand), "second slice: DB expand of slice 1");
+    const auto depth = RequireDepth(reader, surfaces.depth + depthSlice, Gradient, "second slice: slice 1 of the read base");
+    RequireExpanded(reader, written + depthSlice, depth, "second slice: slice 1 of the write base");
+    const auto first = GuestBytes(written, depthSlice);
+    Require(std::memcmp(first.data(), marker.data(), depthSlice) == 0, "depth expand review: second slice: the expand of slice 1 changed slice 0 of the write base");
+    std::puts("  slice 0 of the write base still holds what the CPU wrote");
+}
+
 }
 
 int main() {
@@ -640,6 +662,7 @@ int main() {
         TwoDestinations(reader);
         QueuedDraws(reader);
         SixteenBitPlane(reader);
+        SecondSlice(reader);
         AgcDriverShutdown_nid_postfix();
         std::puts("depth expand review tests passed");
         return 0;

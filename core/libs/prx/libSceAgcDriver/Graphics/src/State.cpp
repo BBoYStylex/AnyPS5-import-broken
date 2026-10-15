@@ -1469,13 +1469,14 @@ std::optional<DepthExpandPass> DecodeDepthExpandPass(const QueueState& queue) {
     if (((zInfo >> 2u) & 3u) != 0) reject("of a multisampled depth surface");
     if (((zInfo >> 4u) & 0x1fu) != 24u) reject("of a depth surface in a swizzle mode other than SW_64KB_Z_X");
     if ((zInfo & 0x000f1000u) != 0) reject("of a partially resident or mipmapped depth surface");
-    if ((view & ~0x02000000u) != 0) reject("of a depth view with a base slice or a mip level");
+    if ((view & 0x3c000000u) != 0) reject("of a depth view with a mip level");
+    if ((value(0x207) & LayerExports) != 0) reject("with layer exports");
     if (((source | destination) & 0xffffu) != 0) reject("between bases that are not 64 KiB aligned");
     zero(cx, 0x80, ~0u, "window offset");
     if (const auto viewportControl = read(cx, 0x206); viewportControl != 0x43fu) throw std::runtime_error(vteMessage(viewportControl));
     const auto target = depthTargetFor(cx);
     if (!passCovers(cx, target.extent)) reject("over part of the depth surface");
-    return DepthExpandPass{target, destination};
+    return DepthExpandPass{target, destination + static_cast<std::uint64_t>(target.firstSlice) * DepthSliceBytes(target.extent, (zInfo & 3u) == 1u ? 2u : 4u)};
 }
 
 std::string DrawRejection(const QueueState& queue, bool indexed) {

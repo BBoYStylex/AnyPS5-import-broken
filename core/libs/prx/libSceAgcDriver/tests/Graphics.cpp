@@ -1940,8 +1940,9 @@ void depthExpandPassTests() {
         {0x010u, 0x20000187u, "of a multisampled depth surface"},
         {0x010u, 0x20000003u, "in a swizzle mode other than SW_64KB_Z_X"},
         {0x010u, 0x20010183u, "of a partially resident or mipmapped depth surface"},
-        {0x002u, 1u, "of a depth view with a base slice"},
-        {0x002u, 0x02000000u | (1u << 26u), "of a depth view with a base slice or a mip level"},
+        {0x002u, 1u << 26u, "of a depth view with a mip level"},
+        {0x002u, 0x02000000u | (1u << 26u), "of a depth view with a mip level"},
+        {0x207u, 1u << 18u, "with layer exports"},
         {0x014u, 0x20298b01u, "between bases that are not 64 KiB aligned"},
         {0x10fu, std::bit_cast<std::uint32_t>(480.0f), "over part of the depth surface"},
         {0x91u, (1080u << 16u) | 1920u, "over part of the depth surface"},
@@ -1950,6 +1951,14 @@ void depthExpandPassTests() {
         auto other = expand();
         other.context[offset] = value;
         expectFailure([&] { AgcDriver::Graphics::DecodeDepthExpandPass(other); }, reason);
+    }
+    for (const auto view : {2u | (2u << 13u), 2u | (5u << 13u), 0x02000000u | 2u | (2u << 13u)}) {
+        auto sliced = expand();
+        sliced.context[0x002] = view;
+        const auto slice = AgcDriver::Graphics::DecodeDepthExpandPass(sliced);
+        Require(slice.has_value() && slice->source.firstSlice == 2u, "the DB expand of a depth view's third slice was not taken");
+        const auto offset = slice->source.address - 0x202a8a0000ull;
+        Require(offset != 0 && offset % 0x10000u == 0 && slice->destination - 0x20298b0000ull == offset && slice->source.stencilAddress > 0x2029430000ull, "the DB expand of a depth view's third slice did not move the read and write bases by the same two slices");
     }
     auto colored = expand();
     colored.context[0x202] = 0x00cc0010u;
