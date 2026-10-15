@@ -31,10 +31,10 @@ def check_code(base):
             + b"\xcc" + b"\x0f\x0b")
 
 
-def fixture(relocation_type=8, addend=ENTRY, alignment=0x4000, memory_size=0x1000):
+def fixture(relocation_type=8, addend=ENTRY, alignment=0x4000, memory_size=0x1000, program_header_count=6):
     image = bytearray(0x8000)
     image[:16] = b"\x7fELF\x02\x01\x01" + bytes(9)
-    struct.pack_into("<HHIQQQIHHHHHH", image, 16, 3, 62, 1, ENTRY, 64, 0, 0, 64, 56, 6, 64, 0, 0)
+    struct.pack_into("<HHIQQQIHHHHHH", image, 16, 3, 62, 1, ENTRY, 64, 0, 0, 64, 56, program_header_count, 64, 0, 0)
     tags = [(5, 0x7A0), (10, 1), (6, 0x780), (11, 24), (7, 0x700), (8, 24), (9, 24), (0, 0)]
     struct.pack_into("<IIQQQQQQ", image, 64, PT_LOAD, 7, 0x4000, 0, 0, 0x1000, memory_size, alignment)
     struct.pack_into("<IIQQQQQQ", image, 120, PT_DYNAMIC, 6, 0x4600, 0x600, 0x600, len(tags) * 16, len(tags) * 16, 8)
@@ -103,6 +103,16 @@ def main():
             shift = 0 if before[0] in (PT_NULL, PT_GNU_STACK) else BASE
             assert after == (*before[:3], before[3] + shift, before[4] + shift, *before[5:]), (before, after)
         assert min(header[3] for header in fixed_headers if header[0] == PT_LOAD) == BASE, "image does not start at the base"
+
+        result, grown_path = relink(relinker, work, "fixed-grown-table", fixture(program_header_count=3),
+                                   "--linux-fixed-base", hex(BASE))
+        assert result.returncode == 0, (result.stdout, result.stderr)
+        grown = grown_path.read_bytes()
+        grown_entry = struct.unpack_from("<Q", grown, 24)[0]
+        assert struct.unpack_from("<Q", grown, 32)[0] != 64, "program header table did not move"
+        assert grown_entry >= BASE, "entry was not rebased"
+        mapped(grown, grown_entry)
+        assert min(header[3] for header in headers(grown) if header[0] == PT_LOAD) == BASE, "grown table's load headers were not rebased"
 
         for (tag, value), (fixed_tag, fixed_value) in zip(dynamic_tags(plain), dynamic_tags(fixed), strict=True):
             assert tag == fixed_tag and fixed_value == value + (BASE if tag in ADDRESS_TAGS else 0), (tag, value, fixed_value)
