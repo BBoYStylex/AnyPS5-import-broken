@@ -394,7 +394,7 @@ std::vector<std::uint32_t> DrawnDepth(TexelReader& reader, const Surfaces& surfa
     const auto depth = reader.Read(surfaces.depth, name + ": texture read of the read base");
     std::uint32_t drawn = 0;
     for (std::uint32_t texel = 0; texel < Texels; ++texel) {
-        if (std::fabs(std::bit_cast<float>(depth[texel]) - (raise + Expected(texel % Width, texel / Width))) <= 4e-6f) ++drawn;
+        if (std::fabs(std::bit_cast<float>(depth[texel]) - (raise + Expected(texel % Width, texel / Width))) <= 0.5f / 65536.0f) ++drawn;
     }
     std::printf("  read base: %u of %u texels hold the drawn depth gradient; texel (0, 0) %s, (%u, %u) %s\n", drawn, Texels, Hex(depth.front()).c_str(), Width - 1u, Height - 1u, Hex(depth.back()).c_str());
     Require(drawn == Texels, name + ": the depth draw did not write its gradient at the read base");

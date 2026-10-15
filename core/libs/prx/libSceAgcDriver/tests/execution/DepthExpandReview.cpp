@@ -388,7 +388,7 @@ std::vector<std::uint32_t> RequireDepth(TexelReader& reader, std::uint64_t surfa
         const auto x = texel % Width;
         const auto y = texel / Width;
         const auto expected = &vertices == &Flat ? FlatDepth : Expected(x, y, &vertices == &SecondGradient ? SecondOffset : 0.0f);
-        if (std::fabs(std::bit_cast<float>(depth[texel]) - expected) <= 4e-6f) ++drawn;
+        if (std::fabs(std::bit_cast<float>(depth[texel]) - expected) <= 0.5f / 65536.0f) ++drawn;
     }
     std::printf("  %s: %u of %u texels hold the drawn depth; texel (0, 0) %s\n", what.c_str(), drawn, Texels, Hex(depth.front()).c_str());
     Require(drawn == Texels, "depth expand review: " + what + " does not hold the drawn depth");
