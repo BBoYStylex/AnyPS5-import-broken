@@ -6,7 +6,6 @@
 extern "C" {
 
 int APS5_VABI sceVrTracker2Finalize() {
-    NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
