@@ -92,12 +92,10 @@ int APS5_VABI sceHmd2ReprojectionEnableVrMode() {
 }
 
 int APS5_VABI sceHmd2ReprojectionGetMirroringDisplayBufferSizeAlign() {
-    NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
 int APS5_VABI sceHmd2ReprojectionGetMirroringWorkMemorySizeAlign() {
-    NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
@@ -112,12 +110,10 @@ int APS5_VABI sceHmd2ReprojectionInitialize() {
 }
 
 int APS5_VABI sceHmd2ReprojectionQueryBufferSizeAlign() {
-    NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
 int APS5_VABI sceHmd2ReprojectionQueryDisplayBufferSizeAlign() {
-    NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
