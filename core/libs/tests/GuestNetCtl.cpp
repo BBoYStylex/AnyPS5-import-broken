@@ -24,6 +24,7 @@ int APS5_VABI sceNetCtlGetInfo(int, NetCtlInfo*);
 int APS5_VABI sceNetCtlGetNatInfo(NetCtlNatInfo*);
 int APS5_VABI sceNetCtlGetState(int*);
 int APS5_VABI sceNetCtlGetStateV6(int*);
+int APS5_VABI sceNetCtlGetInfoV6(int, void*);
 int APS5_VABI sceNetCtlGetResult(int, int*);
 int APS5_VABI sceNetCtlRegisterCallback(NetCtlCallback, void*, int*);
 int APS5_VABI sceNetCtlRegisterCallbackV6(NetCtlCallback, void*, int*);
@@ -202,6 +203,12 @@ int main() {
     Require(sceNetCtlGetInfo(0, &info) == kErrInvalidCode);
     Require(sceNetCtlGetInfo(22, &info) == kErrInvalidCode);
     Require(sceNetCtlGetInfo(14, nullptr) == kErrInvalidAddr);
+
+    std::uint8_t infoV6[256] = {};
+    Require(sceNetCtlGetInfoV6(0, infoV6) == kErrInvalidCode);
+    Require(sceNetCtlGetInfoV6(6, infoV6) == kErrInvalidCode);
+    Require(sceNetCtlGetInfoV6(1, nullptr) == kErrInvalidAddr);
+    if (stateV6 != kStateIpObtained) Require(sceNetCtlGetInfoV6(1, infoV6) == kErrNotConnected);
 
     const int result = sceNetCtlGetInfo(14, &info);
     if (result == kErrNotConnected) {
