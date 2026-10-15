@@ -237,14 +237,12 @@ int APS5_VABI sceNpUnregisterPremiumEventCallback(void) {
 }
 
 int APS5_VABI sceNpGetUserIdByAccountId() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return SCE_NP_ERROR_SIGNED_OUT;
 }
 
 int APS5_VABI sceNpGetSandboxInfo(void* sandbox_info) {
-    (void)sandbox_info;
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    if (!sandbox_info) return SCE_NP_ERROR_INVALID_ARGUMENT;
+    return SCE_NP_ERROR_SIGNED_OUT;
 }
 
 }
