@@ -1464,7 +1464,8 @@ std::optional<DepthExpandPass> DecodeDepthExpandPass(const QueueState& queue) {
     if ((value(0x200) & 0xc000000fu) != 0) reject("with depth, stencil or depth bounds tests");
     const bool colorMasks = find(cx, 0x8e) != cx.end() && find(cx, 0x8f) != cx.end();
     if (((value(0x202) >> 4u) & 7u) != 0 && colorMasks && ColorWriteMask(cx) != 0) reject("with color writes");
-    if ((zInfo & 3u) != 3u) reject("of a depth plane other than Z_32_FLOAT");
+    if ((zInfo & 3u) == 0u) reject("of a surface without a depth plane");
+    if ((zInfo & 3u) == 2u) reject("of a Z_24 depth plane");
     if (((zInfo >> 2u) & 3u) != 0) reject("of a multisampled depth surface");
     if (((zInfo >> 4u) & 0x1fu) != 24u) reject("of a depth surface in a swizzle mode other than SW_64KB_Z_X");
     if ((zInfo & 0x000f1000u) != 0) reject("of a partially resident or mipmapped depth surface");

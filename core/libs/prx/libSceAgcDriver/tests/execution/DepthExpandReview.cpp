@@ -53,6 +53,8 @@ constexpr std::uint32_t DispatchDirect = 0x15u;
 constexpr std::size_t Block = 65536;
 constexpr std::uint32_t CompressDisable = 0x60u;
 constexpr std::uint32_t ZInfo = 0x20000183u;
+constexpr std::uint32_t Z16Info = 0x20000181u;
+constexpr std::uint32_t Format16Unorm = 7;
 constexpr std::uint32_t StencilInfo = 0x20000181u;
 constexpr std::uint32_t NoStencilInfo = 0x20000180u;
 constexpr std::uint32_t ColorDisabled = 0x00cc0000u;
@@ -216,6 +218,7 @@ std::uint64_t NewPlane() {
 struct DrawState {
     std::uint32_t renderControl = 0;
     std::uint32_t depthControl = DepthWriteAlways;
+    std::uint32_t zInfo = ZInfo;
     std::uint32_t stencilInfo = StencilInfo;
     std::uint32_t stencilControl = 0;
     std::uint32_t stencilReference = 0;
@@ -254,7 +257,7 @@ std::vector<std::uint32_t> Draw(const Surfaces& surfaces, const DrawState& state
         {0x111, std::bit_cast<std::uint32_t>(Height / 2.0f)}, {0x112, std::bit_cast<std::uint32_t>(Height / 2.0f)},
         {0xd, extent}, {0x82, extent}, {0x91, extent}, {0x95, extent},
         {0x002, 0}, {0x007, ((Height - 1u) << 16u) | (Width - 1u)}, {0x00a, 0}, {0x00b, std::bit_cast<std::uint32_t>(1.0f)},
-        {0x010, ZInfo}, {0x011, state.stencilInfo}, {0x201, 0}, {0x10b, state.stencilControl}, {0x10c, state.stencilReference}, {0x10d, 0},
+        {0x010, state.zInfo}, {0x011, state.stencilInfo}, {0x201, 0}, {0x10b, state.stencilControl}, {0x10c, state.stencilReference}, {0x10d, 0},
         {0x000, state.renderControl}, {0x200, state.depthControl},
         {0x8e, state.pixelShader ? 0xffffffffu : 0u}, {0x2f8, 0u}, {0x292, 2u},
     };
@@ -374,21 +377,21 @@ std::uint64_t EquationOffset(const TextureSwizzleEquation& equation, std::uint32
     return offset;
 }
 
-std::vector<std::uint32_t> Detiled(std::uint64_t surface, std::span<const std::byte> raw) {
-    const auto descriptor = DecodeTextureResource(TextureDescriptor(surface, Format32Float));
+std::vector<std::uint32_t> Detiled(std::uint64_t surface, std::span<const std::byte> raw, std::uint32_t format = Format32Float, std::uint32_t texelBytes = 4u) {
+    const auto descriptor = DecodeTextureResource(TextureDescriptor(surface, format));
     const auto geometry = DescribeSurface(descriptor);
-    Require(geometry.guestBytes == raw.size(), "depth expand review: the R32F view of the plane is not the size of the depth plane");
-    const auto* equation = FindTextureSwizzleEquation(XorSwizzleMode(descriptor.tileMode), 4u);
-    Require(equation != nullptr, "depth expand review: the SW_64KB_Z_X equation for 32-bit texels is missing");
+    Require(geometry.guestBytes == raw.size(), "depth expand review: the view of the plane is not the size of the plane");
+    const auto* equation = FindTextureSwizzleEquation(XorSwizzleMode(descriptor.tileMode), texelBytes);
+    Require(equation != nullptr, "depth expand review: the SW_64KB_Z_X equation for the plane's texels is missing");
     const auto& mip = geometry.mips.at(0);
-    const auto layout = ThinBlockLayout(descriptor.tileMode, 4u);
+    const auto layout = ThinBlockLayout(descriptor.tileMode, texelBytes);
     std::vector<std::uint32_t> texels(Texels);
     for (std::uint32_t y = 0; y < Height; ++y) {
         for (std::uint32_t x = 0; x < Width; ++x) {
             auto offset = mip.tiledOffset;
             if (mip.tail) offset += EquationOffset(*equation, x + mip.tailX, y + mip.tailY);
             else offset += (static_cast<std::uint64_t>(y / layout[2]) * mip.blocksPerRow + x / layout[1]) * layout[0] + EquationOffset(*equation, x, y);
-            std::memcpy(&texels[y * Width + x], raw.data() + offset, sizeof(std::uint32_t));
+            std::memcpy(&texels[y * Width + x], raw.data() + offset, texelBytes);
         }
     }
     return texels;
@@ -595,6 +598,31 @@ void QueuedDraws(TexelReader& reader) {
     Require(failed == 0, "depth expand review: " + std::to_string(failed) + " of " + std::to_string(cases.size()) + " expands after queued depth draws failed");
 }
 
+void SixteenBitPlane(TexelReader& reader) {
+    std::puts("an expand of a Z_16 surface");
+    const auto surfaces = NewSurfaces();
+    const auto written = NewPlane();
+    auto draw = DepthDrawn(surfaces, Gradient, NoStencilInfo);
+    draw.zInfo = Z16Info;
+    Submit(Draw(surfaces, draw), "Z_16 surface: depth draw");
+    auto expand = Expand(written, NoStencilInfo);
+    expand.zInfo = Z16Info;
+    Submit(Draw(surfaces, expand), "Z_16 surface: DB expand");
+    const auto depth = reader.Read(surfaces.depth, Format16Unorm, "Z_16 surface: read base");
+    std::uint32_t drawn = 0;
+    for (std::uint32_t texel = 0; texel < Texels; ++texel) {
+        if (std::fabs(std::bit_cast<float>(depth[texel]) - Expected(texel % Width, texel / Width, 0.0f)) <= 1.0f / 65535.0f) ++drawn;
+    }
+    std::printf("  Z_16 surface: read base: %u of %u texels hold the drawn depth within one 16-bit step; texel (0, 0) %s\n", drawn, Texels, Hex(depth.front()).c_str());
+    Require(drawn == Texels, "depth expand review: Z_16 surface: the read base does not hold the drawn depth");
+    RequireSame(reader.Read(written, Format16Unorm, "Z_16 surface: texture read of the write base"), depth, "Z_16 surface: texture read of the write base (R16 UNORM)");
+    std::vector<std::byte> raw(static_cast<std::size_t>(DepthSliceBytes({Width, Height}, 2u)));
+    AgcDriver::GuestMemory::Read(written, raw);
+    std::vector<std::uint32_t> quantized(Texels);
+    for (std::uint32_t texel = 0; texel < Texels; ++texel) quantized[texel] = static_cast<std::uint32_t>(std::lround(std::bit_cast<float>(depth[texel]) * 65535.0f));
+    RequireSame(Detiled(written, raw, Format16Unorm, 2u), quantized, "Z_16 surface: raw read of the write base after a flush, detiled with the 16-bit SW_64KB_Z_X equation");
+}
+
 }
 
 int main() {
@@ -611,6 +639,7 @@ int main() {
         BufferReadAfterExpand(reader);
         TwoDestinations(reader);
         QueuedDraws(reader);
+        SixteenBitPlane(reader);
         AgcDriverShutdown_nid_postfix();
         std::puts("depth expand review tests passed");
         return 0;

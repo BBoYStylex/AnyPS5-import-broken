@@ -1936,7 +1936,7 @@ void depthExpandPassTests() {
         {0x000u, 0x20u, "without DEPTH_COMPRESS_DISABLE"},
         {0x200u, 0x2u, "with depth, stencil or depth bounds tests"},
         {0x200u, 0x8u, "with depth, stencil or depth bounds tests"},
-        {0x010u, 0x20000181u, "of a depth plane other than Z_32_FLOAT"},
+        {0x010u, 0x20000182u, "of a Z_24 depth plane"},
         {0x010u, 0x20000187u, "of a multisampled depth surface"},
         {0x010u, 0x20000003u, "in a swizzle mode other than SW_64KB_Z_X"},
         {0x010u, 0x20010183u, "of a partially resident or mipmapped depth surface"},
@@ -1999,13 +1999,15 @@ void depthExpandPassTests() {
     stencilOnly.context[0x014] = stencilOnly.context[0x012];
     stencilOnly.context[0x015] = 0x20294400u;
     expectFailure([&] { AgcDriver::Graphics::DecodeDepthExpandPass(stencilOnly); }, "of the stencil plane");
-    for (const auto format : {1u, 2u}) {
-        for (const auto stencilInfo : {0x20000181u, 0x20000180u}) {
-            auto other = expand();
-            other.context[0x010] = (0x20000183u & ~3u) | format;
-            other.context[0x011] = stencilInfo;
-            expectFailure([&] { AgcDriver::Graphics::DecodeDepthExpandPass(other); }, "of a depth plane other than Z_32_FLOAT");
-        }
+    for (const auto stencilInfo : {0x20000181u, 0x20000180u}) {
+        auto z16 = expand();
+        z16.context[0x010] = 0x20000181u;
+        z16.context[0x011] = stencilInfo;
+        const auto sixteen = AgcDriver::Graphics::DecodeDepthExpandPass(z16);
+        Require(sixteen.has_value() && sixteen->source.format == ((stencilInfo & 1u) != 0 ? VK_FORMAT_D16_UNORM_S8_UINT : VK_FORMAT_D16_UNORM) && sixteen->destination == 0x20298b0000ull, "the DB expand of a Z_16 depth plane was not taken as a 16-bit expand");
+        auto z24 = z16;
+        z24.context[0x010] = 0x20000182u;
+        expectFailure([&] { AgcDriver::Graphics::DecodeDepthExpandPass(z24); }, "of a Z_24 depth plane");
     }
     for (const auto swizzle : {8u, 20u, 27u, 28u}) {
         auto other = expand();

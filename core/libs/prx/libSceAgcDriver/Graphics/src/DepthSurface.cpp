@@ -1320,7 +1320,11 @@ void RetireDepthSurfaces(VkDevice device, std::uint64_t address, std::uint64_t b
 
 namespace {
 
-GuestTextureResource depthPlaneView(std::uint64_t address, VkExtent2D extent) {
+bool sixteenBitDepth(VkFormat format) {
+    return format == VK_FORMAT_D16_UNORM || format == VK_FORMAT_D16_UNORM_S8_UINT;
+}
+
+GuestTextureResource depthPlaneView(std::uint64_t address, VkExtent2D extent, VkFormat format) {
     GuestTextureResource plane{};
     plane.baseAddress = address;
     plane.width = extent.width;
@@ -1328,7 +1332,7 @@ GuestTextureResource depthPlaneView(std::uint64_t address, VkExtent2D extent) {
     plane.mipCount = 1;
     plane.tileMode = TextureTileMode::kZ64KBX;
     plane.dimension = TextureDimension::k2D;
-    plane.format = FindGuestColorTargetFormat(VK_FORMAT_R32_SFLOAT, 4u).value();
+    plane.format = FindGuestColorTargetFormat(format, format == VK_FORMAT_R16_UNORM ? 2u : 4u).value();
     plane.dstSelX = 4;
     plane.dstSelY = 5;
     plane.dstSelZ = 6;
@@ -1383,7 +1387,9 @@ void RunDepthExpandPass(const Context& context, const DepthExpandPass& pass) {
         std::lock_guard lock(surfacesMutex());
         if (planeSurface(context.device, pass.destination) != nullptr) throw failure("into a live depth surface");
     }
-    const auto destination = CachedStorageSurface(context, depthPlaneView(pass.destination, source.extent));
+    const bool d16 = sixteenBitDepth(source.format);
+    const auto planeFormat = d16 ? VK_FORMAT_R16_UNORM : VK_FORMAT_R32_SFLOAT;
+    const auto destination = CachedStorageSurface(context, depthPlaneView(pass.destination, source.extent, planeFormat));
     if (destination == nullptr) throw failure("without a storage image of the write base");
     expandsRun.fetch_add(1, std::memory_order_relaxed);
     const ExpandKey key{context.device, pass.destination};
@@ -1395,8 +1401,7 @@ void RunDepthExpandPass(const Context& context, const DepthExpandPass& pass) {
         if (owner != depthOwners().end()) {
             auto* surface = owner->second.surface;
             const auto& target = surface->target;
-            const bool float32 = target.format == VK_FORMAT_D32_SFLOAT || target.format == VK_FORMAT_D32_SFLOAT_S8_UINT;
-            if (!float32 || surface->hostFormat != target.format || target.samples != 1 || target.extent.width != source.extent.width || target.extent.height != source.extent.height) throw failure("from a depth surface of another extent, format or sample count");
+            if (sixteenBitDepth(target.format) != d16 || surface->hostFormat != target.format || target.samples != 1 || target.extent.width != source.extent.width || target.extent.height != source.extent.height) throw failure("from a depth surface of another extent, format or sample count");
             surface->ApplyFastClear();
             const auto last = expandWrites().find(key);
             if (last != expandWrites().end() && last->second.source == surface && last->second.written == surface->written && last->second.destination.lock() == destination && last->second.version == destination->Version()) {
@@ -1412,7 +1417,7 @@ void RunDepthExpandPass(const Context& context, const DepthExpandPass& pass) {
     }
     if (read == Read::Clear) recordPlaneClear(context, destination, source.clearDepth);
     if (read == Read::GuestBytes) {
-        const auto plane = CachedStorageSurface(context, depthPlaneView(source.address, source.extent));
+        const auto plane = CachedStorageSurface(context, depthPlaneView(source.address, source.extent, planeFormat));
         if (plane == nullptr) throw failure("without a storage image of the read base");
         recordPlaneCopy(context, plane, destination, source.extent);
     }
