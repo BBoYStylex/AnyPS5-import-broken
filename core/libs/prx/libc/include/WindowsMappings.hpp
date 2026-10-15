@@ -567,7 +567,6 @@ public:
                         }
                         cleanEnd = to;
                     }
-                    if (cleanFrom != cleanTo) rememberClean(cleanFrom, cleanTo);
                     if (subphaseOn) addSubphase(&CollectSubphase::armCalls, &CollectSubphase::armBytes, &CollectSubphase::armNanoseconds, stop - cursor, armStart);
                 }
                 if (full) {
