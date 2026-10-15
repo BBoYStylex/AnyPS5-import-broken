@@ -83,6 +83,14 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}/core/shader/recompiler)
     add_test(NAME shader_cache_file_read COMMAND shader_cache_file_read_tests)
     set_tests_properties(shader_cache_file_read PROPERTIES TIMEOUT 20)
+    add_test_executable(request_serializer_tests
+        ${CMAKE_CURRENT_SOURCE_DIR}/core/shader/recompiler/tests/RequestSerializerTests.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/core/shader/recompiler/ControlFlow/src/RequestSerializer.cpp)
+    target_include_directories(request_serializer_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/core/shader/recompiler
+        ${CMAKE_CURRENT_SOURCE_DIR}/core/shader/recompiler/ControlFlow/include)
+    add_test(NAME request_serializer COMMAND request_serializer_tests)
+    set_tests_properties(request_serializer PROPERTIES TIMEOUT 20)
     find_package(Python3 QUIET COMPONENTS Interpreter)
     if(Python3_Interpreter_FOUND)
         add_test(NAME pr_overlap_encoding COMMAND ${Python3_EXECUTABLE}
@@ -146,6 +154,8 @@ if(BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_check_conventions_body_bom.py)
         add_test(NAME conventions_agent_files COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_check_conventions_agent_files.py)
+        add_test(NAME check_compile COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_check_compile.py)
     endif()
 endif()
 
@@ -168,7 +178,7 @@ set(SDL_TEST OFF CACHE BOOL "" FORCE)
 set(SDL_VIDEO ON CACHE BOOL "" FORCE)
 set(SDL_RENDER OFF CACHE BOOL "" FORCE)
 set(SDL_X11 ON CACHE BOOL "" FORCE)
-set(SDL_WAYLAND OFF CACHE BOOL "" FORCE)
+set(SDL_WAYLAND ON CACHE BOOL "" FORCE)
 set(SDL_OPENGL OFF CACHE BOOL "" FORCE)
 set(SDL_OPENGLES OFF CACHE BOOL "" FORCE)
 set(SDL_VULKAN ON CACHE BOOL "" FORCE)

@@ -245,9 +245,10 @@ int APS5_VABI _Cnd_timedwait_nid_postfix(void** conditionHandle, void** mutexHan
     std::unique_lock lock(mutex->native, std::adopt_lock);
     bool timeout = false;
     try {
-        const auto deadlineTime = std::chrono::system_clock::time_point(
-            std::chrono::duration_cast<std::chrono::system_clock::duration>(std::chrono::seconds(deadline.tv_sec)) +
-            std::chrono::ceil<std::chrono::system_clock::duration>(std::chrono::nanoseconds(deadline.tv_nsec)));
+        using Duration = std::chrono::system_clock::duration;
+        const auto whole = std::chrono::duration_cast<Duration>(std::chrono::seconds(deadline.tv_sec));
+        const auto fraction = std::chrono::ceil<Duration>(std::chrono::nanoseconds(deadline.tv_nsec));
+        const auto deadlineTime = std::chrono::system_clock::time_point(whole + fraction);
         timeout = (condition->native.wait_until(lock, deadlineTime) == std::cv_status::timeout);
     } catch (const std::system_error&) {
         lock.release();
@@ -295,4 +296,10 @@ int APS5_VABI _Thrd_sleep_nid_postfix(const Xtime* target, Xtime*) {
     }
 }
 
+
+int APS5_VABI _Cnd_signal_nid_postfix(void** handle) {
+    return SignalCondition_nid_no_patch(handle);
 }
+
+}
+

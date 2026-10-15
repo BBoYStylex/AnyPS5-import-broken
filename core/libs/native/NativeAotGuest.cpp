@@ -419,6 +419,8 @@ void CheckImageMappingChange(std::uint64_t address, std::uint64_t bytes) {
 }
 
 void PromoteSharedMemory() {
+    if (loaded != nullptr && loaded->Concurrent == 0)
+        Fail("shared memory requires the ordered memory profile");
     if (loaded != nullptr && !std::atomic_ref<std::uint8_t>(NativeAotGuestSharedMemory).load(std::memory_order_acquire) && !pthread_equal(epochOwner, pthread_self()))
         Fail("a foreign guest entry requires promotion at an owning-thread call boundary");
     std::atomic_thread_fence(std::memory_order_seq_cst);

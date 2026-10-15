@@ -15,7 +15,7 @@ add_dependencies(anyps5_native_graphics agc_shader_headers agc_trace_revision)
 set_source_files_properties("${LIBS_INCLUDE_DIR}/prx/libkernel/System/src/Process.cpp"
     TARGET_DIRECTORY anyps5_native_graphics PROPERTIES COMPILE_DEFINITIONS APS5_NATIVE_AGGREGATE=1)
 set(nativeComponents libc libkernel libSceAgc libSceAgcDriver
-    libSceVideoOut libScePad libSceMouse libSceKeyboard)
+    libSceVideoOut libScePad libSceMouse libSceKeyboard libSceIme)
 set(nativeUnsupportedSources
     "${LIBS_INCLUDE_DIR}/prx/libkernel/Pthread/src/GuestTlsMacOs.cpp"
     "${LIBS_INCLUDE_DIR}/prx/libc/src/ApplicationProcessParameters.cpp"

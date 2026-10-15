@@ -45,6 +45,7 @@ def main():
     parser.add_argument('--repeats', type=int, default=9)
     parser.add_argument('--workers', type=int, default=2)
     parser.add_argument('--single-thread', action='store_true')
+    parser.add_argument('--no-asyncio', action='store_true')
     parser.add_argument('--baseline-aot', type=Path)
     args = parser.parse_args()
     if platform.system() != 'Darwin' or platform.machine() != 'arm64':
@@ -64,7 +65,7 @@ def main():
     commands = {name: (['/usr/bin/arch', '-x86_64'] if name == 'rosetta' else []) + [str(path)]
                 for name, path in binaries.items()}
     options = [('--single-thread' if args.single_thread else f'-T{args.workers}'), '-3', '-c', str(args.dataset.resolve())]
-    if args.single_thread:
+    if args.single_thread or args.no_asyncio:
         options.append('--no-asyncio')
     data = args.dataset.read_bytes()
     first, checks = {}, {}
@@ -95,7 +96,7 @@ def main():
             values = [row[metric] for row in rows if row['variant'] == name]
             summary[name][metric] = {'median': statistics.median(values), 'min': min(values), 'max': max(values)}
     result = {'schema': 'anyps5.zstd-benchmark.v1', 'host': platform.platform(),
-              'profile': {'single_thread': args.single_thread, 'workers': 0 if args.single_thread else args.workers, 'level': 3, 'warmups': 2, 'rounds': args.repeats},
+              'profile': {'single_thread': args.single_thread, 'workers': 0 if args.single_thread else args.workers, 'no_asyncio': args.single_thread or args.no_asyncio, 'level': 3, 'warmups': 2, 'rounds': args.repeats},
               'binaries': {name: {'path': str(path), 'sha256': digest(path)} for name, path in binaries.items()},
               'arguments': options,
               'dataset': {'path': str(args.dataset.resolve()), 'sha256': digest(args.dataset), 'bytes': len(data)},
