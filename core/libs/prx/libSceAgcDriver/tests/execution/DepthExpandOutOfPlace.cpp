@@ -7,6 +7,7 @@
 #include "prx/libSceAgcDriver/Graphics/include/Texture.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/TextureSwizzleEquations.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/TextureTiling.hpp"
+#include "prx/libSceAgcDriver/Submit/include/Acb.hpp"
 #include "prx/libSceAgcDriver/Submit/include/Dcb.hpp"
 #include "prx/libc/include/GuestAllocations.hpp"
 #include "prx/libc/include/GuestArena.hpp"
@@ -210,9 +211,9 @@ void SetBase(std::vector<std::uint32_t>& words, std::uint32_t low, std::uint32_t
     SetRegister(words, SetContextReg, high, static_cast<std::uint32_t>(address >> 40u));
 }
 
-void Submit(std::vector<std::uint32_t> words, const std::string& what) {
+void Submit(std::vector<std::uint32_t> words, const std::string& what, std::uint32_t queue = 0) {
     Packet packet{words.data(), static_cast<std::uint32_t>(words.size()), 0, {}};
-    Require(sceAgcDriverSubmitDcb(&packet) == 0, what + ": the DCB submission failed");
+    Require((queue == 0 ? sceAgcDriverSubmitDcb(&packet) : sceAgcDriverSubmitAcb(queue, &packet)) == 0, what + ": the submission failed");
     AgcDriverWaitIdle_nid_postfix();
 }
 
@@ -230,7 +231,7 @@ std::array<std::uint32_t, 8> TextureDescriptor(std::uint64_t address) {
     };
 }
 
-void Dispatch(const void* code, std::span<const std::uint32_t> userData, std::uint32_t threads, std::uint32_t groups, bool groupIndex, const std::string& what) {
+void Dispatch(const void* code, std::span<const std::uint32_t> userData, std::uint32_t threads, std::uint32_t groups, bool groupIndex, const std::string& what, std::uint32_t queue = 0) {
     std::vector<std::uint32_t> packet;
     const auto address = Address(code);
     SetRegister(packet, SetShReg, 0x20c, static_cast<std::uint32_t>(address >> 8u));
@@ -241,7 +242,7 @@ void Dispatch(const void* code, std::span<const std::uint32_t> userData, std::ui
     SetRegister(packet, SetShReg, 0x213, (static_cast<std::uint32_t>(userData.size()) << 1u) | (groupIndex ? 1u << 7u : 0u));
     for (std::uint32_t i = 0; i < userData.size(); ++i) SetRegister(packet, SetShReg, 0x240 + i, userData[i]);
     packet.insert(packet.end(), {0xc0000000u | (3u << 16u) | (DispatchDirect << 8u), groups, 1u, 1u, 0x41u});
-    Submit(std::move(packet), what);
+    Submit(std::move(packet), what, queue);
 }
 
 struct Surfaces {
@@ -370,7 +371,7 @@ public:
         Dispatch(storeKernel, userData, Width, Height, true, what);
     }
 
-    void CopyBuffer(std::uint64_t source, std::uint64_t destination, std::uint32_t bytes, bool addressBased, const std::string& what) {
+    void CopyBuffer(std::uint64_t source, std::uint64_t destination, std::uint32_t bytes, bool addressBased, const std::string& what, std::uint32_t queue = 0) {
         std::array<std::uint32_t, 16> userData{};
         const auto read = BufferDescriptor(source, bytes);
         const auto written = BufferDescriptor(destination, bytes);
@@ -378,7 +379,7 @@ public:
         std::copy(written.begin(), written.end(), userData.begin() + 4);
         userData[8] = static_cast<std::uint32_t>(Address(zero));
         userData[9] = static_cast<std::uint32_t>(Address(zero) >> 32u);
-        Dispatch(addressBased ? addressBasedCopyKernel : copyKernel, userData, Threads, bytes / 4u / Threads, true, what);
+        Dispatch(addressBased ? addressBasedCopyKernel : copyKernel, userData, Threads, bytes / 4u / Threads, true, what, queue);
     }
 
     void CopyThroughPointer(std::uint64_t source, std::uint64_t destination, std::uint32_t bytes, const std::string& what) {
@@ -758,6 +759,80 @@ bool RunStorageImageRead(TexelReader& reader) {
     return copied && (cached != 0 || !AddressSpaceCounters().enabled);
 }
 
+bool RunFiveRanges(TexelReader& reader) {
+    const auto name = std::string("the game's expand into a write base across five registered ranges");
+    constexpr std::size_t Piece = 32768;
+    auto* block = AllocateBlock(PlaneBytes() + 2u * Block);
+    auto surfaces = NewSurfaces();
+    surfaces.written = Address(block) + Block;
+    auto at = surfaces.written - 8192u;
+    for (int range = 0; range < 5; ++range, at += Piece) GuestAllocations::Mutation().Add(reinterpret_cast<void*>(static_cast<std::uintptr_t>(at)), Piece, true, true, true);
+    Require(at >= surfaces.written + PlaneBytes(), "depth expand: the five ranges do not cover the plane");
+    const auto copy = Address(NewBlock(PlaneBytes()));
+    std::printf("%s: read base 0x%llx, write base 0x%llx in five 32 KiB ranges from 0x%llx\n", name.c_str(), static_cast<unsigned long long>(surfaces.depth), static_cast<unsigned long long>(surfaces.written), static_cast<unsigned long long>(surfaces.written - 8192u));
+    Submit(DepthDraw(surfaces, false, false), name + ": depth draw at the read base");
+    Submit(DepthDraw(surfaces, true, true), name + ": DB expand from the read base to the write base");
+    const auto depth = DrawnDepth(reader, surfaces, name);
+    bool expanded = Expanded(reader, surfaces.written, depth, name);
+    Fill(copy, PlaneBytes(), 0xffffffffu);
+    reader.CopyBuffer(surfaces.written, copy, static_cast<std::uint32_t>(PlaneBytes()), true, name + ": address-based buffer copy of the write base");
+    expanded = Compare(DetileRaw(surfaces.written, GuestBytes(copy, PlaneBytes())), depth, "  address-based buffer copy of the write base, detiled with the SW_64KB_Z_X equation") == Texels && expanded;
+    Fill(copy, PlaneBytes(), 0xffffffffu);
+    reader.CopyThroughPointer(surfaces.written, copy, static_cast<std::uint32_t>(PlaneBytes()), name + ": pointer copy of the write base");
+    return Compare(DetileRaw(surfaces.written, GuestBytes(copy, PlaneBytes())), depth, "  pointer copy of the write base, detiled with the SW_64KB_Z_X equation") == Texels && expanded;
+}
+
+bool RunComputeQueueRead(TexelReader& reader) {
+    const auto name = std::string("a buffer copy of the write base on an asynchronous compute queue after the game's expand");
+    const auto surfaces = NewSurfaces();
+    const auto copy = Address(NewBlock(PlaneBytes()));
+    Fill(copy, PlaneBytes(), 0xffffffffu);
+    std::printf("%s: read base 0x%llx, write base 0x%llx, copy at 0x%llx\n", name.c_str(), static_cast<unsigned long long>(surfaces.depth), static_cast<unsigned long long>(surfaces.written), static_cast<unsigned long long>(copy));
+    Submit(DepthDraw(surfaces, false, false), name + ": depth draw at the read base");
+    Submit(DepthDraw(surfaces, true, true), name + ": DB expand from the read base to the write base");
+    reader.CopyBuffer(surfaces.written, copy, static_cast<std::uint32_t>(PlaneBytes()), false, name + ": ACB buffer copy of the write base", 0x20u);
+    const auto depth = DrawnDepth(reader, surfaces, name);
+    return Compare(DetileRaw(surfaces.written, GuestBytes(copy, PlaneBytes())), depth, "  ACB buffer copy of the write base, detiled with the SW_64KB_Z_X equation") == Texels;
+}
+
+bool RunDmaRead(TexelReader& reader) {
+    const auto name = std::string("a DMA_DATA copy of the write base after the game's expand");
+    const auto surfaces = NewSurfaces();
+    const auto copy = Address(NewBlock(PlaneBytes()));
+    Fill(copy, PlaneBytes(), 0xffffffffu);
+    std::printf("%s: read base 0x%llx, write base 0x%llx, copy at 0x%llx\n", name.c_str(), static_cast<unsigned long long>(surfaces.depth), static_cast<unsigned long long>(surfaces.written), static_cast<unsigned long long>(copy));
+    Submit(DepthDraw(surfaces, false, false), name + ": depth draw at the read base");
+    auto words = DepthDraw(surfaces, true, true);
+    words.insert(words.end(), {0xc0055000u, 0u, static_cast<std::uint32_t>(surfaces.written), static_cast<std::uint32_t>(surfaces.written >> 32u), static_cast<std::uint32_t>(copy), static_cast<std::uint32_t>(copy >> 32u), static_cast<std::uint32_t>(PlaneBytes())});
+    Submit(std::move(words), name + ": DB expand and a DMA_DATA copy of the write base in one submission");
+    const auto depth = DrawnDepth(reader, surfaces, name);
+    return Compare(DetileRaw(surfaces.written, GuestBytes(copy, PlaneBytes())), depth, "  DMA_DATA copy of the write base, detiled with the SW_64KB_Z_X equation") == Texels;
+}
+
+void Patch(std::vector<std::uint32_t>& words, std::uint32_t offset, std::uint32_t value) {
+    for (std::size_t at = 0; at + 2 < words.size(); ++at) {
+        if (words[at] != (0xc0010000u | (SetContextReg << 8u)) || words[at + 1] != offset) continue;
+        words[at + 2] = value;
+        return;
+    }
+    Require(false, "depth expand: the draw does not set the register to patch");
+}
+
+bool RunDepthBindOfWriteBase(TexelReader& reader) {
+    const auto name = std::string("a depth surface bound at the write base without HTILE after the game's expand");
+    const auto surfaces = NewSurfaces();
+    std::printf("%s: read base 0x%llx, write base 0x%llx\n", name.c_str(), static_cast<unsigned long long>(surfaces.depth), static_cast<unsigned long long>(surfaces.written));
+    Submit(DepthDraw(surfaces, false, false), name + ": depth draw at the read base");
+    Submit(DepthDraw(surfaces, true, true), name + ": DB expand from the read base to the write base");
+    const Surfaces bound{surfaces.written, Address(NewBlock(static_cast<std::size_t>(DepthSliceBytes({Width, Height}, 1u)))), 0u, surfaces.written};
+    auto words = DepthDraw(bound, false, false, {}, 1.0f, RaisedVertices);
+    Patch(words, 0x010, ZInfo & ~(1u << 29u));
+    Patch(words, 0x200, 0x72u);
+    Submit(std::move(words), name + ": a draw that tests the write base's depth without writing it");
+    const auto depth = DrawnDepth(reader, surfaces, name);
+    return Compare(reader.Read(surfaces.written, name + ": texture read of the depth surface at the write base"), depth, "  texture read of the depth surface bound at the write base") == Texels;
+}
+
 bool RunStoreWithoutImportRoom(TexelReader& reader) {
     const auto name = std::string("a pointer copy of a write base after an address-based copy with no room for its import");
     struct Restore {
@@ -820,6 +895,10 @@ int main(int argc, char** argv) {
             {"split-copied-buffer-read", [](TexelReader& reader) { return RunSplitRead(reader, SecondHalf::Copied, false); }, "depth expand: address-based buffer copies of a write base imported in part and copied in part do not hold the read surface's depth"},
             {"repeated-expand", RunRepeatedExpand, "depth expand: a repeated DB expand wrote the plane when nothing changed, or did not write it after a change"},
             {"address-based-storage-image-read", RunStorageImageRead, "depth expand: an address-based buffer copy of an image did not hold what a compute shader stored to it, or no copy went through the cached address space"},
+            {"five-range-write-base", RunFiveRanges, "depth expand: the write base across five registered ranges does not hold the read surface's depth through a texture, a CPU read, an address-based copy or a pointer copy"},
+            {"compute-queue-read", RunComputeQueueRead, "depth expand: a buffer copy of the write base on an asynchronous compute queue does not hold the read surface's depth"},
+            {"dma-read", RunDmaRead, "depth expand: a DMA_DATA copy of the write base does not hold the read surface's depth"},
+            {"depth-bind-of-write-base", RunDepthBindOfWriteBase, "depth expand: a depth surface bound at the write base without HTILE does not start from the expanded plane"},
             {"store-without-import-room", RunStoreWithoutImportRoom, "depth expand: an address-based build with no room for the write base's import stored or imported something for it, or a later pointer copy did not hold the read surface's depth"},
         };
         const std::string_view only = argc == 2 ? std::string_view(argv[1]) : std::string_view();
