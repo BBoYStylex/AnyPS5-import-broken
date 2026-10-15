@@ -4,6 +4,7 @@
 #include "prx/libScePad/include/InputCommandFile.hpp"
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -27,6 +28,12 @@ int APS5_VABI scePadIsRemoteController(int, bool*);
 }
 
 static void Require(bool value) { if (!value) std::abort(); }
+
+static void Require(bool value, const char* message) {
+    if (value) return;
+    std::fprintf(stderr, "touch contact history: %s\n", message);
+    std::abort();
+}
 
 static void CheckInputCommands() {
     const auto path = std::filesystem::temp_directory_path() / ("anyps5-pad-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
@@ -143,6 +150,112 @@ static void CheckTouchContact() {
     Require(data.touch_data_touch0_y == 471);
     PadPublishInput_nid_postfix(PadInputState{});
     Pad::ReadState();
+}
+
+static void CheckTouchHistory(int handle) {
+    const auto read = [&] {
+        PadData data{};
+        Require(scePadReadState(handle, &data) == PAD_OK);
+        return data;
+    };
+    const auto reset = [&] {
+        PadPublishInput_nid_postfix(PadInputState{});
+        read();
+        PadData history[64]{};
+        Require(scePadRead_nid_postfix(handle, history, 64) > 0);
+    };
+
+    reset();
+    PadInputState idle;
+    idle.buttons = static_cast<std::uint32_t>(Pad::PadButton::Cross);
+    PadPublishInput_nid_postfix(idle);
+    auto held = idle;
+    held.touch[0] = {true, 120, 240, 0};
+    PadPublishInput_nid_postfix(held);
+    const auto beforePartial = read();
+    const auto repeated = read();
+    Require(repeated.touch_data_touch0_id == beforePartial.touch_data_touch0_id, "repeated state reads changed a held contact ID");
+    PadData older{};
+    Require(scePadRead_nid_postfix(handle, &older, 1) == 1 && older.touch_data_touch_num == 0);
+    const auto afterPartial = read();
+    Require(afterPartial.touch_data_touch_num == 1 && afterPartial.touch_data_touch0_x == 120 && afterPartial.touch_data_touch0_y == 240);
+    Require(afterPartial.touch_data_touch0_id == beforePartial.touch_data_touch0_id, "reading an older sample changed the current held contact ID");
+    Require(scePadRead_nid_postfix(handle, &older, 1) == 1 && older.touch_data_touch_num == 1);
+    Require(older.touch_data_touch0_id == beforePartial.touch_data_touch0_id, "the queued sample disagrees with the same held contact");
+
+    reset();
+    PadInputState first;
+    first.touch[0] = {true, 100, 200, 0};
+    PadPublishInput_nid_postfix(first);
+    const auto firstContact = read();
+    PadPublishInput_nid_postfix(PadInputState{});
+    auto second = first;
+    second.touch[0] = {true, 900, 400, 0};
+    PadPublishInput_nid_postfix(second);
+    const auto secondContact = read();
+    Require(secondContact.touch_data_touch0_id != firstContact.touch_data_touch0_id, "a release and new contact without an intervening read reused the old ID");
+    PadData history[64]{};
+    Require(scePadRead_nid_postfix(handle, history, 64) == 3);
+    Require(history[0].touch_data_touch_num == 1 && history[0].touch_data_touch0_x == 100);
+    Require(history[0].touch_data_touch0_id == firstContact.touch_data_touch0_id, "an old contact changed ID after a newer contact was read");
+    Require(history[1].touch_data_touch_num == 0 && history[2].touch_data_touch_num == 1 && history[2].touch_data_touch0_x == 900);
+    Require(history[2].touch_data_touch0_id == secondContact.touch_data_touch0_id && read().touch_data_touch0_id == secondContact.touch_data_touch0_id, "draining history changed the new held contact ID");
+
+    reset();
+    auto both = first;
+    both.touch[1] = {true, 900, 400, 0};
+    PadPublishInput_nid_postfix(both);
+    const auto originalPair = read();
+    Require(originalPair.touch_data_touch_num == 2 && originalPair.touch_data_touch0_id != originalPair.touch_data_touch1_id);
+    auto survivor = both;
+    survivor.touch[0].active = false;
+    PadPublishInput_nid_postfix(survivor);
+    const auto one = read();
+    Require(one.touch_data_touch_num == 1 && one.touch_data_touch0_x == 900);
+    Require(one.touch_data_touch0_id == originalPair.touch_data_touch1_id, "releasing one finger changed the surviving finger's ID");
+    auto replacement = survivor;
+    replacement.touch[0] = {true, 300, 500, 0};
+    PadPublishInput_nid_postfix(replacement);
+    const auto newPair = read();
+    Require(newPair.touch_data_touch_num == 2 && newPair.touch_data_touch0_id != originalPair.touch_data_touch0_id);
+    Require(newPair.touch_data_touch1_id == originalPair.touch_data_touch1_id, "replacing another finger changed the surviving finger's ID");
+    Require(scePadRead_nid_postfix(handle, history, 64) == 3);
+    Require(history[0].touch_data_touch0_id == originalPair.touch_data_touch0_id && history[0].touch_data_touch1_id == originalPair.touch_data_touch1_id, "history reassigned the original two-finger contacts");
+    Require(history[1].touch_data_touch0_id == one.touch_data_touch0_id && history[2].touch_data_touch0_id == newPair.touch_data_touch0_id && history[2].touch_data_touch1_id == newPair.touch_data_touch1_id, "history reassigned a surviving or replacement finger");
+    const auto afterPairHistory = read();
+    Require(afterPairHistory.touch_data_touch0_id == newPair.touch_data_touch0_id && afterPairHistory.touch_data_touch1_id == newPair.touch_data_touch1_id, "two-finger history changed the current IDs");
+
+    reset();
+    for (std::uint16_t contact = 0; contact < 40; ++contact) {
+        PadPublishInput_nid_postfix(PadInputState{});
+        auto input = first;
+        input.touch[0].x = static_cast<std::uint16_t>(100 + contact);
+        PadPublishInput_nid_postfix(input);
+    }
+    const auto beforeRollover = read();
+    Require(scePadRead_nid_postfix(handle, history, 64) == 64);
+    for (int sample = 0; sample < 64; ++sample) {
+        Require(history[sample].touch_data_touch_num == (sample % 2 == 0 ? 0 : 1));
+        if (sample % 2 == 0) continue;
+        Require(history[sample].touch_data_touch0_x == 108 + sample / 2);
+        Require(history[sample].touch_data_touch0_id < 128, "a queued contact ID used the reserved high bit");
+        if (sample >= 3) Require(history[sample].touch_data_touch0_id != history[sample - 2].touch_data_touch0_id, "consecutive queued contacts shared an ID");
+    }
+    Require(history[63].touch_data_touch0_id == beforeRollover.touch_data_touch0_id && read().touch_data_touch0_id == beforeRollover.touch_data_touch0_id, "queue rollover changed the latest held contact ID");
+
+    reset();
+    auto moving = first;
+    PadPublishInput_nid_postfix(moving);
+    const auto movingContact = read();
+    for (std::uint16_t sample = 0; sample < 80; ++sample) {
+        moving.touch[0].x = static_cast<std::uint16_t>(200 + sample);
+        PadPublishInput_nid_postfix(moving);
+    }
+    Require(scePadRead_nid_postfix(handle, history, 64) == 64);
+    for (const auto& sample : history) Require(sample.touch_data_touch_num == 1 && sample.touch_data_touch0_id == movingContact.touch_data_touch0_id, "moving a continuously held contact assigned a new ID");
+    Require(read().touch_data_touch0_id == movingContact.touch_data_touch0_id, "reading the moving-contact history changed its current ID");
+    reset();
+    std::puts("touch contact history: partial reads, new contacts, two fingers and queue rollover passed");
 }
 
 static void CheckPartialTrigger() {
@@ -288,6 +401,7 @@ int main() {
     CheckTiltCorrection(handle);
     CheckAngularVelocityDeadband(handle);
     CheckTouchContact();
+    CheckTouchHistory(handle);
     CheckPartialTrigger();
     CheckReadQueue(handle);
     CheckReadStateHandle(handle);

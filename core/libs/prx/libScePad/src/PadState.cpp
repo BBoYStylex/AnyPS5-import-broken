@@ -21,6 +21,7 @@ namespace {
     struct QueuedInput {
         PadInputState input;
         std::uint64_t timestamp = 0;
+        std::array<std::uint8_t, 2> touchIds{};
     };
     constexpr std::size_t kQueueCapacity = 64;
     std::deque<QueuedInput> queue;
@@ -35,8 +36,7 @@ namespace {
     bool angularVelocityDeadband = false;
     constexpr float kAngularVelocityDeadband = 0.017453292f;
     std::uint8_t nextTouchId = 0;
-    bool prevTouchActive[2] = {false, false};
-    std::uint8_t touchIds[2] = {0, 0};
+    std::array<std::uint8_t, 2> touchIds{};
 
     void normalize(Quat& q) {
         const float n = std::sqrt(q.w * q.w + q.x * q.x + q.y * q.y + q.z * q.z);
@@ -118,7 +118,7 @@ bool Pad::IsInitialized() {
 }
 
 namespace {
-PadData BuildData(const PadInputState& state, std::uint64_t changeTime, std::uint64_t now, const Pad::InputCommandFile::Input& injected) {
+PadData BuildData(const PadInputState& state, std::uint64_t changeTime, std::uint64_t now, const Pad::InputCommandFile::Input& injected, const std::array<std::uint8_t, 2>& contactIds) {
     PadData data{};
     data.buttons = state.buttons | injected.buttons;
     const auto& sticks = injected.hasSticks ? injected.sticks : state.sticks;
@@ -169,13 +169,11 @@ PadData BuildData(const PadInputState& state, std::uint64_t changeTime, std::uin
     std::uint8_t touchNum = 0;
     for (int i = 0; i < 2; ++i) {
         const PadTouchPoint& tp = state.touch[i];
-        if (!tp.active) { prevTouchActive[i] = false; continue; }
-        if (!prevTouchActive[i]) touchIds[i] = static_cast<std::uint8_t>(nextTouchId++ & 0x7F);
-        prevTouchActive[i] = true;
+        if (!tp.active) continue;
         if (touchNum == 0) {
-            data.touch_data_touch0_x = tp.x; data.touch_data_touch0_y = tp.y; data.touch_data_touch0_id = touchIds[i];
+            data.touch_data_touch0_x = tp.x; data.touch_data_touch0_y = tp.y; data.touch_data_touch0_id = contactIds[i];
         } else {
-            data.touch_data_touch1_x = tp.x; data.touch_data_touch1_y = tp.y; data.touch_data_touch1_id = touchIds[i];
+            data.touch_data_touch1_x = tp.x; data.touch_data_touch1_y = tp.y; data.touch_data_touch1_id = contactIds[i];
         }
         ++touchNum;
     }
@@ -208,7 +206,7 @@ PadData Pad::ReadState() {
     if (!initialized) throw std::runtime_error("Pad: read before initialization");
     const std::uint64_t now = sceKernelGetProcessTime();
     const auto injected = InjectedInput(now);
-    return BuildData(state, timestamp, now, injected);
+    return BuildData(state, timestamp, now, injected, touchIds);
 }
 
 int Pad::Read(PadData* data, int num) {
@@ -219,13 +217,13 @@ int Pad::Read(PadData* data, int num) {
     const std::uint64_t now = sceKernelGetProcessTime();
     const auto injected = InjectedInput(now);
     if (queue.empty()) {
-        data[0] = BuildData(state, timestamp, now, injected);
+        data[0] = BuildData(state, timestamp, now, injected, touchIds);
         return 1;
     }
     int count = 0;
     while (count < num && !queue.empty()) {
         const QueuedInput& entry = queue.front();
-        data[count++] = BuildData(entry.input, entry.timestamp, now, injected);
+        data[count++] = BuildData(entry.input, entry.timestamp, now, injected, entry.touchIds);
         queue.pop_front();
     }
     return count;
@@ -350,10 +348,13 @@ extern "C" void PadPublishInput_nid_postfix(const PadInputState& input) {
         state.touchLeft == input.touchLeft && state.touchRight == input.touchRight &&
         state.hasMotion == input.hasMotion && state.accel == input.accel && state.gyro == input.gyro &&
         state.touch == input.touch && state.deviceKind == input.deviceKind) return;
+    for (std::size_t index = 0; index < input.touch.size(); ++index) {
+        if (input.touch[index].active && !state.touch[index].active) touchIds[index] = static_cast<std::uint8_t>(nextTouchId++ & 0x7F);
+    }
     state = input;
     timestamp = sceKernelGetProcessTime();
     if (queue.size() == kQueueCapacity) queue.pop_front();
-    queue.push_back({input, timestamp});
+    queue.push_back({input, timestamp, touchIds});
 }
 
 extern "C" void PadReportInputFailure_nid_postfix(std::exception_ptr error) {
