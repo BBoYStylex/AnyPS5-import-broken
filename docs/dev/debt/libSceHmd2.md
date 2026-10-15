@@ -2,8 +2,7 @@
 
 ### Silent stubs
 
-- [libSceHmd2](../../../core/libs/prx/libSceHmd2/Export.cpp) has no PS VR2 runtime: `sceHmd2Initialize` fails, and every other export it has (and every [libSceVrTracker2](../../../core/libs/prx/libSceVrTracker2/Export.cpp) export) throws, except the reprojection size/align queries listed below. PPSA01317 skips its whole VR set-up when initialization fails
-- [sceHmd2ReprojectionGetMirroringDisplayBufferSizeAlign, sceHmd2ReprojectionGetMirroringWorkMemorySizeAlign, sceHmd2ReprojectionQueryBufferSizeAlign, sceHmd2ReprojectionQueryDisplayBufferSizeAlign](../../../core/libs/prx/libSceHmd2/Export.cpp) return 0; signatures are unknown (titles import them with no arguments) and the host has no reprojection buffers to size. Covered by `guest_hmd2`
+- [libSceHmd2](../../../core/libs/prx/libSceHmd2/Export.cpp) has no PS VR2 runtime: `sceHmd2Initialize` fails, and every other export it has (and every [libSceVrTracker2](../../../core/libs/prx/libSceVrTracker2/Export.cpp) export) throws. PPSA01317 skips its whole VR set-up when initialization fails
 
 ### Unknown function info
 
