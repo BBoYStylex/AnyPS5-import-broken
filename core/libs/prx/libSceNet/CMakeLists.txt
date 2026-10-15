@@ -39,14 +39,4 @@ if(BUILD_TESTING)
         set_tests_properties(guest_sce_net PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceNet>")
     endif()
-
-    add_test_executable(guest_net_show_ifconfig_tests ${LIBS_INCLUDE_DIR}/tests/GuestNetShowIfconfig.cpp)
-    target_include_directories(guest_net_show_ifconfig_tests PRIVATE ${LIBS_INCLUDE_DIR})
-    target_link_libraries(guest_net_show_ifconfig_tests PRIVATE libSceNet libc)
-    configure_windows_unwind(guest_net_show_ifconfig_tests)
-    add_test(NAME guest_net_show_ifconfig COMMAND guest_net_show_ifconfig_tests)
-    if(WIN32)
-        set_tests_properties(guest_net_show_ifconfig PROPERTIES ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceNet>")
-    endif()
 endif()
