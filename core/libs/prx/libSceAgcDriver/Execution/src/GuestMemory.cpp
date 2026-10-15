@@ -385,7 +385,7 @@ struct PageSpan {
     }
 
     std::uint8_t load(std::uintptr_t address) const {
-        return std::atomic_ref<const std::uint8_t>(pages[(address - base) / PageBytes]).load(std::memory_order_relaxed);
+        return std::atomic_ref<std::uint8_t>(const_cast<std::uint8_t&>(pages[(address - base) / PageBytes])).load(std::memory_order_relaxed);
     }
 
     void store(std::uintptr_t address, std::uint8_t value) {
@@ -398,11 +398,11 @@ struct PageSpan {
         const auto stop = std::min<std::uintptr_t>((std::min(limit, base + size) - base + PageBytes - 1) / PageBytes, size / PageBytes);
         const std::uint64_t wide = 0x0101010101010101ull * value;
         while (index < stop) {
-            if (index % 8 == 0 && index + 8 <= stop && std::atomic_ref<const std::uint64_t>(*reinterpret_cast<const std::uint64_t*>(pages + index)).load(std::memory_order_relaxed) == wide) {
+            if (index % 8 == 0 && index + 8 <= stop && std::atomic_ref<std::uint64_t>(*reinterpret_cast<std::uint64_t*>(const_cast<std::uint8_t*>(pages + index))).load(std::memory_order_relaxed) == wide) {
                 index += 8;
                 continue;
             }
-            if (std::atomic_ref<const std::uint8_t>(pages[index]).load(std::memory_order_relaxed) != value) break;
+            if (std::atomic_ref<std::uint8_t>(const_cast<std::uint8_t&>(pages[index])).load(std::memory_order_relaxed) != value) break;
             ++index;
         }
         return std::min(limit, base + index * PageBytes);
@@ -1070,6 +1070,26 @@ struct ThreadCollectMemo {
 };
 thread_local ThreadCollectMemo threadCollectMemo;
 
+struct EpochCollectMap {
+    std::uint64_t epoch = 0;
+    std::unordered_map<std::uintptr_t, WriteTracker::Memo> ranges;
+};
+
+EpochCollectMap& epochCollectMap(std::uint64_t epoch) {
+    thread_local EpochCollectMap* slot = nullptr;
+    auto& map = ShaderRecompiler::ThreadOwned(slot);
+    if (map.epoch != epoch) {
+        map.ranges.clear();
+        map.epoch = epoch;
+    }
+    return map;
+}
+
+bool epochCollectMapEnabled() {
+    static const bool enabled = std::getenv("APS5_NO_EPOCH_COLLECT_MAP") == nullptr;
+    return enabled;
+}
+
 bool sharedCollectMemo() {
     static const bool shared = std::getenv("APS5_SHARED_COLLECT_MEMO") != nullptr;
     return shared;
@@ -1155,6 +1175,13 @@ std::uint64_t collectWrites(std::uint64_t address, std::size_t bytes, bool memoi
     if (useMemo && !sharedCollectMemo()) {
         // An entry exists only for a completed walk of an in-arena range, so the tracker is
         // initialized and watched; nothing below the lock needs asking.
+        if (epochCollectMapEnabled()) {
+            const auto& map = epochCollectMap(epoch);
+            if (const auto found = map.ranges.find(first); found != map.ranges.end() && found->second.unwatched == unwatched && stop <= found->second.end) {
+                collectMemoHits.fetch_add(1, std::memory_order_relaxed);
+                return tracker.generation.load(std::memory_order_relaxed);
+            }
+        }
         for (const auto& entry : threadCollectMemo.entries) {
             if (entry.epoch == epoch && entry.unwatched == unwatched && entry.begin <= first && stop <= entry.end) {
                 // The current generation, not the memoized one: blocks stamped since (MarkWritten, an
@@ -1193,7 +1220,13 @@ std::uint64_t collectWrites(std::uint64_t address, std::size_t bytes, bool memoi
     if (collectMemoEnabled()) {
         const auto serial = unwatchSerial.load(std::memory_order_relaxed);
         if (sharedCollectMemo()) tracker.memo[tracker.nextMemo++ % tracker.memo.size()] = {first, stop, epoch, serial};
-        else threadCollectMemo.entries[threadCollectMemo.next++ % threadCollectMemo.entries.size()] = {first, stop, epoch, serial};
+        else {
+            threadCollectMemo.entries[threadCollectMemo.next++ % threadCollectMemo.entries.size()] = {first, stop, epoch, serial};
+            if (epochCollectMapEnabled()) {
+                auto& entry = epochCollectMap(epoch).ranges[first];
+                if (entry.unwatched != serial || entry.end < stop) entry = {first, stop, epoch, serial};
+            }
+        }
     }
     return tracker.generation;
 }
