@@ -3,6 +3,7 @@
 ### Unknown function info
 
 - [Events](../../../core/libs/prx/libSceNpUniversalDataSystem/src/Event.cpp): `sceNpUniversalDataSystemCreateEvent` copies `prop` and returns the event's own property object through `prop_ptr`, as [KytyPS5](https://github.com/KytyPS5/KytyPS5/blob/9e41d8320a2774b303fbad344c2347e8d0292e83/src/libs/libTrophy.cpp) does; `sceNpUniversalDataSystemEventPropertyObjectSetObject`, `SetArray` and the array setters for objects and arrays store a copy of `value` and return the stored copy through `value_ptr`. Destroying a property object or array that its Create function did not return (an event's property object or a stored copy) does nothing, as its owner frees it. These ownership rules are not verified on a console, nor are the output of `sceNpUniversalDataSystemEventToString` (still `{}`) and `sceNpUniversalDataSystemEventEstimateSize` (still 3).
+- [libSceNpUniversalDataSystem](../../../core/libs/prx/libSceNpUniversalDataSystem/src/Export.cpp) (libSceNpUniversalDataSystem) - Universal Data System (UDS) record lifecycle, telemetry streams, and internal daemon synchronization interfaces; stubs throw until persistent UDS storage and NP backend telemetry pipeline are implemented
 
 ### Functional
 
