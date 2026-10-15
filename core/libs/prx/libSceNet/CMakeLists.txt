@@ -39,4 +39,14 @@ if(BUILD_TESTING)
         set_tests_properties(guest_sce_net PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceNet>")
     endif()
+
+    add_test_executable(guest_net_show_netstat_tests ${LIBS_INCLUDE_DIR}/tests/GuestNetShowNetstat.cpp)
+    target_include_directories(guest_net_show_netstat_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_net_show_netstat_tests PRIVATE libSceNet libc)
+    configure_windows_unwind(guest_net_show_netstat_tests)
+    add_test(NAME guest_net_show_netstat COMMAND guest_net_show_netstat_tests)
+    if(WIN32)
+        set_tests_properties(guest_net_show_netstat PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceNet>")
+    endif()
 endif()
