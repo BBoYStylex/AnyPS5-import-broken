@@ -2743,12 +2743,16 @@ void GuestBufferMemory::AcquireRegistered() {
     }
     if (space == nullptr) {
         // Pending GPU results in these ranges are stored when Upload prepares each region.
-        lease = GuestAllocations::GuestAllocationsAcquire_nid_postfix();
+        // Keep the complete snapshot only while discovering imports and regions. The address-space
+        // lease must retain only ranges that can be consumed by the GPU, otherwise CPU-only guest
+        // mappings stay pinned until the batch completes and make unrelated mprotect or munmap
+        // calls wait for GPU work.
+        auto registryLease = GuestAllocations::GuestAllocationsAcquire_nid_postfix();
         lap(timing.leaseUs, at);
         {
             auto& state = Imports();
             std::lock_guard lock(state.mutex);
-            if (importable) refreshImports(context, state, lease);
+            if (importable) refreshImports(context, state, registryLease);
             if (importFloor == 0) importFloor = state.useCounter + 1;
             state.buildFloor = importFloor;
             // Taken before the pass: the imports it takes are the registry's ones (just reconciled, so
@@ -2761,10 +2765,10 @@ void GuestBufferMemory::AcquireRegistered() {
         // One pass in the registry's (ascending) order, so the regions come out sorted for AddSnapshot.
         // The import lock is taken per range: a mirror's preparation may wait for recorded work, which
         // must not happen under it.
-        regions.reserve(lease.size());
+        regions.reserve(registryLease.size());
         std::vector<AddressCopy> copies;
         std::vector<std::uint64_t> imported;
-        for (const auto& range : lease) {
+        for (const auto& range : registryLease) {
             if (!range->readable || !range->gpu) continue;
             validate(range->address, range->bytes);
             Region region{range->address, range->address + range->bytes, range->writable, {}, nullptr};
@@ -2772,7 +2776,7 @@ void GuestBufferMemory::AcquireRegistered() {
             if (importable) {
                 auto& state = Imports();
                 std::lock_guard lock(state.mutex);
-                entry = importAllocation(context, state, range->address, lease, 0, false);
+                entry = importAllocation(context, state, range->address, registryLease, 0, false);
             }
             lap(timing.importsUs, at);
             if (entry != nullptr) {
@@ -2809,6 +2813,13 @@ void GuestBufferMemory::AcquireRegistered() {
             copies.push_back({copied.begin, copied.end, committed, reason});
         }
         releaseImportedMirrors(context, imported);
+        GuestAllocations::Lease::Ranges retainedRanges;
+        retainedRanges.reserve(regions.size());
+        for (const auto& range : registryLease) {
+            if (range->readable && range->gpu) retainedRanges.push_back(range);
+        }
+        lease = GuestAllocations::Lease(std::move(retainedRanges));
+        registryLease.clear();
         regionsSorted = sortedLookup;
         static const std::uint64_t copyLimit = [] {
             const char* value = std::getenv("APS5_ADDRESS_COPY_MAX_MIB");
