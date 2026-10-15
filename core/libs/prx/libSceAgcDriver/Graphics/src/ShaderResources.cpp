@@ -3660,15 +3660,16 @@ std::shared_ptr<ShaderResources::DrawBindings> ShaderResources::PrepareDrawBindi
 
 void ShaderResources::Bind(VkCommandBuffer commands, VkPipelineBindPoint bindPoint, VkPipelineLayout layout) const {
     static const bool reuseDescSets = std::getenv("APS5_DESC_SET_REUSE") != nullptr;
-    if (reuseDescSets && context.descSetCache.valid && context.descSetCache.lastCommandBuffer == commands &&
-        context.descSetCache.lastBindPoint == bindPoint && context.descSetCache.lastLayout == layout &&
-        context.descSetCache.lastSet0 == _set && context.descSetCache.lastSet1 == fragment.set) {
-        return;
-    }
-    if (_set != VK_NULL_HANDLE) context.Resolved(&DeviceFunctions::cmdBindDescriptorSets, "vkCmdBindDescriptorSets")(commands, bindPoint, layout, 0, 1, &_set, 0, nullptr);
-    if (fragment.set != VK_NULL_HANDLE) context.Resolved(&DeviceFunctions::cmdBindDescriptorSets, "vkCmdBindDescriptorSets")(commands, bindPoint, layout, ShaderRecompiler::RuntimeAbi::FragmentDescriptorSet, 1, &fragment.set, 0, nullptr);
-    if (reuseDescSets) {
-        context.descSetCache.noteBind(commands, bindPoint, layout, _set, fragment.set);
+    if (reuseDescSets && context.descSetCache.valid &&
+        context.descSetCache.lastCommandBuffer == commands &&
+        context.descSetCache.lastBindPoint == bindPoint &&
+        context.descSetCache.lastLayout == layout &&
+        context.descSetCache.lastSet0 == _set &&
+        context.descSetCache.lastSet1 == fragment.set) {
+        uint64_t cachedEpoch = context.descSetCache.epoch;
+        if (context.descSetCache.epoch == cachedEpoch) {
+            return;
+        }
     }
 }
 

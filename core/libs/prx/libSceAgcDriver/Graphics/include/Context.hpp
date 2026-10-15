@@ -155,11 +155,13 @@ struct Context {
         VkPipelineLayout lastLayout = VK_NULL_HANDLE;
         VkDescriptorSet lastSet0 = VK_NULL_HANDLE;
         VkDescriptorSet lastSet1 = VK_NULL_HANDLE;
+        uint64_t epoch{0};
         bool valid = false;
-        void reset() { lastCommandBuffer = VK_NULL_HANDLE; lastBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS; lastLayout = VK_NULL_HANDLE; lastSet0 = VK_NULL_HANDLE; lastSet1 = VK_NULL_HANDLE; valid = false; }
+        void reset() { lastCommandBuffer = VK_NULL_HANDLE; lastBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS; lastLayout = VK_NULL_HANDLE; lastSet0 = VK_NULL_HANDLE; lastSet1 = VK_NULL_HANDLE; valid = false; epoch = 0; }
         void noteBind(VkCommandBuffer cb, VkPipelineBindPoint bp, VkPipelineLayout layout, VkDescriptorSet set0, VkDescriptorSet set1) {
             lastCommandBuffer = cb; lastBindPoint = bp; lastLayout = layout; lastSet0 = set0; lastSet1 = set1; valid = true;
         }
+        void invalidate() { epoch++; valid = false; }
     };
     mutable DescriptorSetCache descSetCache;
     // Indirect draw features of the device: records with a non-zero first instance, several records
