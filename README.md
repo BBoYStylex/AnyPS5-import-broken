@@ -1,6 +1,5 @@
 # About
 
-Tool for automatic executables porting to Linux and Windows.
 
 [**Web converter**](https://boykopovar.github.io/AnyPS5/) - files stay on your device.
 
