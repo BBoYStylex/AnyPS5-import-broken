@@ -119,16 +119,8 @@ private:
 #endif
 
 bool SameOutputFile(const std::filesystem::path& first, const std::filesystem::path& second) {
-    // equivalent() compares the volume serial and file index, so it already
-    // identifies one physical file behind hard links, case-insensitive names,
-    // symlinks, and 8.3 short names. A re-probe through freshly created hard
-    // links cannot add information: those links carry the very identity
-    // equivalent() just compared. The removed Windows branch could never return
-    // true (same file implies same permissions and link counts), and on MSVC it
-    // always threw "Cannot compare read-only output identities" for genuinely
-    // different read-only files.
+    
     return std::filesystem::equivalent(first, second);
-    return false;
 }
 
 struct OutputDestination {
@@ -307,8 +299,7 @@ int Run(const int argc, char* argv[]) {
             }
             registryPaths.insert(registryPaths.end(), artifactRegistryPaths.begin(), artifactRegistryPaths.end());
              for (const auto& path : registryPaths) checkOutputInputs(path, "Registry");
-         }
-            for (const auto& path : registryPaths) checkOutputInputs(path, "Registry");
+        
             for (const auto& path : registryPaths) {
                 auto name = Io::Utf8Path(path.filename());
                 name.resize(name.size() - std::string(".registry.json").size());
@@ -329,10 +320,7 @@ int Run(const int argc, char* argv[]) {
             outputPaths.push_back(desktopEntry->EntryPath);
         }
         if (args.windowsDiagnostics) outputPaths.push_back(std::filesystem::absolute("windows-diagnostics-imports.txt"));
-         // Canonical resolution and existence are per-path properties, not per-pair,
-        // so they are computed once per path. Braced-init-list elements are
-        // guaranteed to evaluate left-to-right, so Canonical is ready before the
-        // exists() snapshot is taken.
+
         std::vector<OutputDestination> outputDestinations;
         outputDestinations.reserve(outputPaths.size());
         for (const auto& path : outputPaths)
@@ -346,10 +334,8 @@ int Run(const int argc, char* argv[]) {
             }
         }
 
-        // The write-stage bar must cover every file this tool writes and report
-        // exactly once per write, so it reaches 100% only when the last file lands.
         std::size_t outputCount = guestArtifacts.size() + executables.size();
-        if (args.writeRegistry) outputCount += registryPaths.size();
+        if (args.writeRegistry) outputCount += registryPaths.size()‏;
         if (desktopEntry) ++outputCount;
         if (args.windowsDiagnostics) ++outputCount;
         progress.Report({Domain::ProgressStage::Write, absPath, 0, outputCount});
@@ -371,8 +357,10 @@ int Run(const int argc, char* argv[]) {
             const auto registryWriter = std::make_shared<Relinker::CallRegistryWriter>();
             for (std::size_t index = 0; index < executables.size(); ++index)
                 writeAndReport(Io::Utf8Path(registryPaths[index]), registryWriter->WriteCallRegistry(executables[index].Result.RegistryEntries));
+                
             for (std::size_t index = 0; index < guestArtifacts.size(); ++index)
                 writeAndReport(Io::Utf8Path(registryPaths[executables.size() + index]), registryWriter->WriteModuleImports(guestArtifacts[index].Imports));
+                
          }
         std::optional<std::string> desktopEntryPath;
         if (desktopEntry) {
