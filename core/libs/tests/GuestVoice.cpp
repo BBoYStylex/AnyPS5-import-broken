@@ -16,6 +16,7 @@ int APS5_VABI sceVoiceGetVolume(std::uint32_t, float*);
 int APS5_VABI sceVoiceSetMuteFlag(std::uint32_t, bool);
 int APS5_VABI sceVoiceGetMuteFlag(std::uint32_t, bool*);
 int APS5_VABI sceVoiceGetPortInfo(std::uint32_t, VoicePortInfo*);
+int APS5_VABI sceVoiceWriteToIPort(std::uint32_t, const void*, std::uint32_t*, std::int16_t);
 int APS5_VABI sceVoiceReadFromOPort(std::uint32_t, void*, std::uint32_t*);
 int APS5_VABI sceVoiceResetPort(std::uint32_t);
 }
@@ -50,6 +51,11 @@ int main() {
     VoicePortInfo before{};
     Require(sceVoiceGetPortInfo(input, &before) == 0);
 
+    const std::uint8_t queued[]{1, 2, 3, 4};
+    std::uint32_t queuedSize = sizeof(queued);
+    Require(sceVoiceWriteToIPort(input, queued, &queuedSize, 0) == 0 && queuedSize == sizeof(queued));
+    VoicePortInfo pending{};
+    Require(sceVoiceGetPortInfo(output, &pending) == 0 && pending.byte_count == sizeof(queued));
     Require(sceVoiceResetPort(input) == 0);
     Require(sceVoiceResetPort(output) == 0);
     Require(sceVoiceResetPort(output + 1) != 0);

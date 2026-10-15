@@ -951,6 +951,17 @@ void NggVertexWorkgroupTests() {
 
 constexpr std::array<std::uint8_t, 8> IdentityExports{0xe4u, 0xe4u, 0xe4u, 0xe4u, 0xe4u, 0xe4u, 0xe4u, 0xe4u};
 
+void setFragmentBarycentrics(ShaderRecompiler::RecompileRequest& request, bool enabled) {
+    static constexpr std::array<std::uint32_t, 1> capabilities{spv::CapabilityFragmentBarycentricKHR};
+    static constexpr std::array<std::string_view, 1> extensions{"SPV_KHR_fragment_shader_barycentric"};
+    request.target.fragmentShaderBarycentricEnabled = enabled;
+    if (enabled) {
+        request.target.supportedCapabilities = capabilities;
+        request.target.supportedExtensions = extensions;
+    }
+}
+
+
 std::vector<spv::BuiltIn> pixelBuiltinsRead(std::uint32_t ena, std::uint32_t addr, std::uint32_t source) {
     auto queue = makeState();
     queue.context[0x1b3] = ena;
@@ -964,7 +975,7 @@ std::vector<spv::BuiltIn> pixelBuiltinsRead(std::uint32_t ena, std::uint32_t add
     request.target.vulkanVersion = 0x00401000u;
     request.target.spirvVersion = 0x00010300u;
     request.target.subgroupSize = 64;
-    request.target.fragmentShaderBarycentricEnabled = true;
+    setFragmentBarycentrics(request, true);
     request.layout.pushConstantSizeBytes = 128;
     request.useCache = false;
     const auto result = ShaderRecompiler::Recompile(request);
@@ -1001,7 +1012,7 @@ std::vector<std::uint32_t> pixelNoPerspectiveLocations(bool barycentricEnabled, 
     request.target.vulkanVersion = 0x00401000u;
     request.target.spirvVersion = 0x00010300u;
     request.target.subgroupSize = 64;
-    request.target.fragmentShaderBarycentricEnabled = barycentricEnabled;
+    setFragmentBarycentrics(request, barycentricEnabled);
     request.layout.pushConstantSizeBytes = 128;
     request.useCache = false;
     const auto result = ShaderRecompiler::Recompile(request);
@@ -5075,7 +5086,7 @@ void barycentricEmulationTests() {
         request.target.vulkanVersion = 0x00401000u;
         request.target.spirvVersion = 0x00010300u;
         request.target.subgroupSize = 64;
-        request.target.fragmentShaderBarycentricEnabled = barycentric;
+        setFragmentBarycentrics(request, barycentric);
         request.layout.pushConstantSizeBytes = 128;
         request.useCache = false;
         return Recompile(request);
@@ -5380,7 +5391,7 @@ ShaderRecompiler::RecompileResult recompilePixel(std::initializer_list<std::uint
     request.target.vulkanVersion = 0x00401000u;
     request.target.spirvVersion = 0x00010300u;
     request.target.subgroupSize = 64;
-    request.target.fragmentShaderBarycentricEnabled = true;
+    setFragmentBarycentrics(request, true);
     request.layout.pushConstantSizeBytes = 128;
     request.useCache = false;
     return ShaderRecompiler::Recompile(request);
@@ -6921,7 +6932,7 @@ bool recompilesDebugBranch(std::uint32_t opcode) {
     request.target.vulkanVersion = 0x00401000u;
     request.target.spirvVersion = 0x00010300u;
     request.target.subgroupSize = 64;
-    request.target.fragmentShaderBarycentricEnabled = true;
+    setFragmentBarycentrics(request, true);
     request.layout.pushConstantSizeBytes = 128;
     request.useCache = false;
     return !ShaderRecompiler::Recompile(request).spirv.Words().empty();
