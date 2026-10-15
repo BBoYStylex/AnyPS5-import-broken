@@ -376,7 +376,7 @@ void Driver::waitMemory(std::span<const std::uint32_t> packet, std::uint32_t que
                 if (++timeouts % 20 == 0) std::fprintf(stderr, "[gpu] %llu GPU waits have timed out\n", static_cast<unsigned long long>(timeouts));
                 firstReport = reported.insert(packet[2] | (static_cast<std::uint64_t>(packet[3]) << 32u)).second;
             }
-            if (SkipFailedShadersEnabled()) {
+            if (std::getenv("APS5_SKIP_FAILED_SHADERS") != nullptr) {
                 if (firstReport) {
                     std::fprintf(stderr, "[gpu] auto-skip WAIT_REG_MEM at 0x%llx after timeout (APS5_SKIP_FAILED_SHADERS)\n", static_cast<unsigned long long>(awaited));
                     std::fflush(stderr);
