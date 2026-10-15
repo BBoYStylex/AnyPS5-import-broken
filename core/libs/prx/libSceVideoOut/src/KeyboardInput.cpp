@@ -1,9 +1,11 @@
 #include "prx/libSceVideoOut/include/KeyboardInput.hpp"
+#include "prx/libSceVideoOut/include/PhysicalInput.hpp"
 #include "prx/libSceKeyboard/include/KeyboardState.hpp"
 
 #include "SDL_keyboard.h"
 
 void KeyboardInput::HandleEvent(const SDL_Event& event, unsigned windowId) {
+    if (PhysicalInputDisabled() && event.type != SDL_WINDOWEVENT) return;
     KeyboardInputEvent input{};
     switch (event.type) {
         case SDL_KEYDOWN:
@@ -35,5 +37,5 @@ void KeyboardInput::HandleEvent(const SDL_Event& event, unsigned windowId) {
         default:
             return;
     }
-    KeyboardPublishInput_nid_postfix(input);
+    KeyboardPublishInput_nid_no_patch(input);
 }

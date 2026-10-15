@@ -9,6 +9,7 @@
 
 #include "SDL.h"
 #include "prx/libSceVideoOut/include/PadInput.hpp"
+#include "prx/libSceVideoOut/include/PhysicalInput.hpp"
 #include "prx/libSceVideoOut/include/DisplayWindow.hpp"
 #include "prx/libScePad/include/PadState.hpp"
 #include "prx/libScePad/include/PadInputTypes.hpp"
@@ -20,6 +21,10 @@ PadInput::PadInput() : PadInput(Pad::LoadInputMapping()) {
 
 PadInput::PadInput(Pad::InputConfiguration configuration) : keyboardMouse(std::move(configuration)) {
     openFirstAvailableController();
+    if (PhysicalInputDisabled()) {
+        publish();
+        std::fprintf(stderr, "[input] physical input disabled; scripted pad input remains enabled\n");
+    }
 }
 
 PadInput::~PadInput() {
@@ -27,6 +32,7 @@ PadInput::~PadInput() {
 }
 
 void PadInput::openFirstAvailableController() {
+    if (PhysicalInputDisabled()) return;
     if (controller != nullptr) return;
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
     SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_PS5_RUMBLE, "1");
@@ -75,7 +81,7 @@ void PadInput::closeController() {
 
 void PadInput::applyOutput() {
     PadOutputState fetched;
-    if (PadFetchOutput_nid_postfix(&outputSequence, &fetched)) {
+    if (PadFetchOutput_nid_no_patch(&outputSequence, &fetched)) {
         const bool motionChanged = fetched.motionEnabled != outputState.motionEnabled;
         outputState = fetched;
         outputPending = true;
@@ -194,6 +200,7 @@ PadInputState PadInput::sampleController() const {
 }
 
 void PadInput::HandleEvent(const SDL_Event& event, DisplayWindow& window) {
+    if (PhysicalInputDisabled() && event.type != SDL_WINDOWEVENT) return;
     if (event.type == SDL_CONTROLLERDEVICEADDED) {
         openController(event.cdevice.which);
         return;
@@ -223,7 +230,7 @@ void PadInput::HandleEvent(const SDL_Event& event, DisplayWindow& window) {
     const bool input = event.type == SDL_MOUSEWHEEL || event.type == SDL_MOUSEMOTION || event.type == SDL_KEYDOWN || event.type == SDL_KEYUP ||
         event.type == SDL_MOUSEBUTTONDOWN || event.type == SDL_MOUSEBUTTONUP;
     if (!input || ignoreInput) return;
-    if (event.type == SDL_KEYDOWN && ImeCapturesKeyboard_nid_postfix()) return;
+    if (event.type == SDL_KEYDOWN && ImeCapturesKeyboard_nid_no_patch()) return;
     const auto requests = keyboardMouse.HandleEvent(event, std::chrono::steady_clock::now());
     if (requests.toggleFullscreen && window.Handle() != nullptr && event.key.windowID == SDL_GetWindowID(window.Handle())) window.ToggleFullscreen();
     if (requests.toggleMouse) setMouseMode(!keyboardMouse.MouseMode());
@@ -245,5 +252,5 @@ void PadInput::Update() {
 }
 
 void PadInput::publish() {
-    PadPublishInput_nid_postfix(keyboardMouse.Compose(controllerState));
+    PadPublishInput_nid_no_patch(keyboardMouse.Compose(controllerState));
 }
