@@ -15,6 +15,9 @@
 #include "ShaderDiskCache.hpp"
 #include <list>
 #include <functional>
+#include <filesystem>
+#include <thread>
+#include <array>
 #include <map>
 #include <set>
 #include <mutex>
@@ -831,6 +834,76 @@ std::shared_ptr<PreparedBindingPlan> preparedBindingPlan(const CompiledVariant& 
     return plan;
 }
 
+namespace {
+
+struct ModuleKeyHash {
+    std::uint64_t low = 0x9e3779b97f4a7c15ull;
+    std::uint64_t high = 0xc2b2ae3d27d4eb4full;
+    void Mix(std::uint64_t value) {
+        low = (low ^ value) * 0x100000001b3ull;
+        low ^= low >> 29u;
+        high = (high + value) * 0xff51afd7ed558ccdull;
+        high ^= high >> 33u;
+    }
+};
+
+std::filesystem::path persistedModulePath(const CompiledShaderArtifact& artifact, std::span<const std::uint32_t> classes, std::span<const PipelineSpecializationConstant> constants, const SpirvTarget& target) {
+    ModuleKeyHash hash;
+    const auto words = artifact.spirv.Words();
+    hash.Mix(words.size());
+    for (const auto word : words) hash.Mix(word);
+    hash.Mix(artifact.stencilReferences.size());
+    for (const auto reference : artifact.stencilReferences) hash.Mix(reference);
+    hash.Mix(classes.size());
+    for (const auto value : classes) hash.Mix(value);
+    hash.Mix(constants.size());
+    for (const auto& constant : constants) hash.Mix((static_cast<std::uint64_t>(constant.id) << 32u) | constant.value);
+    hash.Mix(target.vulkanVersion);
+    hash.Mix(target.spirvVersion);
+    hash.Mix(target.nonConstantImageOffsets ? 1u : 0u);
+    hash.Mix(ANYPS5_ENABLE_SPIRV_TOOLS ? 1u : 0u);
+    char name[40];
+    std::snprintf(name, sizeof(name), "%016llx%016llx.spm", static_cast<unsigned long long>(hash.high), static_cast<unsigned long long>(hash.low));
+    return ShaderDiskCache::EntryDirectory() / "modules" / name;
+}
+
+constexpr std::uint32_t PersistedModuleMagic = 0x444d5053u;
+
+bool loadPersistedModule(const std::filesystem::path& path, SpecializedModule& module) {
+    std::FILE* file = std::fopen(path.c_str(), "rb");
+    if (file == nullptr) return false;
+    std::array<std::uint32_t, 4> header{};
+    bool ok = std::fread(header.data(), sizeof(std::uint32_t), header.size(), file) == header.size() && header[0] == PersistedModuleMagic && header[2] < 65536u && header[3] < (64u << 20u);
+    if (ok) {
+        module.pushData = header[1] != 0u;
+        module.bindings.resize(header[2]);
+        std::vector<std::uint32_t> words(header[3]);
+        ok = std::fread(module.bindings.data(), sizeof(std::uint32_t), module.bindings.size(), file) == module.bindings.size() && std::fread(words.data(), sizeof(std::uint32_t), words.size(), file) == words.size() && words.size() >= 5u && words[0] == spv::MagicNumber;
+        if (ok) module.spirv = std::move(words);
+    }
+    std::fclose(file);
+    return ok;
+}
+
+void storePersistedModule(const std::filesystem::path& path, const SpecializedModule& module) {
+    std::error_code error;
+    std::filesystem::create_directories(path.parent_path(), error);
+    const auto temporary = path.string() + ".tmp" + std::to_string(static_cast<unsigned long long>(std::hash<std::thread::id>{}(std::this_thread::get_id())));
+    std::FILE* file = std::fopen(temporary.c_str(), "wb");
+    if (file == nullptr) return;
+    const auto words = module.spirv.Words();
+    const std::array<std::uint32_t, 4> header{PersistedModuleMagic, module.pushData ? 1u : 0u, static_cast<std::uint32_t>(module.bindings.size()), static_cast<std::uint32_t>(words.size())};
+    const bool ok = std::fwrite(header.data(), sizeof(std::uint32_t), header.size(), file) == header.size() && std::fwrite(module.bindings.data(), sizeof(std::uint32_t), module.bindings.size(), file) == module.bindings.size() && std::fwrite(words.data(), sizeof(std::uint32_t), words.size(), file) == words.size();
+    if (std::fclose(file) != 0 || !ok) {
+        std::filesystem::remove(temporary, error);
+        return;
+    }
+    std::filesystem::rename(temporary, path, error);
+    if (error) std::filesystem::remove(temporary, error);
+}
+
+}
+
 std::shared_ptr<const SpecializedModule> specializeModule(const CompiledShaderArtifact& artifact, std::span<const std::uint32_t> classes, std::span<const PipelineSpecializationConstant> constants, const SpirvTarget& target) {
     struct ModuleKeyStorage {};
     auto& key = HostThreadLocal<std::vector<std::uint64_t>, ModuleKeyStorage>();
@@ -851,6 +924,19 @@ std::shared_ptr<const SpecializedModule> specializeModule(const CompiledShaderAr
     }
     std::call_once(entry->ready, [&] {
         try {
+            static const bool persisted = std::getenv("APS5_NO_MODULE_CACHE") == nullptr && ShaderDiskCache::Enabled();
+            if (persisted) {
+                const auto path = persistedModulePath(artifact, classes, constants, target);
+                auto loaded = std::make_shared<SpecializedModule>();
+                if (loadPersistedModule(path, *loaded)) {
+                    loaded->specializationId = constants.empty() ? 0u : nextVariantId();
+                    entry->module = std::move(loaded);
+                } else {
+                    entry->module = buildSpecializedModule(artifact, classes, constants, target);
+                    storePersistedModule(path, *entry->module);
+                }
+                return;
+            }
             entry->module = buildSpecializedModule(artifact, classes, constants, target);
         } catch (...) {
             entry->failure = std::current_exception();
