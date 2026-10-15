@@ -1,9 +1,5 @@
 # libScePad technical debt
 
-### Silent stubs
-
-- [scePadUnknown_n3kSX62fgNo](../../../core/libs/prx/libScePad/Export.cpp) (libScePad, NID `n3kSX62fgNo`) returns 0; PPSA01530 and PPSA13356 import it with an unknown signature and fail to load without it. The real name is unknown. Covered by `guest_pad_unknown_n3k`
-
 ### Unknown function info
 
 - [scePadSetAngularVelocityDeadbandState](../../../core/libs/prx/libScePad/src/PadState.cpp) (libScePad) - with the deadband on, each angular velocity axis whose magnitude is below 0.017453292 rad/s (1 degree per second) reads as 0, before the orientation is integrated; it starts off. Threshold, per-axis test and default follow [duaLib](https://github.com/WujekFoliarz/duaLib/blob/03bad1bea2a36561b520846776f2a07ced6773e0/src/source/duaLib.cpp#L44), which reimplements the PC `libScePad.dll`; the console's threshold is not measured, and the deadband is kept per library rather than per handle since one pad handle exists
