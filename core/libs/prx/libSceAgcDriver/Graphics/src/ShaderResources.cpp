@@ -3515,22 +3515,20 @@ void DescriptorCache::Recycle(VkDescriptorSetLayout layout, const SetAllocation&
 }
 
 void DescriptorCache::Free(const SetAllocation& allocation) noexcept {
+    if (allocation.set == VK_NULL_HANDLE || allocation.pool == VK_NULL_HANDLE) return;
     std::lock_guard lock(mutex);
     if (const auto found = std::find(dedicated.begin(), dedicated.end(), allocation.pool); found != dedicated.end()) {
         dedicated.erase(found);
         destroyPool(context.device, allocation.pool, nullptr);
-    } else {
-        auto& chain = allocation.updateAfterBind ? updateAfterBindPools : pools;
-        if (allocation.poolIndex < chain.size()) {
-            auto& pool = chain[allocation.poolIndex];
-            if (pool.handle == allocation.pool && pool.liveSets > 0) {
-                if (--pool.liveSets == 0) {
-                    if (resetPool(context.device, pool.handle, 0) != VK_SUCCESS) std::terminate();
-                    pool.exhausted = false;
-                }
-            }
-        }
+        return;
     }
+    auto& chain = allocation.updateAfterBind ? updateAfterBindPools : pools;
+    if (allocation.poolIndex >= chain.size()) std::terminate();
+    auto& pool = chain[allocation.poolIndex];
+    if (pool.handle != allocation.pool || pool.liveSets == 0) std::terminate();
+    if (--pool.liveSets != 0) return;
+    if (resetPool(context.device, pool.handle, 0) != VK_SUCCESS) std::terminate();
+    pool.exhausted = false;
 }
 
 DescriptorCache::Stats DescriptorCache::Counters() const {
