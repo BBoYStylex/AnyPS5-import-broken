@@ -212,6 +212,13 @@ void Expect(const AgcDriver::Graphics::ImageTableReuseCounts& before, std::uint6
     Require(step.reused == reused && step.resolved == resolved, "image table reuse: " + what + ": " + std::to_string(step.reused) + " reused and " + std::to_string(step.resolved) + " resolved tables, expected " + std::to_string(reused) + " and " + std::to_string(resolved));
 }
 
+void ExpectElements(const AgcDriver::Graphics::ImageTableReuseCounts& before, std::uint64_t reused, std::uint64_t resolved, const std::string& what) {
+    const auto now = AgcDriver::Graphics::ImageTableReuses();
+    const auto stepReused = now.elementsReused - before.elementsReused;
+    const auto stepResolved = now.elementsResolved - before.elementsResolved;
+    Require(stepReused == reused && stepResolved == resolved, "image table reuse: " + what + ": " + std::to_string(stepReused) + " elements reused and " + std::to_string(stepResolved) + " resolved, expected " + std::to_string(reused) + " and " + std::to_string(resolved));
+}
+
 void RunImageStore(AgcDriver::VulkanDevice& device, const GuestBlock& block) {
     for (std::uint32_t texture = 0; texture < Records; ++texture) {
         Fill(block, texture, 0.125f);
@@ -303,6 +310,7 @@ void RunTests(AgcDriver::VulkanDevice& device, const GuestBlock& block, const Gu
     Require(Dispatch(device, moved, 19) == Row(block.Texels(Moved)), "image table reuse: the moved table sampled the wrong entry when reused");
     Require(Dispatch(device, result, 21) == Row(block.Texels(21)), "image table reuse: the original table sampled the wrong entry when reused");
     Expect(before, 2, 2, "two tables that differ in one record");
+    ExpectElements(before, 143, 49, "two tables that differ in one record");
 
     SetOutput(block.Texels(13));
     const auto writer = Compile(device, block);

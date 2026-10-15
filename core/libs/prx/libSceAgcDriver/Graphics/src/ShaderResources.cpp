@@ -343,6 +343,10 @@ struct TextureCounters {
     std::atomic<std::uint64_t> ownRefreshes{0};
     std::atomic<std::uint64_t> tablesReused{0};
     std::atomic<std::uint64_t> tablesResolved{0};
+    // Elements a table build bound without a fresh lookup (a whole-table reuse or a per-element
+    // donor) and elements it resolved through the texture cache.
+    std::atomic<std::uint64_t> tableElementsReused{0};
+    std::atomic<std::uint64_t> tableElementsResolved{0};
     // Snapshot hits over memory outside the write watch: kept by an unchanged UntrackedHint key, or
     // by a byte compare.
     std::atomic<std::uint64_t> untrackedKept{0};
@@ -363,7 +367,7 @@ void reportTextureCounters() {
     auto last = counters.lastReport.load();
     if (nowMs - last < 10000 || !counters.lastReport.compare_exchange_strong(last, nowMs)) return;
     const auto count = [](const std::atomic<std::uint64_t>& value) { return static_cast<unsigned long long>(value.load(std::memory_order_relaxed)); };
-    AgcDriver::ProfilePrint_nid_no_patch("[textures] sampled created: %llu from storage images, %llu snapshots (%llu snapshot reads over recorded writes inside cachedTexture, %llu storage-path fallbacks); stage-A records %llu: %llu fast hits, %llu full lookups; storage images %llu hits, %llu created, %llu own-object refreshes; image tables %llu reused, %llu resolved; untracked snapshots %llu kept by the write-watch hint, %llu compared\n", count(counters.fromStorage), count(counters.snapshots), count(counters.pendingReads), count(counters.storageFallbacks), count(counters.records), count(counters.fastHits), count(counters.fastMisses), count(counters.storageHits), count(counters.storageCreated), count(counters.ownRefreshes), count(counters.tablesReused), count(counters.tablesResolved), count(counters.untrackedKept), count(counters.untrackedCompared));
+    AgcDriver::ProfilePrint_nid_no_patch("[textures] sampled created: %llu from storage images, %llu snapshots (%llu snapshot reads over recorded writes inside cachedTexture, %llu storage-path fallbacks); stage-A records %llu: %llu fast hits, %llu full lookups; storage images %llu hits, %llu created, %llu own-object refreshes; image tables %llu reused, %llu resolved (%llu elements reused, %llu resolved); untracked snapshots %llu kept by the write-watch hint, %llu compared\n", count(counters.fromStorage), count(counters.snapshots), count(counters.pendingReads), count(counters.storageFallbacks), count(counters.records), count(counters.fastHits), count(counters.fastMisses), count(counters.storageHits), count(counters.storageCreated), count(counters.ownRefreshes), count(counters.tablesReused), count(counters.tablesResolved), count(counters.tableElementsReused), count(counters.tableElementsResolved), count(counters.untrackedKept), count(counters.untrackedCompared));
 }
 
 // What the sampled-texture lookups on this thread proved their returned objects current against,
@@ -4173,6 +4177,7 @@ void ShaderResources::resolveImageTables() {
         std::vector<std::shared_ptr<Texture>> cached;
         if (auto* reused = FindReusedTable(context.device, binding, state); reused != nullptr && reused->fullyClean && TableCurrent(*reused) && CachedTableTextures(*reused, cached)) {
             auto next = cached.begin();
+            std::uint64_t reusedElements = 0;
             for (std::uint32_t element = 0; element < binding.count; ++element) {
                 const auto words = std::span<const std::uint32_t>(binding.guestDescriptor).subspan(static_cast<std::size_t>(element) * 8u, 8u);
                 const auto& entry = reused->elements[element];
@@ -4184,9 +4189,11 @@ void ShaderResources::resolveImageTables() {
                 } else {
                     CompletePendingCpuWrites(context, entry.resource.baseAddress, static_cast<std::size_t>(entry.guestBytes));
                     bind(element, words, std::move(*next++), entry.resource, entry.guestBytes, entry.firstLayer);
+                    ++reusedElements;
                 }
             }
             counters.tablesReused.fetch_add(1, std::memory_order_relaxed);
+            counters.tableElementsReused.fetch_add(reusedElements, std::memory_order_relaxed);
             continue;
         }
         // Elements of the remembered tables of this state, by key: an element whose descriptor repeats
@@ -4203,6 +4210,8 @@ void ShaderResources::resolveImageTables() {
             }
         }
         ReusedTable fresh;
+        std::uint64_t reusedElements = 0;
+        std::uint64_t resolvedElements = 0;
         bool fullyClean = state.epoch != 0;
         for (std::uint32_t element = 0; element < binding.count; ++element) {
             const auto words = std::span<const std::uint32_t>(binding.guestDescriptor).subspan(static_cast<std::size_t>(element) * 8u, 8u);
@@ -4258,6 +4267,8 @@ void ShaderResources::resolveImageTables() {
                     continue;
                 }
             }
+            if (donor != nullptr) ++reusedElements;
+            else ++resolvedElements;
             const auto& log = lookupLog();
             const auto* looked = log.empty() ? nullptr : &log.back();
             const bool clean = donor != nullptr || (looked != nullptr && looked->object == texture.get() && looked->source == nullptr && looked->generation != 0 && looked->keys == DccKeys::Uncompressed && resource.dccAddress == 0);
@@ -4273,6 +4284,8 @@ void ShaderResources::resolveImageTables() {
             bind(element, words, std::move(texture), resource, guestBytes, firstLayer);
         }
         counters.tablesResolved.fetch_add(1, std::memory_order_relaxed);
+        counters.tableElementsReused.fetch_add(reusedElements, std::memory_order_relaxed);
+        counters.tableElementsResolved.fetch_add(resolvedElements, std::memory_order_relaxed);
         if (state.epoch != 0 && CurrentTableState() == state) {
             const auto serial = StorageTexture::PendingSerial();
             if (!StorageTexture::AnyPendingOverlaps(fresh.ranges) && StorageTexture::PendingSerial() == serial) {
@@ -4289,7 +4302,7 @@ void ShaderResources::resolveImageTables() {
 
 ImageTableReuseCounts ImageTableReuses() {
     const auto& counters = TextureCounts();
-    return {counters.tablesReused.load(std::memory_order_relaxed), counters.tablesResolved.load(std::memory_order_relaxed)};
+    return {counters.tablesReused.load(std::memory_order_relaxed), counters.tablesResolved.load(std::memory_order_relaxed), counters.tableElementsReused.load(std::memory_order_relaxed), counters.tableElementsResolved.load(std::memory_order_relaxed)};
 }
 
 void ShaderResources::finishImageTables() {

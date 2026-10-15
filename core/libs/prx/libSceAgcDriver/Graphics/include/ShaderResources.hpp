@@ -116,6 +116,8 @@ using ContentKeyDiff = std::array<bool, static_cast<std::size_t>(ContentKeyCompo
 struct ImageTableReuseCounts {
     std::uint64_t reused = 0;
     std::uint64_t resolved = 0;
+    std::uint64_t elementsReused = 0;
+    std::uint64_t elementsResolved = 0;
 };
 ImageTableReuseCounts ImageTableReuses();
 
