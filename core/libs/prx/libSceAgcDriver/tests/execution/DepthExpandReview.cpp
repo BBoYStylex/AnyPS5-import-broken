@@ -15,6 +15,7 @@
 #endif
 #include <windows.h>
 #endif
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <bit>
@@ -91,6 +92,10 @@ alignas(256) Triangle Gradient{{
 
 alignas(256) Triangle SecondGradient{{
     {-1.0f, -1.0f, SecondOffset, 1.0f}, {3.0f, -1.0f, SecondOffset + XSlope, 1.0f}, {-1.0f, 3.0f, SecondOffset + YSlope, 1.0f},
+}};
+
+alignas(256) Triangle Corner{{
+    {-1.0f, -1.0f, 0.0f, 1.0f}, {1.0f, -1.0f, 0.0f, 1.0f}, {-1.0f, 1.0f, 0.0f, 1.0f},
 }};
 
 alignas(256) Triangle Flat{{
@@ -224,6 +229,7 @@ struct DrawState {
     std::uint32_t stencilControl = 0;
     std::uint32_t stencilReference = 0;
     std::uint64_t writeBase = 0;
+    std::uint64_t stencilWriteBase = 0;
     const Triangle* vertices = &Gradient;
     bool pixelShader = false;
 };
@@ -269,7 +275,7 @@ std::vector<std::uint32_t> Draw(const Surfaces& surfaces, const DrawState& state
     SetBase(words, 0x012, 0x01a, surfaces.depth);
     SetBase(words, 0x014, 0x01c, state.writeBase);
     SetBase(words, 0x013, 0x01b, surfaces.stencil);
-    SetBase(words, 0x015, 0x01d, surfaces.stencil);
+    SetBase(words, 0x015, 0x01d, state.stencilWriteBase != 0 ? state.stencilWriteBase : surfaces.stencil);
     SetRegister(words, SetUconfigReg, 0x242, 4u);
     const auto pixel = state.pixelShader ? Address(PixelCode.data()) : 0u;
     const auto vertex = Address(VertexCode.data());
@@ -645,6 +651,40 @@ void SecondSlice(TexelReader& reader) {
     std::puts("  slice 0 of the write base still holds what the CPU wrote");
 }
 
+void StencilMoved(TexelReader& reader, bool depthMoves) {
+    const auto name = std::string(depthMoves ? "depth and stencil expand" : "stencil-only expand");
+    std::puts(depthMoves ? "an out-of-place expand of the depth and stencil planes" : "an out-of-place expand of the stencil plane alone, the depth plane in place");
+    const auto surfaces = NewSurfaces();
+    const auto written = NewPlane();
+    const auto stencilBytes = static_cast<std::size_t>(DepthSliceBytes({Width, Height}, 1u));
+    const auto stencilWritten = Address(NewBlock(stencilBytes));
+    auto draw = DepthDrawn(surfaces, Gradient);
+    draw.depthControl = StencilReplaceAlways;
+    draw.stencilControl = StencilPassReplace;
+    draw.stencilReference = StencilValue | (0xffu << 8u) | (0xffu << 16u);
+    Submit(Draw(surfaces, draw), name + ": depth and stencil draw");
+    auto corner = draw;
+    corner.depthControl = StencilReplaceAlways & ~4u;
+    corner.vertices = &Corner;
+    corner.stencilReference = 0xa5u | (0xffu << 8u) | (0xffu << 16u);
+    Submit(Draw(surfaces, corner), name + ": stencil draw over half the surface");
+    const auto stencil = reader.Read(surfaces.stencil, Format8Uint, name + ": stencil of the read surface");
+    const auto first = static_cast<std::uint32_t>(std::count(stencil.begin(), stencil.end(), StencilValue));
+    const auto second = static_cast<std::uint32_t>(std::count(stencil.begin(), stencil.end(), 0xa5u));
+    std::printf("  %s: read stencil: %u texels hold 0x%02x and %u hold 0xa5\n", name.c_str(), first, StencilValue, second);
+    Require(first != 0 && second != 0 && first + second == Texels, "depth expand review: " + name + ": the stencil draws did not leave both values");
+    auto expand = Expand(depthMoves ? written : surfaces.depth);
+    expand.stencilWriteBase = stencilWritten;
+    Submit(Draw(surfaces, expand), name + ": DB expand");
+    RequireSame(reader.Read(surfaces.stencil, Format8Uint, name + ": stencil of the read surface after the expand"), stencil, name + ": stencil of the read surface after the expand");
+    RequireSame(reader.Read(stencilWritten, Format8Uint, name + ": texture read of the stencil write base"), stencil, name + ": texture read of the stencil write base (R8 UINT)");
+    std::vector<std::byte> raw(stencilBytes);
+    AgcDriver::GuestMemory::Read(stencilWritten, raw);
+    RequireSame(Detiled(stencilWritten, raw, Format8Uint, 1u), stencil, name + ": raw read of the stencil write base after a flush, detiled with the 8-bit SW_64KB_Z_X equation");
+    const auto depth = RequireDepth(reader, surfaces.depth, Gradient, name + ": read base");
+    if (depthMoves) RequireExpanded(reader, written, depth, name);
+}
+
 }
 
 int main() {
@@ -663,6 +703,8 @@ int main() {
         QueuedDraws(reader);
         SixteenBitPlane(reader);
         SecondSlice(reader);
+        StencilMoved(reader, true);
+        StencilMoved(reader, false);
         AgcDriverShutdown_nid_postfix();
         std::puts("depth expand review tests passed");
         return 0;

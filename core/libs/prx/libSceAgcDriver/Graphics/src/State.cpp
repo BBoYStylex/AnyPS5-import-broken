@@ -1457,7 +1457,6 @@ std::optional<DepthExpandPass> DecodeDepthExpandPass(const QueueState& queue) {
         std::snprintf(text, sizeof(text), "AGC graphics: an out-of-place DB expand (DB_RENDER_CONTROL 0x%08x, DB_Z_INFO 0x%08x, DB_Z_READ_BASE 0x%llx, DB_Z_WRITE_BASE 0x%llx) %s is not implemented", control, zInfo, static_cast<unsigned long long>(source), static_cast<unsigned long long>(destination), what);
         throw std::runtime_error(text);
     };
-    if (planes.stencil) reject("of the stencil plane");
     const auto copySelection = (control & 0xcu) == 0 ? 0xf80u : 0u;
     if ((control & ~(0x60u | 0x2000u | copySelection)) != 0) reject("with clear, copy, resummarize or decompress bits");
     if ((control & 0x40u) == 0) reject("without DEPTH_COMPRESS_DISABLE");
@@ -1471,12 +1470,15 @@ std::optional<DepthExpandPass> DecodeDepthExpandPass(const QueueState& queue) {
     if ((zInfo & 0x000f1000u) != 0) reject("of a partially resident or mipmapped depth surface");
     if ((view & 0x3c000000u) != 0) reject("of a depth view with a mip level");
     if ((value(0x207) & LayerExports) != 0) reject("with layer exports");
-    if (((source | destination) & 0xffffu) != 0) reject("between bases that are not 64 KiB aligned");
+    if (((source | destination | (planes.stencil ? base(0x013, 0x01b) | base(0x015, 0x01d) : 0u)) & 0xffffu) != 0) reject("between bases that are not 64 KiB aligned");
     zero(cx, 0x80, ~0u, "window offset");
     if (const auto viewportControl = read(cx, 0x206); viewportControl != 0x43fu) throw std::runtime_error(vteMessage(viewportControl));
     const auto target = depthTargetFor(cx);
     if (!passCovers(cx, target.extent)) reject("over part of the depth surface");
-    return DepthExpandPass{target, destination + static_cast<std::uint64_t>(target.firstSlice) * DepthSliceBytes(target.extent, (zInfo & 3u) == 1u ? 2u : 4u)};
+    const auto slice = static_cast<std::uint64_t>(target.firstSlice);
+    DepthExpandPass pass{target, planes.depth ? destination + slice * DepthSliceBytes(target.extent, (zInfo & 3u) == 1u ? 2u : 4u) : 0u};
+    if (planes.stencil) pass.stencilDestination = base(0x015, 0x01d) + slice * DepthSliceBytes(target.extent, 1u);
+    return pass;
 }
 
 std::string DrawRejection(const QueueState& queue, bool indexed) {

@@ -1931,7 +1931,7 @@ void depthExpandPassTests() {
     const auto stencilKept = AgcDriver::Graphics::DecodeDepthExpandPass(readOnlyStencilView);
     Require(stencilKept.has_value() && stencilKept->destination == 0x20298b0000ull && stencilKept->source.stencilAddress == 0x2029430000ull, "the DB expand of a depth plane with a read-only stencil plane was not taken");
     const std::vector<std::tuple<std::uint32_t, std::uint32_t, std::string_view>> rejections{
-        {0x015u, 0x20294400u, "of the stencil plane"},
+        {0x015u, 0x20294401u, "between bases that are not 64 KiB aligned"},
         {0x000u, 0x61u, "with clear, copy, resummarize or decompress bits"},
         {0x000u, 0x20u, "without DEPTH_COMPRESS_DISABLE"},
         {0x200u, 0x2u, "with depth, stencil or depth bounds tests"},
@@ -2007,7 +2007,16 @@ void depthExpandPassTests() {
     auto stencilOnly = expand();
     stencilOnly.context[0x014] = stencilOnly.context[0x012];
     stencilOnly.context[0x015] = 0x20294400u;
-    expectFailure([&] { AgcDriver::Graphics::DecodeDepthExpandPass(stencilOnly); }, "of the stencil plane");
+    const auto stencilMoved = AgcDriver::Graphics::DecodeDepthExpandPass(stencilOnly);
+    Require(stencilMoved.has_value() && stencilMoved->destination == 0 && stencilMoved->stencilDestination == 0x2029440000ull && stencilMoved->source.stencilAddress == 0x2029430000ull, "the DB expand of a stencil plane alone was not taken with the depth plane left in place");
+    auto bothMoved = expand();
+    bothMoved.context[0x015] = 0x20294400u;
+    const auto both = AgcDriver::Graphics::DecodeDepthExpandPass(bothMoved);
+    Require(both.has_value() && both->destination == 0x20298b0000ull && both->stencilDestination == 0x2029440000ull, "the DB expand of the depth and stencil planes did not take both write bases");
+    Require(pass->stencilDestination == 0, "the game's DB expand, whose stencil plane stays in place, took a stencil write base");
+    auto stencilOnlyNoDepth = stencilOnly;
+    stencilOnlyNoDepth.context[0x010] = 0x20000180u;
+    expectFailure([&] { AgcDriver::Graphics::DecodeDepthExpandPass(stencilOnlyNoDepth); }, "of a surface without a depth plane");
     for (const auto stencilInfo : {0x20000181u, 0x20000180u}) {
         auto z16 = expand();
         z16.context[0x010] = 0x20000181u;

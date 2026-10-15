@@ -173,6 +173,7 @@ std::optional<ColorMetadataPass> DecodeColorMetadataPass(const QueueState& queue
 struct DepthExpandPass {
     DepthTarget source;
     std::uint64_t destination;
+    std::uint64_t stencilDestination = 0;
 };
 std::optional<DepthExpandPass> DecodeDepthExpandPass(const QueueState& queue);
 std::string DepthMaintenanceRejection(const QueueState& queue);
