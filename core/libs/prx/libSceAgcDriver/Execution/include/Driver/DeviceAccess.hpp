@@ -2,12 +2,12 @@
 #define CORE_LIBS_PRX_LIBSCEAGCDRIVER_EXECUTION_INCLUDE_DRIVER_DEVICEACCESS_HPP
 
 #include "prx/libSceAgcDriver/Execution/include/VulkanDevice.hpp"
-#include "prx/libSceAgcDriver/Execution/include/AtomicSharedPtr.hpp"
 #include <atomic>
 #include <condition_variable>
 #include <cstddef>
 #include <memory>
 #include <mutex>
+#include "prx/libc/include/general/AtomicSharedPtr.hpp"
 
 namespace AgcDriver::DriverDetail {
 

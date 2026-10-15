@@ -2,7 +2,6 @@
 #define CORE_LIBS_PRX_LIBSCEAGCDRIVER_EXECUTION_INCLUDE_DRIVER_DISPATCHCACHE_HPP
 
 #include "prx/libSceAgcDriver/Execution/include/Driver/Shaders/ShaderRegistry.hpp"
-#include "prx/libSceAgcDriver/Execution/include/AtomicSharedPtr.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Recipe.hpp"
 #include <algorithm>
 #include <array>
@@ -18,6 +17,7 @@
 #include <span>
 #include <utility>
 #include <vector>
+#include "prx/libc/include/general/AtomicSharedPtr.hpp"
 
 namespace AgcDriver::DriverDetail {
 
