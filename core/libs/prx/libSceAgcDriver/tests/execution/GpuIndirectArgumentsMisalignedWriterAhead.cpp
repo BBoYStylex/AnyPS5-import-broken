@@ -4,11 +4,10 @@
 #include "prx/libc/include/GuestAllocations.hpp"
 #include <array>
 #include <cstdint>
-#include <cstdlib>
 #include <cstring>
 #include <initializer_list>
 #include <iostream>
-#include <memory>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -24,7 +23,12 @@ alignas(256) std::array<std::uint32_t, 7> CounterCode{0xf4080200u, 0xfa000000u, 
 
 constexpr std::size_t BlockBytes = 65536;
 constexpr std::uint32_t ArgumentsOffset = 4;
-std::unique_ptr<std::uint8_t, decltype(&std::free)> Block(static_cast<std::uint8_t*>(std::aligned_alloc(BlockBytes, BlockBytes)), &std::free);
+std::array<std::uint8_t, 2 * BlockBytes - 1> BlockBacking{};
+std::span<std::uint8_t> Block = [] {
+    const auto address = reinterpret_cast<std::uintptr_t>(BlockBacking.data());
+    const auto aligned = (address + BlockBytes - 1) & ~(BlockBytes - 1);
+    return std::span<std::uint8_t>(reinterpret_cast<std::uint8_t*>(aligned), BlockBytes);
+}();
 alignas(256) std::array<std::uint32_t, 4> WriterDescriptor{};
 alignas(256) std::array<std::uint32_t, 4> Counter{};
 alignas(256) std::array<std::uint32_t, 4> CounterDescriptor{};
@@ -45,13 +49,13 @@ std::array<std::uint32_t, 4> Descriptor(const void* pointer, std::uint32_t bytes
 
 std::uint32_t Argument(std::size_t index) {
     std::uint32_t value = 0;
-    std::memcpy(&value, Block.get() + ArgumentsOffset + index * sizeof(value), sizeof(value));
+    std::memcpy(&value, Block.data() + ArgumentsOffset + index * sizeof(value), sizeof(value));
     return value;
 }
 
 void SetArguments(std::uint32_t x, std::uint32_t y, std::uint32_t z) {
     const std::array<std::uint32_t, 3> values{x, y, z};
-    std::memcpy(Block.get() + ArgumentsOffset, values.data(), sizeof(values));
+    std::memcpy(Block.data() + ArgumentsOffset, values.data(), sizeof(values));
 }
 
 void SetShaderRegister(std::vector<std::uint32_t>& words, std::uint32_t offset, std::uint32_t value) {
@@ -73,14 +77,12 @@ void Program(std::vector<std::uint32_t>& words, const void* code, std::initializ
 
 int main() {
     try {
-        Require(Block != nullptr, "could not allocate the 64 KiB-aligned guest block");
-        std::memset(Block.get(), 0, BlockBytes);
         auto device = OpenVulkanTestDevice();
         if (!device) return VulkanTestSkipped;
         device.reset();
-        GuestAllocations::Mutation().Add(Block.get(), BlockBytes, true, true, true);
+        GuestAllocations::Mutation().Add(Block.data(), BlockBytes, true, true, true);
         SetArguments(1, 1, 1);
-        const auto* arguments = Block.get() + ArgumentsOffset;
+        const auto* arguments = Block.data() + ArgumentsOffset;
         WriterDescriptor = Descriptor(arguments, 16);
         CounterDescriptor = Descriptor(Counter.data(), sizeof(Counter));
         std::vector<std::uint32_t> warmUp;
@@ -108,7 +110,7 @@ int main() {
         Require(Counter[0] == 24, "an indirect dispatch whose arguments the dispatch before it writes through a misaligned binding ran " + std::to_string(Counter[0]) + " groups, expected 24");
         const auto adopted = AgcDriverDispatchesAdoptedAhead_nid_postfix() - adoptedBefore;
         Require(adopted == 2, "the gated group adopted " + std::to_string(adopted) + " dispatches resolved at the gate, expected 2: a GPU-read indirect dispatch whose registered arguments an earlier dispatch writes through a misaligned binding must still be captured at the gate");
-        GuestAllocations::Mutation().Remove(Block.get());
+        GuestAllocations::Mutation().Remove(Block.data());
         std::cout << "gpu indirect arguments misaligned writer ahead test passed\n";
         AgcDriverShutdown_nid_postfix();
         return 0;
