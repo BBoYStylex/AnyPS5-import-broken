@@ -552,6 +552,37 @@ struct AudioOut2MasteringStatesHeader {
     std::uint32_t states_id;
 };
 
+struct AudioOut2MasteringStatesDescriptor {
+    std::uint32_t id;
+    std::uint32_t size;
+};
+
+constexpr std::uint32_t AudioOut2MasteringMaxSystemChannels = 8;
+
+template <std::uint32_t Bands>
+struct AudioOut2MasteringCompressorStates {
+    AudioOut2MasteringStatesDescriptor descriptor;
+    std::uint32_t reserved[2];
+    float input_rms[Bands][AudioOut2MasteringMaxSystemChannels];
+    float compression_coeff[Bands][AudioOut2MasteringMaxSystemChannels];
+};
+
+struct AudioOut2MasteringLimiterStates {
+    AudioOut2MasteringStatesDescriptor descriptor;
+    std::uint32_t reserved[2];
+    float input_peak[AudioOut2MasteringMaxSystemChannels];
+    float output_peak[AudioOut2MasteringMaxSystemChannels];
+    float gain_peak[AudioOut2MasteringMaxSystemChannels];
+};
+
+template <std::uint32_t Bands>
+struct AudioOut2MasteringStates {
+    AudioOut2MasteringStatesHeader states_header;
+    std::uint32_t reserved[3];
+    AudioOut2MasteringCompressorStates<Bands> compressor_states;
+    AudioOut2MasteringLimiterStates limiter_states;
+};
+
 struct AudioOutOutputParam {
     int handle;
     const void* ptr;
