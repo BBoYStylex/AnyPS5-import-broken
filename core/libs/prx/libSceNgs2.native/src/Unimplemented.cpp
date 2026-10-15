@@ -26,15 +26,6 @@ std::atomic<Ngs2Handle> g_next_report_handle{1};
 
 extern "C" {
 
-int APS5_VABI sceNgs2GeomApply(const Ngs2GeomListenerWork* listener, const Ngs2GeomSourceParam* source, Ngs2GeomAttribute* out_attrib, uint32_t flags) {
-    (void)listener;
-    (void)source;
-    (void)out_attrib;
-    (void)flags;
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
 int APS5_VABI sceNgs2ReportRegisterHandler(uint32_t report_type, void* handler, uintptr_t user_data, Ngs2Handle* out_handle) {
     if (handler == nullptr || out_handle == nullptr) {
         throw std::runtime_error("sceNgs2ReportRegisterHandler: invalid argument");
