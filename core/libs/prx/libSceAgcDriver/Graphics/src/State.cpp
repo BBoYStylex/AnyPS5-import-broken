@@ -668,6 +668,23 @@ void intersect(VkRect2D& result, const Registers& registers, std::uint32_t offse
     result.extent = {std::min(oldRight, right) > left ? std::min(oldRight, right) - left : 0, std::min(oldBottom, bottom) > top ? std::min(oldBottom, bottom) - top : 0};
 }
 
+struct ExpandedPlanes {
+    bool depth = false;
+    bool stencil = false;
+};
+
+ExpandedPlanes outOfPlacePlanes(const Registers& cx) {
+    const auto control = find(cx, 0x000);
+    if (control == cx.end() || (control->second & 0x60u) == 0) return {};
+    const auto value = [&](std::uint32_t offset) {
+        const auto found = find(cx, offset);
+        return found == cx.end() ? 0u : found->second;
+    };
+    const auto base = [&](std::uint32_t low, std::uint32_t high) { return (static_cast<std::uint64_t>(value(high) & 0xffu) << 40u) | (static_cast<std::uint64_t>(value(low)) << 8u); };
+    const auto view = value(0x002);
+    return {(value(0x010) & 3u) != 0 && (view & 0x01000000u) == 0 && base(0x012, 0x01a) != base(0x014, 0x01c), (value(0x011) & 1u) != 0 && (view & 0x02000000u) == 0 && base(0x013, 0x01b) != base(0x015, 0x01d)};
+}
+
 }
 
 VkExtent2D SampleLocationGrid(const State& state) {
@@ -777,7 +794,13 @@ bool DepthResummarizeDrawsNothing(const QueueState& queue) {
 std::string DepthMaintenanceRejection(const QueueState& queue) {
     if (DepthResummarizeDrawsNothing(queue)) return {};
     const auto control = find(queue.context, 0x000);
-    if (control == queue.context.end() || (control->second & ~0x2063u) == 0) return {};
+    if (control == queue.context.end()) return {};
+    if (const auto planes = outOfPlacePlanes(queue.context); planes.depth || planes.stencil) {
+        char text[192];
+        std::snprintf(text, sizeof(text), "AGC graphics: an out-of-place DB expand (DB_RENDER_CONTROL 0x%08x) is run by the draw precheck, in order, and is not drawn", control->second);
+        return text;
+    }
+    if ((control->second & ~0x2063u) == 0) return {};
     const auto depthControl = find(queue.context, 0x200);
     const bool colorMasks = find(queue.context, 0x8e) != queue.context.end() && find(queue.context, 0x8f) != queue.context.end();
     if ((control->second & ~0x2063u) == 0x10u && depthControl != queue.context.end() && (depthControl->second & 3u) == 0 && colorMasks && ColorWriteMask(queue.context) == 0) return {};
@@ -1405,8 +1428,9 @@ std::optional<ColorMetadataPass> DecodeColorMetadataPass(const QueueState& queue
 std::optional<DepthExpandPass> DecodeDepthExpandPass(const QueueState& queue) {
     constexpr std::uint32_t compressDisable = 0x60u;
     const auto& cx = queue.context;
+    const auto planes = outOfPlacePlanes(cx);
+    if (!planes.depth && !planes.stencil) return std::nullopt;
     const auto control = find(cx, 0x000);
-    if (control == cx.end() || (control->second & compressDisable) == 0) return std::nullopt;
     const auto value = [&](std::uint32_t offset) {
         const auto found = find(cx, offset);
         return found == cx.end() ? 0u : found->second;
@@ -1418,15 +1442,12 @@ std::optional<DepthExpandPass> DecodeDepthExpandPass(const QueueState& queue) {
     const auto view = value(0x002);
     const auto source = base(0x012, 0x01a);
     const auto destination = base(0x014, 0x01c);
-    const bool depthMoves = (zInfo & 3u) != 0 && (view & 0x01000000u) == 0 && source != destination;
-    const bool stencilMoves = stencil && (view & 0x02000000u) == 0 && base(0x013, 0x01b) != base(0x015, 0x01d);
-    if (!depthMoves && !stencilMoves) return std::nullopt;
     const auto reject = [&](const char* what) {
         char text[320];
         std::snprintf(text, sizeof(text), "AGC graphics: an out-of-place DB expand (DB_RENDER_CONTROL 0x%08x, DB_Z_INFO 0x%08x, DB_Z_READ_BASE 0x%llx, DB_Z_WRITE_BASE 0x%llx) %s is not implemented", control->second, zInfo, static_cast<unsigned long long>(source), static_cast<unsigned long long>(destination), what);
         throw std::runtime_error(text);
     };
-    if (stencilMoves) reject("of the stencil plane");
+    if (planes.stencil) reject("of the stencil plane");
     if ((control->second & ~(compressDisable | 0x2000u)) != 0) reject("with clear, copy, resummarize or decompress bits");
     if ((control->second & 0x40u) == 0) reject("without DEPTH_COMPRESS_DISABLE");
     if ((value(0x200) & 0xc000000fu) != 0) reject("with depth, stencil or depth bounds tests");
