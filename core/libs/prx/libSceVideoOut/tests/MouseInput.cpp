@@ -58,7 +58,7 @@ void CaptureDecision(MouseInput& input, std::int32_t handle) {
     Require(!input.CaptureWanted(true), "a closed window keeps the capture");
     input.HandleEvent(Window(3, SDL_WINDOWEVENT_FOCUS_GAINED), 3);
 }
-void CaptureApplied(MouseInput& input) {
+void CaptureApplied(MouseInput& input, std::int32_t handle) {
     SDL_SetHint("SDL_VIDEODRIVER", "dummy");
     if (SDL_Init(SDL_INIT_VIDEO) != 0) {
         std::fprintf(stderr, "mouse input: SDL video unavailable (%s): capture application not checked\n", SDL_GetError());
@@ -66,8 +66,10 @@ void CaptureApplied(MouseInput& input) {
     }
     input.UpdateCapture(true);
     const bool applied = SDL_GetRelativeMouseMode() == SDL_TRUE;
+    Require(sceMouseClose(handle) == 0, "close before toggle capture check failed");
     input.UpdateCapture(false);
-    Require(SDL_GetRelativeMouseMode() == SDL_FALSE, "the capture was not released");
+    Require(SDL_GetRelativeMouseMode() == (applied ? SDL_TRUE : SDL_FALSE), "mouse-to-stick mode was not preserved");
+    SDL_SetRelativeMouseMode(SDL_FALSE);
     std::printf("mouse input: SDL %s relative mode under the %s driver\n", applied ? "applied" : "refused", SDL_GetCurrentVideoDriver());
     SDL_Quit();
 }
@@ -114,7 +116,7 @@ int main() {
     Sum(handle, x, y);
     Require(x == 6 && y == 6, "an empty presentation changed the scale");
     CaptureDecision(input, handle);
-    CaptureApplied(input);
+    CaptureApplied(input, handle);
     std::puts("mouse input tests passed");
     return 0;
 }
