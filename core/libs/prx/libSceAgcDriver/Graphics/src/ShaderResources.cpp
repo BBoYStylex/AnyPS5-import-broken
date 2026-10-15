@@ -1395,7 +1395,9 @@ struct ReusedTableElement {
     std::weak_ptr<Texture> texture;
     GuestTextureResource resource{};
     std::uint64_t guestBytes = 0;
+    std::uint64_t generation = 0;
     bool firstLayer = false;
+    bool clean = false;
     bool rejected = false;
     std::string message;
 };
@@ -1407,6 +1409,7 @@ struct ReusedTable {
     std::vector<std::uint32_t> words;
     std::vector<ShaderRecompiler::DescriptorImageShape> shapes;
     std::vector<bool> depthCompare;
+    bool fullyClean = false;
     std::vector<ReusedTableElement> elements;
     std::vector<GuestMemory::UnchangedQuery> queries;
     std::vector<std::pair<std::uint64_t, std::uint64_t>> ranges;
@@ -1459,6 +1462,16 @@ bool CachedTableTextures(const ReusedTable& table, std::vector<std::shared_ptr<T
         touchTexture(cache, it);
     }
     return true;
+}
+
+std::shared_ptr<Texture> ReusableTableTexture(const TextureKey& key) {
+    auto& cache = Textures();
+    std::lock_guard lock(cache.mutex);
+    const auto it = findTexture(cache, key);
+    if (it == cache.entries.end()) return nullptr;
+    auto texture = it->texture;
+    touchTexture(cache, it);
+    return texture;
 }
 
 void RememberTable(ReusedTable&& table, const ShaderRecompiler::DescriptorBinding& binding) {
@@ -4158,7 +4171,7 @@ void ShaderResources::resolveImageTables() {
         };
         const auto state = CurrentTableState();
         std::vector<std::shared_ptr<Texture>> cached;
-        if (auto* reused = FindReusedTable(context.device, binding, state); reused != nullptr && TableCurrent(*reused) && CachedTableTextures(*reused, cached)) {
+        if (auto* reused = FindReusedTable(context.device, binding, state); reused != nullptr && reused->fullyClean && TableCurrent(*reused) && CachedTableTextures(*reused, cached)) {
             auto next = cached.begin();
             for (std::uint32_t element = 0; element < binding.count; ++element) {
                 const auto words = std::span<const std::uint32_t>(binding.guestDescriptor).subspan(static_cast<std::size_t>(element) * 8u, 8u);
@@ -4176,14 +4189,28 @@ void ShaderResources::resolveImageTables() {
             counters.tablesReused.fetch_add(1, std::memory_order_relaxed);
             continue;
         }
+        // Elements of the remembered tables of this state, by key: an element whose descriptor repeats
+        // (a table rewritten with the same entries, or one entry used by several tables) reuses the
+        // resolved texture while it is still the cache's entry, its surface is unchanged since the
+        // donor's generation and no pending work overlaps it; anything else resolves fresh.
+        std::unordered_map<TextureKey, const ReusedTableElement*, TextureKeyHash> donors;
+        if (state.epoch != 0) {
+            for (const auto& remembered : ReusedTables()) {
+                for (const auto& entry : remembered.elements) {
+                    if (!entry.clean || entry.texture.expired()) continue;
+                    donors.emplace(entry.key, &entry);
+                }
+            }
+        }
         ReusedTable fresh;
-        bool reusable = state.epoch != 0;
+        bool fullyClean = state.epoch != 0;
         for (std::uint32_t element = 0; element < binding.count; ++element) {
             const auto words = std::span<const std::uint32_t>(binding.guestDescriptor).subspan(static_cast<std::size_t>(element) * 8u, 8u);
             const auto absolute = static_cast<std::uint64_t>(table.elementBase) + element;
             if (absolute >= context.imageTableCapacity) {
                 table.map[faults + element] = rejectTableElement(table, words, capacityMessage());
-                reusable = false;
+                fresh.elements.push_back({{}, {}, {}, 0, 0, false, false, true, capacityMessage()});
+                fullyClean = false;
                 continue;
             }
             GuestTextureResource resource{};
@@ -4199,40 +4226,60 @@ void ShaderResources::resolveImageTables() {
                 static_cast<void>(ResolveTextureFormat(resource.format));
             } catch (const std::runtime_error& error) {
                 table.map[faults + element] = rejectTableElement(table, words, error.what());
-                if (reusable) fresh.elements.push_back({{}, {}, {}, 0, false, true, error.what()});
+                fresh.elements.push_back({{}, {}, {}, 0, 0, false, false, true, error.what()});
+                fullyClean = false;
                 continue;
             }
             CompletePendingCpuWrites(context, resource.baseAddress, static_cast<std::size_t>(guestBytes));
             if (resource.dccAddress != 0) CompletePendingCpuWrites(context, resource.dccAddress, DccKeyBytes(guestBytes));
-            std::shared_ptr<Texture> texture;
             const auto components = ViewComponents(resource);
             const bool depthCompare = binding.imageDepthCompare.at(element);
-            try {
-                texture = cachedTexture(context, words, resource, components, guestBytes, depthCompare);
-            } catch (const std::runtime_error& error) {
-                table.map[faults + element] = rejectTableElement(table, words, error.what());
-                if (reusable) fresh.elements.push_back({{}, {}, {}, 0, false, true, error.what()});
-                continue;
-            }
-            if (reusable) {
-                const auto& log = lookupLog();
-                const auto* looked = log.empty() ? nullptr : &log.back();
-                reusable = looked != nullptr && looked->object == texture.get() && looked->source == nullptr && looked->generation != 0 && looked->keys == DccKeys::Uncompressed && resource.dccAddress == 0;
-                if (reusable) {
-                    fresh.elements.push_back({MakeTextureKey(context.device, words, components, depthCompare), texture, resource, guestBytes, firstLayer, false, {}});
-                    fresh.queries.push_back({resource.baseAddress, static_cast<std::size_t>(guestBytes), looked->generation});
-                    fresh.ranges.emplace_back(resource.baseAddress, resource.baseAddress + guestBytes);
+            const auto elementKey = MakeTextureKey(context.device, words, components, depthCompare);
+            std::shared_ptr<Texture> texture;
+            const ReusedTableElement* donor = nullptr;
+            if (!donors.empty()) {
+                const auto found = donors.find(elementKey);
+                if (found != donors.end()) {
+                    const std::pair<std::uint64_t, std::uint64_t> range[]{ {found->second->resource.baseAddress, found->second->resource.baseAddress + found->second->guestBytes} };
+                    if (GuestMemory::UnchangedSince(found->second->resource.baseAddress, static_cast<std::size_t>(found->second->guestBytes), found->second->generation) && !StorageTexture::AnyPendingOverlaps(range)) {
+                        texture = ReusableTableTexture(elementKey);
+                        if (texture != nullptr && texture == found->second->texture.lock()) donor = found->second;
+                        else texture = nullptr;
+                    }
                 }
+            }
+            if (texture == nullptr) {
+                try {
+                    texture = cachedTexture(context, words, resource, components, guestBytes, depthCompare);
+                } catch (const std::runtime_error& error) {
+                    table.map[faults + element] = rejectTableElement(table, words, error.what());
+                    fresh.elements.push_back({{}, {}, {}, 0, 0, false, false, true, error.what()});
+                    fullyClean = false;
+                    continue;
+                }
+            }
+            const auto& log = lookupLog();
+            const auto* looked = log.empty() ? nullptr : &log.back();
+            const bool clean = donor != nullptr || (looked != nullptr && looked->object == texture.get() && looked->source == nullptr && looked->generation != 0 && looked->keys == DccKeys::Uncompressed && resource.dccAddress == 0);
+            const auto generation = donor != nullptr ? donor->generation : (looked != nullptr ? looked->generation : 0);
+            if (clean) {
+                fresh.elements.push_back({elementKey, texture, resource, guestBytes, generation, firstLayer, true, false, {}});
+                fresh.queries.push_back({resource.baseAddress, static_cast<std::size_t>(guestBytes), generation});
+                fresh.ranges.emplace_back(resource.baseAddress, resource.baseAddress + guestBytes);
+            } else {
+                fresh.elements.push_back({elementKey, texture, resource, guestBytes, 0, firstLayer, false, false, {}});
+                fullyClean = false;
             }
             bind(element, words, std::move(texture), resource, guestBytes, firstLayer);
         }
         counters.tablesResolved.fetch_add(1, std::memory_order_relaxed);
-        if (reusable && CurrentTableState() == state) {
+        if (state.epoch != 0 && CurrentTableState() == state) {
             const auto serial = StorageTexture::PendingSerial();
             if (!StorageTexture::AnyPendingOverlaps(fresh.ranges) && StorageTexture::PendingSerial() == serial) {
                 fresh.device = context.device;
                 fresh.state = state;
                 fresh.pendingSerial = serial;
+                fresh.fullyClean = fullyClean;
                 RememberTable(std::move(fresh), binding);
             }
         }
