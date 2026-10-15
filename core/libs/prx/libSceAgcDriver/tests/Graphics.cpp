@@ -798,6 +798,9 @@ void ShaderStageTests() {
         expectFailure([&] { AgcDriver::Graphics::DecodeState(fan); }, "invalid geometry subgroup");
         fan.userConfig[0x25b] = 0x4020;
         fan.userConfig[0x242] = 3;
+        const auto strip = AgcDriver::Graphics::DecodeState(fan);
+        Require(strip.topology == VK_PRIMITIVE_TOPOLOGY_LINE_STRIP && strip.stages.mesh->inputPrimitive == 3 && strip.stages.mesh->primitivesPerGroup == 31, "a line strip did not decode overlapping geometry input");
+        fan.userConfig[0x242] = 7;
         expectFailure([&] { AgcDriver::Graphics::DecodeState(fan); }, "unsupported geometry input or output assembly");
     }
     {
