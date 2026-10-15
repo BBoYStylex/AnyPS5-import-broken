@@ -468,11 +468,6 @@ int APS5_VABI sceSslGetSerialNumber() {
  return 0;
 }
 
-int APS5_VABI sceSslFreeSslCertName(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
 int APS5_VABI sceSslDisableVerifyOption(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
