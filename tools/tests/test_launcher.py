@@ -4,6 +4,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "launcher"))
 import anyps5_launcher as launcher
@@ -124,6 +125,46 @@ class LauncherTests(unittest.TestCase):
         write(self.root / "build" / "CMakeCache.txt",
               b"CMAKE_CXX_COMPILER:UNINITIALIZED=aps5-missing-g++\nCMAKE_CXX_COMPILER_AR:FILEPATH=F:/w/mingw64/bin/gcc-ar.exe\n")
         self.assertEqual(launcher.mingw_dirs(cfg)[0], Path("F:/w/mingw64/bin"))
+
+    def test_fingerprint_tracks_same_size_subsecond_updates(self):
+        for kind in ("executable", "module", "relinker"):
+            with self.subTest(kind=kind):
+                folder = self.game("subsecond-" + kind, modules=("libc.prx",))
+                game = next(g for g in launcher.scan_games(self.root / "games") if g.path == folder)
+                relinker = self.root / ("relinker-" + kind)
+                write(relinker, b"relinker")
+                target = {"executable": game.elf, "module": folder / "sce_module" / "libc.prx", "relinker": relinker}[kind]
+                os.utime(target, ns=(1700000000100000000, 1700000000100000000))
+                original = launcher.fingerprint(game, {"extra_args": ""}, relinker)
+                contents = target.read_bytes()
+                target.write_bytes(contents[:-1] + bytes([contents[-1] ^ 1]))
+                os.utime(target, ns=(1700000000900000000, 1700000000900000000))
+                self.assertNotEqual(original, launcher.fingerprint(game, {"extra_args": ""}, relinker))
+
+    def test_scan_handles_non_object_params(self):
+        self.game("valid", title=("PPSA00001", "Game A"))
+        folder = self.game("invalid")
+        for value in (None, [], "title", 42, True):
+            with self.subTest(value=value):
+                write(folder / "sce_sys" / "param.json", json.dumps(value).encode())
+                games = {g.path.name: g for g in launcher.scan_games(self.root / "games")}
+                self.assertEqual(len(games), 2)
+                self.assertEqual((games[folder.name].title_id, games[folder.name].name), ("", folder.name))
+                self.assertEqual((games["valid"].title_id, games["valid"].name), ("PPSA00001", "Game A"))
+
+    def test_sync_libs_refreshes_same_size_rollback(self):
+        for source_time, cached_time in ((100, 200), (200, 100)):
+            with self.subTest(source_time=source_time):
+                out = self.root / ("cache-" + str(source_time))
+                source = self.root / "built" / "libSceExample.prx"
+                cached = out / "libs" / source.name
+                write(source, b"selected")
+                write(cached, b"previous")
+                os.utime(source, (source_time, source_time))
+                os.utime(cached, (cached_time, cached_time))
+                with patch.object(launcher, "IS_WIN", False):
+                    launcher.sync_libs(out, {"libs_dir": str(source.parent)}, lambda line: None)
+                self.assertEqual(cached.read_bytes(), b"selected")
 
     def test_emulator_command(self):
         game = launcher.Game(Path("/g/x"), "X", "PPSA00002", None, Path("/g/x/eboot.bin"), "elf", None)

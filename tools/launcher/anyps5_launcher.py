@@ -82,6 +82,8 @@ def read_param(game_dir):
         data = json.loads((game_dir / "sce_sys" / "param.json").read_text("utf-8", errors="replace"))
     except (OSError, ValueError):
         return "", ""
+    if not isinstance(data, dict):
+        return "", ""
     tid = str(data.get("titleId") or data.get("title_id") or "")
     lp = data.get("localizedParameters")
     name = ""
@@ -202,7 +204,7 @@ def fingerprint(game, cfg, relinker):
 
     def add(p):
         st = p.stat()
-        h.update(f"{p}|{st.st_size}|{int(st.st_mtime)}\n".encode())
+        h.update(f"{p}|{st.st_size}|{st.st_mtime_ns}\n".encode())
 
     add(game.elf)
     for m in module_dirs(game):
@@ -339,7 +341,7 @@ def sync_libs(out, cfg, log):
     dst.mkdir(exist_ok=True)
     for f in prx:
         d = dst / f.name
-        if not d.exists() or d.stat().st_size != f.stat().st_size or d.stat().st_mtime < f.stat().st_mtime:
+        if not d.exists() or d.stat().st_size != f.stat().st_size or d.stat().st_mtime_ns != f.stat().st_mtime_ns:
             shutil.copy2(f, d)
     if IS_WIN:
         dirs = mingw_dirs(cfg) + [src]
