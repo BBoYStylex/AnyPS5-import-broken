@@ -10,5 +10,5 @@
 
 ### Functional
 
-- PPSA30601 imports declared without parameters, signatures unknown, added without an implementation because the title fails to load without them: [sce::Json::Object::insert](../../../core/libs/prx/libSceJson2/Export.cpp) (libSceJson2), whose return type, and so whether a result pointer precedes `this`, is unknown, and [sceMouseResetAbsolutePosition](../../../core/libs/prx/libSceMouse/Export.cpp) (libSceMouse)
+- PPSA30601 imports declared without parameters, signatures unknown, added without an implementation because the title fails to load without them: [sce::Json::Object::insert](../../../core/libs/prx/libSceJson2/Export.cpp) (libSceJson2), whose return type, and so whether a result pointer precedes `this`, is unknown. `sceMouseResetAbsolutePosition` returns success as a no-op because the host mouse backend exposes relative motion and stores no absolute position
 - [sce::Json::InitParameter2 base-object constructor](../../../core/libs/prx/libSceJson2/Export.cpp) (libSceJson2) - forwards to the complete-object constructor and uses its inferred layout and default field values; constructor equivalence and initialization bytes remain unverified on the console
