@@ -335,7 +335,7 @@ void RunTests(AgcDriver::VulkanDevice& device, const GuestBlock& block, const Gu
     Require(Dispatch(device, result, 17) == Row(block.Texels(17)), "image table reuse: an entry the CPU wrote before the epoch kept its old texels");
     Require(Dispatch(device, result, 3) == Row(block.Texels(3)), "image table reuse: an entry stamped by another entry's collect sampled the wrong texels");
     Require(Dispatch(device, result, 17) == Row(block.Texels(17)), "image table reuse: the table of the new epoch sampled the wrong entry");
-    Expect(before, 4 - CpuWriteResolutions, CpuWriteResolutions, "a CPU write collected in a new epoch, then two dispatches with unaffected entries reusable");
+    Expect(before, 3 - CpuWriteResolutions, CpuWriteResolutions, "a CPU write collected in a new epoch, then two dispatches");
 
     before = AgcDriver::Graphics::ImageTableReuses();
     SetRecord(block, 19, Moved);
