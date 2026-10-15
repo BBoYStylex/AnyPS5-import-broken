@@ -138,6 +138,15 @@ def main():
                 result, output = convert(case, windows, ["--module-dir", rejected])
                 assert result.returncode == 2 and message in result.stderr, (rejected, result.stderr)
 
+            alias = case / "Media" / "LinkedPlugins"
+            try:
+                alias.symlink_to(plugins, target_is_directory=True)
+            except (NotImplementedError, OSError):
+                pass
+            else:
+                result, output = convert(case, windows, ["--module-dir", "Media/Plugins", "--module-dir", "Media/LinkedPlugins"])
+                assert result.returncode == 2 and "Duplicate guest module directory" in result.stderr, result.stderr
+
             result, output = convert(case, windows, ["--skip-sce-module", "--module-dir", "Media/Plugins"])
             assert result.returncode != 0 and "conflicts with --skip-sce-module" in result.stderr, result.stderr
 

@@ -59,6 +59,26 @@ def main():
                 assert result.returncode == 2 and message in result.stderr, (options, result.stderr)
                 assert not output.exists(), options
 
+            case = work / f"{windows}-aliased-module-executable"
+            (case / "picker").mkdir(parents=True)
+            (case / "picker" / "picker.bin").write_bytes(main_fixture())
+            try:
+                (case / "linked-picker").symlink_to(case / "picker", target_is_directory=True)
+            except (NotImplementedError, OSError):
+                pass
+            else:
+                result, output = convert(case, windows, ["--module-dir", "picker", "--executable", "linked-picker/picker.bin"])
+                assert result.returncode == 2 and "in a guest module directory" in result.stderr, result.stderr
+                assert not output.exists()
+
+            case = work / f"{windows}-case-aliased-module-executable"
+            (case / "picker").mkdir(parents=True)
+            (case / "picker" / "picker.bin").write_bytes(main_fixture())
+            if (case / "PICKER").is_dir():
+                result, output = convert(case, windows, ["--module-dir", "PICKER", "--executable", "picker/picker.bin"])
+                assert result.returncode == 2 and "in a guest module directory" in result.stderr, result.stderr
+                assert not output.exists()
+
             case = work / f"{windows}-needed"
             (case / "Media" / "Modules").mkdir(parents=True)
             (case / "Media" / "Modules" / "needed.prx").write_bytes(module_with_symbol(True))

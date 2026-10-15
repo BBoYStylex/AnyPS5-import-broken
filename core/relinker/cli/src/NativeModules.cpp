@@ -32,7 +32,11 @@ NativeModules ReadModules(const std::filesystem::path& inputPath, const std::fil
         auto directory = (root / relative).lexically_normal();
         if (!directory.has_filename()) directory = directory.parent_path();
         if (!std::filesystem::is_directory(directory)) throw Domain::RelinkerException("Guest module path is not a directory: " + Io::Utf8Path(directory));
-        if (std::find(directories.begin(), directories.end(), directory) != directories.end()) throw Domain::RelinkerException("Duplicate guest module directory: " + Io::Utf8Path(directory));
+        if (std::any_of(directories.begin(), directories.end(), [&](const auto& existing) {
+                std::error_code error;
+                return std::filesystem::equivalent(existing, directory, error) && !error;
+            }))
+            throw Domain::RelinkerException("Duplicate guest module directory: " + Io::Utf8Path(directory));
         directories.push_back(directory);
         runtimeDirectories.push_back(directory);
     }
