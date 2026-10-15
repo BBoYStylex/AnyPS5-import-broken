@@ -1,9 +1,14 @@
 #include "prx/libc/include/FilesystemError.hpp"
+#include "FilesystemStatistics.hpp"
 #include <cerrno>
 #include <cstdint>
+#include <cstring>
 #include <fcntl.h>
 #include <string_view>
 #include <system_error>
+#ifdef __APPLE__
+#include <sys/statvfs.h>
+#endif
 #ifdef _WIN32
 #include <windows.h>
 #include <io.h>
@@ -11,7 +16,6 @@
 #include <unistd.h>
 #endif
 
-struct LibcStatvfs;
 extern "C" int APS5_VABI fstatvfs_nid_postfix(int, LibcStatvfs*);
 
 namespace {
@@ -38,6 +42,7 @@ int HostError(int error) {
     }
 }
 
+#ifndef __APPLE__
 struct Descriptor {
     int value;
     ~Descriptor() {
@@ -104,6 +109,7 @@ int OpenMetadata(const std::filesystem::path& path, bool directory) {
     return descriptor < 0 ? Fail(HostError(errno)) : descriptor;
 #endif
 }
+#endif
 }
 
 extern "C" int APS5_VABI statvfs_nid_postfix(const char* path, LibcStatvfs* output) {
@@ -114,9 +120,24 @@ extern "C" int APS5_VABI statvfs_nid_postfix(const char* path, LibcStatvfs* outp
     const bool directory = last == '/' || last == '\\' || FinalPathComponentIsDot_nid_no_patch(path);
     std::filesystem::path native;
     if (const int error = ResolvePathError_nid_no_patch(path, native)) return Fail(error);
+#ifdef __APPLE__
+    if (directory) native += "/";
+    struct statvfs host{};
+    if (::statvfs(native.c_str(), &host) != 0) return Fail(HostError(errno));
+    if (output == nullptr) return Fail(14);
+    const LibcStatvfs result{
+        host.f_bavail, host.f_bfree, host.f_blocks, host.f_favail, host.f_favail, host.f_files,
+        host.f_bsize, ((host.f_flag & ST_RDONLY) ? 1ull : 0ull) | ((host.f_flag & ST_NOSUID) ? 2ull : 0ull),
+        host.f_frsize != 0 ? host.f_frsize : host.f_bsize, 0, host.f_namemax
+    };
+    std::memcpy(output, &result, sizeof(result));
+    errno = saved;
+    return 0;
+#else
     const int descriptor = OpenMetadata(native, directory);
     if (descriptor < 0) return -1;
     const Descriptor owner{descriptor};
     errno = saved;
     return fstatvfs_nid_postfix(descriptor, output);
+#endif
 }
