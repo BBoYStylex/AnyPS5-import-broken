@@ -255,28 +255,14 @@ VkStencilOpState stencilFace(std::uint32_t compare, std::uint32_t ops, std::uint
     return face;
 }
 
-void decodeDepth(const Registers& cx, std::uint32_t depthControl, bool testValExport, State& result) {
-    zero(cx, 0x000, 0x00001f9cu, "depth copy, resummarize or decompress draws (DB_RENDER_CONTROL)");
-    const bool depthClear = (read(cx, 0x000) & 1u) != 0;
-    const bool stencilClear = (read(cx, 0x000) & 2u) != 0;
+DepthTarget depthTargetFor(const Registers& cx) {
     const auto view = read(cx, 0x002);
-    zero(cx, 0x002, 0x3c000000u, "depth mips (DB_DEPTH_VIEW MIP_LEVEL)");
-    zero(cx, 0x010, 0x000f1000u, "partially resident or mipmapped depth (DB_Z_INFO)");
-    zero(cx, 0x011, 0x00001000u, "partially resident stencil (DB_STENCIL_INFO)");
     const auto zFormat = read(cx, 0x010) & 3u;
     const bool stencil = (read(cx, 0x011) & 1u) != 0;
-    Require(zFormat != 2, "Z_24 depth is unsupported");
-    if (zFormat == 0) depthControl &= ~6u;
-    if (!stencil) depthControl &= ~1u;
     const auto base = [&](std::uint32_t low, std::uint32_t highOffset) {
         const auto high = find(cx, highOffset);
         return (high == cx.end() ? 0ull : static_cast<std::uint64_t>(high->second & 0xffu) << 40u) | (static_cast<std::uint64_t>(read(cx, low)) << 8u);
     };
-    const bool depthReadOnly = (view & 0x01000000u) != 0;
-    const bool stencilReadOnly = (view & 0x02000000u) != 0;
-    Require(!stencilClear || (stencil && !stencilReadOnly), "stencil clear requires a writable stencil plane");
-    Require(!stencilClear || !testValExport, "stencil clear with a pixel shader that exports the stencil test value is unsupported");
-    Require(!depthClear || (zFormat != 0 && !depthReadOnly), "depth clear requires a writable depth plane");
     DepthTarget depth{};
     depth.samples = 1u << ((read(cx, 0x010) >> 2u) & 3u);
     depth.depthSwizzle = (read(cx, 0x010) >> 4u) & 31u;
@@ -285,8 +271,6 @@ void decodeDepth(const Registers& cx, std::uint32_t depthControl, bool testValEx
     depth.lastSlice = (view >> 13u) & 0x7ffu;
     depth.address = zFormat != 0 ? base(0x012, 0x01a) : 0;
     depth.stencilAddress = stencil ? base(0x013, 0x01b) : 0;
-    Require(zFormat == 0 || depthReadOnly || base(0x014, 0x01c) == depth.address, "depth read and written at different addresses is unsupported");
-    Require(!stencil || stencilReadOnly || base(0x015, 0x01d) == depth.stencilAddress, "stencil read and written at different addresses is unsupported");
     if (depth.samples != 1u) {
         depth.pipeBankXor = static_cast<std::uint32_t>(depth.address & 65535u);
         depth.address &= ~std::uint64_t{65535u};
@@ -310,6 +294,34 @@ void decodeDepth(const Registers& cx, std::uint32_t depthControl, bool testValEx
         depth.htileAddress = base(0x005, 0x01e) + static_cast<std::uint64_t>(view & 0x1fffu) * HtileMetadataBytes(depth.extent);
         depth.htileStencil = stencil && !depth.htileDepthOnly;
     }
+    return depth;
+}
+
+void decodeDepth(const Registers& cx, std::uint32_t depthControl, bool testValExport, State& result) {
+    zero(cx, 0x000, 0x00001f9cu, "depth copy, resummarize or decompress draws (DB_RENDER_CONTROL)");
+    const bool depthClear = (read(cx, 0x000) & 1u) != 0;
+    const bool stencilClear = (read(cx, 0x000) & 2u) != 0;
+    const auto view = read(cx, 0x002);
+    zero(cx, 0x002, 0x3c000000u, "depth mips (DB_DEPTH_VIEW MIP_LEVEL)");
+    zero(cx, 0x010, 0x000f1000u, "partially resident or mipmapped depth (DB_Z_INFO)");
+    zero(cx, 0x011, 0x00001000u, "partially resident stencil (DB_STENCIL_INFO)");
+    const auto zFormat = read(cx, 0x010) & 3u;
+    const bool stencil = (read(cx, 0x011) & 1u) != 0;
+    Require(zFormat != 2, "Z_24 depth is unsupported");
+    if (zFormat == 0) depthControl &= ~6u;
+    if (!stencil) depthControl &= ~1u;
+    const auto base = [&](std::uint32_t low, std::uint32_t highOffset) {
+        const auto high = find(cx, highOffset);
+        return (high == cx.end() ? 0ull : static_cast<std::uint64_t>(high->second & 0xffu) << 40u) | (static_cast<std::uint64_t>(read(cx, low)) << 8u);
+    };
+    const bool depthReadOnly = (view & 0x01000000u) != 0;
+    const bool stencilReadOnly = (view & 0x02000000u) != 0;
+    Require(!stencilClear || (stencil && !stencilReadOnly), "stencil clear requires a writable stencil plane");
+    Require(!stencilClear || !testValExport, "stencil clear with a pixel shader that exports the stencil test value is unsupported");
+    Require(!depthClear || (zFormat != 0 && !depthReadOnly), "depth clear requires a writable depth plane");
+    Require(zFormat == 0 || depthReadOnly || base(0x014, 0x01c) == base(0x012, 0x01a), "depth read and written at different addresses is unsupported");
+    Require(!stencil || stencilReadOnly || base(0x015, 0x01d) == base(0x013, 0x01b), "stencil read and written at different addresses is unsupported");
+    const auto depth = depthTargetFor(cx);
     result.depth = depth;
     result.depthTest = (depthControl & 2u) != 0;
     result.depthWrite = result.depthTest && (depthControl & 4u) != 0 && !depthReadOnly;
@@ -683,6 +695,22 @@ ExpandedPlanes outOfPlacePlanes(const Registers& cx) {
     const auto base = [&](std::uint32_t low, std::uint32_t high) { return (static_cast<std::uint64_t>(value(high) & 0xffu) << 40u) | (static_cast<std::uint64_t>(value(low)) << 8u); };
     const auto view = value(0x002);
     return {(value(0x010) & 3u) != 0 && (view & 0x01000000u) == 0 && base(0x012, 0x01a) != base(0x014, 0x01c), (value(0x011) & 1u) != 0 && (view & 0x02000000u) == 0 && base(0x013, 0x01b) != base(0x015, 0x01d)};
+}
+
+bool passCovers(const Registers& cx, VkExtent2D extent) {
+    const auto xs = std::fabs(readFloat(cx, 0x10f));
+    const auto xo = readFloat(cx, 0x110);
+    const auto ys = std::fabs(readFloat(cx, 0x111));
+    const auto yo = readFloat(cx, 0x112);
+    VkRect2D covered{{0, 0}, {0x7fffu, 0x7fffu}};
+    intersect(covered, cx, 0xc, true);
+    intersect(covered, cx, 0x81, false);
+    intersect(covered, cx, 0x90, false);
+    if ((read(cx, 0x292) & 2u) != 0) intersect(covered, cx, 0x94, false);
+    const auto width = static_cast<float>(extent.width);
+    const auto height = static_cast<float>(extent.height);
+    const bool viewportCovers = xo - xs <= 0.0f && xo + xs >= width && yo - ys <= 0.0f && yo + ys >= height;
+    return viewportCovers && covered.offset.x == 0 && covered.offset.y == 0 && covered.extent.width >= extent.width && covered.extent.height >= extent.height;
 }
 
 }
@@ -1380,22 +1408,7 @@ std::optional<ColorMetadataPass> DecodeColorMetadataPass(const QueueState& queue
     zero(cx, 0x80, ~0u, "window offset");
     const auto viewportControl = read(cx, 0x206);
     if (viewportControl != 0x43fu) throw std::runtime_error(vteMessage(viewportControl));
-    const auto xs = std::fabs(readFloat(cx, 0x10f));
-    const auto xo = readFloat(cx, 0x110);
-    const auto ys = std::fabs(readFloat(cx, 0x111));
-    const auto yo = readFloat(cx, 0x112);
-    VkRect2D covered{{0, 0}, {0x7fffu, 0x7fffu}};
-    intersect(covered, cx, 0xc, true);
-    intersect(covered, cx, 0x81, false);
-    intersect(covered, cx, 0x90, false);
-    if ((read(cx, 0x292) & 2u) != 0) intersect(covered, cx, 0x94, false);
-    const auto requireCovered = [&](const ColorTarget& target) {
-        const auto width = static_cast<float>(target.extent.width);
-        const auto height = static_cast<float>(target.extent.height);
-        const bool viewportCovers = xo - xs <= 0.0f && xo + xs >= width && yo - ys <= 0.0f && yo + ys >= height;
-        const bool scissorCovers = covered.offset.x == 0 && covered.offset.y == 0 && covered.extent.width >= target.extent.width && covered.extent.height >= target.extent.height;
-        Require(viewportCovers && scissorCovers, "CB metadata pass over part of a color target");
-    };
+    const auto requireCovered = [&](const ColorTarget& target) { Require(passCovers(cx, target.extent), "CB metadata pass over part of a color target"); };
     if (resolve) {
         const auto source = DecodeColorBuffer(cx, 0);
         const auto destination = DecodeColorBuffer(cx, 1);
@@ -1426,32 +1439,31 @@ std::optional<ColorMetadataPass> DecodeColorMetadataPass(const QueueState& queue
 }
 
 std::optional<DepthExpandPass> DecodeDepthExpandPass(const QueueState& queue) {
-    constexpr std::uint32_t compressDisable = 0x60u;
     const auto& cx = queue.context;
     const auto planes = outOfPlacePlanes(cx);
     if (!planes.depth && !planes.stencil) return std::nullopt;
-    const auto control = find(cx, 0x000);
+    const auto control = read(cx, 0x000);
     const auto value = [&](std::uint32_t offset) {
         const auto found = find(cx, offset);
         return found == cx.end() ? 0u : found->second;
     };
     const auto base = [&](std::uint32_t low, std::uint32_t high) { return (static_cast<std::uint64_t>(value(high) & 0xffu) << 40u) | (static_cast<std::uint64_t>(value(low)) << 8u); };
     const auto zInfo = value(0x010);
-    const auto stencilInfo = value(0x011);
-    const bool stencil = (stencilInfo & 1u) != 0;
     const auto view = value(0x002);
     const auto source = base(0x012, 0x01a);
     const auto destination = base(0x014, 0x01c);
     const auto reject = [&](const char* what) {
         char text[320];
-        std::snprintf(text, sizeof(text), "AGC graphics: an out-of-place DB expand (DB_RENDER_CONTROL 0x%08x, DB_Z_INFO 0x%08x, DB_Z_READ_BASE 0x%llx, DB_Z_WRITE_BASE 0x%llx) %s is not implemented", control->second, zInfo, static_cast<unsigned long long>(source), static_cast<unsigned long long>(destination), what);
+        std::snprintf(text, sizeof(text), "AGC graphics: an out-of-place DB expand (DB_RENDER_CONTROL 0x%08x, DB_Z_INFO 0x%08x, DB_Z_READ_BASE 0x%llx, DB_Z_WRITE_BASE 0x%llx) %s is not implemented", control, zInfo, static_cast<unsigned long long>(source), static_cast<unsigned long long>(destination), what);
         throw std::runtime_error(text);
     };
     if (planes.stencil) reject("of the stencil plane");
-    if ((control->second & ~(compressDisable | 0x2000u)) != 0) reject("with clear, copy, resummarize or decompress bits");
-    if ((control->second & 0x40u) == 0) reject("without DEPTH_COMPRESS_DISABLE");
+    const auto copySelection = (control & 0xcu) == 0 ? 0xf80u : 0u;
+    if ((control & ~(0x60u | 0x2000u | copySelection)) != 0) reject("with clear, copy, resummarize or decompress bits");
+    if ((control & 0x40u) == 0) reject("without DEPTH_COMPRESS_DISABLE");
     if ((value(0x200) & 0xc000000fu) != 0) reject("with depth, stencil or depth bounds tests");
-    if (((value(0x202) >> 4u) & 7u) != 0 && (value(0x8e) & value(0x8f)) != 0) reject("with color writes");
+    const bool colorMasks = find(cx, 0x8e) != cx.end() && find(cx, 0x8f) != cx.end();
+    if (((value(0x202) >> 4u) & 7u) != 0 && colorMasks && ColorWriteMask(cx) != 0) reject("with color writes");
     if ((zInfo & 3u) != 3u) reject("of a depth plane other than Z_32_FLOAT");
     if (((zInfo >> 2u) & 3u) != 0) reject("of a multisampled depth surface");
     if (((zInfo >> 4u) & 0x1fu) != 24u) reject("of a depth surface in a swizzle mode other than SW_64KB_Z_X");
@@ -1459,34 +1471,9 @@ std::optional<DepthExpandPass> DecodeDepthExpandPass(const QueueState& queue) {
     if ((view & ~0x02000000u) != 0) reject("of a depth view with a base slice or a mip level");
     if (((source | destination) & 0xffffu) != 0) reject("between bases that are not 64 KiB aligned");
     zero(cx, 0x80, ~0u, "window offset");
-    if (const auto viewportControl = value(0x206); viewportControl != 0x43fu) throw std::runtime_error(vteMessage(viewportControl));
-    const auto size = value(0x007);
-    const VkExtent2D extent{(size & 0x3fffu) + 1u, ((size >> 16u) & 0x3fffu) + 1u};
-    const auto xs = std::fabs(readFloat(cx, 0x10f));
-    const auto xo = readFloat(cx, 0x110);
-    const auto ys = std::fabs(readFloat(cx, 0x111));
-    const auto yo = readFloat(cx, 0x112);
-    VkRect2D covered{{0, 0}, {0x7fffu, 0x7fffu}};
-    intersect(covered, cx, 0xc, true);
-    intersect(covered, cx, 0x81, false);
-    intersect(covered, cx, 0x90, false);
-    if ((value(0x292) & 2u) != 0) intersect(covered, cx, 0x94, false);
-    const auto width = static_cast<float>(extent.width);
-    const auto height = static_cast<float>(extent.height);
-    const bool viewportCovers = xo - xs <= 0.0f && xo + xs >= width && yo - ys <= 0.0f && yo + ys >= height;
-    const bool scissorCovers = covered.offset.x == 0 && covered.offset.y == 0 && covered.extent.width >= extent.width && covered.extent.height >= extent.height;
-    if (!viewportCovers || !scissorCovers) reject("over part of the depth surface");
-    DepthTarget target{};
-    target.address = source;
-    target.stencilAddress = stencil ? base(0x013, 0x01b) : 0;
-    target.extent = extent;
-    target.format = stencil ? VK_FORMAT_D32_SFLOAT_S8_UINT : VK_FORMAT_D32_SFLOAT;
-    target.clearDepth = std::bit_cast<float>(value(0x00b));
-    target.clearStencil = static_cast<std::uint8_t>(value(0x00a) & 0xffu);
-    if ((zInfo & (1u << 29u)) != 0 && value(0x005) != 0) {
-        target.htileAddress = base(0x005, 0x01e);
-        target.htileStencil = stencil && (stencilInfo & (1u << 29u)) == 0;
-    }
+    if (const auto viewportControl = read(cx, 0x206); viewportControl != 0x43fu) throw std::runtime_error(vteMessage(viewportControl));
+    const auto target = depthTargetFor(cx);
+    if (!passCovers(cx, target.extent)) reject("over part of the depth surface");
     return DepthExpandPass{target, destination};
 }
 
