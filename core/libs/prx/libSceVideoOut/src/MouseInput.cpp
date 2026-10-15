@@ -1,4 +1,5 @@
 #include "prx/libSceVideoOut/include/MouseInput.hpp"
+#include "prx/libSceVideoOut/include/PhysicalInput.hpp"
 #include "prx/libSceMouse/include/MouseState.hpp"
 
 #include "SDL_mouse.h"
@@ -7,6 +8,7 @@
 #include <cstdio>
 
 void MouseInput::HandleEvent(const SDL_Event& event, unsigned windowId) {
+    if (PhysicalInputDisabled() && event.type != SDL_WINDOWEVENT) return;
     MouseInputEvent input{};
     switch (event.type) {
         case SDL_MOUSEMOTION:
@@ -54,7 +56,7 @@ void MouseInput::HandleEvent(const SDL_Event& event, unsigned windowId) {
         default:
             return;
     }
-    MousePublishInput_nid_postfix(input);
+    MousePublishInput_nid_no_patch(input);
 }
 
 void MouseInput::SetPresentation(std::uint32_t sourceWidth, std::uint32_t sourceHeight, std::uint32_t presentedWidth, std::uint32_t presentedHeight) {
@@ -78,7 +80,7 @@ std::int32_t MouseInput::scaled(std::int32_t delta, double scale, double& remain
 }
 
 bool MouseInput::CaptureWanted(bool allowed) const {
-    return allowed && focused && MouseIsOpen_nid_postfix();
+    return !PhysicalInputDisabled() && allowed && focused && MouseIsOpen_nid_no_patch();
 }
 
 void MouseInput::UpdateCapture(bool allowed) {

@@ -1303,7 +1303,7 @@ void ripRelativeExecution() {}
 #endif
 
 void scannerZeroTail() {
-    const auto scanner = Codegen::MakeInstructionScanner();
+    const auto scanner = Codegen::MakeInstructionScanner({}, true);
     const Bytes code{0xC3, 0x00, 0x00, 0x00};
     require(scanner->ScanCodeSection(code, 0, code.size()).size() == 2, "Odd zero padding at segment tail must end the scan");
     const Bytes truncated{0xC3, 0x0F};

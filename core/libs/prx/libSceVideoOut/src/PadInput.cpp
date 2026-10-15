@@ -9,16 +9,22 @@
 
 #include "SDL.h"
 #include "prx/libSceVideoOut/include/PadInput.hpp"
+#include "prx/libSceVideoOut/include/PhysicalInput.hpp"
 #include "prx/libSceVideoOut/include/DisplayWindow.hpp"
 #include "prx/libScePad/include/PadState.hpp"
 #include "prx/libScePad/include/PadInputTypes.hpp"
 #include "prx/libc/include/General.hpp"
+#include "prx/libSceIme/include/ImeInput.hpp"
 
 PadInput::PadInput() : PadInput(Pad::LoadInputMapping()) {
 }
 
 PadInput::PadInput(Pad::InputConfiguration configuration) : keyboardMouse(std::move(configuration)) {
     openFirstAvailableController();
+    if (PhysicalInputDisabled()) {
+        publish();
+        std::fprintf(stderr, "[input] physical input disabled; scripted pad input remains enabled\n");
+    }
 }
 
 PadInput::~PadInput() {
@@ -26,6 +32,7 @@ PadInput::~PadInput() {
 }
 
 void PadInput::openFirstAvailableController() {
+    if (PhysicalInputDisabled()) return;
     if (controller != nullptr) return;
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
     SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_PS5_RUMBLE, "1");
@@ -82,9 +89,11 @@ void PadInput::applyOutput() {
     }
     if (controller == nullptr) return;
     const auto now = std::chrono::steady_clock::now();
-    const bool rumbling = outputState.vibrationLarge != 0 || outputState.vibrationSmall != 0;
-    const bool triggerRumble = outputState.trigger[0].fallback != 0 || outputState.trigger[1].fallback != 0;
     const bool isPs5 = SDL_GameControllerGetType(controller) == SDL_CONTROLLER_TYPE_PS5;
+    const auto large = isPs5 ? outputState.vibrationLarge : std::max(outputState.vibrationLarge, outputState.audioVibrationLarge);
+    const auto small = isPs5 ? outputState.vibrationSmall : std::max(outputState.vibrationSmall, outputState.audioVibrationSmall);
+    const bool rumbling = large != 0 || small != 0;
+    const bool triggerRumble = outputState.trigger[0].fallback != 0 || outputState.trigger[1].fallback != 0;
     if (!outputPending) {
         if ((rumbling || (triggerRumble && !isPs5)) && now >= nextRumbleRefresh) outputPending = true;
         else return;
@@ -92,7 +101,7 @@ void PadInput::applyOutput() {
     outputPending = false;
     nextRumbleRefresh = now + std::chrono::milliseconds(700);
     constexpr Uint32 rumbleMs = 2000;
-    SDL_GameControllerRumble(controller, static_cast<Uint16>(outputState.vibrationLarge * 257), static_cast<Uint16>(outputState.vibrationSmall * 257), rumbling ? rumbleMs : 0);
+    SDL_GameControllerRumble(controller, static_cast<Uint16>(large * 257), static_cast<Uint16>(small * 257), rumbling ? rumbleMs : 0);
     if (SDL_GameControllerHasLED(controller) == SDL_TRUE) {
         if (outputState.lightBarValid) SDL_GameControllerSetLED(controller, outputState.lightBar[0], outputState.lightBar[1], outputState.lightBar[2]);
         else SDL_GameControllerSetLED(controller, 0, 64, 255);
@@ -191,6 +200,7 @@ PadInputState PadInput::sampleController() const {
 }
 
 void PadInput::HandleEvent(const SDL_Event& event, DisplayWindow& window) {
+    if (PhysicalInputDisabled() && event.type != SDL_WINDOWEVENT) return;
     if (event.type == SDL_CONTROLLERDEVICEADDED) {
         openController(event.cdevice.which);
         return;
@@ -220,6 +230,7 @@ void PadInput::HandleEvent(const SDL_Event& event, DisplayWindow& window) {
     const bool input = event.type == SDL_MOUSEWHEEL || event.type == SDL_MOUSEMOTION || event.type == SDL_KEYDOWN || event.type == SDL_KEYUP ||
         event.type == SDL_MOUSEBUTTONDOWN || event.type == SDL_MOUSEBUTTONUP;
     if (!input || ignoreInput) return;
+    if (event.type == SDL_KEYDOWN && ImeCapturesKeyboard_nid_postfix()) return;
     const auto requests = keyboardMouse.HandleEvent(event, std::chrono::steady_clock::now());
     if (requests.toggleFullscreen && window.Handle() != nullptr && event.key.windowID == SDL_GetWindowID(window.Handle())) window.ToggleFullscreen();
     if (requests.toggleMouse) setMouseMode(!keyboardMouse.MouseMode());

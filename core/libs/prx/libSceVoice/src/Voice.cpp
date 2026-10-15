@@ -294,4 +294,14 @@ int APS5_VABI sceVoiceGetPortAttr(std::uint32_t port_id, std::int32_t attr, void
     }
 }
 
+// Reset preserves the port identity, attributes, and connections.
+int APS5_VABI sceVoiceResetPort(std::uint32_t port_id) {
+    std::lock_guard lock(g_lock);
+    if (!g_initialised) return SCE_VOICE_ERROR_NOT_INIT;
+    auto* port = find(port_id);
+    if (port == nullptr) return SCE_VOICE_ERROR_PORT_INVALID;
+    port->queue.clear();
+    return 0;
+}
+
 }

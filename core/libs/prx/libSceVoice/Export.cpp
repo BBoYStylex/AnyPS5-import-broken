@@ -21,10 +21,7 @@ int APS5_VABI sceVoiceEnableChat(void) {
     return 0;
 }
 
-int APS5_VABI sceVoiceResetPort(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
+
 
 int APS5_VABI sceVoiceDisableChat(void) {
     NotImplemented_nid_no_patch(__func__);

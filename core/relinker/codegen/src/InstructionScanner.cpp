@@ -29,20 +29,22 @@ bool _isCutByTheEnd(const X64InstructionDecoder& decoder, const std::uint8_t* cu
 
 class InstructionScanner : public IInstructionScanner {
 public:
-    explicit InstructionScanner(std::function<void(std::uint64_t, std::uint64_t)> progress) : progress(std::move(progress)) {}
+    explicit InstructionScanner(std::function<void(std::uint64_t, std::uint64_t)> progress, bool allowTruncatedTail) : progress(std::move(progress)), allowTruncatedTail(allowTruncatedTail) {}
     [[nodiscard]] std::vector<InstructionMatch> ScanCodeSection(const std::vector<std::uint8_t>& codeSection, Domain::FileByteOffset codeSectionOffset, Domain::FileByteOffset codeSectionSize) const override;
+    void VisitCodeSection(const std::vector<std::uint8_t>& codeSection, Domain::FileByteOffset codeSectionOffset, Domain::FileByteOffset codeSectionSize, const std::function<void(const InstructionMatch&)>& visit) const override;
 
 private:
+    bool allowTruncatedTail;
     std::function<void(std::uint64_t, std::uint64_t)> progress;
 };
 
-std::vector<InstructionMatch> InstructionScanner::ScanCodeSection(const std::vector<std::uint8_t>& codeSection, const Domain::FileByteOffset codeSectionOffset, const Domain::FileByteOffset codeSectionSize) const {
+template<typename TVisitor>
+void ScanCodeSection(const std::vector<std::uint8_t>& codeSection, const Domain::FileByteOffset codeSectionOffset, const Domain::FileByteOffset codeSectionSize, const std::function<void(std::uint64_t, std::uint64_t)>& progress, bool allowTruncatedTail, TVisitor&& visit) {
     if (codeSectionSize > codeSection.size()) throw CodegenException("Code section exceeds the input buffer", codeSectionOffset);
     if (codeSectionSize > std::numeric_limits<Domain::FileByteOffset>::max() - codeSectionOffset) throw CodegenException("Code section offset overflow", codeSectionOffset);
     const auto limit = static_cast<std::size_t>(codeSectionSize);
 
     const X64InstructionDecoder decoder;
-    std::vector<InstructionMatch> matches;
     std::size_t i = 0;
 
     if (progress) progress(0, limit);
@@ -55,13 +57,14 @@ std::vector<InstructionMatch> InstructionScanner::ScanCodeSection(const std::vec
         try {
             length = decoder.Decode(cursor, available);
         } catch (const CodegenException& e) {
-            if (available < MaxInstructionLength && _isCutByTheEnd(decoder, cursor, available))
+            if (allowTruncatedTail && available < MaxInstructionLength && _isCutByTheEnd(decoder, cursor, available))
                 break;
             if (std::all_of(cursor, cursor + available, [](const std::uint8_t b) { return b == 0; })) break;
             throw CodegenException(std::string("Cannot decode instruction: ") + e.what(), codeSectionOffset + i);
         }
 
-        matches.push_back({codeSectionOffset + i, length});
+        const InstructionMatch match{codeSectionOffset + i, length};
+        visit(match);
 
         i += length;
         if (progress && i - lastReport >= 65536) {
@@ -71,11 +74,20 @@ std::vector<InstructionMatch> InstructionScanner::ScanCodeSection(const std::vec
     }
 
     if (progress) progress(limit, limit);
+}
+
+std::vector<InstructionMatch> InstructionScanner::ScanCodeSection(const std::vector<std::uint8_t>& codeSection, const Domain::FileByteOffset codeSectionOffset, const Domain::FileByteOffset codeSectionSize) const {
+    std::vector<InstructionMatch> matches;
+    Codegen::ScanCodeSection(codeSection, codeSectionOffset, codeSectionSize, progress, allowTruncatedTail, [&](const InstructionMatch& match) { matches.push_back(match); });
     return matches;
 }
 
-std::unique_ptr<IInstructionScanner> MakeInstructionScanner(std::function<void(std::uint64_t, std::uint64_t)> progress) {
-    return std::make_unique<InstructionScanner>(std::move(progress));
+void InstructionScanner::VisitCodeSection(const std::vector<std::uint8_t>& codeSection, const Domain::FileByteOffset codeSectionOffset, const Domain::FileByteOffset codeSectionSize, const std::function<void(const InstructionMatch&)>& visit) const {
+    Codegen::ScanCodeSection(codeSection, codeSectionOffset, codeSectionSize, progress, allowTruncatedTail, visit);
+}
+
+std::unique_ptr<IInstructionScanner> MakeInstructionScanner(std::function<void(std::uint64_t, std::uint64_t)> progress, bool allowTruncatedTail) {
+    return std::make_unique<InstructionScanner>(std::move(progress), allowTruncatedTail);
 }
 
 }
