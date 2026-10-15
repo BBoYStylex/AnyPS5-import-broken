@@ -23,7 +23,7 @@ int main() {
     PadInputState stale{};
     stale.buttons = 0x8000;
     stale.sticks[0] = 0;
-    PadPublishInput_nid_no_patch(stale);
+    PadPublishInput_nid_postfix(stale);
     PadInput pad;
     MouseInput mouse;
     KeyboardInput keyboard;

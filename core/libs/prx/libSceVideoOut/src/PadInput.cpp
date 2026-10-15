@@ -81,7 +81,7 @@ void PadInput::closeController() {
 
 void PadInput::applyOutput() {
     PadOutputState fetched;
-    if (PadFetchOutput_nid_no_patch(&outputSequence, &fetched)) {
+    if (PadFetchOutput_nid_postfix(&outputSequence, &fetched)) {
         const bool motionChanged = fetched.motionEnabled != outputState.motionEnabled;
         outputState = fetched;
         outputPending = true;
@@ -230,7 +230,7 @@ void PadInput::HandleEvent(const SDL_Event& event, DisplayWindow& window) {
     const bool input = event.type == SDL_MOUSEWHEEL || event.type == SDL_MOUSEMOTION || event.type == SDL_KEYDOWN || event.type == SDL_KEYUP ||
         event.type == SDL_MOUSEBUTTONDOWN || event.type == SDL_MOUSEBUTTONUP;
     if (!input || ignoreInput) return;
-    if (event.type == SDL_KEYDOWN && ImeCapturesKeyboard_nid_no_patch()) return;
+    if (event.type == SDL_KEYDOWN && ImeCapturesKeyboard_nid_postfix()) return;
     const auto requests = keyboardMouse.HandleEvent(event, std::chrono::steady_clock::now());
     if (requests.toggleFullscreen && window.Handle() != nullptr && event.key.windowID == SDL_GetWindowID(window.Handle())) window.ToggleFullscreen();
     if (requests.toggleMouse) setMouseMode(!keyboardMouse.MouseMode());
@@ -252,5 +252,5 @@ void PadInput::Update() {
 }
 
 void PadInput::publish() {
-    PadPublishInput_nid_no_patch(keyboardMouse.Compose(controllerState));
+    PadPublishInput_nid_postfix(keyboardMouse.Compose(controllerState));
 }

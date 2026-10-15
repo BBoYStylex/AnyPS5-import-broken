@@ -37,5 +37,5 @@ void KeyboardInput::HandleEvent(const SDL_Event& event, unsigned windowId) {
         default:
             return;
     }
-    KeyboardPublishInput_nid_no_patch(input);
+    KeyboardPublishInput_nid_postfix(input);
 }
