@@ -24,11 +24,6 @@ namespace {
 
 void Require(bool value) { if (!value) std::abort(); }
 
-template <typename TFunction>
-void RequireThrows(TFunction function) {
-    try { function(); } catch (const std::logic_error&) { return; }
-    std::abort();
-}
 
 std::uint32_t CreatePort(std::int32_t type, float volume) {
     VoicePortParam param{};
@@ -43,12 +38,12 @@ std::uint32_t CreatePort(std::int32_t type, float volume) {
 } // namespace
 
 int main() {
-    RequireThrows([] { sceVoiceResetPort(0); });
+    Require(sceVoiceResetPort(0) != 0);
     VoiceInitParam init{};
     VoiceStartParam start{};
     Require(sceVoiceInit(&init, 0) == 0);
     Require(sceVoiceStart(&start) == 0);
-    const auto input = CreatePort(2, 0.5f);
+    const auto input = CreatePort(1, 0.5f);
     const auto output = CreatePort(3, 0.25f);
     Require(sceVoiceConnectIPortToOPort(input, output) == 0);
     Require(sceVoiceSetMuteFlag(output, true) == 0);
@@ -57,7 +52,7 @@ int main() {
 
     Require(sceVoiceResetPort(input) == 0);
     Require(sceVoiceResetPort(output) == 0);
-    RequireThrows([&] { sceVoiceResetPort(output + 1); });
+    Require(sceVoiceResetPort(output + 1) != 0);
 
     VoicePortInfo after{};
     Require(sceVoiceGetPortInfo(input, &after) == 0);
@@ -72,8 +67,8 @@ int main() {
     Require(sceVoiceDisconnectIPortFromOPort(input, output) == 0);
 
     Require(sceVoiceDeletePort(input) == 0);
-    RequireThrows([&] { sceVoiceResetPort(input); });
+    Require(sceVoiceResetPort(input) != 0);
     Require(sceVoiceResetPort(output) == 0);
     Require(sceVoiceEnd_nid_postfix() == 0);
-    RequireThrows([&] { sceVoiceResetPort(output); });
+    Require(sceVoiceResetPort(output) != 0);
 }

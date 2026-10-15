@@ -599,7 +599,7 @@ void testShaderHeaderAlignment() {
     refused(expectFailure([&] { AgcDriverRegisterShader_nid_postfix(at(4, misplaced)); }), "null or misaligned address");
     Shader older = shader;
     older.version = 0x17;
-    refused(expectFailure([&] { AgcDriverRegisterShader_nid_postfix(at(1, older)); }), "invalid guestShader header");
+    refused(expectFailure([&] { AgcDriverRegisterShader_nid_postfix(at(1, older)); }), "invalid shader header");
     Shader truncated = shader;
     truncated.header_size = sizeof(Shader) - 4;
     refused(expectFailure([&] { AgcDriverRegisterShader_nid_postfix(at(4, truncated)); }), "smaller than its fixed fields");
