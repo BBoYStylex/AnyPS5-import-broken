@@ -66,17 +66,28 @@ int APS5_VABI sceWebBrowserDialogUpdateStatus(void) {
 }
 
 
-int APS5_VABI sceWebBrowserDialogSetCookie(void) {
+int APS5_VABI sceWebBrowserDialogSetCookie(const void* cookie) {
+    const int status = g_status.load();
+    if (status == COMMON_DIALOG_STATUS_NONE) return COMMON_DIALOG_ERROR_NOT_INITIALIZED;
+    if (status == COMMON_DIALOG_STATUS_RUNNING) return COMMON_DIALOG_ERROR_BUSY;
+    if (cookie == nullptr) return COMMON_DIALOG_ERROR_ARG_NULL;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceWebBrowserDialogOpenForPredeterminedContent() {
+int APS5_VABI sceWebBrowserDialogOpenForPredeterminedContent(const void* param) {
+    const int status = g_status.load();
+    if (status == COMMON_DIALOG_STATUS_NONE) return COMMON_DIALOG_ERROR_NOT_INITIALIZED;
+    if (status == COMMON_DIALOG_STATUS_RUNNING) return COMMON_DIALOG_ERROR_BUSY;
+    if (param == nullptr) return COMMON_DIALOG_ERROR_ARG_NULL;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceWebBrowserDialogResetCookie() {
+int APS5_VABI sceWebBrowserDialogResetCookie(void) {
+    const int status = g_status.load();
+    if (status == COMMON_DIALOG_STATUS_NONE) return COMMON_DIALOG_ERROR_NOT_INITIALIZED;
+    if (status == COMMON_DIALOG_STATUS_RUNNING) return COMMON_DIALOG_ERROR_BUSY;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
