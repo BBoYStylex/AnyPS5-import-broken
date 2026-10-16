@@ -184,6 +184,14 @@ std::uint32_t ShaderPreparationContext::ResourcePrograms() const {
 IrProgram PrepareResourceProgram(const RecompileRequest& request) {
     return PrepareResourceProgram(request, nullptr);
 }
+bool nativeFloat32FlushToZero(const RecompileRequest& request) {
+    const auto& capabilities = request.target.supportedCapabilities;
+    if (std::ranges::find(capabilities, static_cast<std::uint32_t>(spv::CapabilityDenormFlushToZero)) == capabilities.end()) return false;
+    static const bool pixelOnly = std::getenv("APS5_NATIVE_F32_FTZ_PIXEL_ONLY") != nullptr;
+    if (pixelOnly && request.shader.stage != ShaderStage::Fragment) return false;
+    return !request.context.floatMode.has_value() || ((request.context.floatMode->floatMode >> 4u) & 3u) == 0u;
+}
+
 
 IrProgram PrepareResourceProgram(const RecompileRequest& request, ShaderPreparationContext* preparation) {
     frontEndBuilds.fetch_add(1, std::memory_order_relaxed);
@@ -210,6 +218,7 @@ IrProgram PrepareResourceProgram(const RecompileRequest& request, ShaderPreparat
     const auto supports = [&](spv::Capability capability) { return std::ranges::find(request.target.supportedCapabilities, static_cast<std::uint32_t>(capability)) != request.target.supportedCapabilities.end(); };
     translateOptions.nativeFloat16 = supports(spv::CapabilityFloat16) && supports(spv::CapabilityRoundingModeRTE) && supports(spv::CapabilityDenormPreserve);
     translateOptions.floatMode = request.context.floatMode;
+    translateOptions.nativeFloat32FlushToZero = nativeFloat32FlushToZero(request);
     translateOptions.inputInfo = inputInfo;
 
     constexpr InstructionTranslator translator;
@@ -531,6 +540,7 @@ CompiledVariant emitVariant(const RecompileRequest& request, IrProgram& program)
     targetOptions.fragmentDescriptorSet = request.target.registrationModules;
     targetOptions.float16DenormPreserve = request.target.float16DenormPreserve;
     targetOptions.spannedWaves = request.target.spannedWaves;
+    targetOptions.float32FlushToZero = nativeFloat32FlushToZero(request);
 
     constexpr SpirvEmitter spirvEmitter;
     CompiledShaderArtifact result;
