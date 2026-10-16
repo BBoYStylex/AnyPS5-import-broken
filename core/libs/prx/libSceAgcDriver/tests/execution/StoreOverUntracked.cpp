@@ -218,9 +218,10 @@ bool Holds(const std::uint32_t* texels, std::uint32_t value) {
 template <typename THold>
 bool HoldPending(THold& hold, const Surface& surface, std::uint32_t result) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    const std::array<std::pair<std::uint64_t, std::uint64_t>, 1> range{{{surface.Address(), surface.Address() + SurfaceBytes}}};
     while (true) {
         hold.lock();
-        if (StorageTexture::AnyPending()) return true;
+        if (StorageTexture::AnyPendingOverlaps(range)) return true;
         hold.unlock();
         if (Holds(surface.Texels(), result)) return false;
         Require(std::chrono::steady_clock::now() < deadline, "store over untracked: the result neither became pending nor reached guest memory");
