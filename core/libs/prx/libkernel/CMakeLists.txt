@@ -1053,7 +1053,7 @@ if(BUILD_TESTING)
     add_test(NAME guest_thread_sanitizer COMMAND guest_thread_sanitizer_tests)
     if(WIN32)
         set_tests_properties(guest_thread_sanitizer PROPERTIES ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libkernel>\;path_list_prepend:$<TARGET_FILE_DIR:libSceDbgThreadSanitizer>")
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libkernel>;PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceDbgThreadSanitizer>")
     endif()
     add_test_executable(guest_system_command_tests ${LIBS_INCLUDE_DIR}/tests/GuestSystemCommand.cpp)
     target_include_directories(guest_system_command_tests PRIVATE ${LIBS_INCLUDE_DIR})
