@@ -11,6 +11,7 @@
 #include <thread>
 #include <vector>
 #include <atomic>
+#include "prx/libSceVideoOut/include/PresentWorker.hpp"
 #include <exception>
 #include <future>
 #include <memory>
@@ -250,7 +251,7 @@ private:
     std::uint64_t hdrGeneration = 0;
     std::atomic<int> displayRefreshRate{0};
 
-    std::jthread presentThread;
+    PresentWorker presentThread;
     std::jthread vblankThread;
 };
 
