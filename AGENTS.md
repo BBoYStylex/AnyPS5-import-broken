@@ -34,7 +34,8 @@ Relinker-only changes can use the [relinker-only build](docs/dev/BUILD.md#relink
 
 ## Pull requests
 
-- Search open and closed PRs and issues first; never duplicate an open PR. Agree the order with PRs in the overlap comment and declare it with `Depends on`.
+- Before starting, search open AND closed PRs (by function name), issues and the title's [Game bring-up](https://github.com/boykopovar/AnyPS5/discussions/categories/game-bring-up) discussion; the same function is often already written. Never duplicate an open PR; for a closed one, read why it was closed and link it.
+- Before opening, run `python3 tools/pr_overlap.py --branch <branch>`. Agree the order with overlapping PRs and declare it with `Depends on`.
 - One topic, based on current `main`; update by rebase, never by merging `main`.
 - Conventional Commits for commits and PR title. Fill in the [template](.github/pull_request_template.md), including `Depends on`, `Unblocks`, `GPUs tested` and `AI-assisted`.
 - A fix for a title names it on `Unblocks` and pastes its stop line on current `main`.
