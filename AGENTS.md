@@ -7,4 +7,6 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) and [CONVENTIONS](docs/dev/CONVENTIONS.m
 - `core/relinker`: ELF rewriting and NID binding. `core/libs/prx/<lib>`: one shared library per system library. `core/shader/recompiler`: RDNA to SPIR-V; Vulkan backend in `core/libs/prx/libSceAgcDriver`.
 - Before starting, search open and closed pull requests by function name, and the title's [Game bring-up](https://github.com/boykopovar/AnyPS5/discussions/categories/game-bring-up) discussion: the same function is often already written. For a closed one, read why it was closed.
 - Before opening, run `python3 tools/check_conventions.py --base origin/main` and `python3 tools/pr_overlap.py --branch <branch>`.
+- `tools/` helpers: `import_audit.py` (a converted game's imports against the built libraries), `nid_names.py` (names for Unknown NIDs), `stubgen.py` (export skeletons), `hw-oracle/` (shader semantics on [hardware](docs/dev/HW_ORACLE.md)).
+- Performance: record a [trace](docs/dev/BUILD.md#performance-trace) of `main` and of the change in the same scene, read it with `tools/trace_digest.py`, compare the summaries with `tools/performance_compare.py`.
 - Agents add no code comments: technical debt comments are written only by humans.
