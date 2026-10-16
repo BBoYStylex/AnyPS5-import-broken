@@ -29,6 +29,7 @@ std::int32_t APS5_VABI sceJpegDecCreate(const JpegDecCreateParam*, void*, std::u
 std::int32_t APS5_VABI sceJpegDecDelete(void*);
 std::int32_t APS5_VABI sceJpegDecParseHeader(const JpegDecParseParam*, JpegDecImageInfo*);
 std::int32_t APS5_VABI sceJpegDecDecode(void*, const JpegDecDecodeParam*, JpegDecImageInfo*);
+std::int32_t APS5_VABI sceJpegDecDecodeWithInputControl(void);
 }
 
 static void Require(bool value) { if (!value) std::abort(); }
@@ -165,5 +166,6 @@ int main() {
     Require(sceJpegDecDecode(handle, &garbageDecode, &info) == invalidData);
 
     Require(sceJpegDecDelete(handle) == 0);
+    Require(ThrowsRuntimeError([] { sceJpegDecDecodeWithInputControl(); }));
     return 0;
 }

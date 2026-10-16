@@ -9,6 +9,7 @@
 #include <utility>
 #include "Decoder/Jpeg.hpp"
 #include "SceTypes.hpp"
+#include "prx/libc/include/General.hpp"
 
 static_assert(sizeof(JpegDecCreateParam) == 0xC);
 static_assert(sizeof(JpegDecParseParam) == 0x10);
@@ -147,6 +148,11 @@ int32_t APS5_VABI sceJpegDecDecode(void* handle, const JpegDecDecodeParam* param
     if (image_info) fillImageInfo(*header, image_info);
     if (header->width > MAX_PACKED_DIMENSION || header->height > MAX_PACKED_DIMENSION) return 0;
     return static_cast<std::int32_t>(header->width << 16 | header->height);
+}
+
+int32_t APS5_VABI sceJpegDecDecodeWithInputControl(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
 }
 
 int32_t APS5_VABI sceJpegDecDelete(void* handle) {
