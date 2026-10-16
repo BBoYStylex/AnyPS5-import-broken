@@ -21,6 +21,7 @@
 #include <cstdio>
 #include <cstring>
 #include <iostream>
+#include <mutex>
 #include <span>
 #include <string>
 #include <vector>
@@ -128,6 +129,24 @@ std::uint64_t Address(const std::uint8_t* guest) {
     return reinterpret_cast<std::uint64_t>(guest);
 }
 
+void HostWriteUnderGpuLock(GuestSurface& surface) {
+    AgcDriverWaitIdle_nid_postfix();
+    const auto before = AgcDriver::GuestMemory::LockedHostWrites();
+    {
+        std::lock_guard gpu(AgcDriver::GuestMemory::GpuMutex());
+        const GuestArena::HostWrite scope(surface.Data(), BlockBytes);
+        std::memset(surface.Data(), 0x11, BlockBytes);
+    }
+    const auto locked = AgcDriver::GuestMemory::LockedHostWrites();
+    Require(locked == before + 1, "host write under the GPU mutex: the count moved by " + std::to_string(locked - before) + ", not 1");
+    {
+        const GuestArena::HostWrite scope(surface.Data(), BlockBytes);
+        std::memset(surface.Data(), 0x22, BlockBytes);
+    }
+    Require(AgcDriver::GuestMemory::LockedHostWrites() == locked, "host write under the GPU mutex: a host write made without the mutex was counted");
+    std::puts("host write under the GPU mutex: it returned and was counted once");
+}
+
 std::atomic<std::uint64_t> flushesAfterShutdown{0};
 
 void CountFlush(std::uint64_t, std::size_t) {
@@ -158,6 +177,8 @@ int main() {
             const auto device = OpenVulkanTestDevice();
             if (!device) return VulkanTestSkipped;
         }
+        GuestSurface locked;
+        HostWriteUnderGpuLock(locked);
         GuestSurface surface;
         HostWriteAfterShutdown(surface);
         std::puts("host write hook tests passed");

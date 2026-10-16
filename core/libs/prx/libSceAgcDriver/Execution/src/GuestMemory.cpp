@@ -2112,8 +2112,30 @@ void FlushGpuWrites(std::uint64_t address, std::size_t bytes) {
     if (const auto hook = flushHook.load(std::memory_order_acquire)) hook(address, bytes);
 }
 
+namespace {
+
+std::atomic<std::uint64_t> lockedHostWrites{0};
+std::atomic<bool> lockedHostWriteLogged{false};
+
+void noteLockedHostWrite(std::uintptr_t address, std::size_t bytes) {
+    static const bool assertLock = std::getenv("APS5_ASSERT_GPU_LOCK") != nullptr;
+    if (assertLock) {
+        std::fprintf(stderr, "[lock] ASSERT: a host write of 0x%zx bytes at 0x%llx was made under GuestMemory::GpuMutex on thread tagged 0x%x\n", bytes, static_cast<unsigned long long>(address), GpuLockThreadTag());
+        std::abort();
+    }
+    lockedHostWrites.fetch_add(1, std::memory_order_relaxed);
+    if (!lockedHostWriteLogged.exchange(true, std::memory_order_relaxed)) std::fprintf(stderr, "[lock] a host write of 0x%zx bytes at 0x%llx was made under GuestMemory::GpuMutex on thread tagged 0x%x; it waits for GPU work with the mutex held (counted, logged once)\n", bytes, static_cast<unsigned long long>(address), GpuLockThreadTag());
+}
+
+}
+
+std::uint64_t LockedHostWrites() {
+    return lockedHostWrites.load(std::memory_order_relaxed);
+}
+
 void PrepareHostWrite(std::uintptr_t address, std::size_t bytes) {
     if (ownHostWrite || bytes == 0) return;
+    if (GpuMutex().HeldByThisThread()) noteLockedHostWrite(address, bytes);
     const HostWriteInFlight inFlight;
     if (hostWritesStopped.load(std::memory_order_seq_cst)) return;
     const ReadSiteScope site(ReadSite::Store);
