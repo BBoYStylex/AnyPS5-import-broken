@@ -6,6 +6,7 @@
 #include <mutex>
 #include <utility>
 
+// std::atomic<std::shared_ptr<T>> is C++20, but libc++ does not ship it yet; there a mutex guards the pointer.
 #if defined(__cpp_lib_atomic_shared_ptr)
 template <class T>
 using AtomicSharedPtr = std::atomic<std::shared_ptr<T>>;
@@ -29,14 +30,18 @@ public:
         std::lock_guard lock(mutex);
         return std::exchange(value, std::move(desired));
     }
-    bool compare_exchange_strong(std::shared_ptr<T>& expected, std::shared_ptr<T> desired, std::memory_order = std::memory_order_seq_cst) noexcept {
-        std::lock_guard lock(mutex);
-        if (value == expected) {
-            value = std::move(desired);
-            return true;
+    bool compare_exchange_strong(std::shared_ptr<T>& expected, std::shared_ptr<T> desired,
+        std::memory_order = std::memory_order_seq_cst) noexcept {
+        std::shared_ptr<T> previous;
+        bool exchanged;
+        {
+            std::lock_guard lock(mutex);
+            exchanged = value == expected && !value.owner_before(expected) && !expected.owner_before(value);
+            if (exchanged) previous = std::exchange(value, std::move(desired));
+            else previous = value;
         }
-        expected = value;
-        return false;
+        if (!exchanged) expected = std::move(previous);
+        return exchanged;
     }
     operator std::shared_ptr<T>() const noexcept { return load(); }
     void operator=(std::shared_ptr<T> desired) noexcept { store(std::move(desired)); }

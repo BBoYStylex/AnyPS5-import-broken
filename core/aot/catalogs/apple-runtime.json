@@ -1,0 +1,502 @@
+{
+  "schema": "anyps5.aot.provider-catalog.v1",
+  "target": "apple-arm64",
+  "entries": [
+    {
+      "identity": {
+        "nid": "8G2LB+A3rzg",
+        "library": "libc",
+        "library_version": 1,
+        "module": "libc",
+        "module_version": 257
+      },
+      "contract": {
+        "result": "i32",
+        "parameters": [
+          "ptr"
+        ],
+        "name": "atexit_nid_postfix",
+        "native_binding_qualification": {
+          "guest_symbol": "atexit",
+          "native_symbol": "atexit_nid_postfix",
+          "signature": {
+            "parameters": [
+              "ptr"
+            ],
+            "result": "i32"
+          },
+          "evidence": {
+            "path": "core/libs/prx/libc/src/Process.cpp",
+            "sha256": "e6e0ce482d7dd6973461c5cec475e33b36c90735e67045e4d6efc48d276f31a4",
+            "excerpt": "int APS5_VABI atexit_nid_postfix(GuestExitCallback func) {"
+          },
+          "reason": "Bind the guest libc export: registration and guest exit preserve callbacks. Process replacement through LoadExec intentionally skips guest exit handlers; native bundle teardown belongs to host shutdown.",
+          "dependencies": [
+            {
+              "path": "core/libs/prx/libc/src/RuntimeSupport.cpp",
+              "sha256": "0111efaefef6ced3e9e0ec77515458f74f3870276ea2583d990e811bda225010",
+              "excerpt": "int APS5_VABI __cxa_atexit_nid_postfix(void (APS5_VABI *func)(void*), void* arg, void* dsoHandle) {"
+            }
+          ]
+        },
+        "memory_effects": {
+          "writes": [],
+          "callbacks": false,
+          "evidence": "Process.cpp delegates registration to RuntimeSupport.cpp __cxa_atexit: stores the callback in the private host destructor vector and registers a host exit runner; no guest writes or callback execution during registration. Finalization invokes callbacks later."
+        }
+      },
+      "sources": [
+        {
+          "path": "core/libs/prx/libc/src/Process.cpp",
+          "sha256": "e6e0ce482d7dd6973461c5cec475e33b36c90735e67045e4d6efc48d276f31a4",
+          "excerpt": "int APS5_VABI atexit_nid_postfix(GuestExitCallback func) {"
+        },
+        {
+          "path": "core/libs/prx/libc/src/RuntimeSupport.cpp",
+          "sha256": "0111efaefef6ced3e9e0ec77515458f74f3870276ea2583d990e811bda225010",
+          "excerpt": "int APS5_VABI __cxa_atexit_nid_postfix(void (APS5_VABI *func)(void*), void* arg, void* dsoHandle) {"
+        },
+        {
+          "path": "core/libs/prx/libc/include/general/VabiMacros.hpp",
+          "sha256": "e5826fe2f933c746e13e0f6ac68d56194ac56a778f92539d15f0d02fd70ed636",
+          "excerpt": "#define APS5_VABI"
+        }
+      ],
+      "facts_sha256": "4f39491c4416e009fbc6621335202db8123da475b80a2875a3b5e4f03ea2702f"
+    },
+    {
+      "identity": {
+        "nid": "uMei1W9uyNo",
+        "library": "libc",
+        "library_version": 1,
+        "module": "libc",
+        "module_version": 257
+      },
+      "contract": {
+        "result": "void",
+        "parameters": [
+          "i32"
+        ],
+        "noreturn": true,
+        "name": "exit_nid_postfix",
+        "native_binding_qualification": {
+          "guest_symbol": "exit",
+          "native_symbol": "exit_nid_postfix",
+          "signature": {
+            "parameters": [
+              "i32"
+            ],
+            "result": "void"
+          },
+          "evidence": {
+            "path": "core/libs/prx/libc/src/Process.cpp",
+            "sha256": "e6e0ce482d7dd6973461c5cec475e33b36c90735e67045e4d6efc48d276f31a4",
+            "excerpt": "void APS5_VABI exit_nid_postfix(int code) {"
+          },
+          "reason": "Bind the guest libc export: registration and guest exit preserve callbacks. Process replacement through LoadExec intentionally skips guest exit handlers; native bundle teardown belongs to host shutdown."
+        }
+      },
+      "sources": [
+        {
+          "path": "core/libs/prx/libc/src/Process.cpp",
+          "sha256": "e6e0ce482d7dd6973461c5cec475e33b36c90735e67045e4d6efc48d276f31a4",
+          "excerpt": "void APS5_VABI exit_nid_postfix(int code) {"
+        },
+        {
+          "path": "core/libs/prx/libc/include/general/VabiMacros.hpp",
+          "sha256": "e5826fe2f933c746e13e0f6ac68d56194ac56a778f92539d15f0d02fd70ed636",
+          "excerpt": "#define APS5_VABI"
+        }
+      ],
+      "facts_sha256": "bf50804638b55ca76b93a7742e99b780ed74f999209b8f28d923203e6ba125aa"
+    },
+    {
+      "identity": {
+        "nid": "j3YMu1MVNNo",
+        "library": "libSceUserService",
+        "library_version": 1,
+        "module": "libSceUserService",
+        "module_version": 257
+      },
+      "contract": {
+        "name": "sceUserServiceInitialize",
+        "result": "i32",
+        "parameters": [
+          "ptr"
+        ]
+      },
+      "sources": [
+        {
+          "path": "core/libs/prx/libSceUserService/Export.cpp",
+          "sha256": "5300859a15f76b56f05e12fb2989abc59878a35d1fff8547c2dd42f418f56a53",
+          "excerpt": "int APS5_VABI sceUserServiceInitialize("
+        },
+        {
+          "path": "core/libs/prx/libc/include/general/VabiMacros.hpp",
+          "sha256": "e5826fe2f933c746e13e0f6ac68d56194ac56a778f92539d15f0d02fd70ed636",
+          "excerpt": "#define APS5_VABI"
+        }
+      ],
+      "facts_sha256": "dc3024fc3a024937967855404902161739054a4f27b255b1dc2bd82704355cda"
+    },
+    {
+      "identity": {
+        "nid": "CdWp0oHWGr0",
+        "library": "libSceUserService",
+        "library_version": 1,
+        "module": "libSceUserService",
+        "module_version": 257
+      },
+      "contract": {
+        "name": "sceUserServiceGetInitialUser",
+        "result": "i32",
+        "parameters": [
+          "ptr"
+        ]
+      },
+      "sources": [
+        {
+          "path": "core/libs/prx/libSceUserService/Export.cpp",
+          "sha256": "5300859a15f76b56f05e12fb2989abc59878a35d1fff8547c2dd42f418f56a53",
+          "excerpt": "int APS5_VABI sceUserServiceGetInitialUser("
+        },
+        {
+          "path": "core/libs/prx/libc/include/general/VabiMacros.hpp",
+          "sha256": "e5826fe2f933c746e13e0f6ac68d56194ac56a778f92539d15f0d02fd70ed636",
+          "excerpt": "#define APS5_VABI"
+        }
+      ],
+      "facts_sha256": "22cb5a597e2dd2556af036c12cd07832b2c97af2bcd0cc84837e2a6accdb4d18"
+    },
+    {
+      "identity": {
+        "nid": "hv1luiJrqQM",
+        "library": "libScePad",
+        "library_version": 1,
+        "module": "libScePad",
+        "module_version": 257
+      },
+      "contract": {
+        "name": "scePadInit_nid_postfix",
+        "result": "i32",
+        "parameters": []
+      },
+      "sources": [
+        {
+          "path": "core/libs/prx/libScePad/Export.cpp",
+          "sha256": "8aa78f7ab58e86a93180ad046ba48fbb9a6fdb41acac7c5de4470afb16151add",
+          "excerpt": "int APS5_VABI scePadInit_nid_postfix("
+        },
+        {
+          "path": "core/libs/SceTypes.hpp",
+          "sha256": "1fb2f8e7f03898bfa7ff1377e6038248bc0cb059696db96ce99fcc04dd554de5",
+          "excerpt": "struct PadData"
+        },
+        {
+          "path": "core/libs/prx/libScePad/include/PadState.hpp",
+          "sha256": "bcc8bc46f9ba5a728c9ef491b52c07639c0457bc07a5ce6f73d0222d4195e4b1",
+          "excerpt": "PadData ReadState();"
+        },
+        {
+          "path": "core/libs/prx/libc/include/general/VabiMacros.hpp",
+          "sha256": "e5826fe2f933c746e13e0f6ac68d56194ac56a778f92539d15f0d02fd70ed636",
+          "excerpt": "#define APS5_VABI"
+        }
+      ],
+      "facts_sha256": "e6d76afa6784fd9add338e59b7ae44379bcad76693f8da461bd721a31898b9fa"
+    },
+    {
+      "identity": {
+        "nid": "xk0AcarP3V4",
+        "library": "libScePad",
+        "library_version": 1,
+        "module": "libScePad",
+        "module_version": 257
+      },
+      "contract": {
+        "name": "scePadOpen_nid_postfix",
+        "result": "i32",
+        "parameters": [
+          "i32",
+          "i32",
+          "i32",
+          "ptr"
+        ]
+      },
+      "sources": [
+        {
+          "path": "core/libs/prx/libScePad/Export.cpp",
+          "sha256": "8aa78f7ab58e86a93180ad046ba48fbb9a6fdb41acac7c5de4470afb16151add",
+          "excerpt": "int APS5_VABI scePadOpen_nid_postfix("
+        },
+        {
+          "path": "core/libs/SceTypes.hpp",
+          "sha256": "1fb2f8e7f03898bfa7ff1377e6038248bc0cb059696db96ce99fcc04dd554de5",
+          "excerpt": "struct PadData"
+        },
+        {
+          "path": "core/libs/prx/libScePad/include/PadState.hpp",
+          "sha256": "bcc8bc46f9ba5a728c9ef491b52c07639c0457bc07a5ce6f73d0222d4195e4b1",
+          "excerpt": "PadData ReadState();"
+        },
+        {
+          "path": "core/libs/prx/libc/include/general/VabiMacros.hpp",
+          "sha256": "e5826fe2f933c746e13e0f6ac68d56194ac56a778f92539d15f0d02fd70ed636",
+          "excerpt": "#define APS5_VABI"
+        }
+      ],
+      "facts_sha256": "d2048aaf671d6a066fd8aa0d40adae5d54457df6746c2d797173131a4d92e028"
+    },
+    {
+      "identity": {
+        "nid": "YndgXqQVV7c",
+        "library": "libScePad",
+        "library_version": 1,
+        "module": "libScePad",
+        "module_version": 257
+      },
+      "contract": {
+        "name": "scePadReadState",
+        "result": "i32",
+        "parameters": [
+          "i32",
+          "ptr"
+        ]
+      },
+      "sources": [
+        {
+          "path": "core/libs/prx/libScePad/Export.cpp",
+          "sha256": "8aa78f7ab58e86a93180ad046ba48fbb9a6fdb41acac7c5de4470afb16151add",
+          "excerpt": "int APS5_VABI scePadReadState("
+        },
+        {
+          "path": "core/libs/SceTypes.hpp",
+          "sha256": "1fb2f8e7f03898bfa7ff1377e6038248bc0cb059696db96ce99fcc04dd554de5",
+          "excerpt": "struct PadData"
+        },
+        {
+          "path": "core/libs/prx/libScePad/include/PadState.hpp",
+          "sha256": "bcc8bc46f9ba5a728c9ef491b52c07639c0457bc07a5ce6f73d0222d4195e4b1",
+          "excerpt": "PadData ReadState();"
+        },
+        {
+          "path": "core/libs/prx/libc/include/general/VabiMacros.hpp",
+          "sha256": "e5826fe2f933c746e13e0f6ac68d56194ac56a778f92539d15f0d02fd70ed636",
+          "excerpt": "#define APS5_VABI"
+        }
+      ],
+      "facts_sha256": "9102d05efb52a724433d8deb72f7fc2a8fa9c8e1f1d918289ab5a516d4fae24e"
+    },
+    {
+      "identity": {
+        "nid": "1jfXLRVzisc",
+        "library": "libkernel",
+        "library_version": 1,
+        "module": "libkernel",
+        "module_version": 257
+      },
+      "contract": {
+        "name": "sceKernelUsleep_nid_postfix",
+        "result": "i32",
+        "parameters": [
+          "u32"
+        ]
+      },
+      "sources": [
+        {
+          "path": "core/libs/prx/libkernel/Time/Time.cpp",
+          "sha256": "c114f078fd61e987c9c1252f717d49ad48256afeba4595fb66574a46108803b9",
+          "excerpt": "int APS5_VABI sceKernelUsleep_nid_postfix(KernelUseconds microseconds)"
+        },
+        {
+          "path": "core/libs/prx/libkernel/Time/include/Time.hpp",
+          "sha256": "f98d709bce1dc2a06bb74e13c716a09763db413f8c7882914d536dca8fe60f8e",
+          "excerpt": "KernelUseconds"
+        },
+        {
+          "path": "core/libs/prx/libc/include/general/VabiMacros.hpp",
+          "sha256": "e5826fe2f933c746e13e0f6ac68d56194ac56a778f92539d15f0d02fd70ed636",
+          "excerpt": "#define APS5_VABI"
+        }
+      ],
+      "facts_sha256": "570b8238b96dc4c63e615d8362fa03198de8f4bd0277506bb22835b1facaea70"
+    },
+    {
+      "identity": {
+        "nid": "6ncge5+l5Qs",
+        "library": "libScePad",
+        "library_version": 1,
+        "module": "libScePad",
+        "module_version": 257
+      },
+      "contract": {
+        "name": "scePadClose_nid_postfix",
+        "result": "i32",
+        "parameters": [
+          "i32"
+        ]
+      },
+      "sources": [
+        {
+          "path": "core/libs/prx/libScePad/Export.cpp",
+          "sha256": "8aa78f7ab58e86a93180ad046ba48fbb9a6fdb41acac7c5de4470afb16151add",
+          "excerpt": "int APS5_VABI scePadClose_nid_postfix("
+        },
+        {
+          "path": "core/libs/SceTypes.hpp",
+          "sha256": "1fb2f8e7f03898bfa7ff1377e6038248bc0cb059696db96ce99fcc04dd554de5",
+          "excerpt": "struct PadData"
+        },
+        {
+          "path": "core/libs/prx/libScePad/include/PadState.hpp",
+          "sha256": "bcc8bc46f9ba5a728c9ef491b52c07639c0457bc07a5ce6f73d0222d4195e4b1",
+          "excerpt": "PadData ReadState();"
+        },
+        {
+          "path": "core/libs/prx/libc/include/general/VabiMacros.hpp",
+          "sha256": "e5826fe2f933c746e13e0f6ac68d56194ac56a778f92539d15f0d02fd70ed636",
+          "excerpt": "#define APS5_VABI"
+        }
+      ],
+      "facts_sha256": "e004258e5935da562add0149f848bf578d4fe54047452e303127adddf8c07aa1"
+    },
+    {
+      "identity": {
+        "nid": "zl7hupSO0C0",
+        "library": "libkernel",
+        "library_version": 1,
+        "module": "libkernel",
+        "module_version": 257
+      },
+      "contract": {
+        "name": "sceKernelSendNotificationRequest",
+        "result": "i32",
+        "parameters": [
+          "i32",
+          "ptr",
+          "u64",
+          "i32"
+        ],
+        "memory_effects": {
+          "writes": [],
+          "callbacks": false,
+          "evidence": "Notification.cpp reads request bytes and writes only private host state/stderr. Size is the native provider size_t ABI; caller register bits must satisfy it."
+        }
+      },
+      "sources": [
+        {
+          "path": "core/libs/prx/libkernel/System/src/Notification.cpp",
+          "sha256": "b6050f45e4d7abf37fc5c11874613d1035c456595b860d6d0cd78d8a811132d2",
+          "excerpt": "sceKernelSendNotificationRequest(int device, const void* request, std::size_t size, int flags)"
+        },
+        {
+          "path": "core/libs/prx/libc/include/general/VabiMacros.hpp",
+          "sha256": "e5826fe2f933c746e13e0f6ac68d56194ac56a778f92539d15f0d02fd70ed636",
+          "excerpt": "#define APS5_VABI"
+        }
+      ],
+      "facts_sha256": "38e19554f4d94e676c9dcc0e6f888375db358d7312261a567beb4d9947ab5d01"
+    },
+    {
+      "identity": {
+        "nid": "8zTFvBIAIN8",
+        "library": "libc",
+        "library_version": 1,
+        "module": "libc",
+        "module_version": 257
+      },
+      "contract": {
+        "name": "memset",
+        "result": "ptr",
+        "parameters": [
+          "ptr",
+          "i32",
+          "u64"
+        ],
+        "memory_effects": {
+          "writes": [
+            {
+              "parameter": 0,
+              "size_parameter": 2
+            }
+          ],
+          "callbacks": false,
+          "evidence": "Reviewed AnyPS5 wrapper delegates directly to host std::memset. Valid C objects and, for memcpy, nonoverlap are caller preconditions. Host libc binding uses the same LP64 signature. Rechecked after ARM64 x87-export exclusion: the complete memcpy and memset definitions, LP64 signatures and memory effects are unchanged."
+        }
+      },
+      "sources": [
+        {
+          "path": "core/libs/prx/libc/src/Strings.cpp",
+          "sha256": "fc3c551af89f114d07aa9a9b1ed76d531f7eae5ebd572b84939bb03ba5fffa37",
+          "excerpt": "return std::memset(s, c, n);"
+        }
+      ],
+      "facts_sha256": "80c90a33c1b1703bb92cf540e932c2d2045235fd1e79c4461ab2fa06de56dfad"
+    },
+    {
+      "identity": {
+        "nid": "Q3VBxCXhUHs",
+        "library": "libc",
+        "library_version": 1,
+        "module": "libc",
+        "module_version": 257
+      },
+      "contract": {
+        "name": "memcpy",
+        "result": "ptr",
+        "parameters": [
+          "ptr",
+          "ptr",
+          "u64"
+        ],
+        "memory_effects": {
+          "writes": [
+            {
+              "parameter": 0,
+              "size_parameter": 2
+            }
+          ],
+          "callbacks": false,
+          "evidence": "Reviewed AnyPS5 wrapper delegates directly to host std::memcpy. Valid C objects and, for memcpy, nonoverlap are caller preconditions. Host libc binding uses the same LP64 signature. Rechecked after ARM64 x87-export exclusion: the complete memcpy and memset definitions, LP64 signatures and memory effects are unchanged."
+        }
+      },
+      "sources": [
+        {
+          "path": "core/libs/prx/libc/src/Strings.cpp",
+          "sha256": "fc3c551af89f114d07aa9a9b1ed76d531f7eae5ebd572b84939bb03ba5fffa37",
+          "excerpt": "return std::memcpy(dest, src, n);"
+        }
+      ],
+      "facts_sha256": "4077fb61e6e2c06f4f8d6f6e23a84ac4c5e3940a8fe5d2d16a043cc1ff79eb09"
+    },
+    {
+      "identity": {
+        "nid": "j4ViWNHEgww",
+        "library": "libc",
+        "library_version": 1,
+        "module": "libc",
+        "module_version": 257
+      },
+      "contract": {
+        "name": "strlen",
+        "result": "u64",
+        "parameters": [
+          "ptr"
+        ],
+        "memory_effects": {
+          "writes": [],
+          "callbacks": false,
+          "evidence": "Reviewed AnyPS5 wrapper delegates directly to host std::strlen. Valid C objects and, for memcpy, nonoverlap are caller preconditions. Host libc binding uses the same LP64 signature."
+        }
+      },
+      "sources": [
+        {
+          "path": "core/libs/prx/libc/src/StringLength.cpp",
+          "sha256": "88446982f7385c26c0d91ca01dd143e84dee7c0bc2245c373558b4427f876ee8",
+          "excerpt": "return std::strlen(s);"
+        }
+      ],
+      "facts_sha256": "478103ff3fa85de06cec8ac6f3b02a458b9fe9fa1b0f2ec7ea689ba1b40c40e6"
+    }
+  ]
+}

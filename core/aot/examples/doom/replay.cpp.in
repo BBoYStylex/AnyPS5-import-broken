@@ -1,0 +1,13 @@
+int ReplayDebugOutText(int channel, const char* text) {
+    if (text == nullptr) return sceKernelDebugOutText(channel, text);
+    unsigned frame = 0;
+    int gametic = 0;
+    if (std::sscanf(text, "video: captured frame %u", &frame) == 1) {
+        std::memcpy(&gametic, reinterpret_cast<const void*>(*app___aps5_guest_image.Base + GAMETIC_ADDRESS), sizeof(gametic));
+        std::fprintf(stderr, "aot-replay frame=%u tic=%d\n", frame, gametic);
+    } else if (std::strncmp(text, "Error: timed ", 13) == 0) {
+        std::memcpy(&gametic, reinterpret_cast<const void*>(*app___aps5_guest_image.Base + GAMETIC_ADDRESS), sizeof(gametic));
+        std::fprintf(stderr, "aot-replay final-tic=%d\n", gametic);
+    }
+    return sceKernelDebugOutText(channel, text);
+}

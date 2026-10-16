@@ -12,7 +12,9 @@
 #include <atomic>
 #include <algorithm>
 #include <bit>
+#if defined(__x86_64__)
 #include <emmintrin.h>
+#endif
 #include <functional>
 #include <cstdio>
 #include <cstdlib>
@@ -29,6 +31,11 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#elif defined(__APPLE__)
+#include <mach/mach.h>
+#include <mach/mach_vm.h>
+#include <pthread.h>
+#include <sys/mman.h>
 #else
 #include <cerrno>
 #include <cstdint>
@@ -562,6 +569,36 @@ bool describePages(std::uintptr_t address, std::size_t bytes, Emit&& emit) {
         const auto next = std::min(end, regionEnd);
         if (!emit(PageRun{cursor, next, readable, writable})) return true;
         cursor = next;
+#elif defined(__APPLE__)
+        // The region at or above the cursor, with its current protection.
+        auto regionBase = static_cast<mach_vm_address_t>(cursor);
+        mach_vm_size_t regionSize = 0;
+        vm_region_basic_info_data_64_t info{};
+        mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+        mach_port_t object = MACH_PORT_NULL;
+        const auto result = mach_vm_region(mach_task_self(), &regionBase, &regionSize, VM_REGION_BASIC_INFO_64, reinterpret_cast<vm_region_info_t>(&info), &count, &object);
+        if (result == KERN_INVALID_ADDRESS) {
+            static_cast<void>(emit(PageRun{cursor, end, false, false}));
+            return true;
+        }
+        if (result != KERN_SUCCESS || regionSize == 0) return false;
+        if (regionBase > cursor) {
+            const auto gapEnd = std::min<std::uintptr_t>(end, regionBase);
+            if (!emit(PageRun{cursor, gapEnd, false, false})) return true;
+            cursor = gapEnd;
+            continue;
+        }
+        auto next = std::min<std::uintptr_t>(end, regionBase + regionSize);
+        bool readable = (info.protection & VM_PROT_READ) != 0;
+        bool writable = readable && (info.protection & VM_PROT_WRITE) != 0;
+        std::uintptr_t watchedEnd = next;
+        if (const int logical = GuestWriteWatch::GuestWriteWatchProtection_nid_postfix(cursor, next, &watchedEnd); logical >= 0) {
+            next = std::min(next, watchedEnd);
+            readable = (logical & PROT_READ) != 0;
+            writable = readable && (logical & PROT_WRITE) != 0;
+        }
+        if (!emit(PageRun{cursor, next, readable, writable})) return true;
+        cursor = next;
 #else
         const auto generation = GuestAllocations::GuestAllocationsGeneration_nid_postfix();
         const auto recordRun = [&](std::uintptr_t next, bool readable, bool writable) {
@@ -643,6 +680,10 @@ bool onOwnLiveStack(std::uintptr_t address, std::size_t bytes) {
             GetCurrentThreadStackLimits(&lowLimit, &highLimit);
             low = static_cast<std::uintptr_t>(lowLimit);
             high = static_cast<std::uintptr_t>(highLimit);
+#elif defined(__APPLE__)
+            // Darwin reports the top of the stack and its size; there is no pthread_getattr_np.
+            high = reinterpret_cast<std::uintptr_t>(pthread_get_stackaddr_np(pthread_self()));
+            low = high - pthread_get_stacksize_np(pthread_self());
 #else
             pthread_attr_t attributes;
             if (pthread_getattr_np(pthread_self(), &attributes) != 0) return;
@@ -2203,6 +2244,8 @@ void WriteChanged(std::uint64_t address, std::span<const std::byte> current, std
         std::size_t firstChanged = size;
         std::size_t lastChanged = 0;
         std::size_t at = 0;
+
+#if defined(__x86_64__)
         for (; at + 16 <= size; at += 16) {
             const auto bytes = _mm_loadu_si128(reinterpret_cast<const __m128i*>(current.data() + at));
             const auto same = _mm_cmpeq_epi8(bytes, _mm_loadu_si128(reinterpret_cast<const __m128i*>(original.data() + at)));
@@ -2215,6 +2258,7 @@ void WriteChanged(std::uint64_t address, std::span<const std::byte> current, std
             lastChanged = std::max(lastChanged, at + 32 - static_cast<std::size_t>(std::countl_zero(changed)));
         }
         _mm_sfence();
+#endif
         for (; at < size; ++at) {
             if (current[at] == original[at]) continue;
             destination[at] = current[at];
