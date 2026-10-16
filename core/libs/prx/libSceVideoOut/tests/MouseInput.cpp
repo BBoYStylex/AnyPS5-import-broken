@@ -124,8 +124,7 @@ int main() {
         MouseData data{};
         int read = sceMouseRead(handle, &data, 1);
         Require(read == 1, "failed to read mouse data");
-        Require((data.buttons & 4) != 0, "left mouse button should set Square button (bit 2)");
-        Require((data.buttons & 8) == 0, "left mouse button should not set R2 button (bit 3)");
+        Require(data.buttons == 1, "left mouse button should use guest mouse bit 0");
 
         SDL_Event leftUp{};
         leftUp.type = SDL_MOUSEBUTTONUP;
@@ -135,8 +134,7 @@ int main() {
         input.HandleEvent(leftUp, 3);
         read = sceMouseRead(handle, &data, 1);
         Require(read == 1, "failed to read mouse data");
-        Require((data.buttons & 4) == 0, "left mouse button up should clear Square button");
-        Require((data.buttons & 8) == 0, "left mouse button up should not set R2 button");
+        Require(data.buttons == 0, "left mouse button up should clear guest mouse bit 0");
 
         SDL_Event rightDown{};
         rightDown.type = SDL_MOUSEBUTTONDOWN;
@@ -146,8 +144,7 @@ int main() {
         input.HandleEvent(rightDown, 3);
         read = sceMouseRead(handle, &data, 1);
         Require(read == 1, "failed to read mouse data");
-        Require((data.buttons & 8) != 0, "right mouse button should set R2 button (bit 3)");
-        Require((data.buttons & 4) == 0, "right mouse button should not set Square button (bit 2)");
+        Require(data.buttons == 2, "right mouse button should use guest mouse bit 1");
 
         SDL_Event rightUp{};
         rightUp.type = SDL_MOUSEBUTTONUP;
@@ -157,13 +154,27 @@ int main() {
         input.HandleEvent(rightUp, 3);
         read = sceMouseRead(handle, &data, 1);
         Require(read == 1, "failed to read mouse data");
-        Require((data.buttons & 8) == 0, "right mouse button up should clear R2 button");
-        Require((data.buttons & 4) == 0, "right mouse button up should not set Square button");
+        Require(data.buttons == 0, "right mouse button up should clear guest mouse bit 1");
 
-        input.HandleEvent(Motion(3, 0, 0), 3);
+        SDL_Event middleDown{};
+        middleDown.type = SDL_MOUSEBUTTONDOWN;
+        middleDown.button.windowID = 3;
+        middleDown.button.button = SDL_BUTTON_MIDDLE;
+        middleDown.button.state = SDL_PRESSED;
+        input.HandleEvent(middleDown, 3);
         read = sceMouseRead(handle, &data, 1);
         Require(read == 1, "failed to read mouse data");
-        Require(data.buttons == 0, "no buttons should be set when no mouse buttons are pressed");
+        Require(data.buttons == 4, "middle mouse button should use guest mouse bit 2");
+
+        SDL_Event middleUp{};
+        middleUp.type = SDL_MOUSEBUTTONUP;
+        middleUp.button.windowID = 3;
+        middleUp.button.button = SDL_BUTTON_MIDDLE;
+        middleUp.button.state = SDL_RELEASED;
+        input.HandleEvent(middleUp, 3);
+        read = sceMouseRead(handle, &data, 1);
+        Require(read == 1, "failed to read mouse data");
+        Require(data.buttons == 0, "middle mouse button up should clear guest mouse bit 2");
     }
 
     CaptureDecision(input, handle);
