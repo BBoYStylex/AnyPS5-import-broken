@@ -9,4 +9,3 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) and [CONVENTIONS](docs/dev/CONVENTIONS.m
 - Before opening, run `python3 tools/check_conventions.py --base origin/main` and `python3 tools/pr_overlap.py --branch <branch>`.
 - `tools/` helpers: `import_audit.py` (a converted game's imports against the built libraries), `nid_names.py` (names for Unknown NIDs), `stubgen.py` (export skeletons), `hw-oracle/` (shader semantics on [hardware](docs/dev/HW_ORACLE.md)).
 - Performance: record a [trace](docs/dev/BUILD.md#performance-trace) of `main` and of the change in the same scene, read it with `tools/trace_digest.py`, compare the summaries with `tools/performance_compare.py`.
-- Agents add no code comments: technical debt comments are written only by humans.
