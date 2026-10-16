@@ -50,6 +50,9 @@ void APS5_VABI sceUsbdFillInterruptTransfer(void* transfer, void* deviceHandle, 
 std::int32_t APS5_VABI sceUsbdCancelTransfer(void* transfer);
 std::int32_t APS5_VABI sceUsbdEventHandlingOk();
 void APS5_VABI sceUsbdFreeConfigDescriptor(void* config);
+int APS5_VABI sceUsbdClearHalt();
+int APS5_VABI sceUsbdGetDevice();
+int APS5_VABI sceUsbdHandleEvents();
 }
 
 namespace {
@@ -295,6 +298,9 @@ int main(int argc, char** argv) {
     sceUsbdFreeConfigDescriptor(nullptr);
     if (argc == 2 && std::strcmp(argv[1], "device") == 0) Device();
     sceUsbdExit();
+    Require(Throws([&] { sceUsbdClearHalt(); }), "clear halt throw");
+    Require(Throws([&] { sceUsbdGetDevice(); }), "get device throw");
+    Require(Throws([&] { sceUsbdHandleEvents(); }), "handle events throw");
     std::puts("USBD tests passed");
     return 0;
 }
