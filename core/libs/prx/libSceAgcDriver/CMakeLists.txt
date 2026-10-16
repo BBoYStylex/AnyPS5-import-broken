@@ -550,6 +550,16 @@ target_link_libraries(agc_structurizer_tests PRIVATE shader_recompiler_agc_drive
 set_target_properties(agc_structurizer_tests PROPERTIES CXX_EXTENSIONS OFF)
 configure_windows_unwind(agc_structurizer_tests)
 
+add_test_executable(agc_vulkan_driver_selection_tests EXCLUDE_FROM_ALL tests/VulkanDriverSelection.cpp)
+target_include_directories(agc_vulkan_driver_selection_tests PRIVATE ${LIBS_INCLUDE_DIR} ${ANYPS5_VULKAN_HEADERS_INCLUDE_DIR})
+set_target_properties(agc_vulkan_driver_selection_tests PROPERTIES CXX_EXTENSIONS OFF)
+configure_windows_unwind(agc_vulkan_driver_selection_tests)
+if(BUILD_TESTING)
+    set_target_properties(agc_vulkan_driver_selection_tests PROPERTIES EXCLUDE_FROM_ALL OFF)
+    add_test(NAME agc_vulkan_driver_selection COMMAND agc_vulkan_driver_selection_tests)
+    set_tests_properties(agc_vulkan_driver_selection PROPERTIES TIMEOUT 20)
+endif()
+
 add_test_executable(agc_fragment_barycentric_tests EXCLUDE_FROM_ALL tests/FragmentBarycentric.cpp)
 target_include_directories(agc_fragment_barycentric_tests PRIVATE ${LIBS_INCLUDE_DIR} ${ANYPS5_VULKAN_HEADERS_INCLUDE_DIR})
 set_target_properties(agc_fragment_barycentric_tests PROPERTIES CXX_EXTENSIONS OFF)
