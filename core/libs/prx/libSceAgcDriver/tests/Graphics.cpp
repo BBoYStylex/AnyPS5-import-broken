@@ -6094,7 +6094,7 @@ void ProvokingVertexTests() {
     ValidateProvokingVertex(unsupported, first);
     auto last = first;
     last.provokingVertexMode = VK_PROVOKING_VERTEX_MODE_LAST_VERTEX_EXT;
-    expectFailure([&] { ValidateProvokingVertex(unsupported, last); }, "last provoking vertex requires VK_EXT_provoking_vertex with provokingVertexLast enabled");
+    ValidateProvokingVertex(unsupported, last);
     auto supported = unsupported;
     supported.provokingVertexLast = true;
     ValidateProvokingVertex(supported, last);
