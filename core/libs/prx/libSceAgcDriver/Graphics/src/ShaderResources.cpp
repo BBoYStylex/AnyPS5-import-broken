@@ -4665,6 +4665,10 @@ void ShaderResources::resolveImageTables() {
             const VkImageViewType multisampleViewType = shape == ShaderRecompiler::DescriptorImageShape::Image2DMultisampleArray ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D;
             try {
                 texture = cachedTexture(context, words, resource, components, guestBytes, depthCompare, multisampleViewType);
+            } catch (const TextureMemoryExhausted& error) {
+                table.map[faults + element] = rejectTableElement(table, words, error.what());
+                reusable = false;
+                continue;
             } catch (const VulkanError&) {
                 throw;
             } catch (const std::runtime_error& error) {
