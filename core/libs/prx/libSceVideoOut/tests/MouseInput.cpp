@@ -113,6 +113,59 @@ int main() {
     input.HandleEvent(Motion(3, 3, 3), 3);
     Sum(handle, x, y);
     Require(x == 6 && y == 6, "an empty presentation changed the scale");
+
+    {
+        SDL_Event leftDown{};
+        leftDown.type = SDL_MOUSEBUTTONDOWN;
+        leftDown.button.windowID = 3;
+        leftDown.button.button = SDL_BUTTON_LEFT;
+        leftDown.button.state = SDL_PRESSED;
+        input.HandleEvent(leftDown, 3);
+        MouseData data{};
+        int read = sceMouseRead(handle, &data, 1);
+        Require(read == 1, "failed to read mouse data");
+        Require((data.buttons & 4) != 0, "left mouse button should set Square button (bit 2)");
+        Require((data.buttons & 8) == 0, "left mouse button should not set R2 button (bit 3)");
+
+        SDL_Event leftUp{};
+        leftUp.type = SDL_MOUSEBUTTONUP;
+        leftUp.button.windowID = 3;
+        leftUp.button.button = SDL_BUTTON_LEFT;
+        leftUp.button.state = SDL_RELEASED;
+        input.HandleEvent(leftUp, 3);
+        read = sceMouseRead(handle, &data, 1);
+        Require(read == 1, "failed to read mouse data");
+        Require((data.buttons & 4) == 0, "left mouse button up should clear Square button");
+        Require((data.buttons & 8) == 0, "left mouse button up should not set R2 button");
+
+        SDL_Event rightDown{};
+        rightDown.type = SDL_MOUSEBUTTONDOWN;
+        rightDown.button.windowID = 3;
+        rightDown.button.button = SDL_BUTTON_RIGHT;
+        rightDown.button.state = SDL_PRESSED;
+        input.HandleEvent(rightDown, 3);
+        read = sceMouseRead(handle, &data, 1);
+        Require(read == 1, "failed to read mouse data");
+        Require((data.buttons & 8) != 0, "right mouse button should set R2 button (bit 3)");
+        Require((data.buttons & 4) == 0, "right mouse button should not set Square button (bit 2)");
+
+        SDL_Event rightUp{};
+        rightUp.type = SDL_MOUSEBUTTONUP;
+        rightUp.button.windowID = 3;
+        rightUp.button.button = SDL_BUTTON_RIGHT;
+        rightUp.button.state = SDL_RELEASED;
+        input.HandleEvent(rightUp, 3);
+        read = sceMouseRead(handle, &data, 1);
+        Require(read == 1, "failed to read mouse data");
+        Require((data.buttons & 8) == 0, "right mouse button up should clear R2 button");
+        Require((data.buttons & 4) == 0, "right mouse button up should not set Square button");
+
+        input.HandleEvent(Motion(3, 0, 0), 3);
+        read = sceMouseRead(handle, &data, 1);
+        Require(read == 1, "failed to read mouse data");
+        Require(data.buttons == 0, "no buttons should be set when no mouse buttons are pressed");
+    }
+
     CaptureDecision(input, handle);
     CaptureApplied(input);
     std::puts("mouse input tests passed");
