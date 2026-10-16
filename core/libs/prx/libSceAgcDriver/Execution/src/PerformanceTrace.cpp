@@ -138,6 +138,7 @@ double seconds(Clock::duration elapsed) {
 void PerformanceTrace::BindThread(const char* name, std::size_t capacity) {
     if (!Configured() || local != nullptr) return;
     const bool windowed = std::getenv("APS5_TRACE_FRAMES") != nullptr || std::getenv("APS5_TRACE_SECONDS") != nullptr;
+    if (windowed && capacity == TraceThread::DefaultCapacity) capacity = TraceThread::ParseCapacity(std::getenv("APS5_TRACE_EVENTS"));
     auto bound = std::make_unique<TraceThread>(name, presentCount, windowed ? capacity : 0, buffering);
     auto& state = session();
     std::lock_guard lock(state.mutex);
@@ -220,6 +221,7 @@ void PerformanceTrace::Present(std::uint32_t width, std::uint32_t height, const 
         {
             std::lock_guard gpu(gpuMutex);
             gpuRanges.clear();
+            gpuLost = 0;
             gpuRanges.reserve(GpuRangeCapacity);
         }
         state.presents.push_back(now);
@@ -255,7 +257,7 @@ void PerformanceTrace::Present(std::uint32_t width, std::uint32_t height, const 
     if (state.gpuClock && device != nullptr && device->CalibrateClock(clock.gpuNs, clock.cpu)) {
         std::lock_guard gpu(gpuMutex);
         gpuSlices = TraceFormat::GpuSlices(gpuRanges, *state.gpuClock, clock, state.presents.front());
-        snapshots.push_back({"gpu", gpuSlices, {}, gpuDropped});
+        snapshots.push_back({"gpu", gpuSlices, {}, gpuLost != 0, gpuLost});
     }
     const auto process = processId();
     auto summary = identity(width, height, device);
