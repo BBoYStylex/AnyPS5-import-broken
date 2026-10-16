@@ -53,6 +53,7 @@ struct TableColumn {
     std::uint32_t foldedAddend = 0;
     std::uint32_t foldedCarry = 0;
     bool selected = false;
+    bool allOnesKey = false;
     std::uint32_t selection = 0;
 
     bool operator==(const TableColumn& other) const {

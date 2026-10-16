@@ -264,6 +264,14 @@ alignas(256) constexpr std::array<std::uint32_t, 25> ReadPointerCode{
     0xbf810000u,
 };
 
+alignas(256) constexpr std::array<std::uint32_t, 33> PointerSetBitLoopCode{
+    0xf4080200u, 0xfa000000u, 0xf4080700u, 0xfa000010u, 0xf4080800u, 0xfa000020u, 0xf4200b04u, 0xfa000000u,
+    0x360200bfu, 0x7e020d01u, 0x060202f0u, 0x100202ffu, 0x3c800000u, 0x7e0402ffu, 0x3e000000u, 0xbeae0380u,
+    0xbead132cu, 0x8f12852du, 0xf40c0900u, 0x24000040u, 0xf09c0f08u, 0x01090401u, 0x7e12022eu, 0x34101286u,
+    0x4a101100u, 0x34101084u, 0xe0781000u, 0x80070408u, 0x802e812eu, 0xbeac1b2du, 0xbf07802cu, 0xbf85fff0u,
+    0xbf810000u,
+};
+
 alignas(256) constexpr std::array<std::uint32_t, 30> SplitRecordCode{
     0xf4080100u, 0xfa000000u, 0xf4080200u, 0xfa000010u, 0xf4080700u, 0xfa000020u, 0x8f108202u, 0xf4200444u,
     0x20000000u, 0x9312b011u, 0xf42c0802u, 0x24000000u, 0xf4280a02u, 0x24000020u, 0x360200bfu, 0x7e020d01u,
@@ -1213,6 +1221,38 @@ void RunPointerTests(AgcDriver::VulkanDevice& device) {
     RequireRed(reads, 4, Lanes, [](std::uint32_t x) { return UintTexels[x]; }, "pointer image table read: key 0x1ff masked to entry 255");
 }
 
+void RunPointerSetBitTests(AgcDriver::VulkanDevice& device) {
+    const std::array<std::uint32_t, 4> invalid{0x1234u, 0x5678u, 0x9abcu, 0x1000ffacu};
+    std::fill(Root.begin(), Root.end(), 0u);
+    SetEntry(0, Image(FloatTexels.data(), Format32Float));
+    SetEntry(2, Image(SintTexels.data(), Format32SInt));
+    SetEntry(31, Image(UintTexels.data(), Format32UInt));
+    SetEntry(32, invalid);
+    SetEntry(40, invalid);
+    Keys = {};
+    Keys[0] = 0x80000005u;
+    const auto loop = RunPointer(device, PointerSetBitLoopCode, 1);
+    Require(!Faulted(loop), "pointer image table set-bit key: the selected entries faulted:\n" + loop.log);
+    const std::array<std::function<std::uint32_t(std::uint32_t)>, 3> texels{
+        [](std::uint32_t x) { return std::bit_cast<std::uint32_t>(FloatTexels[x]); },
+        [](std::uint32_t x) { return static_cast<std::uint32_t>(SintTexels[x]); },
+        [](std::uint32_t x) { return UintTexels[x]; },
+    };
+    for (std::uint32_t iteration = 0; iteration < texels.size(); ++iteration) {
+        for (std::uint32_t lane = 0; lane < Lanes; ++lane) {
+            const auto actual = Output[(iteration * Lanes + lane) * 4u];
+            Require(actual == texels[iteration](lane), "pointer image table set-bit key: iteration " + std::to_string(iteration) + " read " + Hex(actual) + " at lane " + std::to_string(lane) + ", expected " + Hex(texels[iteration](lane)));
+        }
+    }
+    const auto palette = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(Root.data())) + PaletteOffset;
+    const std::vector<std::pair<std::uint64_t, std::uint64_t>> reads{{palette, 32u * 32u}};
+    Require(loop.imageTableReadRanges.size() == 1u && loop.imageTableReadRanges[0] == reads, "pointer image table set-bit key: the snapshot read entries an s_ff1 key cannot select");
+
+    Keys[0] = 0u;
+    const auto empty = RunPointer(device, PointerSetBitLoopCode, 1);
+    Require(Faulted(empty) && empty.log.find("outside the snapshot") != std::string::npos && Zeros(empty), "pointer image table set-bit key: the -1 key of an empty set did not fault as outside the snapshot:\n" + empty.log);
+}
+
 void RunPointerRecordTests(AgcDriver::VulkanDevice& device) {
     Fill();
     const auto floatImage = Image(FloatTexels.data(), Format32Float);
@@ -1511,6 +1551,7 @@ int main() {
         RunStoreTests(*device);
         RunSelectedStoreTests(*device);
         RunPointerTests(*device);
+        RunPointerSetBitTests(*device);
         RunPointerRecordTests(*device);
         RunPointerChainRecordTests(*device);
         RunSplitRecordTests(*device);
