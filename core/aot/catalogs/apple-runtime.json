@@ -27,7 +27,7 @@
           },
           "evidence": {
             "path": "core/libs/prx/libc/src/Process.cpp",
-            "sha256": "82925ab5a5a13063189a5ac8e0ff2e62b7c6a9873036fe7e738dca5c3e9a1fd8",
+            "sha256": "e6e0ce482d7dd6973461c5cec475e33b36c90735e67045e4d6efc48d276f31a4",
             "excerpt": "int APS5_VABI atexit_nid_postfix(GuestExitCallback func) {"
           },
           "reason": "Bind the guest libc export: registration and guest exit preserve callbacks. Process replacement through LoadExec intentionally skips guest exit handlers; native bundle teardown belongs to host shutdown.",
@@ -48,7 +48,7 @@
       "sources": [
         {
           "path": "core/libs/prx/libc/src/Process.cpp",
-          "sha256": "82925ab5a5a13063189a5ac8e0ff2e62b7c6a9873036fe7e738dca5c3e9a1fd8",
+          "sha256": "e6e0ce482d7dd6973461c5cec475e33b36c90735e67045e4d6efc48d276f31a4",
           "excerpt": "int APS5_VABI atexit_nid_postfix(GuestExitCallback func) {"
         },
         {
@@ -62,7 +62,7 @@
           "excerpt": "#define APS5_VABI"
         }
       ],
-      "facts_sha256": "813890b90057552125f3901cc00f902e09342cd461e80465bd4510d88fa269d7"
+      "facts_sha256": "4f39491c4416e009fbc6621335202db8123da475b80a2875a3b5e4f03ea2702f"
     },
     {
       "identity": {
@@ -90,7 +90,7 @@
           },
           "evidence": {
             "path": "core/libs/prx/libc/src/Process.cpp",
-            "sha256": "82925ab5a5a13063189a5ac8e0ff2e62b7c6a9873036fe7e738dca5c3e9a1fd8",
+            "sha256": "e6e0ce482d7dd6973461c5cec475e33b36c90735e67045e4d6efc48d276f31a4",
             "excerpt": "void APS5_VABI exit_nid_postfix(int code) {"
           },
           "reason": "Bind the guest libc export: registration and guest exit preserve callbacks. Process replacement through LoadExec intentionally skips guest exit handlers; native bundle teardown belongs to host shutdown."
@@ -99,7 +99,7 @@
       "sources": [
         {
           "path": "core/libs/prx/libc/src/Process.cpp",
-          "sha256": "82925ab5a5a13063189a5ac8e0ff2e62b7c6a9873036fe7e738dca5c3e9a1fd8",
+          "sha256": "e6e0ce482d7dd6973461c5cec475e33b36c90735e67045e4d6efc48d276f31a4",
           "excerpt": "void APS5_VABI exit_nid_postfix(int code) {"
         },
         {
@@ -108,7 +108,7 @@
           "excerpt": "#define APS5_VABI"
         }
       ],
-      "facts_sha256": "2e095aa2687fc86e7f958a16baadb91564fee6efb2ec7546d212a6647efd6390"
+      "facts_sha256": "bf50804638b55ca76b93a7742e99b780ed74f999209b8f28d923203e6ba125aa"
     },
     {
       "identity": {
