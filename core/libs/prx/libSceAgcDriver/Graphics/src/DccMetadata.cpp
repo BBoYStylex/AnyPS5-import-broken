@@ -682,9 +682,20 @@ DccKeys ProvedClearKeys(const GuestTextureResource& resource, std::uint64_t gues
     // The collect precedes the scan: a write landing between them is stamped above `collected`, so
     // the proof it would invalidate is never taken as current.
     const auto collected = count == 0 ? 0 : GuestMemory::CollectWrites(resource.dccAddress, count);
-    if (proof.generation != 0 && collected != 0 && GuestMemory::UnchangedSince(resource.dccAddress, count, proof.generation)) {
-        counters.proved.fetch_add(1, std::memory_order_relaxed);
-        return proof.keys;
+    if (proof.generation != 0 && collected != 0) {
+        bool pendingWrite = false;
+        if (GuestMemory::GpuMutex().HeldByThisThread()) {
+            if (auto* recorder = Recorder::Active(); recorder != nullptr) {
+                const auto info = recorder->DescribePendingWrite(resource.dccAddress, count);
+                pendingWrite = info.has_value() && !info->signaled;
+            }
+        } else {
+            pendingWrite = Recorder::SnapshotWriteOverlaps(resource.dccAddress, count);
+        }
+        if (!pendingWrite && GuestMemory::UnchangedSince(resource.dccAddress, count, proof.generation)) {
+            counters.proved.fetch_add(1, std::memory_order_relaxed);
+            return proof.keys;
+        }
     }
     bool memoized = false;
     const auto keys = textureClearKeys(resource, guestBytes, memoized);

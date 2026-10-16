@@ -1273,7 +1273,7 @@ void unchangedSinceTests() {
 // until the key range is stamped (a GPU key store's MarkWritten) or the CPU writes it; a scan made
 // while recorded work still writes the keys is not kept. With APS5_NO_KEY_FAST_PATH=1 every call
 // scans and no proof is stored.
-void keyProofTests(const Device& device, Recorder& recorder) {
+void keyProofTests(Recorder& recorder) {
     using namespace AgcDriver::GuestMemory;
     constexpr std::size_t bytes = 65536;
     void* block = AllocateWatched(bytes, bytes);
@@ -1324,21 +1324,18 @@ void keyProofTests(const Device& device, Recorder& recorder) {
     before = KeyProofCounts();
     Require(before.scanned == after.scanned + 1 && proof.keys == DccKeys::Clear0001, "(9) the CPU write did not make a scan");
     Require(ProvedClearKeys(resource, surfaceBytes, proof) == DccKeys::Clear0001 && KeyProofCounts().proved == before.proved + 1, "(9) the new keys were not proved");
-    // A recorded write over the keys (noted and stamped as the driver's key stores are): the scans
-    // are not kept until its batch signaled.
     recorder.NotePendingWrite(address, keyCount);
     MarkWritten(address, keyCount);
+    Require(recorder.PendingWriteOverlaps(address, keyCount), "the pending key writer was not recorded");
+    const auto submissionsBeforePendingRead = recorder.Submissions();
     before = KeyProofCounts();
-    Require(ProvedClearKeys(resource, surfaceBytes, proof) == DccKeys::Clear0001 && proof.generation == 0, "(9) a scan under a pending write was kept");
-    Require(ProvedClearKeys(resource, surfaceBytes, proof) == DccKeys::Clear0001 && proof.generation == 0, "(9) a second scan under a pending write was kept");
+    Require(ProvedClearKeys(resource, surfaceBytes, proof) == DccKeys::Clear0001, "(9) a pending key writer changed the result");
     after = KeyProofCounts();
-    Require(after.scanned == before.scanned + 2 && after.unstable == before.unstable + 2 && after.proved == before.proved, "(9) unstable scans were miscounted");
-    recorder.Submit();
-    device.WaitQueue();
-    Require(ProvedClearKeys(resource, surfaceBytes, proof) == DccKeys::Clear0001 && proof.generation != 0, "(9) a signaled write kept the scan unstable");
+    Require(recorder.Submissions() > submissionsBeforePendingRead, "(9) an older proof bypassed the pending key writer");
+    Require(proof.generation != 0 && after.scanned == before.scanned + 1 && after.unstable == before.unstable && after.proved == before.proved, "(9) the waited key scan did not produce a stable proof");
     recorder.Sync();
     before = KeyProofCounts();
-    Require(ProvedClearKeys(resource, surfaceBytes, proof) == DccKeys::Clear0001 && KeyProofCounts().proved == before.proved + 1, "(9) the proof did not hold after the batch finished");
+    Require(ProvedClearKeys(resource, surfaceBytes, proof) == DccKeys::Clear0001 && KeyProofCounts().proved == before.proved + 1, "(9) the proof was not reused after the pending writer finished");
 }
 
 void targetKeyProofTests(const Device& device, Recorder& recorder) {
@@ -8280,7 +8277,7 @@ int main(int argc, char** argv) {
         largeLabelTests(recorder);
         unchangedSinceTests();
         closeRaceTests(device, recorder);
-        keyProofTests(device, recorder);
+        keyProofTests(recorder);
         targetKeyProofTests(device, recorder);
         refreshProofTests(device, recorder);
         resourceReadTests(device, recorder);
