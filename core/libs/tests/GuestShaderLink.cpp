@@ -7,7 +7,7 @@
 #include <stdexcept>
 #include <span>
 extern "C" int APS5_VABI sceAgcLinkShaders(ShaderRegister*, ShaderRegister*, const void*, const Shader*, const Shader*, std::uint32_t);
-extern "C" int APS5_VABI sceAgcUnknown_vieBRwlh1Lw(ShaderRegister*, const Shader*, const Shader*);
+extern "C" int APS5_VABI sceAgcUpdateInterpolantMapping_10000(ShaderRegister*, const Shader*, const Shader*);
 extern "C" void* APS5_VABI sceAgcGetRegisterDefaults();
 extern "C" void* APS5_VABI sceAgcGetRegisterDefaults2(std::uint32_t);
 static void Require(bool value) { if (!value) std::abort(); }
@@ -122,20 +122,20 @@ int main() {
     vertex.num_output_semantics = 1;
     pixel.input_semantics = &input;
     pixel.num_input_semantics = 1;
-    Require(sceAgcUnknown_vieBRwlh1Lw(sdkMapping.data(), &vertex, &pixel) == 0);
+    Require(sceAgcUpdateInterpolantMapping_10000(sdkMapping.data(), &vertex, &pixel) == 0);
     Require(sdkMapping[0].offset == SPI_PS_INPUT_CNTL_0 && sdkMapping[0].value == (5 | 0x400));
     for (unsigned i = 1; i < sdkMapping.size(); ++i)
         Require(sdkMapping[i].offset == 0xdeadbeef && sdkMapping[i].value == 0xcafebabe);
 
     input.semantic = 10;
     input.default_value = 2;
-    Require(sceAgcUnknown_vieBRwlh1Lw(sdkMapping.data(), &vertex, &pixel) == 0);
+    Require(sceAgcUpdateInterpolantMapping_10000(sdkMapping.data(), &vertex, &pixel) == 0);
     Require(sdkMapping[0].value == 0x220);
 
     // Without a PS (ANIMAL WELL's first pipeline links a GS alone) every interpolant is written, disabled.
     for (const Shader* gs : {static_cast<const Shader*>(nullptr), static_cast<const Shader*>(&vertex)}) {
         sdkMapping.fill({0xdeadbeef, 0xcafebabe});
-        Require(sceAgcUnknown_vieBRwlh1Lw(sdkMapping.data(), gs, nullptr) == 0);
+        Require(sceAgcUpdateInterpolantMapping_10000(sdkMapping.data(), gs, nullptr) == 0);
         for (unsigned i = 0; i < 32; ++i)
             Require(sdkMapping[i].offset == SPI_PS_INPUT_CNTL_0 + i && sdkMapping[i].value == 0);
         Require(sdkMapping.back().offset == 0xdeadbeef && sdkMapping.back().value == 0xcafebabe);
@@ -145,7 +145,7 @@ int main() {
         sdkMapping.fill({0xdeadbeef, 0xcafebabe});
         const auto saved = sdkMapping;
         bool thrown = false;
-        try { sceAgcUnknown_vieBRwlh1Lw(sdkMapping.data(), gs, &pixel); }
+        try { sceAgcUpdateInterpolantMapping_10000(sdkMapping.data(), gs, &pixel); }
         catch (const std::runtime_error&) { thrown = true; }
         Require(thrown && std::memcmp(sdkMapping.data(), saved.data(), sizeof(sdkMapping)) == 0);
     };
