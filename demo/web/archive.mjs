@@ -177,7 +177,7 @@ export class Archive {
   }
 
   selectedBytesForTarget(target) {
-    if (target !== "linux" && target !== "windows") throw new Error(`Unsupported conversion target: ${target}`);
+    if (target !== "linux" && target !== "windows" && target !== "macos") throw new Error(`Unsupported conversion target: ${target}`);
     if (target === "windows" && (this.icon?.entry.uncompressedSize ?? 0) > ICON_LIMIT) throw new Error("sce_sys/icon0.png exceeds 16 MiB");
     return target === "windows" ? this.windowsSelectedBytes : this.selectedBytes;
   }
