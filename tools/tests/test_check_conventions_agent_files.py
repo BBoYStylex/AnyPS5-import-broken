@@ -16,7 +16,12 @@ class AgentFileTests(unittest.TestCase):
         ):
             with self.subTest(name=name):
                 self.assertIs(allowed_notes(f"docs/dev/{name}"), False)
-                self.assertIs(allowed_notes(name), False)
+                if name != "AGENTS.md":
+                    self.assertIs(allowed_notes(name), False)
+
+    def test_root_agents_md_is_allowed(self):
+        self.assertIs(allowed_notes("AGENTS.md"), True)
+        self.assertIs(allowed_notes("core/AGENTS.md"), False)
 
     def test_ordinary_docs_are_still_allowed(self):
         self.assertTrue(allowed_notes("docs/dev/Claudette.md"))
