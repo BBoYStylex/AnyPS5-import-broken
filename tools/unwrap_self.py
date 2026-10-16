@@ -94,12 +94,16 @@ def parse_elf(data):
     inner = data.find(b"\x7fELF")
     if inner < 0:
         raise Refused("no inner ELF header")
+    if len(data) - inner < 0x40:
+        raise Refused("truncated inner ELF header")
     header = bytearray(data[inner:inner + 0x40])
     program_offset = struct.unpack_from("<Q", header, 0x20)[0]
     entry_size = struct.unpack_from("<H", header, 0x36)[0]
     count = struct.unpack_from("<H", header, 0x38)[0]
     if entry_size != 56 or count == 0:
         raise Refused("program header table is %d entries of %d bytes" % (count, entry_size))
+    if program_offset > len(data) - inner or count > (len(data) - inner - program_offset) // entry_size:
+        raise Refused("program header table does not fit the container")
     headers = []
     for index in range(count):
         offset = inner + program_offset + index * 56

@@ -80,6 +80,24 @@ def read_program_headers(path):
 
 
 class UnwrapTest(unittest.TestCase):
+    def test_truncated_inner_metadata_is_refused_without_touching_output(self):
+        truncated_header = bytearray(FIRST_REGION)
+        struct.pack_into("<I", truncated_header, 0, SELF_MAGIC)
+        truncated_header[-4:] = b"\x7fELF"
+        truncated_table = bytearray(build_container(default_segments(), default_records(), default_payloads()))
+        struct.pack_into("<Q", truncated_table, ELF_HEADER_OFFSET + 0x20, len(truncated_table))
+        for container, message in ((truncated_header, "truncated inner ELF header"),
+                                   (truncated_table, "program header table does not fit")):
+            with self.subTest(message=message):
+                output = Path(self.directory) / "output.elf"
+                output.write_bytes(b"previous output")
+                result, output = self.convert(container)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn(message, result.stderr)
+                self.assertNotIn("Traceback", result.stderr)
+                self.assertEqual(output.read_bytes(), b"previous output")
+
+
     def convert(self, container, name="input.self"):
         directory = Path(self.directory)
         source = directory / name
