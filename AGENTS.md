@@ -24,10 +24,10 @@ Relinker-only changes can use the [relinker-only build](docs/dev/BUILD.md#relink
 ## Code
 
 - Do exactly the right thing or throw `std::runtime_error`: no fallbacks, retries, silent success or behaviour switched by environment variables.
-- Unimplemented exports call `NotImplemented_nid_no_patch(__func__)`. A silent stub only when it unblocks a title and affects only UI, listed in `docs/dev/debt/<lib>.md`.
+- Unimplemented exports call `NotImplemented_nid_no_patch(__func__)`. A silent stub only when it unblocks a title and affects only UI, listed under Silent stubs in `docs/dev/debt/<lib>.md`.
 - General behaviour, not what one title needs. Unverified return codes and shader semantics throw or go in technical debt; cite the hardware measurement or exact source (ISA, LLVM, ACO, Mesa).
 - No code comments: technical debt comments are written only by humans.
-- Debt entries go in `docs/dev/debt/<name>.md`, named after the first `core/` path they link, next to related entries.
+- Gaps, unknown NIDs and assumed signatures go in [technical debt](docs/dev/TechnicalDebt.md) under its sections (`Silent stubs`, `Unknown function info`, `Functional`, ...): in `docs/dev/debt/<name>.md`, named after the first `core/` path the entry links, next to related entries; entries that link no `core/` path stay in the index.
 - PascalCase classes and public methods, camelCase private members and arguments, `I` for interfaces. Standard C++ over extensions.
 - Do not reimplement modules titles ship (`sce_module/`, `sce_modules/`, `prx/`). Third-party code is a submodule built from source.
 - Tests fail without the change, pass with it, finish in 30 s on lavapipe with no shader cache and build on Windows (MinGW). No export-only tests.
