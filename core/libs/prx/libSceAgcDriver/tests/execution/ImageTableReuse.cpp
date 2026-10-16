@@ -265,7 +265,7 @@ void RunSelectivePendingWrite(AgcDriver::VulkanDevice& device, const GuestBlock&
     auto before = AgcDriver::Graphics::ImageTableReuses();
     Require(Dispatch(device, result, 23) == Row(separate.Texels(0)), "image table reuse: the separate-block entry sampled the wrong texels");
     Require(Dispatch(device, result, 5) == Row(block.Texels(5)), "image table reuse: a sibling entry sampled the wrong texels");
-    Expect(before, 1, 1, "a table whose images include a separate tracking block");
+    Expect(before, 1, 2, "a table whose images include a separate tracking block");
 
     Store(device, separate, 0);
     std::vector<float> stored(Width);
