@@ -359,6 +359,31 @@ PeDirectory WindowsTlsBuilder::Build(const std::vector<std::uint8_t>& source, co
             if (preserveCounter) code.Emit({0x51});
             if (preserveAccumulator) code.Emit({0x50});
             loadPointer();
+            // Plain thread-pointer load (Displacement==0, no ALU, no store): derive the PS5 job
+            // descriptor pointer and propagate it to stack_base+0x48 on first non-null read.
+            // tls[0x130] (= [rax-0x78]) is the scheduler context; its slot[0] (= *sched_ctx)
+            // is the actual job descriptor the fast path expects at stack_base+0x48.
+            if (!access.StoreImmediate && access.AluOpcode == 0 && access.Displacement == 0) {
+                code.Emit({0x52});                                           // push rdx
+                code.Emit({0x48, 0x8b, 0x90, 0x88, 0xff, 0xff, 0xff});     // mov rdx,[rax-0x78]  (sched_ctx)
+                code.Emit({0x48, 0x85, 0xd2});                              // test rdx,rdx
+                const auto skipProp0a = code.Branch({0x0f, 0x84});          // jz  skip_prop0
+                code.Emit({0x48, 0x8b, 0x12});                              // mov rdx,[rdx]       (job_desc)
+                code.Emit({0x48, 0x85, 0xd2});                              // test rdx,rdx
+                const auto skipProp0b = code.Branch({0x0f, 0x84});          // jz  skip_prop0
+                code.Emit({0x51});                                           // push rcx (scratch)
+                code.Emit({0x48, 0x89, 0xe1});                              // mov  rcx,rsp
+                code.Emit({0x48, 0x81, 0xe1, 0x00, 0x00, 0xf0, 0xff});     // and  rcx,~0xFFFFF
+                code.Emit({0x48, 0x83, 0xb9, 0x48, 0x00, 0x00, 0x00, 0x00}); // cmp qword[rcx+0x48],0
+                const auto skipWrite0 = code.Branch({0x0f, 0x85});          // jnz skip_write0
+                code.Emit({0x48, 0x89, 0x91, 0x48, 0x00, 0x00, 0x00});     // mov [rcx+0x48],rdx
+                code.PatchBranch(skipWrite0, code.GetRva());
+                code.Emit({0x59});                                           // pop rcx
+                code.PatchBranch(skipProp0a, code.GetRva());
+                code.PatchBranch(skipProp0b, code.GetRva());
+                code.Emit({0x5a});                                           // pop rdx
+                // rax still holds the thread pointer
+            }
             if (access.AluOpcode != 0) {
                 code.Emit({0x48, 0x8b, 0x80});
                 code.U32(access.Displacement);
@@ -366,6 +391,28 @@ PeDirectory WindowsTlsBuilder::Build(const std::vector<std::uint8_t>& source, co
             } else if (!access.StoreImmediate && access.Displacement != 0) {
                 code.Emit({0x48, 0x8b, 0x80});
                 code.U32(access.Displacement);
+                // Direct sched-context read (displacement == -0x78): rax = sched_ctx.
+                // Dereference once more to get the job descriptor pointer for stack_base+0x48.
+                if (access.Displacement == 0xFFFFFF88u) {
+                    code.Emit({0x48, 0x85, 0xc0});                              // test rax,rax (sched_ctx)
+                    const auto skipProp1a = code.Branch({0x0f, 0x84});          // jz  skip_prop1
+                    code.Emit({0x50});                                           // push rax (save sched_ctx)
+                    code.Emit({0x48, 0x8b, 0x00});                              // mov rax,[rax] (job_desc)
+                    code.Emit({0x48, 0x85, 0xc0});                              // test rax,rax
+                    const auto skipProp1b = code.Branch({0x0f, 0x84});          // jz  skip_pop_prop1
+                    code.Emit({0x51});                                           // push rcx
+                    code.Emit({0x48, 0x89, 0xe1});                              // mov  rcx,rsp
+                    code.Emit({0x48, 0x81, 0xe1, 0x00, 0x00, 0xf0, 0xff});     // and  rcx,~0xFFFFF
+                    code.Emit({0x48, 0x83, 0xb9, 0x48, 0x00, 0x00, 0x00, 0x00}); // cmp qword[rcx+0x48],0
+                    const auto skipWrite1 = code.Branch({0x0f, 0x85});          // jnz skip_write1
+                    code.Emit({0x48, 0x89, 0x81, 0x48, 0x00, 0x00, 0x00});     // mov [rcx+0x48],rax
+                    code.PatchBranch(skipWrite1, code.GetRva());
+                    code.Emit({0x59});                                           // pop rcx
+                    code.PatchBranch(skipProp1b, code.GetRva());
+                    code.Emit({0x58});                                           // pop rax  (restore sched_ctx)
+                    code.PatchBranch(skipProp1a, code.GetRva());
+                    // rax restored to sched_ctx for the caller
+                }
             }
             if (access.StoreImmediate) {
                 code.Emit({0xc7, 0x40, 0x28});
@@ -413,6 +460,10 @@ PeDirectory WindowsTlsBuilder::Build(const std::vector<std::uint8_t>& source, co
     writeAddress(48, codeRva);
 
     Io::WriteU32(data.Data, 36, static_cast<std::uint32_t>(std::bit_width(alignment)) << 20);
+    // Store threadPointerOffset at offset 0x2C (just after the 4-byte TLS index slot at 0x28).
+    // GuestStackSwitch_nid_no_patch reads this to locate the PS5 job-context field (FS:-0x78)
+    // in the per-thread TLS block, so it can initialize stack_base+0x48 on custom stacks.
+    Io::WriteU32(data.Data, 0x2c, static_cast<std::uint32_t>(threadPointerOffset));
     const PeDirectory directory{data.Rva, 40};
     sections.push_back(std::move(data));
     sections.push_back({".gtcode", codeRva, SectionRead | SectionExecute | 0x20u, code.TakeBytes()});
