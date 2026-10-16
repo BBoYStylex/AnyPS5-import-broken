@@ -1869,7 +1869,7 @@
     }
   },
   "qualification": {
-    "facts_sha256": "23b42339bf1ffecbe9652ff915541e79d5586c9e1f3ac496ad4b482d8b4c4bec",
+    "facts_sha256": "6e1e7f01b585503825e48059353d38791e1cbcbdb72927271d50ef384f4a8e94",
     "sources": [
       {
         "path": "core/aot/examples/gpu_cube/variant.py",
