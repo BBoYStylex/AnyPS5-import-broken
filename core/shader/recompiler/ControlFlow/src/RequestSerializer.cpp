@@ -1,4 +1,5 @@
 #include "ControlFlow/RequestSerializer.hpp"
+#include <bit>
 #include <stdexcept>
 
 namespace ShaderRecompiler {
@@ -863,6 +864,12 @@ std::string RequestSerializer::Serialize(const RecompileRequest& request) const 
     }
     writer.WriteBool(request.target.float32FlushToZero);
     writer.WriteBool(request.target.float32DenormPreserve);
+    if (request.context.vertex.has_value()) {
+        writer.WriteBool(request.context.vertex->pointList);
+        writer.WriteU32(std::bit_cast<std::uint32_t>(request.context.vertex->pointSize));
+        writer.WriteU32(std::bit_cast<std::uint32_t>(request.context.vertex->pointSizeMin));
+        writer.WriteU32(std::bit_cast<std::uint32_t>(request.context.vertex->pointSizeMax));
+    }
     return base64Encode(buffer);
 }
 
@@ -917,6 +924,14 @@ DeserializedRequest RequestSerializer::Deserialize(std::string_view text) const 
     }
     if (version >= 36u) result.request.target.float32FlushToZero = reader.ReadBool();
     if (version >= 41u) result.request.target.float32DenormPreserve = reader.ReadBool();
+    if (version >= 33u && result.request.context.vertex.has_value()) {
+        auto& vertex = *result.request.context.vertex;
+        vertex.pointList = reader.ReadBool();
+        vertex.pointSize = std::bit_cast<float>(reader.ReadU32());
+        vertex.pointSizeMin = std::bit_cast<float>(reader.ReadU32());
+        vertex.pointSizeMax = std::bit_cast<float>(reader.ReadU32());
+        result.vertex = vertex;
+    }
     if (version >= 21u && reader.Remaining() != 0u) throw std::runtime_error("RequestSerializer: unexpected trailing data");
     return result;
 }
