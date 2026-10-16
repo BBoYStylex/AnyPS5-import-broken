@@ -2,6 +2,7 @@
 
 ### Silent stubs
 
+- [sceVideoOutUnknown_YNw9Xk5iNWo](../../../core/libs/prx/libSceVideoOut/Unimplemented.cpp) (libSceVideoOut, NID YNw9Xk5iNWo) - imported by Wobbly Life (PPSA29413), Dreaming Sarah (PPSA02929), Stray (PPSA02100), and Onimusha Way of the Sword (PPSA27836). The observed call site in Wobbly Life passes (67072176, 0x1). Returns 0 without recording the state to allow titles to boot to streaming without aborting
 - [sceVideoOutSetFlipRate](../../../core/libs/prx/libSceVideoOut/src/Output.cpp) stores a rate of 0, 1 or 2 and returns `VIDEO_OUT_ERROR_INVALID_VALUE` for any other rate. PPSA13356 calls it with 60; whether the console accepts that value or returns this error is unverified
 - [sceVideoOutOpen](../../../core/libs/prx/libSceVideoOut/src/Output.cpp) validates the priority and CPU affinity that the open param requests for the VideoOut service thread but does not apply them: the port's present and vblank threads are host threads, and guest priorities and affinities do not reach host scheduling
 - [sceVideoOutAddVrrStatusFlagsPrivilege](../../../core/libs/prx/libSceVideoOut/src/Output.cpp) returns 0 and does nothing: the host output has no VRR state to report. The name comes from an assert message in a title that requires `SCE_VIDEO_OUT_OK`; the NID hashes to it, the arguments are unknown (it is called without any)
