@@ -6179,6 +6179,60 @@ void ProvokingVertexTests() {
     expectFailure([&] { ValidateProvokingVertex(supported, last); }, "invalid provoking vertex mode");
 }
 
+void UnobservedProvokingVertexTests() {
+    using namespace AgcDriver::Graphics;
+    auto last = DecodeState(makeState());
+    last.provokingVertexMode = VK_PROVOKING_VERTEX_MODE_LAST_VERTEX_EXT;
+    const Context unsupported{};
+    const auto module = [](std::initializer_list<std::uint32_t> instructions) {
+        std::vector<std::uint32_t> words{spv::MagicNumber, 0x10300u, 0u, 4u, 0u};
+        words.insert(words.end(), instructions);
+        return words;
+    };
+    ShaderRecompiler::RecompileResult fragment{};
+    const std::array<CompiledShader, 1> shaders{{{ShaderRecompiler::ShaderStage::Fragment, &fragment, 0}}};
+    const ShaderRecompiler::FragmentParameter smooth{0, 0, false, false};
+    const auto refused = [&](const State& state) {
+        expectFailure([&] { ValidateProvokingVertex(unsupported, state, shaders); }, "last provoking vertex requires VK_EXT_provoking_vertex with provokingVertexLast enabled");
+    };
+    for (const auto topology : {VK_PRIMITIVE_TOPOLOGY_POINT_LIST, VK_PRIMITIVE_TOPOLOGY_LINE_LIST, VK_PRIMITIVE_TOPOLOGY_LINE_STRIP, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_FAN}) {
+        auto state = last;
+        state.topology = topology;
+        ValidateProvokingVertex(unsupported, state);
+        fragment.fragmentParameters.clear();
+        fragment.spirv = module({});
+        ValidateProvokingVertex(unsupported, state, shaders);
+        fragment.fragmentParameters = {smooth};
+        fragment.spirv = module({(4u << 16u) | spv::OpDecorate, 1u, spv::DecorationLocation, 0u});
+        ValidateProvokingVertex(unsupported, state, shaders);
+        for (std::uint32_t read = 0; read < 4; ++read) {
+            const ShaderRecompiler::FragmentParameter observed{1, 1, read == 0, read == 1, read == 2, read == 3, false};
+            fragment.fragmentParameters = {smooth, observed};
+            refused(state);
+        }
+        fragment.fragmentParameters = {smooth};
+        for (const std::uint32_t decoration : {static_cast<std::uint32_t>(spv::DecorationFlat), static_cast<std::uint32_t>(spv::DecorationPerVertexKHR)}) {
+            fragment.spirv = module({(3u << 16u) | spv::OpDecorate, 1u, decoration});
+            refused(state);
+            fragment.spirv = module({(4u << 16u) | spv::OpMemberDecorate, 1u, 0u, decoration});
+            refused(state);
+        }
+        fragment.spirv = module({(5u << 16u) | spv::OpDecorate, 1u, spv::DecorationLocation});
+        refused(state);
+        fragment.spirv = std::vector<std::uint32_t>{};
+        refused(state);
+    }
+    ShaderRecompiler::RecompileResult vertex{};
+    vertex.fragmentParameters = {{0, 0, true, true, true, true, true}};
+    vertex.spirv = module({(3u << 16u) | spv::OpDecorate, 1u, spv::DecorationFlat});
+    fragment.fragmentParameters = {smooth};
+    fragment.spirv = module({});
+    const std::array<CompiledShader, 2> stages{{{ShaderRecompiler::ShaderStage::Vertex, &vertex, 0}, {ShaderRecompiler::ShaderStage::Fragment, &fragment, 0}}};
+    ValidateProvokingVertex(unsupported, last, stages);
+    const std::array<CompiledShader, 1> missing{{{ShaderRecompiler::ShaderStage::Fragment, nullptr, 0}}};
+    expectFailure([&] { ValidateProvokingVertex(unsupported, last, missing); }, "last provoking vertex requires VK_EXT_provoking_vertex with provokingVertexLast enabled");
+}
+
 void ProvokingVertexRenderPassTests() {
     using namespace AgcDriver::Graphics;
     const auto first = DecodeState(makeState());
@@ -7335,6 +7389,12 @@ int main(int argc, char** argv) {
             descriptorPoolResetFailureTest();
             std::cerr << "descriptor pool reset failure did not terminate\n";
             return 1;
+        }
+        if (argc == 2 && std::string_view(argv[1]) == "--unobserved-provoking-vertex") {
+            UnobservedProvokingVertexTests();
+            ProvokingVertexTests();
+            std::cout << "Unobserved provoking vertex checks passed\n";
+            return 0;
         }
         if (argc == 2 && std::string_view(argv[1]) == "--covered-centroid-state") {
             multisampleTests();
