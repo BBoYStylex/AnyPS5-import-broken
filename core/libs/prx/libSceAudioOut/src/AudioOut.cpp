@@ -18,7 +18,9 @@
 #include "prx/libc/include/Shutdown.hpp"
 #include "prx/libkernel/Time/include/Time.hpp"
 #include "prx/libSceAudioOut/include/AudioOutSdl.hpp"
+#include "prx/libScePad/include/PadState.hpp"
 #include "AudioOutShutdown.hpp"
+#include "AudioOut2PadMix.hpp"
 
 static constexpr int PORT_TYPE_MAIN = 0;
 static constexpr int PORT_TYPE_BGM = 1;
@@ -268,6 +270,33 @@ static void paceVirtualPort(Port& port, bool hasData, std::unique_lock<std::mute
     port.virtualQueueEnd += (1000000ULL * port.samplesNum) / port.freq;
 }
 
+static void submitVibration(Port& port, const void* data) {
+    if (port.type != PORT_TYPE_VIBRATION || data == nullptr || (port.channels != 1 && port.channels != 2)) return;
+
+    std::vector<float> pad(static_cast<std::size_t>(port.samplesNum) * AUDIO_OUT2_PAD_CHANNELS, 0.0f);
+    const float volume[2] = {
+        static_cast<float>(port.volume[0]) / DEFAULT_VOLUME * static_cast<float>(port.mixLevel) / DEFAULT_VOLUME,
+        static_cast<float>(port.volume[port.channels == 2 ? 1 : 0]) / DEFAULT_VOLUME * static_cast<float>(port.mixLevel) / DEFAULT_VOLUME,
+    };
+    for (std::uint32_t frame = 0; frame < port.samplesNum; frame++) {
+        float samples[2]{};
+        if (formatIsFloat(port.format)) {
+            const auto* pcm = static_cast<const float*>(data) + static_cast<std::size_t>(frame) * port.channels;
+            samples[0] = pcm[0];
+            samples[1] = pcm[port.channels == 2 ? 1 : 0];
+        } else {
+            const auto* pcm = static_cast<const std::int16_t*>(data) + static_cast<std::size_t>(frame) * port.channels;
+            samples[0] = static_cast<float>(pcm[0]) / 32768.0f;
+            samples[1] = static_cast<float>(pcm[port.channels == 2 ? 1 : 0]) / 32768.0f;
+        }
+        AudioOut2AccumulatePadFrame(AudioOut2Route::PadVibration, samples, 2, volume,
+            pad.data() + static_cast<std::size_t>(frame) * AUDIO_OUT2_PAD_CHANNELS);
+    }
+    AudioOut2FinishPadMix(pad.data(), port.samplesNum);
+    const auto rumble = AudioOut2RumbleFromPadFrames(pad.data(), port.samplesNum);
+    PadSubmitAudioHaptics_nid_postfix(rumble[0], rumble[1]);
+}
+
 static bool portTypeValid(int type) {
     return (type >= PORT_TYPE_MAIN && type <= PORT_TYPE_PADSPK) ||
            type == PORT_TYPE_VIBRATION ||
@@ -373,6 +402,7 @@ int APS5_VABI sceAudioOutOutput(int handle, const void* ptr) try {
 
     if (port->device == 0) {
         paceVirtualPort(*port, ptr != nullptr, lock);
+        submitVibration(*port, ptr);
     } else {
         queueAudio(*port, ptr, lock);
     }
@@ -402,6 +432,7 @@ int APS5_VABI sceAudioOutOutputs(AudioOutOutputParam* param, std::uint32_t num) 
         Port& port = *getPort(param[i].handle);
         if (port.device == 0) {
             paceVirtualPort(port, param[i].ptr != nullptr, lock);
+            submitVibration(port, param[i].ptr);
         } else {
             queueAudio(port, param[i].ptr, lock);
         }
