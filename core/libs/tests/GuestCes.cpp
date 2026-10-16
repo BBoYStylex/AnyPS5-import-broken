@@ -6,6 +6,7 @@
 extern "C" {
 const std::uint8_t* APS5_VABI sceCesRefersUcsProfileCp1252(void);
 const std::uint8_t* APS5_VABI sceCesRefersUcsProfileCp1251(void);
+const std::uint8_t* APS5_VABI sceCesRefersUcsProfileCp1250(void);
 int APS5_VABI sceCesMbcsUcsContextInit(void*, const void*);
 void* APS5_VABI sceCesUcsProfileInitEucJpCp51932(void*);
 int APS5_VABI sceCesUtf8StrToMbcsStr(void*, const std::uint8_t*, std::uint32_t, std::uint32_t*, std::uint8_t*, std::uint32_t, std::uint32_t*);
@@ -114,6 +115,25 @@ int main() {
     Require(Utf8ToSbc(cyrillic, "\xC3\xA9", 2) == unassignedCode);
     Require(Utf8ToSbc(profile, "\xD0\x90", 2) == unassignedCode);
 
+    const std::uint8_t* centralEuropean = sceCesRefersUcsProfileCp1250();
+    Require(centralEuropean != nullptr && centralEuropean == sceCesRefersUcsProfileCp1250() && centralEuropean != profile && centralEuropean != cyrillic);
+    RequireSbcToUtf8(centralEuropean, 'A', "A");
+    RequireSbcToUtf8(centralEuropean, 0x80, "\xE2\x82\xAC");
+    RequireSbcToUtf8(centralEuropean, 0x8C, "\xC5\x9A");
+    RequireSbcToUtf8(centralEuropean, 0xA3, "\xC5\x81");
+    RequireSbcToUtf8(centralEuropean, 0xB9, "\xC4\x85");
+    RequireSbcToUtf8(centralEuropean, 0xFF, "\xCB\x99");
+    RequireUtf8ToSbc(centralEuropean, "\xC5\x82", 0xB3);
+    RequireUtf8ToSbc(centralEuropean, "\xC4\x8D", 0xE8);
+    for (int sbc = 1; sbc < 256; ++sbc) {
+        std::uint8_t cp[4] = {};
+        std::uint32_t cpLength = 0;
+        std::uint8_t back = 0;
+        Require(sceCesSbcToUtf8(centralEuropean, static_cast<std::uint8_t>(sbc), cp, sizeof(cp), &cpLength) == 0);
+        Require(sceCesUtf8ToSbc(cp, cpLength, &cpLength, centralEuropean, &back) == 0 && back == sbc);
+    }
+    Require(Utf8ToSbc(centralEuropean, "\xD0\x90", 2) == unassignedCode);
+
     char context[256] = {};
     Require(sceCesMbcsUcsContextInit(context, cyrillic) == 0);
     Require(sceCesMbcsUcsContextInit(nullptr, cyrillic) == invalidParameter);
@@ -192,4 +212,10 @@ int main() {
     Require(sceCesMbcsStrToUtf8Str(context, reinterpret_cast<const std::uint8_t*>("\xC0\xFF"), 2, &used, back, sizeof(back), &produced) == 0);
     Require(produced == 4 && std::memcmp(back, "\xD0\x90\xD1\x8F", 4) == 0);
     Require(sceCesUtf8StrToMbcsStr(context, back, 4, &used, mbcs, sizeof(mbcs), &produced) == 0 && produced == 2 && mbcs[0] == 0xC0 && mbcs[1] == 0xFF);
+
+    char cp1250Context[256] = {};
+    Require(sceCesMbcsUcsContextInit(cp1250Context, centralEuropean) == 0);
+    Require(sceCesMbcsStrToUtf8Str(cp1250Context, reinterpret_cast<const std::uint8_t*>("\xA3\xE8"), 2, &used, back, sizeof(back), &produced) == 0);
+    Require(produced == 4 && std::memcmp(back, "\xC5\x81\xC4\x8D", 4) == 0);
+    Require(sceCesUtf8StrToMbcsStr(cp1250Context, back, 4, &used, mbcs, sizeof(mbcs), &produced) == 0 && produced == 2 && mbcs[0] == 0xA3 && mbcs[1] == 0xE8);
 }
