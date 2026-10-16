@@ -487,16 +487,29 @@ cmake --build /path/native-build --target native_sce_crt_tests native_audio_shut
 ctest --test-dir /path/native-build -R 'native_(sce_crt|.*shutdown)$' --output-on-failure
 ```
 
-Build the pinned external source's `host` target. For each of `demo1`, `demo2`
-and `demo3`, create `/path/references/DEMO` and run the host executable with
-`DOOM_WADDIR=/path/PPSA99666/wads`, `DOOM_OUT=/path/references/DEMO`,
-`DOOM_CAPTURE=120,900` and arguments `-timedemo DEMO`. The source reference exits
-1 at timedemo completion; check its log and generated captures. The verifier
-requires the exact qualified raw reference hashes, not only that exit code.
-These six reference images were independently associated with gametics 79 and
-859 in the source engine. Physical frame numbers include a clock-dependent
-initial wipe and are not logical tic identifiers.
-Do not enable source-reference audio or compare its timing with the full runtime.
+For reference-only capture, replace the capture condition in the external
+`src/host/host.c` function `plat_video_present` with the following. Leave the
+engine, frame increment and all other behavior unchanged:
+
+```c
+extern int gametic;
+int saved_frame = frame;
+if (gametic == 79 || gametic == 859) {
+    frame = gametic == 79 ? 120 : 900;
+    capture(pixels, palette);
+    frame = saved_frame;
+}
+```
+
+Build that pinned source's `host` target. For each of `demo1`, `demo2` and
+`demo3`, create `/path/references/DEMO` and run the host executable with
+`DOOM_WADDIR=/path/PPSA99666/wads`, `DOOM_OUT=/path/references/DEMO` and arguments
+`-timedemo DEMO`. The reference exits 1 at timedemo completion; check its log
+and captures. The verifier requires the six frozen raw hashes, independently
+associated with gametics 79 and 859, not only that exit code. Physical frame
+numbers include a clock-dependent initial wipe and are not logical tic
+identifiers. Do not enable reference audio or compare its timing with the full
+runtime.
 
 Set `SDL_VULKAN_LIBRARY`, `VK_ICD_FILENAMES` and the loader search path as for the
 cube check. Then run:
