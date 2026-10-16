@@ -14,6 +14,7 @@ endfunction()
 
 option(BUILD_TESTING "Build and register relinker tests" OFF)
 option(ANYPS5_RELINKER_ONLY "Build the relinker without system libraries or third-party dependencies" OFF)
+option(ANYPS5_NATIVE_AOT "Build the experimental offline Apple ARM64 compiler" OFF)
 option(ANYPS5_BUILD_WASM "Build the browser relinker" OFF)
 if(ANYPS5_BUILD_WASM)
     if(NOT EMSCRIPTEN)
@@ -183,6 +184,10 @@ if(BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_performance_compare.py)
         set_tests_properties(performance_compare PROPERTIES TIMEOUT 20)
     endif()
+endif()
+
+if(ANYPS5_NATIVE_AOT)
+    add_subdirectory(core/aot)
 endif()
 
 if(ANYPS5_RELINKER_ONLY)
