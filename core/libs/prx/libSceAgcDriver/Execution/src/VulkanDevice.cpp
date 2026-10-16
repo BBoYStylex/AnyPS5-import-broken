@@ -4364,6 +4364,7 @@ struct RecordedDispatch {
     int cpuReason = 0;
     std::array<std::uint32_t, 3> threadGroup{};
     std::array<std::uint32_t, 3> threadLimit{};
+    std::shared_ptr<Graphics::ShaderResources::DispatchUse> use;
 };
 
 VkDevice VulkanDevice::Device() const {
@@ -4519,7 +4520,7 @@ std::shared_ptr<PreparedDispatch> VulkanDevice::PrepareDispatch(const ShaderReco
         prepared->key = DispatchContentKey(compute, context.device);
         phase(PreparedDispatch::PrepareKey);
         cached = state->resourceCache.Find(prepared->key);
-        if (cached != nullptr && DispatchMove()) {
+        if (cached != nullptr && DispatchMove() && !cached->ReusesAddressSpace()) {
             Graphics::ShaderResources::MoveProof proof;
             if (!cached->MovedDispatchBuffers(compute, nullptr, DispatchMoveBytes(), proof).has_value()) {
                 DispatchMoves().filtered[static_cast<std::size_t>(proof.refusal)].fetch_add(1, std::memory_order_relaxed);
@@ -4820,7 +4821,10 @@ void VulkanDevice::recordDispatch(RecordedDispatch& record) {
     context.Resolved(&Graphics::DeviceFunctions::cmdBindPipeline, "vkCmdBindPipeline")(commands, VK_PIPELINE_BIND_POINT_COMPUTE, record.objects->pipeline);
     if (record.bindings != nullptr) Graphics::Require(record.bindings->allocation.set != VK_NULL_HANDLE, "dispatch overlay has no descriptor set");
     if (record.bindings != nullptr) context.Resolved(&Graphics::DeviceFunctions::cmdBindDescriptorSets, "vkCmdBindDescriptorSets")(commands, VK_PIPELINE_BIND_POINT_COMPUTE, record.objects->layout, 0, 1, &record.bindings->allocation.set, 0, nullptr);
-    else resources.Bind(commands, VK_PIPELINE_BIND_POINT_COMPUTE, record.objects->layout);
+    else {
+        resources.BindUse(commands, record.objects->layout, record.use.get());
+        if (record.use != nullptr && record.use->bindings != nullptr) recorder.Keep(record.use->bindings);
+    }
     if (const auto dwords = record.shader->program->workgroupMemoryDwords; dwords != 0) {
         auto memory = state->WorkgroupMemoryFor(context, record.x, record.y, record.z, dwords);
         context.Resolved(&Graphics::DeviceFunctions::cmdBindDescriptorSets, "vkCmdBindDescriptorSets")(commands, VK_PIPELINE_BIND_POINT_COMPUTE, record.objects->layout, ShaderRecompiler::WorkgroupMemoryDescriptorSet, 1, &memory->set, 0, nullptr);
@@ -4880,7 +4884,10 @@ void VulkanDevice::recordDispatch(RecordedDispatch& record) {
     recordStep(PhaseRecordMarks);
     // Only copied written buffers (and BDA fault checks) need work once the GPU is done; without them
     // the batch can signal its labels from the GPU.
-    if (resources.NeedsCompletion() && resources.Reusable()) {
+    if (record.use != nullptr) {
+        auto kept = record.resources;
+        recorder.OnComplete([kept, use = record.use] { kept->CompleteDispatchUse(*use); });
+    } else if (resources.NeedsCompletion() && resources.Reusable()) {
         auto kept = record.resources;
         recorder.OnComplete([kept] { kept->CheckFaults(); });
     } else if (resources.NeedsCompletion()) {
@@ -5163,9 +5170,9 @@ VulkanDevice::IndirectOutcome VulkanDevice::dispatch(const ShaderRecompiler::Rec
         contentKey = prepared != nullptr && !prepared->key.empty() ? std::move(prepared->key) : DispatchContentKey(shaders[0], context.device);
         auto cached = preparedFind && prepared != nullptr && prepared->cached != nullptr ? std::move(prepared->cached) : state->resourceCache.Find(contentKey);
         if (cached != nullptr) {
-            if (cached->Revalidate(shaders[0])) {
+            if (cached->Revalidate(std::span<const Graphics::CompiledShader>(shaders), nullptr, snapshots)) {
                 bool usable = true;
-                if (DispatchMove() && !exactEntry) {
+                if (DispatchMove() && !exactEntry && !cached->ReusesAddressSpace()) {
                     auto& moves = DispatchMoves();
                     Graphics::ShaderResources::MoveProof proof;
                     auto moved = cached->MovedDispatchBuffers(shaders[0], state->recorder.get(), DispatchMoveBytes(), proof);
@@ -5198,7 +5205,7 @@ VulkanDevice::IndirectOutcome VulkanDevice::dispatch(const ShaderRecompiler::Rec
                     contentKey = DispatchContentKey(shaders[0], context.device, false);
                     refusedMove = true;
                     cached = state->resourceCache.Find(contentKey);
-                    if (cached != nullptr && cached->Revalidate(shaders[0])) usable = true;
+                    if (cached != nullptr && cached->Revalidate(std::span<const Graphics::CompiledShader>(shaders), nullptr, snapshots)) usable = true;
                     else if (cached != nullptr) {
                         state->resourceCache.Remove(contentKey, cached.get());
                         ++d.cacheInvalidated;
@@ -5210,6 +5217,7 @@ VulkanDevice::IndirectOutcome VulkanDevice::dispatch(const ShaderRecompiler::Rec
                     resources = std::move(cached);
                     fromCache = true;
                     ++d.cacheHits;
+                    if (resources->ReusesAddressSpace()) Graphics::CountAddressReuse(Graphics::AddressReuse::Reused);
                 }
             } else {
                 state->resourceCache.Remove(contentKey, cached.get());
@@ -5235,6 +5243,10 @@ VulkanDevice::IndirectOutcome VulkanDevice::dispatch(const ShaderRecompiler::Rec
         }
     }
     resources->PatchPushConstants(pushBytes);
+    struct SpaceRelease {
+        Graphics::ShaderResources* resources;
+        ~SpaceRelease() { resources->EndUse(); }
+    } spaceRelease{resources.get()};
     if (profile) timer.add(PhaseResourcesHookWaits, Graphics::Recorder::ThreadWaitedMs() - waitedBefore);
     // The lookup outcomes of this call: rows with counts on the [indirect] line, and a summary for
     // the longest call.
@@ -5277,6 +5289,7 @@ VulkanDevice::IndirectOutcome VulkanDevice::dispatch(const ShaderRecompiler::Rec
     record.resourceKeyMatched = fromCache;
     record.bindings = overlay;
     record.threadGroup = threadGroup;
+    record.use = resources->BeginDispatchUse();
     if (arguments != 0) decideIndirect(record, outcome, groupsText);
     // The indirect hold total below still covers the whole call of a CPU-resolved one.
     const bool indirect = record.arguments != 0 || outcome.cpuReason != 0;
