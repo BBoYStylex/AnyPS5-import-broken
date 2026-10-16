@@ -41,6 +41,13 @@ ATOMIC = {'add': 'add', 'sub': 'sub', 'and': 'and', 'or': 'or', 'xor': 'xor', 'i
 INTRINSIC = re.compile(r'call (<[^>]+>|\S+) (@llvm\.[\w.]+)\((.*)\)\s*$')
 
 
+
+def operation(method, *arguments):
+    def lower(self):
+        getattr(self, method)(*arguments)
+    return lower
+
+
 class Unsupported(ValueError):
     pass
 
@@ -342,8 +349,7 @@ class Integer(Emitter):
         if store:
             self.write(destination, result)
 
-    def op_cmp(self):
-        self.op_sub(False)
+    op_cmp = operation('op_sub', False)
 
     def op_sbb(self):
         destination, bits, left, right = self.binary('sbb')
@@ -359,11 +365,9 @@ class Integer(Emitter):
         if store:
             self.write(destination, result)
 
-    def op_and(self):
-        self.logic('and')
+    op_and = operation('logic', 'and')
 
-    def op_or(self):
-        self.logic('or')
+    op_or = operation('logic', 'or')
 
     def op_xor(self):
         destination, source = self.operands()
@@ -374,8 +378,7 @@ class Integer(Emitter):
             return
         self.logic('xor')
 
-    def op_test(self):
-        self.logic('and', False)
+    op_test = operation('logic', 'and', False)
 
     def op_inc(self, delta=1):
         destination, = self.operands()
@@ -441,27 +444,21 @@ class Integer(Emitter):
         bits = ALIASES[source][1]
         self.write_register(target, self.sext(value, bits, ALIASES[target][1]))
 
-    def op_cdqe(self):
-        self.extend_accumulator('eax', 'rax')
+    op_cdqe = operation('extend_accumulator', 'eax', 'rax')
 
-    def op_cwde(self):
-        self.extend_accumulator('ax', 'eax')
+    op_cwde = operation('extend_accumulator', 'ax', 'eax')
 
-    def op_cbw(self):
-        self.extend_accumulator('al', 'ax')
+    op_cbw = operation('extend_accumulator', 'al', 'ax')
 
     def split_sign(self, source, target):
         value, bits = self.read_register(source)
         self.write_register(target, self.v(f'ashr i{bits} {value}, {bits - 1}'))
 
-    def op_cdq(self):
-        self.split_sign('eax', 'edx')
+    op_cdq = operation('split_sign', 'eax', 'edx')
 
-    def op_cqo(self):
-        self.split_sign('rax', 'rdx')
+    op_cqo = operation('split_sign', 'rax', 'rdx')
 
-    def op_cwd(self):
-        self.split_sign('ax', 'dx')
+    op_cwd = operation('split_sign', 'ax', 'dx')
 
     def op_nop(self):
         pass
@@ -469,8 +466,7 @@ class Integer(Emitter):
     op_endbr64 = op_nop
     op_pause = op_nop
 
-    def op_mfence(self):
-        self.emit('fence seq_cst')
+    op_mfence = operation('emit', 'fence seq_cst')
 
     op_lfence = op_mfence
     op_sfence = op_mfence
@@ -576,16 +572,13 @@ class Integer(Emitter):
         self.preserve_flags_if_zero(count, {'cf': carry, 'of': overflow, 'zf': zero, 'sf': sign, 'pf': parity, 'af': 'false'})
         self.write(destination, result)
 
-    def op_shl(self):
-        self.shift('shl')
+    op_shl = operation('shift', 'shl')
 
     op_sal = op_shl
 
-    def op_shr(self):
-        self.shift('shr')
+    op_shr = operation('shift', 'shr')
 
-    def op_sar(self):
-        self.shift('sar')
+    op_sar = operation('shift', 'sar')
 
     def rotate(self, left):
         destination = self.operands()[0]
@@ -607,11 +600,9 @@ class Integer(Emitter):
         self.preserve_flags_if_zero(count, {'cf': carry, 'of': overflow})
         self.write(destination, result)
 
-    def op_rol(self):
-        self.rotate(True)
+    op_rol = operation('rotate', True)
 
-    def op_ror(self):
-        self.rotate(False)
+    op_ror = operation('rotate', False)
 
     def double_shift(self, left):
         destination, source = self.operands()[:2]
@@ -637,11 +628,9 @@ class Integer(Emitter):
         self.preserve_flags_if_zero(count, {'cf': carry, 'of': overflow, 'zf': zero, 'sf': sign, 'pf': parity, 'af': 'false'})
         self.write(destination, result)
 
-    def op_shld(self):
-        self.double_shift(True)
+    op_shld = operation('double_shift', True)
 
-    def op_shrd(self):
-        self.double_shift(False)
+    op_shrd = operation('double_shift', False)
 
     def op_imul(self):
         operands = self.operands()
@@ -688,8 +677,7 @@ class Integer(Emitter):
         self.zf_sf_pf(low, bits)
         self.set_flag('af', 'false')
 
-    def op_mul(self):
-        self.wide_multiply(False)
+    op_mul = operation('wide_multiply', False)
 
     def divide(self, signed):
         source, = self.operands()
@@ -730,11 +718,9 @@ class Integer(Emitter):
             self.write_register(low_name, narrow)
             self.write_register(high_name, rest)
 
-    def op_div(self):
-        self.divide(False)
+    op_div = operation('divide', False)
 
-    def op_idiv(self):
-        self.divide(True)
+    op_idiv = operation('divide', True)
 
     def bit_operand(self):
         destination, source = self.operands()
@@ -768,17 +754,13 @@ class Integer(Emitter):
         else:
             self.write(where[1], result)
 
-    def op_bt(self):
-        self.bit_test('test')
+    op_bt = operation('bit_test', 'test')
 
-    def op_bts(self):
-        self.bit_test('set')
+    op_bts = operation('bit_test', 'set')
 
-    def op_btr(self):
-        self.bit_test('reset')
+    op_btr = operation('bit_test', 'reset')
 
-    def op_btc(self):
-        self.bit_test('complement')
+    op_btc = operation('bit_test', 'complement')
 
     def bit_scan(self, reverse):
         destination, source = self.operands()
@@ -799,11 +781,9 @@ class Integer(Emitter):
         old = self.read(destination)
         self.write(destination, self.v(f'select i1 {zero}, i{bits} {old}, i{bits} {position}'))
 
-    def op_bsf(self):
-        self.bit_scan(False)
+    op_bsf = operation('bit_scan', False)
 
-    def op_bsr(self):
-        self.bit_scan(True)
+    op_bsr = operation('bit_scan', True)
 
     def count_bits(self, intrinsic):
         destination, source = self.operands()
@@ -814,11 +794,9 @@ class Integer(Emitter):
         self.set_flag('zf', self.v(f'icmp eq i{bits} {result}, 0'))
         self.write(destination, result)
 
-    def op_tzcnt(self):
-        self.count_bits('cttz')
+    op_tzcnt = operation('count_bits', 'cttz')
 
-    def op_lzcnt(self):
-        self.count_bits('ctlz')
+    op_lzcnt = operation('count_bits', 'ctlz')
 
     def op_popcnt(self):
         destination, source = self.operands()
@@ -844,14 +822,11 @@ class Integer(Emitter):
         amount = self.v(f'and i{bits} {self.read(count)}, {bits - 1}')
         self.write(destination, self.v(f'{operation} i{bits} {self.read(source)}, {amount}'))
 
-    def op_shlx(self):
-        self.bmi_shift('shl')
+    op_shlx = operation('bmi_shift', 'shl')
 
-    def op_shrx(self):
-        self.bmi_shift('lshr')
+    op_shrx = operation('bmi_shift', 'lshr')
 
-    def op_sarx(self):
-        self.bmi_shift('ashr')
+    op_sarx = operation('bmi_shift', 'ashr')
 
     def op_rorx(self):
         destination, source, count = self.operands()
@@ -897,14 +872,11 @@ class Integer(Emitter):
         self.zf_sf_pf(result, bits)
         self.write(destination, result)
 
-    def op_blsr(self):
-        self.blsx('blsr')
+    op_blsr = operation('blsx', 'blsr')
 
-    def op_blsi(self):
-        self.blsx('blsi')
+    op_blsi = operation('blsx', 'blsi')
 
-    def op_blsmsk(self):
-        self.blsx('blsmsk')
+    op_blsmsk = operation('blsx', 'blsmsk')
 
     def aligned_atomic_pointer(self, operand, bits):
         address = self.address(operand)
@@ -1095,8 +1067,7 @@ class Integer(Emitter):
         value = self.v(f'load i64, ptr {self.v(f"getelementptr i8, ptr %s, i64 {STATE_X87_CONTROL}")}')
         self.write(destination, self.trunc(value, 16), 16)
 
-    def op_fldz(self):
-        self.x87_push('0')
+    op_fldz = operation('x87_push', '0')
 
     def op_fstp(self):
         destination, = self.operands()
@@ -1142,11 +1113,9 @@ class Integer(Emitter):
     def op_cmc(self):
         self.set_flag('cf', self.v(f'xor i1 {self.flag("cf")}, true'))
 
-    def op_clc(self):
-        self.set_flag('cf', 'false')
+    op_clc = operation('set_flag', 'cf', 'false')
 
-    def op_stc(self):
-        self.set_flag('cf', 'true')
+    op_stc = operation('set_flag', 'cf', 'true')
 
     def op_cld(self):
         pass
@@ -1273,15 +1242,13 @@ class Vector(Integer):
         destination, source = self.operands()
         self.write128(destination, self.read128(source, aligned), aligned)
 
-    def op_movups(self):
-        self.move128(False)
+    op_movups = operation('move128', False)
 
     op_movupd = op_movups
     op_movdqu = op_movups
     op_lddqu = op_movups
 
-    def op_movaps(self):
-        self.move128(True)
+    op_movaps = operation('move128', True)
 
     op_movapd = op_movaps
     op_movdqa = op_movaps
@@ -1307,8 +1274,7 @@ class Vector(Integer):
 
     op_movq = op_movd
 
-    def op_movss(self):
-        self.move_scalar(32)
+    op_movss = operation('move_scalar', 32)
 
     def op_movsd(self):
         if not any(self.is_xmm(operand) for operand in self.operands()):
@@ -1333,13 +1299,11 @@ class Vector(Integer):
                 value = self.v(f'lshr i128 {value}, 64')
             self.store(self.address(destination), self.trunc(value, 64, 128), 64)
 
-    def op_movlps(self):
-        self.half_move(False)
+    op_movlps = operation('half_move', False)
 
     op_movlpd = op_movlps
 
-    def op_movhps(self):
-        self.half_move(True)
+    op_movhps = operation('half_move', True)
 
     op_movhpd = op_movhps
 
@@ -1374,20 +1338,17 @@ class Vector(Integer):
     op_xorps = op_pxor
     op_xorpd = op_pxor
 
-    def op_pand(self):
-        self.bitwise('and')
+    op_pand = operation('bitwise', 'and')
 
     op_andps = op_pand
     op_andpd = op_pand
 
-    def op_pandn(self):
-        self.bitwise('and', True)
+    op_pandn = operation('bitwise', 'and', True)
 
     op_andnps = op_pandn
     op_andnpd = op_pandn
 
-    def op_por(self):
-        self.bitwise('or')
+    op_por = operation('bitwise', 'or')
 
     op_orps = op_por
     op_orpd = op_por
@@ -1438,11 +1399,9 @@ class Vector(Integer):
         packed = self.v(f'bitcast <{count} x i1> {signs} to i{count}')
         self.write(destination, self.zext(packed, count, destination.size * 8))
 
-    def op_movmskps(self):
-        self.float_mask('ps')
+    op_movmskps = operation('float_mask', 'ps')
 
-    def op_movmskpd(self):
-        self.float_mask('pd')
+    op_movmskpd = operation('float_mask', 'pd')
 
     def shuffle_words(self, kind):
         destination, source, immediate = self.operands()
@@ -1462,14 +1421,11 @@ class Vector(Integer):
         shuffled = self.v(f'shufflevector <8 x i16> {vector}, <8 x i16> poison, <8 x i32> <{", ".join(f"i32 {x}" for x in order)}>')
         self.set_xmm(self.xmm_index(destination), self.unlanes(shuffled, 'w'))
 
-    def op_pshufd(self):
-        self.shuffle_words('d')
+    op_pshufd = operation('shuffle_words', 'd')
 
-    def op_pshuflw(self):
-        self.shuffle_words('lw')
+    op_pshuflw = operation('shuffle_words', 'lw')
 
-    def op_pshufhw(self):
-        self.shuffle_words('hw')
+    op_pshufhw = operation('shuffle_words', 'hw')
 
     def op_shufps(self):
         index, _, source = self.destination_source()
@@ -1518,17 +1474,13 @@ class Vector(Integer):
         narrow = self.v(f'trunc {wide} {clamped} to <{2 * count} x i{target_bits}>')
         self.set_xmm(index, self.v(f'bitcast <{2 * count} x i{target_bits}> {narrow} to i128'))
 
-    def op_packuswb(self):
-        self.pack('w', 8, False)
+    op_packuswb = operation('pack', 'w', 8, False)
 
-    def op_packsswb(self):
-        self.pack('w', 8, True)
+    op_packsswb = operation('pack', 'w', 8, True)
 
-    def op_packssdw(self):
-        self.pack('d', 16, True)
+    op_packssdw = operation('pack', 'd', 16, True)
 
-    def op_packusdw(self):
-        self.pack('d', 16, False)
+    op_packusdw = operation('pack', 'd', 16, False)
 
     def lane_shift(self, kind, operation):
         destination, source = self.operands()
@@ -1555,11 +1507,9 @@ class Vector(Integer):
             return
         self.set_xmm(index, self.v(f'{"shl" if left else "lshr"} i128 {self.get_xmm(index)}, {8 * amount}'))
 
-    def op_pslldq(self):
-        self.byte_shift(True)
+    op_pslldq = operation('byte_shift', True)
 
-    def op_psrldq(self):
-        self.byte_shift(False)
+    op_psrldq = operation('byte_shift', False)
 
     def op_pinsrw(self):
         destination, source, immediate = self.operands()
@@ -1656,13 +1606,11 @@ class Vector(Integer):
         for flag in ('of', 'sf', 'af'):
             self.set_flag(flag, 'false')
 
-    def op_ucomisd(self):
-        self.compare_flags('sd')
+    op_ucomisd = operation('compare_flags', 'sd')
 
     op_comisd = op_ucomisd
 
-    def op_ucomiss(self):
-        self.compare_flags('ss')
+    op_ucomiss = operation('compare_flags', 'ss')
 
     op_comiss = op_ucomiss
 
@@ -1719,11 +1667,9 @@ class Vector(Integer):
         raw = self.v(f'bitcast {name} {converted} to i{bits}')
         self.set_xmm(index, self.merge_low(self.get_xmm(index), raw, bits))
 
-    def op_cvtsi2sd(self):
-        self.integer_to_float('sd')
+    op_cvtsi2sd = operation('integer_to_float', 'sd')
 
-    def op_cvtsi2ss(self):
-        self.integer_to_float('ss')
+    op_cvtsi2ss = operation('integer_to_float', 'ss')
 
     def op_cvttpd2dq(self):
         destination, source = self.operands()
@@ -1744,17 +1690,13 @@ class Vector(Integer):
             result = self.v(f'or i128 {result}, {shifted}')
         self.set_xmm(self.xmm_index(destination), result)
 
-    def op_cvttsd2si(self):
-        self.float_to_integer('sd', True)
+    op_cvttsd2si = operation('float_to_integer', 'sd', True)
 
-    def op_cvttss2si(self):
-        self.float_to_integer('ss', True)
+    op_cvttss2si = operation('float_to_integer', 'ss', True)
 
-    def op_cvtsd2si(self):
-        self.float_to_integer('sd', False)
+    op_cvtsd2si = operation('float_to_integer', 'sd', False)
 
-    def op_cvtss2si(self):
-        self.float_to_integer('ss', False)
+    op_cvtss2si = operation('float_to_integer', 'ss', False)
 
     def float_resize(self, source_kind, target_kind):
         index, _, source = self.destination_source()
@@ -1768,11 +1710,9 @@ class Vector(Integer):
         raw = self.v(f'bitcast {target_name} {result} to i{target_bits}')
         self.set_xmm(index, self.merge_low(self.get_xmm(index), raw, target_bits))
 
-    def op_cvtss2sd(self):
-        self.float_resize('ss', 'sd')
+    op_cvtss2sd = operation('float_resize', 'ss', 'sd')
 
-    def op_cvtsd2ss(self):
-        self.float_resize('sd', 'ss')
+    op_cvtsd2ss = operation('float_resize', 'sd', 'ss')
 
     def op_cvtdq2pd(self):
         index, _, source = self.destination_source()
@@ -1785,332 +1725,223 @@ class Vector(Integer):
         vector, _ = self.lanes(self.read128(source, True), 'd')
         self.set_xmm(index, self.v(f'bitcast <4 x float> {self.v(f"sitofp <4 x i32> {vector} to <4 x float>")} to i128'))
 
-    def op_paddb(self):
-        self.lane_binary('b', 'add')
+    op_paddb = operation('lane_binary', 'b', 'add')
 
-    def op_psubb(self):
-        self.lane_binary('b', 'sub')
+    op_psubb = operation('lane_binary', 'b', 'sub')
 
-    def op_pcmpeqb(self):
-        self.lane_compare('b', 'eq')
+    op_pcmpeqb = operation('lane_compare', 'b', 'eq')
 
-    def op_pcmpgtb(self):
-        self.lane_compare('b', 'sgt')
+    op_pcmpgtb = operation('lane_compare', 'b', 'sgt')
 
-    def op_paddw(self):
-        self.lane_binary('w', 'add')
+    op_paddw = operation('lane_binary', 'w', 'add')
 
-    def op_psubw(self):
-        self.lane_binary('w', 'sub')
+    op_psubw = operation('lane_binary', 'w', 'sub')
 
-    def op_pcmpeqw(self):
-        self.lane_compare('w', 'eq')
+    op_pcmpeqw = operation('lane_compare', 'w', 'eq')
 
-    def op_pcmpgtw(self):
-        self.lane_compare('w', 'sgt')
+    op_pcmpgtw = operation('lane_compare', 'w', 'sgt')
 
-    def op_paddd(self):
-        self.lane_binary('d', 'add')
+    op_paddd = operation('lane_binary', 'd', 'add')
 
-    def op_psubd(self):
-        self.lane_binary('d', 'sub')
+    op_psubd = operation('lane_binary', 'd', 'sub')
 
-    def op_pcmpeqd(self):
-        self.lane_compare('d', 'eq')
+    op_pcmpeqd = operation('lane_compare', 'd', 'eq')
 
-    def op_pcmpgtd(self):
-        self.lane_compare('d', 'sgt')
+    op_pcmpgtd = operation('lane_compare', 'd', 'sgt')
 
-    def op_paddq(self):
-        self.lane_binary('q', 'add')
+    op_paddq = operation('lane_binary', 'q', 'add')
 
-    def op_psubq(self):
-        self.lane_binary('q', 'sub')
+    op_psubq = operation('lane_binary', 'q', 'sub')
 
-    def op_pcmpeqq(self):
-        self.lane_compare('q', 'eq')
+    op_pcmpeqq = operation('lane_compare', 'q', 'eq')
 
-    def op_pcmpgtq(self):
-        self.lane_compare('q', 'sgt')
+    op_pcmpgtq = operation('lane_compare', 'q', 'sgt')
 
-    def op_punpcklbw(self):
-        self.unpack('b', False)
+    op_punpcklbw = operation('unpack', 'b', False)
 
-    def op_punpckhbw(self):
-        self.unpack('b', True)
+    op_punpckhbw = operation('unpack', 'b', True)
 
-    def op_punpcklwd(self):
-        self.unpack('w', False)
+    op_punpcklwd = operation('unpack', 'w', False)
 
-    def op_punpckhwd(self):
-        self.unpack('w', True)
+    op_punpckhwd = operation('unpack', 'w', True)
 
-    def op_punpckldq(self):
-        self.unpack('d', False)
+    op_punpckldq = operation('unpack', 'd', False)
 
-    def op_punpckhdq(self):
-        self.unpack('d', True)
+    op_punpckhdq = operation('unpack', 'd', True)
 
-    def op_punpcklqdq(self):
-        self.unpack('q', False)
+    op_punpcklqdq = operation('unpack', 'q', False)
 
-    def op_punpckhqdq(self):
-        self.unpack('q', True)
+    op_punpckhqdq = operation('unpack', 'q', True)
 
-    def op_unpcklps(self):
-        self.unpack('d', False)
+    op_unpcklps = operation('unpack', 'd', False)
 
-    def op_unpckhps(self):
-        self.unpack('d', True)
+    op_unpckhps = operation('unpack', 'd', True)
 
-    def op_unpcklpd(self):
-        self.unpack('q', False)
+    op_unpcklpd = operation('unpack', 'q', False)
 
-    def op_unpckhpd(self):
-        self.unpack('q', True)
+    op_unpckhpd = operation('unpack', 'q', True)
 
-    def op_paddusb(self):
-        self.lane_intrinsic('b', 'uadd.sat')
+    op_paddusb = operation('lane_intrinsic', 'b', 'uadd.sat')
 
-    def op_paddusw(self):
-        self.lane_intrinsic('w', 'uadd.sat')
+    op_paddusw = operation('lane_intrinsic', 'w', 'uadd.sat')
 
-    def op_psubusb(self):
-        self.lane_intrinsic('b', 'usub.sat')
+    op_psubusb = operation('lane_intrinsic', 'b', 'usub.sat')
 
-    def op_psubusw(self):
-        self.lane_intrinsic('w', 'usub.sat')
+    op_psubusw = operation('lane_intrinsic', 'w', 'usub.sat')
 
-    def op_paddsb(self):
-        self.lane_intrinsic('b', 'sadd.sat')
+    op_paddsb = operation('lane_intrinsic', 'b', 'sadd.sat')
 
-    def op_paddsw(self):
-        self.lane_intrinsic('w', 'sadd.sat')
+    op_paddsw = operation('lane_intrinsic', 'w', 'sadd.sat')
 
-    def op_psubsb(self):
-        self.lane_intrinsic('b', 'ssub.sat')
+    op_psubsb = operation('lane_intrinsic', 'b', 'ssub.sat')
 
-    def op_psubsw(self):
-        self.lane_intrinsic('w', 'ssub.sat')
+    op_psubsw = operation('lane_intrinsic', 'w', 'ssub.sat')
 
-    def op_pmaxub(self):
-        self.lane_intrinsic('b', 'umax')
+    op_pmaxub = operation('lane_intrinsic', 'b', 'umax')
 
-    def op_pminub(self):
-        self.lane_intrinsic('b', 'umin')
+    op_pminub = operation('lane_intrinsic', 'b', 'umin')
 
-    def op_pmaxsw(self):
-        self.lane_intrinsic('w', 'smax')
+    op_pmaxsw = operation('lane_intrinsic', 'w', 'smax')
 
-    def op_pminsw(self):
-        self.lane_intrinsic('w', 'smin')
+    op_pminsw = operation('lane_intrinsic', 'w', 'smin')
 
-    def op_pmullw(self):
-        self.lane_binary('w', 'mul')
+    op_pmullw = operation('lane_binary', 'w', 'mul')
 
-    def op_psllw(self):
-        self.lane_shift('w', 'shl')
+    op_psllw = operation('lane_shift', 'w', 'shl')
 
-    def op_pslld(self):
-        self.lane_shift('d', 'shl')
+    op_pslld = operation('lane_shift', 'd', 'shl')
 
-    def op_psllq(self):
-        self.lane_shift('q', 'shl')
+    op_psllq = operation('lane_shift', 'q', 'shl')
 
-    def op_psrlw(self):
-        self.lane_shift('w', 'lshr')
+    op_psrlw = operation('lane_shift', 'w', 'lshr')
 
-    def op_psrld(self):
-        self.lane_shift('d', 'lshr')
+    op_psrld = operation('lane_shift', 'd', 'lshr')
 
-    def op_psrlq(self):
-        self.lane_shift('q', 'lshr')
+    op_psrlq = operation('lane_shift', 'q', 'lshr')
 
-    def op_psraw(self):
-        self.lane_shift('w', 'ashr')
+    op_psraw = operation('lane_shift', 'w', 'ashr')
 
-    def op_psrad(self):
-        self.lane_shift('d', 'ashr')
+    op_psrad = operation('lane_shift', 'd', 'ashr')
 
-    def op_addsd(self):
-        self.float_binary('fadd', 'sd')
+    op_addsd = operation('float_binary', 'fadd', 'sd')
 
-    def op_subsd(self):
-        self.float_binary('fsub', 'sd')
+    op_subsd = operation('float_binary', 'fsub', 'sd')
 
-    def op_mulsd(self):
-        self.float_binary('fmul', 'sd')
+    op_mulsd = operation('float_binary', 'fmul', 'sd')
 
-    def op_divsd(self):
-        self.float_binary('fdiv', 'sd')
+    op_divsd = operation('float_binary', 'fdiv', 'sd')
 
-    def op_minsd(self):
-        self.float_extreme('sd', True)
+    op_minsd = operation('float_extreme', 'sd', True)
 
-    def op_maxsd(self):
-        self.float_extreme('sd', False)
+    op_maxsd = operation('float_extreme', 'sd', False)
 
-    def op_sqrtsd(self):
-        self.float_sqrt('sd')
+    op_sqrtsd = operation('float_sqrt', 'sd')
 
-    def op_cmpeqsd(self):
-        self.compare_mask('sd', 0)
+    op_cmpeqsd = operation('compare_mask', 'sd', 0)
 
-    def op_cmpltsd(self):
-        self.compare_mask('sd', 1)
+    op_cmpltsd = operation('compare_mask', 'sd', 1)
 
-    def op_cmplesd(self):
-        self.compare_mask('sd', 2)
+    op_cmplesd = operation('compare_mask', 'sd', 2)
 
-    def op_cmpunordsd(self):
-        self.compare_mask('sd', 3)
+    op_cmpunordsd = operation('compare_mask', 'sd', 3)
 
-    def op_cmpneqsd(self):
-        self.compare_mask('sd', 4)
+    op_cmpneqsd = operation('compare_mask', 'sd', 4)
 
-    def op_cmpnltsd(self):
-        self.compare_mask('sd', 5)
+    op_cmpnltsd = operation('compare_mask', 'sd', 5)
 
-    def op_cmpnlesd(self):
-        self.compare_mask('sd', 6)
+    op_cmpnlesd = operation('compare_mask', 'sd', 6)
 
-    def op_cmpordsd(self):
-        self.compare_mask('sd', 7)
+    op_cmpordsd = operation('compare_mask', 'sd', 7)
 
-    def op_addss(self):
-        self.float_binary('fadd', 'ss')
+    op_addss = operation('float_binary', 'fadd', 'ss')
 
-    def op_subss(self):
-        self.float_binary('fsub', 'ss')
+    op_subss = operation('float_binary', 'fsub', 'ss')
 
-    def op_mulss(self):
-        self.float_binary('fmul', 'ss')
+    op_mulss = operation('float_binary', 'fmul', 'ss')
 
-    def op_divss(self):
-        self.float_binary('fdiv', 'ss')
+    op_divss = operation('float_binary', 'fdiv', 'ss')
 
-    def op_minss(self):
-        self.float_extreme('ss', True)
+    op_minss = operation('float_extreme', 'ss', True)
 
-    def op_maxss(self):
-        self.float_extreme('ss', False)
+    op_maxss = operation('float_extreme', 'ss', False)
 
-    def op_sqrtss(self):
-        self.float_sqrt('ss')
+    op_sqrtss = operation('float_sqrt', 'ss')
 
-    def op_cmpeqss(self):
-        self.compare_mask('ss', 0)
+    op_cmpeqss = operation('compare_mask', 'ss', 0)
 
-    def op_cmpltss(self):
-        self.compare_mask('ss', 1)
+    op_cmpltss = operation('compare_mask', 'ss', 1)
 
-    def op_cmpless(self):
-        self.compare_mask('ss', 2)
+    op_cmpless = operation('compare_mask', 'ss', 2)
 
-    def op_cmpunordss(self):
-        self.compare_mask('ss', 3)
+    op_cmpunordss = operation('compare_mask', 'ss', 3)
 
-    def op_cmpneqss(self):
-        self.compare_mask('ss', 4)
+    op_cmpneqss = operation('compare_mask', 'ss', 4)
 
-    def op_cmpnltss(self):
-        self.compare_mask('ss', 5)
+    op_cmpnltss = operation('compare_mask', 'ss', 5)
 
-    def op_cmpnless(self):
-        self.compare_mask('ss', 6)
+    op_cmpnless = operation('compare_mask', 'ss', 6)
 
-    def op_cmpordss(self):
-        self.compare_mask('ss', 7)
+    op_cmpordss = operation('compare_mask', 'ss', 7)
 
-    def op_addpd(self):
-        self.float_binary('fadd', 'pd')
+    op_addpd = operation('float_binary', 'fadd', 'pd')
 
-    def op_subpd(self):
-        self.float_binary('fsub', 'pd')
+    op_subpd = operation('float_binary', 'fsub', 'pd')
 
-    def op_mulpd(self):
-        self.float_binary('fmul', 'pd')
+    op_mulpd = operation('float_binary', 'fmul', 'pd')
 
-    def op_divpd(self):
-        self.float_binary('fdiv', 'pd')
+    op_divpd = operation('float_binary', 'fdiv', 'pd')
 
-    def op_minpd(self):
-        self.float_extreme('pd', True)
+    op_minpd = operation('float_extreme', 'pd', True)
 
-    def op_maxpd(self):
-        self.float_extreme('pd', False)
+    op_maxpd = operation('float_extreme', 'pd', False)
 
-    def op_sqrtpd(self):
-        self.float_sqrt('pd')
+    op_sqrtpd = operation('float_sqrt', 'pd')
 
-    def op_cmpeqpd(self):
-        self.compare_mask('pd', 0)
+    op_cmpeqpd = operation('compare_mask', 'pd', 0)
 
-    def op_cmpltpd(self):
-        self.compare_mask('pd', 1)
+    op_cmpltpd = operation('compare_mask', 'pd', 1)
 
-    def op_cmplepd(self):
-        self.compare_mask('pd', 2)
+    op_cmplepd = operation('compare_mask', 'pd', 2)
 
-    def op_cmpunordpd(self):
-        self.compare_mask('pd', 3)
+    op_cmpunordpd = operation('compare_mask', 'pd', 3)
 
-    def op_cmpneqpd(self):
-        self.compare_mask('pd', 4)
+    op_cmpneqpd = operation('compare_mask', 'pd', 4)
 
-    def op_cmpnltpd(self):
-        self.compare_mask('pd', 5)
+    op_cmpnltpd = operation('compare_mask', 'pd', 5)
 
-    def op_cmpnlepd(self):
-        self.compare_mask('pd', 6)
+    op_cmpnlepd = operation('compare_mask', 'pd', 6)
 
-    def op_cmpordpd(self):
-        self.compare_mask('pd', 7)
+    op_cmpordpd = operation('compare_mask', 'pd', 7)
 
-    def op_addps(self):
-        self.float_binary('fadd', 'ps')
+    op_addps = operation('float_binary', 'fadd', 'ps')
 
-    def op_subps(self):
-        self.float_binary('fsub', 'ps')
+    op_subps = operation('float_binary', 'fsub', 'ps')
 
-    def op_mulps(self):
-        self.float_binary('fmul', 'ps')
+    op_mulps = operation('float_binary', 'fmul', 'ps')
 
-    def op_divps(self):
-        self.float_binary('fdiv', 'ps')
+    op_divps = operation('float_binary', 'fdiv', 'ps')
 
-    def op_minps(self):
-        self.float_extreme('ps', True)
+    op_minps = operation('float_extreme', 'ps', True)
 
-    def op_maxps(self):
-        self.float_extreme('ps', False)
+    op_maxps = operation('float_extreme', 'ps', False)
 
-    def op_sqrtps(self):
-        self.float_sqrt('ps')
+    op_sqrtps = operation('float_sqrt', 'ps')
 
-    def op_cmpeqps(self):
-        self.compare_mask('ps', 0)
+    op_cmpeqps = operation('compare_mask', 'ps', 0)
 
-    def op_cmpltps(self):
-        self.compare_mask('ps', 1)
+    op_cmpltps = operation('compare_mask', 'ps', 1)
 
-    def op_cmpleps(self):
-        self.compare_mask('ps', 2)
+    op_cmpleps = operation('compare_mask', 'ps', 2)
 
-    def op_cmpunordps(self):
-        self.compare_mask('ps', 3)
+    op_cmpunordps = operation('compare_mask', 'ps', 3)
 
-    def op_cmpneqps(self):
-        self.compare_mask('ps', 4)
+    op_cmpneqps = operation('compare_mask', 'ps', 4)
 
-    def op_cmpnltps(self):
-        self.compare_mask('ps', 5)
+    op_cmpnltps = operation('compare_mask', 'ps', 5)
 
-    def op_cmpnleps(self):
-        self.compare_mask('ps', 6)
+    op_cmpnleps = operation('compare_mask', 'ps', 6)
 
-    def op_cmpordps(self):
-        self.compare_mask('ps', 7)
+    op_cmpordps = operation('compare_mask', 'ps', 7)
 
 
 ALL_FLAGS = frozenset(FLAGS)
