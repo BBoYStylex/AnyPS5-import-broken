@@ -2127,10 +2127,63 @@ void noteLockedHostWrite(std::uintptr_t address, std::size_t bytes) {
     if (!lockedHostWriteLogged.exchange(true, std::memory_order_relaxed)) std::fprintf(stderr, "[lock] a host write of 0x%zx bytes at 0x%llx was made under GuestMemory::GpuMutex on thread tagged 0x%x; it waits for GPU work with the mutex held (counted, logged once)\n", bytes, static_cast<unsigned long long>(address), GpuLockThreadTag());
 }
 
+std::atomic<double (*)()> waitedMsProvider{nullptr};
+
+double threadWaitedMs() {
+    const auto provider = waitedMsProvider.load(std::memory_order_acquire);
+    return provider != nullptr ? provider() : 0.0;
+}
+
+struct HostWriteTotals {
+    std::atomic<std::uint64_t> calls{0};
+    std::atomic<std::uint64_t> waited{0};
+    std::atomic<std::uint64_t> waitedNanoseconds{0};
+    std::atomic<std::uint64_t> maxWaitedNanoseconds{0};
+    std::atomic<std::int64_t> lastReport{0};
+};
+
+HostWriteTotals& HostWrites() {
+    static HostWriteTotals totals;
+    return totals;
+}
+
+void noteHostWriteWait(double waitedMs) {
+    auto& totals = HostWrites();
+    totals.calls.fetch_add(1, std::memory_order_relaxed);
+    if (waitedMs > 0) {
+        const auto nanoseconds = static_cast<std::uint64_t>(waitedMs * 1e6);
+        totals.waited.fetch_add(1, std::memory_order_relaxed);
+        totals.waitedNanoseconds.fetch_add(nanoseconds, std::memory_order_relaxed);
+        auto most = totals.maxWaitedNanoseconds.load(std::memory_order_relaxed);
+        while (nanoseconds > most && !totals.maxWaitedNanoseconds.compare_exchange_weak(most, nanoseconds, std::memory_order_relaxed)) {
+        }
+    }
+    const auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    auto last = totals.lastReport.load(std::memory_order_relaxed);
+    if (nowMs - last < 10000 || !totals.lastReport.compare_exchange_strong(last, nowMs)) return;
+    AgcDriver::ProfilePrint_nid_no_patch("%s", HostWriteReport().c_str());
+}
+
 }
 
 std::uint64_t LockedHostWrites() {
     return lockedHostWrites.load(std::memory_order_relaxed);
+}
+
+void SetWaitedMsProvider(double (*provider)()) {
+    waitedMsProvider.store(provider, std::memory_order_release);
+}
+
+HostWriteCounts HostWritesCounted() {
+    const auto& totals = HostWrites();
+    return {totals.calls.load(std::memory_order_relaxed), totals.waited.load(std::memory_order_relaxed), totals.waitedNanoseconds.load(std::memory_order_relaxed) / 1e6, totals.maxWaitedNanoseconds.load(std::memory_order_relaxed) / 1e6};
+}
+
+std::string HostWriteReport() {
+    const auto counts = HostWritesCounted();
+    char line[256];
+    std::snprintf(line, sizeof(line), "[hostwrite] %llu host writes, %llu waited for GPU work over their range: %.2f ms in total, %.2f ms at most\n", static_cast<unsigned long long>(counts.calls), static_cast<unsigned long long>(counts.waited), counts.waitedMs, counts.maxWaitedMs);
+    return line;
 }
 
 void PrepareHostWrite(std::uintptr_t address, std::size_t bytes) {
@@ -2139,7 +2192,13 @@ void PrepareHostWrite(std::uintptr_t address, std::size_t bytes) {
     const HostWriteInFlight inFlight;
     if (hostWritesStopped.load(std::memory_order_seq_cst)) return;
     const ReadSiteScope site(ReadSite::Store);
+    if (!MemoryProfiled()) {
+        FlushGpuWrites(address, bytes);
+        return;
+    }
+    const auto waitedBefore = threadWaitedMs();
     FlushGpuWrites(address, bytes);
+    noteHostWriteWait(threadWaitedMs() - waitedBefore);
 }
 
 bool StopHostWrites(std::uint32_t boundMs) {

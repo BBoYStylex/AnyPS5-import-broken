@@ -19,6 +19,7 @@
 #include <atomic>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <mutex>
@@ -129,6 +130,28 @@ std::uint64_t Address(const std::uint8_t* guest) {
     return reinterpret_cast<std::uint64_t>(guest);
 }
 
+void HostWriteWaits(GuestSurface& pending, GuestSurface& idle) {
+    auto* guest = pending.Data();
+    Dispatch(guest);
+    StorageTexture::FlushPending(Address(guest), SurfaceBytes, nullptr, "sampled texture");
+    Require(std::all_of(guest, guest + SurfaceBytes, [](std::uint8_t byte) { return byte == 0; }), "host write waits: the image's store landed when it was made, so none was recorded over the range");
+    const auto before = AgcDriver::GuestMemory::HostWritesCounted();
+    {
+        const GuestArena::HostWrite scope(guest, BlockBytes);
+        std::memset(guest, 0x33, BlockBytes);
+    }
+    const auto recorded = AgcDriver::GuestMemory::HostWritesCounted();
+    Require(recorded.calls == before.calls + 1 && recorded.waited == before.waited + 1 && recorded.waitedMs > before.waitedMs, "host write waits: a host write over a recorded store counted " + std::to_string(recorded.calls - before.calls) + " call(s), " + std::to_string(recorded.waited - before.waited) + " that waited");
+    {
+        const GuestArena::HostWrite scope(idle.Data(), BlockBytes);
+        std::memset(idle.Data(), 0x44, BlockBytes);
+    }
+    const auto after = AgcDriver::GuestMemory::HostWritesCounted();
+    Require(after.calls == recorded.calls + 1 && after.waited == recorded.waited, "host write waits: a host write over an idle range counted " + std::to_string(after.calls - recorded.calls) + " call(s), " + std::to_string(after.waited - recorded.waited) + " that waited");
+    std::cout << AgcDriver::GuestMemory::HostWriteReport();
+    std::puts("host write waits: the write over the recorded store waited, the one over the idle range did not");
+}
+
 void HostWriteUnderGpuLock(GuestSurface& surface) {
     AgcDriverWaitIdle_nid_postfix();
     const auto before = AgcDriver::GuestMemory::LockedHostWrites();
@@ -173,10 +196,18 @@ void HostWriteAfterShutdown(GuestSurface& surface) {
 
 int main() {
     try {
+#ifdef _WIN32
+        _putenv_s("APS5_PROFILE_DRAW", "1");
+#else
+        setenv("APS5_PROFILE_DRAW", "1", 1);
+#endif
         {
             const auto device = OpenVulkanTestDevice();
             if (!device) return VulkanTestSkipped;
         }
+        GuestSurface pending;
+        GuestSurface idle;
+        HostWriteWaits(pending, idle);
         GuestSurface locked;
         HostWriteUnderGpuLock(locked);
         GuestSurface surface;
