@@ -154,6 +154,19 @@ static void TestInvalidListener() {
     }
 }
 
+static void TestDefaultApply() {
+    const auto listenerParam = Listener();
+    Ngs2GeomListenerWork listener{};
+    Require(sceNgs2GeomCalcListener(&listenerParam, &listener, 0) == SCE_NGS2_OK);
+    Ngs2GeomSourceParam source{};
+    Require(sceNgs2GeomResetSourceParam(&source) == SCE_NGS2_OK);
+    Ngs2GeomAttribute attribute;
+    std::memset(&attribute, 0x5a, sizeof(attribute));
+    Require(sceNgs2GeomApply(&listener, &source, &attribute, 0) == SCE_NGS2_OK);
+    Require(attribute.pitch_ratio == 1.0f);
+    Require(sceNgs2GeomApply(&listener, &source, nullptr, 0) == SCE_NGS2_ERROR_INVALID_OUT_ADDRESS);
+}
+
 int main() {
     TestLayouts();
     TestResetListenerParam();
@@ -161,5 +174,6 @@ int main() {
     TestDefaultListener();
     TestUnsupportedListener();
     TestInvalidListener();
+    TestDefaultApply();
     return 0;
 }
