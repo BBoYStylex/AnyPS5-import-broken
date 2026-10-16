@@ -271,7 +271,7 @@ void RunSelectivePendingWrite(AgcDriver::VulkanDevice& device, const GuestBlock&
     auto before = AgcDriver::Graphics::ImageTableReuses();
     Require(Dispatch(device, result, 23) == Row(separate.Texels(0)), "image table reuse: the separate-block entry sampled the wrong texels");
     Require(Dispatch(device, result, 5) == Row(block.Texels(5)), "image table reuse: a sibling entry sampled the wrong texels");
-    Expect(before, 1, 2, "a table whose images include a separate tracking block");
+    Expect(before, 1, 1, "a table whose images include a separate tracking block");
 
     const auto unwatchedBeforeStore = AgcDriver::GuestMemory::UnwatchSerial();
     Store(device, separate, 0);
@@ -401,10 +401,11 @@ int main() {
         GuestBlock block;
         GuestBlock stores(UnimportableBytes);
         GuestBlock separate;
+        GuestBlock selective;
         const auto device = OpenVulkanTestDevice();
         if (!device) return VulkanTestSkipped;
         RunTests(*device, block, stores);
-        RunSelectivePendingWrite(*device, block, separate);
+        RunSelectivePendingWrite(*device, selective, separate);
         RunMixedDcc(*device);
         std::puts("image table reuse tests passed");
         return 0;
