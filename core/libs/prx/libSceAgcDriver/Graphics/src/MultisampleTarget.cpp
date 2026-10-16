@@ -258,6 +258,16 @@ void retireUnmapped(std::uintptr_t address, std::size_t bytes) {
     anyGuarded().store(!guarded().empty(), std::memory_order_release);
 }
 
+void retireGuardForAddress(std::uint64_t address, std::size_t bytes) {
+    std::unique_lock lock(guardedMutex());
+    std::erase_if(guarded(), [&](const auto& range) {
+        if (address >= range.address + range.bytes || range.address >= address + bytes) return false;
+        range.active->store(false, std::memory_order_release);
+        return true;
+    });
+    anyGuarded().store(!guarded().empty(), std::memory_order_release);
+}
+
 void guard(const Context& context, const ColorTarget& target, const std::shared_ptr<std::atomic<bool>>& active) {
     auto bytes = std::max<std::uint64_t>(target.bytes * target.samples, static_cast<std::uint64_t>(target.extent.width) * target.extent.height * target.elementBytes * target.samples);
     if (MultisampledBlockLog2(target.tileMode) == 16u && target.tileMode != ColorTileMode::Standard64KB && std::has_single_bit(target.elementBytes) && std::has_single_bit(target.samples)) {
@@ -595,9 +605,12 @@ void RequireNoMultisampleTarget(std::uint64_t address, std::size_t bytes, const 
     std::shared_lock lock(guardedMutex());
     for (const auto& range : guarded()) {
         if (address >= range.address + range.bytes || range.address >= address + bytes) continue;
+        lock.unlock();
+        retireGuardForAddress(address, bytes);
         char text[256];
-        std::snprintf(text, sizeof(text), "AGC graphics: %s of 0x%llx+0x%zx overlaps multisampled color target 0x%llx+0x%llx (%u samples), whose samples are only on the host: guest access to it is not implemented", access, static_cast<unsigned long long>(address), bytes, static_cast<unsigned long long>(range.address), static_cast<unsigned long long>(range.bytes), range.samples);
-        throw std::runtime_error(text);
+        std::snprintf(text, sizeof(text), "[gpu] %s of 0x%llx+0x%zx retired guard for reused multisampled color target 0x%llx+0x%llx (%u samples)", access, static_cast<unsigned long long>(address), bytes, static_cast<unsigned long long>(range.address), static_cast<unsigned long long>(range.bytes), range.samples);
+        std::fprintf(stderr, "%s\n", text);
+        return;
     }
 }
 
