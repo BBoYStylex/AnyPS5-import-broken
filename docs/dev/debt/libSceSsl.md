@@ -10,4 +10,4 @@
 
 ### Functional
 
-- PPSA07411 imports declared without parameters, signatures unknown, added without an implementation because the title fails to load without them: [sceSslEnableVerifyOption](../../../core/libs/prx/libSceSsl/Export.cpp) (libSceSsl), [four sce::Json::Value members (setElementAccessFailureHandler, setSpecialFloatHandler, setTypeMismatchHandler, operator bool)](../../../core/libs/prx/libSceJson2/Export.cpp) (libSceJson2), [sceConvertKeycodeGetCharacter](../../../core/libs/prx/libSceConvertKeycode/Export.cpp) (libSceConvertKeycode) and [sceNpSessionSignalingGetGroupFromSessionId](../../../core/libs/prx/libSceNpSessionSignaling/Export.cpp) (libSceNpSessionSignaling)
+- [sceSslEnableVerifyOption](../../../core/libs/prx/libSceSsl/Export.cpp) (libSceSsl) - imported by PPSA07411 and added without an implementation; declared without parameters, signature unknown
