@@ -484,7 +484,7 @@ update identities without requalifying their contracts.
 cmake -S . -B /path/native-build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 -DANYPS5_NATIVE_AOT=ON -DANYPS5_NATIVE_GRAPHICS=ON -DBUILD_TESTING=OFF
 python3 core/aot/examples/doom/build.py --app /path/eboot.elf --module /path/libc.elf --build-root /path/native-build --output /path/doom-artifacts
 cmake --build /path/native-build --target native_sce_crt_tests native_audio_shutdown_tests
-ctest --test-dir /path/native-build -R 'native_(sce_crt|audio_shutdown)$' --output-on-failure
+ctest --test-dir /path/native-build -R 'native_(sce_crt|.*shutdown)$' --output-on-failure
 ```
 
 Build the pinned external source's `host` target. For each of `demo1`, `demo2`
@@ -493,6 +493,9 @@ and `demo3`, create `/path/references/DEMO` and run the host executable with
 `DOOM_CAPTURE=120,900` and arguments `-timedemo DEMO`. The source reference exits
 1 at timedemo completion; check its log and generated captures. The verifier
 requires the exact qualified raw reference hashes, not only that exit code.
+These six reference images were independently associated with gametics 79 and
+859 in the source engine. Physical frame numbers include a clock-dependent
+initial wipe and are not logical tic identifiers.
 Do not enable source-reference audio or compare its timing with the full runtime.
 
 Set `SDL_VULKAN_LIBRARY`, `VK_ICD_FILENAMES` and the loader search path as for the
@@ -503,7 +506,14 @@ python3 core/aot/examples/doom/verify.py --binary /path/doom-artifacts/doom --pa
 ```
 
 The verifier copies the package into fresh run directories and selects its
-existing CPU scaler and capture server. It receives captures over localhost,
+existing CPU scaler and capture server. The example logs the guest gametic at
+each capture and at demo completion without changing guest state. The manifest
+qualifies its address only for this exact ELF. The verifier requests frames
+119–121 and 899–901, selects the predeclared gametics 79 and 859 from that
+metadata, and rejects missing, repeated or nonmonotonic evidence. It never
+selects by pixel similarity. A target outside the capture window is a failed
+qualification. The initial wipe is at tic 1 in these frozen replays; these
+targets are outside it. The verifier receives captures over localhost,
 checks 5,026/3,836/2,134 gametics, six exact 1920x1080 RGB images, native execution,
 module finalization and Vulkan teardown. Alpha is excluded. The original PS5
 exit path logs status 1 then requests system-service exit, yielding host status 0.

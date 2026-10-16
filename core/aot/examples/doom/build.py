@@ -71,11 +71,14 @@ def main():
         elif 'prototype' in record:
             name = record['native']
             prototypes.add(record['prototype'] + ';')
-            extras.append('{' + json.dumps(identity) + ', NativeAotSce::ScalarBridge<' + name + '>, nullptr, false, false, reinterpret_cast<const void*>(' + name + ')}')
+            provider = 'ReplayDebugOutText' if name == 'sceKernelDebugOutText' else name
+            extras.append('{' + json.dumps(identity) + ', NativeAotSce::ScalarBridge<' + provider + '>, nullptr, false, false, reinterpret_cast<const void*>(' + name + ')}')
         else:
             name = record['native']
             rows.append('{' + json.dumps(identity) + ',' + json.dumps(name) + ',OriginalNativeBindings[' + str(names.index(name)) + '],' + str(record['data']).lower() + '},')
     source = (HERE.parent / 'original_sce/driver.cpp.in').read_text()
+    source = 'int ReplayDebugOutText(int, const char*);\n' + source
+    source += (HERE / 'replay.cpp.in').read_text().replace('GAMETIC_ADDRESS', str(manifest['gametic_address']))
     process = next(s for s in programs['app'].view.segments if s['type'] == 0x61000001)
     tags = programs['shim'].dynamic['tags']
     require(tags.get('DT_INIT_ARRAYSZ', 0) == tags.get('DT_FINI_ARRAYSZ', 0) == 0, 'module initializer arrays changed')
@@ -110,7 +113,7 @@ def main():
         link += ['-framework', framework]
     subprocess.run(command + link + ['-o', str(output / 'doom')], check=True)
     receipt = {'manifest_sha256': digest(HERE / 'bindings.json'), 'inputs': manifest['inputs'], 'reports': reports,
-               'consumer_sources': {str(p.relative_to(ROOT)): digest(p) for p in [Path(__file__), HERE.parent / 'original_sce/driver.cpp.in']},
+               'consumer_sources': {str(p.relative_to(ROOT)): digest(p) for p in [Path(__file__), HERE / 'replay.cpp.in', HERE.parent / 'original_sce/driver.cpp.in']},
                'compiler_sources': {str(p.relative_to(ROOT)): digest(p) for p in sorted((ROOT / 'core/aot').glob('*.py'))},
                'runtime_sources': manifest['sources'], 'libraries': {path: digest(build / path) for path in libraries},
                'binary_sha256': digest(output / 'doom'), 'runtime_verified': False}

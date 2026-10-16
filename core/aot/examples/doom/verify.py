@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+CAPTURES = (119, 120, 121, 899, 900, 901)
 
 
 def digest(path):
@@ -20,6 +21,15 @@ def digest(path):
 def require(value, reason):
     if not value:
         raise ValueError(reason)
+
+
+def capture_tics(text, expected):
+    pairs = [(int(frame), int(tic)) for frame, tic in re.findall(r'^aot-replay frame=(\d+) tic=(\d+)$', text, re.M)]
+    require(tuple(frame for frame, _ in pairs) == CAPTURES, 'capture tic evidence missing, repeated or unordered')
+    tics = [tic for _, tic in pairs]
+    require(1 < tics[0] < tics[-1] < expected and all(a < b for a, b in zip(tics, tics[1:])), 'captures must advance beyond the initial wipe')
+    require(re.findall(r'^aot-replay final-tic=(\d+)$', text, re.M) == [str(expected)], 'final tic identity differs')
+    return {tic: frame for frame, tic in pairs}
 
 
 def receive(connection, count):
@@ -41,7 +51,8 @@ def replay(binary, package, demo, expected, output, compare, references):
     with socket.socket() as reservation:
         reservation.bind(('127.0.0.1', 0))
         port = reservation.getsockname()[1]
-    (run / 'app0/test.cfg').write_text(f'game doom1.wad\npresent cpu\ncapture 120,900\nserve {port}\n')
+    captures = ','.join(map(str, CAPTURES))
+    (run / 'app0/test.cfg').write_text(f'game doom1.wad\npresent cpu\ncapture {captures}\nserve {port}\n')
     started, errors = time.monotonic(), []
     with (output / 'run.log').open('w') as log:
         process = subprocess.Popen([str(binary), '-timedemo', demo], cwd=run, stdout=log, stderr=subprocess.STDOUT)
@@ -81,15 +92,25 @@ def replay(binary, package, demo, expected, output, compare, references):
               'cpu_scaler': 'video: CPU presentation' in text, 'guest_exit_1': 'ps5: exit 1' in text,
               'gpu_teardown': 'Destroyed VkDevice' in text,
               'module_teardown': 'original SCE bundle teardown completed' in text, 'frames': []}
-    for frame in (120, 900):
+    try:
+        by_tic = capture_tics(text, expected)
+    except ValueError as error:
+        errors.append(str(error))
+        by_tic = {}
+    targets = json.loads((HERE / 'bindings.json').read_text())['reference_gametics']
+    for reference_frame, tic in targets.items():
+        frame = by_tic.get(tic)
+        if frame is None:
+            result['frames'].append({'gametic': tic, 'missing': True})
+            continue
         captured = output / f'shot{frame:05d}.tiled'
         if not captured.exists():
             result['frames'].append({'frame': frame, 'missing': True})
             continue
-        comparison = subprocess.run([str(compare), str(captured), str(references / demo / f'frame{frame:05d}.raw'),
+        comparison = subprocess.run([str(compare), str(captured), str(references / demo / f'frame{int(reference_frame):05d}.raw'),
                                      str(output / f'frame{frame:05d}.ppm')], capture_output=True, text=True)
         record = json.loads(comparison.stdout) if comparison.stdout else {'comparison_error': comparison.stderr}
-        record.update(frame=frame, exit=comparison.returncode, sha256=digest(captured))
+        record.update(frame=frame, gametic=tic, reference_frame=int(reference_frame), exit=comparison.returncode, sha256=digest(captured))
         result['frames'].append(record)
     result['passed'] = (code == 0 and not timeout and not errors and result['gametics'] == [expected]
                         and all(result[key] for key in ('native', 'cpu_scaler', 'guest_exit_1', 'gpu_teardown', 'module_teardown'))
