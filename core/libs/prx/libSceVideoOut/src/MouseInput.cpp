@@ -18,9 +18,9 @@ void MouseInput::HandleEvent(const SDL_Event& event, unsigned windowId) {
         case SDL_MOUSEBUTTONUP:
             if (event.button.windowID != windowId || !focused) return;
             switch (event.button.button) {
-                case SDL_BUTTON_LEFT: input.button = 4; break;
-                case SDL_BUTTON_RIGHT: input.button = 8; break;
-                case SDL_BUTTON_MIDDLE: input.button = 0; break;
+                case SDL_BUTTON_LEFT: input.button = 1; break;
+                case SDL_BUTTON_RIGHT: input.button = 2; break;
+                case SDL_BUTTON_MIDDLE: input.button = 4; break;
                 default: return;
             }
             input.pressed = event.type == SDL_MOUSEBUTTONDOWN;
