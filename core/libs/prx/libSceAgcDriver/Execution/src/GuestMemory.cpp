@@ -1372,7 +1372,14 @@ bool ImportWatched(std::uint64_t address, std::size_t bytes, const std::function
         return true;
     }
     const WindowCopy window{first, saved, slots};
-    if (!before || !walkWrites(tracker, first, stop, StampKind::Cpu, true, &window)) unwatchLocked(tracker, first, static_cast<std::size_t>(stop - first));
+    if (!before || !walkWrites(tracker, first, stop, StampKind::Cpu, true, &window)) {
+        const auto span = static_cast<std::size_t>(stop - first);
+        lock.unlock();
+        beforeUnwatch(first, span);
+        lock.lock();
+        tracker.initialize();
+        unwatchLocked(tracker, first, span);
+    }
     return true;
 }
 

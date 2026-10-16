@@ -34,6 +34,21 @@ void Require(bool condition, const std::string& message) {
     if (!condition) throw std::runtime_error(message);
 }
 
+struct FailedImportHook {
+    std::uint64_t address = 0;
+    std::size_t bytes = 0;
+    int calls = 0;
+};
+
+FailedImportHook* failedImportHook = nullptr;
+
+void NoteFailedImportUnwatch(std::uint64_t address, std::size_t bytes) {
+    if (failedImportHook == nullptr) return;
+    failedImportHook->address = address;
+    failedImportHook->bytes = bytes;
+    ++failedImportHook->calls;
+}
+
 void* AllocateWatched(std::size_t bytes, bool crossLeaf = false) {
 #ifdef _WIN32
     static_cast<void>(crossLeaf);
@@ -730,6 +745,34 @@ void ProtectPage(std::uint64_t address, bool readable) {
     GuestAllocations::GuestAllocationsInvalidate_nid_postfix(static_cast<std::uintptr_t>(address), 4096);
 }
 
+void CheckFailedStayingImportNotifiesHook() {
+    void* memory = AllocateWatched(Block);
+    struct Cleanup {
+        void* memory;
+        ~Cleanup() {
+#ifdef _WIN32
+            GuestArena::GuestArenaRelease_nid_postfix(memory, Block);
+#else
+            munmap(memory, Block);
+#endif
+        }
+    } cleanup{memory};
+    const auto base = reinterpret_cast<std::uint64_t>(memory);
+    Unwatch(base, Block);
+    Require(!Watched(base, Block), "the block stayed watched after Unwatch");
+    FailedImportHook seen;
+    failedImportHook = &seen;
+    struct Restore {
+        ~Restore() {
+            failedImportHook = nullptr;
+            SetUnwatchHook(nullptr);
+        }
+    } restore;
+    SetUnwatchHook(&NoteFailedImportUnwatch);
+    Require(ImportWatched(base, Block, [] { return true; }, true), "a staying import of an unwatched range failed");
+    Require(seen.calls != 0 && seen.address <= base && seen.address + seen.bytes >= base + Block, "a staying import that drops its range did so without the unwatch hook");
+}
+
 void CheckUnwatchedImport() {
     void* memory = AllocateWatched(3 * Block);
     const auto base = reinterpret_cast<std::uint64_t>(memory);
@@ -947,6 +990,8 @@ int main() {
         CheckImportWindowZeroPages();
         CheckImportWindowOtherThread();
         CheckUnwatchedImport();
+        CheckCommittedRanges();
+        CheckFailedStayingImportNotifiesHook();
         CheckCommittedRanges();
     } catch (const std::exception& error) {
         std::cerr << "write tracking test failed: " << error.what() << "\n";
