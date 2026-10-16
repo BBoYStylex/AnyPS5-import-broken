@@ -110,6 +110,7 @@ def main():
         link += ['-framework', framework]
     subprocess.run(command + link + ['-o', str(output / 'doom')], check=True)
     receipt = {'manifest_sha256': digest(HERE / 'bindings.json'), 'inputs': manifest['inputs'], 'reports': reports,
+               'consumer_sources': {str(p.relative_to(ROOT)): digest(p) for p in [Path(__file__), HERE.parent / 'original_sce/driver.cpp.in']},
                'compiler_sources': {str(p.relative_to(ROOT)): digest(p) for p in sorted((ROOT / 'core/aot').glob('*.py'))},
                'runtime_sources': manifest['sources'], 'libraries': {path: digest(build / path) for path in libraries},
                'binary_sha256': digest(output / 'doom'), 'runtime_verified': False}
