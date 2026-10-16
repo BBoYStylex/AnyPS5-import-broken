@@ -206,7 +206,7 @@ void Register(std::span<const Binding> bindings) {
 
 void SetBoundaryObserver(BoundaryObserver value) { observer = value; }
 
-std::uint64_t InvokeCallback(std::uint64_t target, std::uint64_t argument) {
+std::uint64_t InvokeCallback(std::uint64_t target, std::uint64_t argument, std::uint64_t second) {
     Require(target != 0 && NativeAotGuest::IsConvertedFunction(target), "callback target has no converted entry");
     constexpr std::size_t bytes = 65536;
     struct Stack {
@@ -216,6 +216,7 @@ std::uint64_t InvokeCallback(std::uint64_t target, std::uint64_t argument) {
     NativeAotGuestState state{};
     state.Gpr[4] = stack.Top;
     state.Gpr[7] = argument;
+    state.Gpr[6] = second;
     state.Mxcsr = 0x1f80;
     state.X87Control = 0x37f;
     return NativeAotGuest::Invoke(state, target);

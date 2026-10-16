@@ -19,7 +19,6 @@ set(nativeComponents libc libkernel libSceAgc libSceAgcDriver
 set(nativeUnsupportedSources
     "${LIBS_INCLUDE_DIR}/prx/libkernel/Pthread/src/GuestTlsMacOs.cpp"
     "${LIBS_INCLUDE_DIR}/prx/libc/src/ApplicationProcessParameters.cpp"
-    "${LIBS_INCLUDE_DIR}/prx/libc/src/Strings.cpp"
     "${LIBS_INCLUDE_DIR}/prx/libc/src/Math.cpp"
     "${LIBS_INCLUDE_DIR}/prx/libc/src/Formatting.cpp"
     "${LIBS_INCLUDE_DIR}/prx/libc/src/ScanningWide.cpp"
@@ -64,6 +63,43 @@ endif()
 target_link_options(anyps5_native_graphics INTERFACE LINKER:-dead_strip)
 target_include_directories(anyps5_native_graphics PUBLIC "${LIBS_INCLUDE_DIR}")
 set_target_properties(anyps5_native_graphics PROPERTIES POSITION_INDEPENDENT_CODE ON CXX_EXTENSIONS OFF)
+
+add_library(anyps5_native_services STATIC EXCLUDE_FROM_ALL
+    "${LIBS_INCLUDE_DIR}/prx/libSceLibcInternal/FilesystemStatistics.cpp"
+    "${LIBS_INCLUDE_DIR}/prx/libSceLibcInternal/PathStatistics.cpp"
+    "${LIBS_INCLUDE_DIR}/prx/libkernel_sys/Export.cpp")
+foreach(component IN ITEMS libSceAudioOut libSceHttp libSceSsl libSceNet libSceCommonDialog libSceImeDialog libSceUserService)
+    get_target_property(serviceSources ${component} SOURCES)
+    get_target_property(serviceDirectory ${component} SOURCE_DIR)
+    foreach(source IN LISTS serviceSources)
+        if(NOT IS_ABSOLUTE "${source}")
+            set(source "${serviceDirectory}/${source}")
+        endif()
+        target_sources(anyps5_native_services PRIVATE "${source}")
+    endforeach()
+endforeach()
+target_include_directories(anyps5_native_services PRIVATE "${LIBS_INCLUDE_DIR}" ${ANYPS5_SDL2_INCLUDE_DIR})
+target_link_libraries(anyps5_native_services PUBLIC anyps5_native_graphics mbedx509 mbedcrypto)
+set_target_properties(anyps5_native_services PROPERTIES CXX_EXTENSIONS OFF)
+
+add_test_executable(native_audio_shutdown_tests ../prx/libSceAudioOut/tests/AudioOutShutdown.cpp)
+target_include_directories(native_audio_shutdown_tests PRIVATE "${LIBS_INCLUDE_DIR}")
+target_link_libraries(native_audio_shutdown_tests PRIVATE anyps5_native_services)
+foreach(mode IN ITEMS audio-out audio-out2 audio-out2-waiting-push audio-out2-advance)
+    add_test(NAME native_${mode}_shutdown COMMAND native_audio_shutdown_tests --${mode})
+    set_tests_properties(native_${mode}_shutdown PROPERTIES TIMEOUT 10 ENVIRONMENT "SDL_AUDIODRIVER=dummy")
+endforeach()
+
+add_test_executable(native_sce_crt_tests ../tests/NativeAotSceCrt.cpp NativeAotSceCrt.cpp NativeAotSce.cpp NativeAotGuest.cpp)
+target_link_libraries(native_sce_crt_tests PRIVATE anyps5_native_graphics)
+add_test(NAME native_sce_crt COMMAND native_sce_crt_tests)
+set_tests_properties(native_sce_crt PROPERTIES TIMEOUT 20)
+
+add_test_executable(native_bundle_shutdown_tests ../tests/NativeAotShutdown.cpp)
+target_link_libraries(native_bundle_shutdown_tests PRIVATE anyps5_native_graphics)
+add_test(NAME native_bundle_shutdown COMMAND ${CMAKE_COMMAND} -DPROGRAM=$<TARGET_FILE:native_bundle_shutdown_tests>
+    -P "${LIBS_INCLUDE_DIR}/tests/NativeAotShutdown.cmake")
+set_tests_properties(native_bundle_shutdown PROPERTIES TIMEOUT 10)
 
 add_test_executable(native_shared_memory_alias_tests NativeSharedMemoryAliasTests.cpp)
 target_link_libraries(native_shared_memory_alias_tests PRIVATE anyps5_native_graphics)

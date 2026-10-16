@@ -921,7 +921,7 @@ _start:
     def test_unimplemented_instruction_rejects_conversion(self):
         with self.assertRaisesRegex(guest_lift.LiftError, 'unsupported instruction'):
             self.program(PRELUDE + '''
-    vaddps ymm0, ymm1, ymm2
+    vrcpps ymm0, ymm1
     xor edi, edi
 ''' + EXIT)
 

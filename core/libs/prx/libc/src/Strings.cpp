@@ -57,6 +57,7 @@ float QuietNan(float value, const char* text) {
     return std::bit_cast<float>((bits & 0x80000000u) | 0x7fc00000u);
 }
 
+#if !defined(__aarch64__)
 long double QuietNan(long double value, const char* text) {
     std::uint16_t exponent;
     std::memcpy(&exponent, reinterpret_cast<const unsigned char*>(&value) + sizeof(std::uint64_t), sizeof(exponent));
@@ -65,6 +66,7 @@ long double QuietNan(long double value, const char* text) {
     std::memcpy(&value, &significand, sizeof(significand));
     return value;
 }
+#endif
 
 template<typename TParse>
 auto ParseAsciiPrefix(const char16_t* text, char16_t** end, TParse parse) {
@@ -232,10 +234,12 @@ double APS5_VABI atof_nid_postfix(const char* str) { return strtod_nid_postfix(s
 float APS5_VABI strtof_nid_postfix(const char* str, char** endptr) {
     return ParseFloat<float>(str, endptr, std::strtof);
 }
+#if !defined(__aarch64__)
 long double APS5_VABI strtold_nid_postfix(const char* str, char** endptr) {
     static_assert(sizeof(long double) == 16, "Guest long double requires x87 extended precision storage");
     return ParseFloat<long double>(str, endptr, std::strtold);
 }
+#endif
 
 int APS5_VABI atoi_nid_postfix(const char* str) {
     return static_cast<int>(strtol_nid_postfix(str, nullptr, 10));
@@ -534,11 +538,13 @@ float APS5_VABI wcstof_nid_postfix(const char16_t* str, char16_t** endptr) {
     return ParseAsciiPrefix(str, endptr, [](const char* text, char** end) { return ParseFloat<float>(text, end, std::strtof); });
 }
 
+#if !defined(__aarch64__)
 long double APS5_VABI wcstold_nid_postfix(const char16_t* str, char16_t** endptr) {
     static_assert(sizeof(long double) == 16);
     static_assert(std::numeric_limits<long double>::digits == 64);
     return ParseAsciiPrefix(str, endptr, [](const char* text, char** end) { return ParseFloat<long double>(text, end, std::strtold); });
 }
+#endif
 
 long long APS5_VABI wcstol_nid_postfix(const char16_t* str, char16_t** endptr, int base) {
     return ParseAsciiPrefix(str, endptr, [base](const char* text, char** end) { return StopAtPrefixLetter_nid_no_patch(text, end, base) ? 0LL : ConvertInteger(text, end, base, std::strtoll); });

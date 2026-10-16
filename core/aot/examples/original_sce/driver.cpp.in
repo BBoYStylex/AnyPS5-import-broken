@@ -2,6 +2,7 @@
 #include "native/NativeAotSce.hpp"
 #include "prx/libc/include/NativeAotImage.hpp"
 #include "prx/libc/include/NativeAotBundle.hpp"
+#include "prx/libc/include/Shutdown.hpp"
 #include <cstdio>
 #include <cerrno>
 #include <cstdlib>
@@ -15,7 +16,6 @@ extern const NativeAotGuestImage shim___aps5_guest_image;
 extern const void* OriginalNativeBindings[];
 void Aps5StartGuest_nid_no_patch(void (*)(void*,void*),void*);
 void exit_nid_postfix(int);
-int __cxa_atexit_nid_postfix(void (*)(void*),void*,void*);
 }
 namespace {
 std::unique_ptr<NativeAotBundleRegistry> lifecycle;
@@ -25,7 +25,7 @@ char** argumentValues;
 unsigned frames=0;
 void InitializeModule() { NativeAotSce::InvokeCallback(*shim___aps5_guest_image.Base + INIT_ADDRESS); std::fprintf(stderr,"original module initialized\n"); }
 void FinalizeModule() { NativeAotSce::InvokeCallback(*shim___aps5_guest_image.Base + FINI_ADDRESS); std::fprintf(stderr,"original module finalized\n"); }
-void Stop(void*) { lifecycle->Stop(); std::fprintf(stderr,"original SCE bundle teardown completed\n"); }
+void Stop() { lifecycle->Stop(); std::fprintf(stderr,"original SCE bundle teardown completed\n"); }
 void Boundary(const char* name,const NativeAotGuestState& state) {
     if (static_cast<std::int32_t>(state.Gpr[0]) != 0) return;
     const auto* text=std::getenv("ANYPS5_TEST_FRAME_LIMIT");
@@ -60,7 +60,7 @@ ROWS
     modules[1].tls=&moduleTls;modules[1].tlsBytes=shim___aps5_guest_image.TlsMemorySize;
     lifecycle=std::make_unique<NativeAotBundleRegistry>(modules,0);
     lifecycle->Start();
-    __cxa_atexit_nid_postfix(Stop,nullptr,nullptr);
+    LibcRegisterShutdown_nid_postfix(Stop);
     NativeAotSce::SetBoundaryObserver(Boundary);
     NativeAotGuest::StartSceApplication(app___aps5_guest_image,argumentCount,argumentValues);
 }

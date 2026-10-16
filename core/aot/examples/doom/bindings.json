@@ -1,0 +1,1684 @@
+{
+  "schema": "anyps5.aot.sce-consumer.v1",
+  "title": "PPSA99666",
+  "release": "lowbit/ps5-doom v1.1.1",
+  "source_commit": "ba6e305bd315828c0980ff93eb54e35c8ebf397b",
+  "inputs": {
+    "app": "62d4cfe60815afbbebbd1916eb6b08fa5bd53e36d3ced68d9b62a6488bb37378",
+    "module": "8ee6e124993e1af26420cb455890fd002f5d6c7e78883c860ce45734e7d002bb"
+  },
+  "bindings": {
+    "[\"sce\",\"tcVi5SivF7Q\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "sprintf",
+      "bridge": "qualified CRT"
+    },
+    "[\"sce\",\"8zTFvBIAIN8\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "memset",
+      "native": "memset_nid_postfix",
+      "data": false,
+      "prototype": "void* memset_nid_postfix(void* s, int c, size_t n)",
+      "source": "core/libs/prx/libc/src/Strings.cpp"
+    },
+    "[\"sce\",\"as8Od-tH1BI\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "__stderrp",
+      "native": "__stderrp_nid_postfix",
+      "data": true
+    },
+    "[\"sce\",\"fffwELXNVFA\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "fprintf",
+      "bridge": "qualified CRT"
+    },
+    "[\"sce\",\"xeYO4u7uyJ0\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "fopen",
+      "native": "fopen_nid_postfix",
+      "data": false,
+      "prototype": "FileStream* fopen_nid_postfix(const char* filename, const char* mode)",
+      "source": "core/libs/prx/libc/src/FileAndHeap.cpp"
+    },
+    "[\"sce\",\"j4ViWNHEgww\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "strlen",
+      "native": "strlen_nid_postfix",
+      "data": false
+    },
+    "[\"sce\",\"gQX+4GDQjpM\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "malloc",
+      "native": "malloc_nid_postfix",
+      "data": false
+    },
+    "[\"sce\",\"kiZSXIWd9vg\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "strcpy",
+      "native": "strcpy_nid_postfix",
+      "data": false,
+      "prototype": "char* strcpy_nid_postfix(char* dest, const char* src)",
+      "source": "core/libs/prx/libc/src/Strings.cpp"
+    },
+    "[\"sce\",\"MpxhMh8QFro\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "fwrite",
+      "native": "fwrite_nid_postfix",
+      "data": false,
+      "prototype": "size_t fwrite_nid_postfix(const void* buffer, size_t size, size_t count, FileStream* stream)",
+      "source": "core/libs/prx/libc/src/FileAndHeap.cpp"
+    },
+    "[\"sce\",\"rQFVBXp-Cxg\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "fseek",
+      "native": "fseek_nid_postfix",
+      "data": false,
+      "prototype": "int fseek_nid_postfix(FileStream* stream, std::int64_t offset, int origin)",
+      "source": "core/libs/prx/libc/src/FileAndHeap.cpp"
+    },
+    "[\"sce\",\"Qazy8LmXTvw\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "ftell",
+      "native": "ftell_nid_postfix",
+      "data": false,
+      "prototype": "std::int64_t ftell_nid_postfix(FileStream* stream)",
+      "source": "core/libs/prx/libc/src/FileAndHeap.cpp"
+    },
+    "[\"sce\",\"lbB+UlZqVG0\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "fread",
+      "native": "fread_nid_postfix",
+      "data": false,
+      "prototype": "size_t fread_nid_postfix(void* buffer, size_t size, size_t count, FileStream* stream)",
+      "source": "core/libs/prx/libc/src/FileAndHeap.cpp"
+    },
+    "[\"sce\",\"uodLYyUip20\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "fclose",
+      "native": "fclose_nid_postfix",
+      "data": false,
+      "prototype": "int fclose_nid_postfix(FileStream* stream)",
+      "source": "core/libs/prx/libc/src/FileAndHeap.cpp"
+    },
+    "[\"sce\",\"Q3VBxCXhUHs\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "memcpy",
+      "native": "memcpy_nid_postfix",
+      "data": false,
+      "prototype": "void* memcpy_nid_postfix(void* dest, const void* src, size_t n)",
+      "source": "core/libs/prx/libc/src/Strings.cpp"
+    },
+    "[\"sce\",\"2X5agFjKxMc\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "calloc",
+      "native": "calloc_nid_postfix",
+      "data": false,
+      "prototype": "void* calloc_nid_postfix(size_t count, size_t size)",
+      "source": "core/libs/prx/libc/src/FileAndHeap.cpp"
+    },
+    "[\"sce\",\"uMei1W9uyNo\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "exit",
+      "native": "exit_nid_postfix",
+      "data": false
+    },
+    "[\"sce\",\"zqJhBxAKfsc\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "__stdoutp",
+      "native": "__stdoutp_nid_postfix",
+      "data": true
+    },
+    "[\"sce\",\"vZMcAfsA31I\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "setbuf",
+      "native": "setbuf_nid_postfix",
+      "data": false,
+      "prototype": "void setbuf_nid_postfix(FileStream* stream, char* buffer)",
+      "source": "core/libs/prx/libc/src/StandardStreams.cpp"
+    },
+    "[\"sce\",\"fPxypibz2MY\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "atoi",
+      "native": "atoi_nid_postfix",
+      "data": false,
+      "prototype": "int atoi_nid_postfix(const char* str)",
+      "source": "core/libs/prx/libc/src/Strings.cpp"
+    },
+    "[\"sce\",\"aZK8lNei-Qw\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "fputc",
+      "native": "fputc_nid_postfix",
+      "data": false,
+      "prototype": "int fputc_nid_postfix(int value, FileStream* stream)",
+      "source": "core/libs/prx/libc/src/StandardStreams.cpp"
+    },
+    "[\"sce\",\"q1OvUam0BJU\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "__isthreaded",
+      "native": "__isthreaded_nid_postfix",
+      "data": true
+    },
+    "[\"sce\",\"bgAcsbcEznc\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "__stdinp",
+      "native": "__stdinp_nid_postfix",
+      "data": true
+    },
+    "[\"sce\",\"yDnwZsMnX0Q\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "__srget",
+      "native": "__srget_nid_postfix",
+      "data": false,
+      "prototype": "int __srget_nid_postfix(FileStream* stream)",
+      "source": "core/libs/prx/libc/src/StandardStreams.cpp"
+    },
+    "[\"sce\",\"8Q60JLJ6Rv4\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "getc",
+      "native": "getc_nid_postfix",
+      "data": false,
+      "prototype": "int getc_nid_postfix(FileStream* stream)",
+      "source": "core/libs/prx/libc/src/StandardStreams.cpp"
+    },
+    "[\"sce\",\"TYE4irxSmko\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "toupper",
+      "native": "toupper_nid_postfix",
+      "data": false,
+      "prototype": "int toupper_nid_postfix(int c)",
+      "source": "core/libs/prx/libc/src/LocaleSupport.cpp"
+    },
+    "[\"sce\",\"Ovb2dSJOAuE\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "strcmp",
+      "native": "strcmp_nid_postfix",
+      "data": false,
+      "prototype": "int strcmp_nid_postfix(const char* s1, const char* s2)",
+      "source": "core/libs/prx/libc/src/Strings.cpp"
+    },
+    "[\"sce\",\"AV6ipCNa4Rw\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "strcasecmp",
+      "native": "strcasecmp_nid_postfix",
+      "data": false,
+      "prototype": "int strcasecmp_nid_postfix(const char* s1, const char* s2)",
+      "source": "core/libs/prx/libc/src/Strings.cpp"
+    },
+    "[\"sce\",\"AqBioC2vF3I\",\"libkernel\",1,\"libkernel\",1]": {
+      "name": "read",
+      "native": "read_nid_postfix",
+      "data": false
+    },
+    "[\"sce\",\"bY-PO6JhzhQ\",\"libkernel\",1,\"libkernel\",1]": {
+      "name": "close",
+      "native": "close_nid_postfix",
+      "data": false
+    },
+    "[\"sce\",\"wuCroIGjt2g\",\"libkernel\",1,\"libkernel\",1]": {
+      "name": "open",
+      "native": "open_nid_postfix",
+      "data": false
+    },
+    "[\"sce\",\"6sJWiWSRuqk\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "strncpy",
+      "native": "strncpy_nid_postfix",
+      "data": false,
+      "prototype": "char* strncpy_nid_postfix(char* dest, const char* src, size_t count)",
+      "source": "core/libs/prx/libc/src/Strings.cpp"
+    },
+    "[\"sce\",\"FN4gaPmuFV8\",\"libkernel\",1,\"libkernel\",1]": {
+      "name": "write",
+      "native": "write_nid_postfix",
+      "data": false,
+      "prototype": "int64_t write_nid_postfix(int d, const char* str, int64_t size)",
+      "source": "core/libs/prx/libkernel/File/src/Stdio.cpp"
+    },
+    "[\"sce\",\"mqQMh1zPPT8\",\"libkernel\",1,\"libkernel\",1]": {
+      "name": "fstat",
+      "native": "fstat_nid_disambig1_nid_postfix",
+      "data": false,
+      "prototype": "int64_t fstat_nid_disambig1_nid_postfix(int d, FileStat* sb)",
+      "source": "core/libs/prx/libkernel/File/src/Stdio.cpp"
+    },
+    "[\"sce\",\"LxcEU+ICu8U\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "feof",
+      "native": "feof_nid_postfix",
+      "data": false,
+      "prototype": "int feof_nid_postfix(FileStream* stream)",
+      "source": "core/libs/prx/libc/src/StandardStreams.cpp"
+    },
+    "[\"sce\",\"npLpPTaSuHg\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "fscanf",
+      "bridge": "qualified CRT"
+    },
+    "[\"sce\",\"1Pk0qZQGeWo\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "sscanf",
+      "bridge": "qualified CRT"
+    },
+    "[\"sce\",\"8vE6Z6VEYyk\",\"libkernel\",1,\"libkernel\",1]": {
+      "name": "access",
+      "native": "access_nid_postfix",
+      "data": false,
+      "prototype": "extern \"C\" int access_nid_postfix(const char* path, int mode)",
+      "source": "core/libs/prx/libc/src/Filesystem.cpp"
+    },
+    "[\"sce\",\"pXvbDfchu6k\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "strncasecmp",
+      "native": "strncasecmp_nid_postfix",
+      "data": false,
+      "prototype": "int strncasecmp_nid_postfix(const char* s1, const char* s2, size_t n)",
+      "source": "core/libs/prx/libc/src/Strings.cpp"
+    },
+    "[\"sce\",\"Oy6IpwgtYOk\",\"libkernel\",1,\"libkernel\",1]": {
+      "name": "lseek",
+      "native": "lseek_nid_postfix",
+      "data": false,
+      "prototype": "int64_t lseek_nid_postfix(int d, int64_t offset, int whence)",
+      "source": "core/libs/prx/libkernel/File/src/Stdio.cpp"
+    },
+    "[\"sce\",\"Y7aJ1uydPMo\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "realloc",
+      "native": "realloc_nid_postfix",
+      "data": false,
+      "prototype": "void* realloc_nid_postfix(void* ptr, size_t newSize)",
+      "source": "core/libs/prx/libc/src/FileAndHeap.cpp"
+    },
+    "[\"sce\",\"eLdDw6l0-bU\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "snprintf",
+      "bridge": "qualified CRT"
+    },
+    "[\"sce\",\"BPE9s9vQQXo\",\"libkernel\",1,\"libkernel\",1]": {
+      "name": "mmap",
+      "native": "mmap_nid_postfix",
+      "data": false,
+      "prototype": "void* mmap_nid_postfix(void* address, std::size_t length, int protection,\n                                int flags, int descriptor, std::int64_t offset) noexcept",
+      "source": "core/libs/prx/libkernel/DirectMemory/PosixMemory.cpp"
+    },
+    "[\"sce\",\"Q2V+iqvjgC0\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "vsnprintf",
+      "bridge": "qualified CRT"
+    },
+    "[\"sce\",\"2Z+PpY6CaJg\",\"libkernel\",1,\"libkernel\",1]": {
+      "name": "pthread_mutex_unlock",
+      "native": "pthread_mutex_unlock_nid_postfix",
+      "data": false,
+      "prototype": "int pthread_mutex_unlock_nid_postfix(PthreadMutex* mutex)",
+      "source": "core/libs/prx/libkernel/Pthread/Posix/Mutex.cpp"
+    },
+    "[\"sce\",\"7H0iTOciTLo\",\"libkernel\",1,\"libkernel\",1]": {
+      "name": "pthread_mutex_lock",
+      "native": "pthread_mutex_lock_nid_postfix",
+      "data": false,
+      "prototype": "int pthread_mutex_lock_nid_postfix(PthreadMutex* mutex)",
+      "source": "core/libs/prx/libkernel/Pthread/Posix/Mutex.cpp"
+    },
+    "[\"sce\",\"dnaeGXbjP6E\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "exp2",
+      "bridge": "qualified CRT"
+    },
+    "[\"sce\",\"WuMbPBKN1TU\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "log10",
+      "bridge": "qualified CRT"
+    },
+    "[\"sce\",\"H8ya2H00jbI\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "sin",
+      "bridge": "qualified CRT"
+    },
+    "[\"sce\",\"wuAQt-j+p4o\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "exp2f",
+      "bridge": "qualified CRT"
+    },
+    "[\"sce\",\"tIhsqj0qsFE\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "free",
+      "native": "free_nid_postfix",
+      "data": false
+    },
+    "[\"sce\",\"NVadfnzQhHQ\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "exp",
+      "bridge": "qualified CRT"
+    },
+    "[\"sce\",\"g7zzzLDYGw0\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "strdup",
+      "native": "strdup_nid_postfix",
+      "data": false,
+      "prototype": "char* strdup_nid_postfix(const char* source)",
+      "source": "core/libs/prx/libc/src/AllocatingStrings.cpp"
+    },
+    "[\"sce\",\"enqPGLfmVNU\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "strtok_r",
+      "native": "strtok_r_nid_postfix",
+      "data": false,
+      "prototype": "char* strtok_r_nid_postfix(char* text, const char* delimiters, char** state)",
+      "source": "core/libs/prx/libc/src/StringExtensions.cpp"
+    },
+    "[\"sce\",\"aesyjrHVWy4\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "strncmp",
+      "native": "strncmp_nid_postfix",
+      "data": false,
+      "prototype": "int strncmp_nid_postfix(const char* s1, const char* s2, size_t n)",
+      "source": "core/libs/prx/libc/src/Strings.cpp"
+    },
+    "[\"sce\",\"ob5xAW4ln-0\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "strchr",
+      "native": "strchr_nid_postfix",
+      "data": false,
+      "prototype": "const char* strchr_nid_postfix(const char* s, int c)",
+      "source": "core/libs/prx/libc/src/Strings.cpp"
+    },
+    "[\"sce\",\"viiwFMaNamA\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "strstr",
+      "native": "strstr_nid_postfix",
+      "data": false,
+      "prototype": "char* strstr_nid_postfix(const char* haystack, const char* needle)",
+      "source": "core/libs/prx/libc/src/Strings.cpp"
+    },
+    "[\"sce\",\"9yDWMxEFdJU\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "strrchr",
+      "native": "strrchr_nid_postfix",
+      "data": false,
+      "prototype": "char* strrchr_nid_postfix(const char* s, int c)",
+      "source": "core/libs/prx/libc/src/Strings.cpp"
+    },
+    "[\"sce\",\"kHg45qPC6f0\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "strncat",
+      "native": "strncat_nid_postfix",
+      "data": false,
+      "prototype": "char* strncat_nid_postfix(char* destination, const char* source, std::size_t limit)",
+      "source": "core/libs/prx/libc/src/StringExtensions.cpp"
+    },
+    "[\"sce\",\"q0F6yS-rCms\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "strcspn",
+      "native": "strcspn_nid_postfix",
+      "data": false,
+      "prototype": "std::size_t strcspn_nid_postfix(const char* text, const char* reject)",
+      "source": "core/libs/prx/libc/src/StringExtensions.cpp"
+    },
+    "[\"sce\",\"PqF+kHW-2WQ\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "tolower",
+      "native": "tolower_nid_postfix",
+      "data": false,
+      "prototype": "int tolower_nid_postfix(int c)",
+      "source": "core/libs/prx/libc/src/LocaleSupport.cpp"
+    },
+    "[\"sce\",\"AEJdIVZTEmo\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "qsort",
+      "bridge": "qualified CRT"
+    },
+    "[\"sce\",\"h9CcP3J0oVM\",\"libkernel\",1,\"libkernel\",1]": {
+      "name": "pthread_join",
+      "native": "pthread_join_nid_postfix",
+      "data": false,
+      "prototype": "int pthread_join_nid_postfix(Pthread thread, void** value)",
+      "source": "core/libs/prx/libkernel/Pthread/Posix/Thread.cpp"
+    },
+    "[\"sce\",\"OxhIB8LB-PQ\",\"libkernel\",1,\"libkernel\",1]": {
+      "name": "pthread_create",
+      "bridge": "qualified CRT"
+    },
+    "[\"sce\",\"wazw2x2m3DQ\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "isspace",
+      "native": "isspace_nid_postfix",
+      "data": false,
+      "prototype": "int isspace_nid_postfix(int c)",
+      "source": "core/libs/prx/libc/src/LocaleSupport.cpp"
+    },
+    "[\"sce\",\"9BcDykPmo1I\",\"libkernel\",1,\"libkernel\",1]": {
+      "name": "__error",
+      "native": "__error_nid_postfix",
+      "data": false,
+      "prototype": "int* __error_nid_postfix()",
+      "source": "core/libs/prx/libc/src/Process.cpp"
+    },
+    "[\"sce\",\"VAzswvTOCzI\",\"libkernel\",1,\"libkernel\",1]": {
+      "name": "unlink",
+      "native": "unlink_nid_postfix",
+      "data": false,
+      "prototype": "int unlink_nid_postfix(const char* path)",
+      "source": "core/libs/prx/libkernel/File/src/Stdio.cpp"
+    },
+    "[\"sce\",\"NN01qLRhiqU\",\"libkernel\",1,\"libkernel\",1]": {
+      "name": "rename",
+      "native": "rename_nid_postfix",
+      "data": false,
+      "prototype": "extern \"C\" int rename_nid_postfix(const char* from, const char* to)",
+      "source": "core/libs/prx/libc/src/Rename.cpp"
+    },
+    "[\"sce\",\"UqDGjXA5yUM\",\"libkernel\",1,\"libkernel\",1]": {
+      "name": "munmap",
+      "native": "munmap_nid_postfix",
+      "data": false,
+      "prototype": "int munmap_nid_postfix(void* address, std::size_t length) noexcept",
+      "source": "core/libs/prx/libkernel/DirectMemory/PosixMemory.cpp"
+    },
+    "[\"sce\",\"+P6FRGH4LfA\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "memmove",
+      "native": "memmove_nid_postfix",
+      "data": false,
+      "prototype": "void* memmove_nid_postfix(void* dest, const void* src, size_t n)",
+      "source": "core/libs/prx/libc/src/Strings.cpp"
+    },
+    "[\"sce\",\"KdP-nULpuGw\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "fgets",
+      "native": "fgets_nid_postfix",
+      "data": false,
+      "prototype": "char* fgets_nid_postfix(char* buffer, int size, FileStream* stream)",
+      "source": "core/libs/prx/libc/src/StandardStreams.cpp"
+    },
+    "[\"sce\",\"TU-d9PfIHPM\",\"libkernel\",1,\"libkernel\",1]": {
+      "name": "socket",
+      "native": "socket_nid_postfix",
+      "data": false,
+      "prototype": "int socket_nid_postfix(int family, int type, int protocol)",
+      "source": "core/libs/prx/libkernel/Socket/src/Udp.cpp"
+    },
+    "[\"sce\",\"fFxGkxF2bVo\",\"libkernel\",1,\"libkernel\",1]": {
+      "name": "setsockopt",
+      "native": "setsockopt_nid_postfix",
+      "data": false,
+      "prototype": "int setsockopt_nid_postfix(int descriptor, int level, int option,\n                                    const void* value, std::uint32_t length)",
+      "source": "core/libs/prx/libkernel/Socket/src/Udp.cpp"
+    },
+    "[\"sce\",\"KuOmgKoqCdY\",\"libkernel\",1,\"libkernel\",1]": {
+      "name": "bind",
+      "native": "bind_nid_postfix",
+      "data": false,
+      "prototype": "int bind_nid_postfix(int descriptor, const void* address, std::uint32_t length)",
+      "source": "core/libs/prx/libkernel/Socket/src/Udp.cpp"
+    },
+    "[\"sce\",\"pxnCmagrtao\",\"libkernel\",1,\"libkernel\",1]": {
+      "name": "listen",
+      "native": "listen_nid_postfix",
+      "data": false,
+      "prototype": "int listen_nid_postfix(int descriptor, int backlog)",
+      "source": "core/libs/prx/libkernel/Socket/src/Udp.cpp"
+    },
+    "[\"sce\",\"XVL8So3QJUk\",\"libkernel\",1,\"libkernel\",1]": {
+      "name": "connect",
+      "native": "connect_nid_postfix",
+      "data": false,
+      "prototype": "int connect_nid_postfix(int descriptor, const void* address, std::uint32_t length)",
+      "source": "core/libs/prx/libkernel/Socket/src/Udp.cpp"
+    },
+    "[\"sce\",\"RenI1lL1WFk\",\"libkernel\",1,\"libkernel\",1]": {
+      "name": "getsockname",
+      "native": "getsockname_nid_postfix",
+      "data": false,
+      "prototype": "int getsockname_nid_postfix(int descriptor, void* address, std::uint32_t* length)",
+      "source": "core/libs/prx/libkernel/Socket/src/Udp.cpp"
+    },
+    "[\"sce\",\"ku7D4q1Y9PI\",\"libkernel\",1,\"libkernel\",1]": {
+      "name": "poll",
+      "native": "poll_nid_postfix",
+      "data": false,
+      "prototype": "int poll_nid_postfix(GuestPollDescriptor* descriptors, std::uint32_t count, int timeout)",
+      "source": "core/libs/prx/libkernel/Socket/src/Udp.cpp"
+    },
+    "[\"sce\",\"wLlFkwG9UcQ\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "time",
+      "native": "time_nid_postfix",
+      "data": false,
+      "prototype": "int64_t time_nid_postfix(int64_t* timer)",
+      "source": "core/libs/prx/libc/src/Time.cpp"
+    },
+    "[\"sce\",\"Ez8xjo9UF4E\",\"libkernel\",1,\"libkernel\",1]": {
+      "name": "recv",
+      "native": "recv_nid_postfix",
+      "data": false,
+      "prototype": "std::int64_t recv_nid_postfix(int descriptor, void* buffer, std::uint64_t length, int flags)",
+      "source": "core/libs/prx/libkernel/Socket/src/Udp.cpp"
+    },
+    "[\"sce\",\"VOBg+iNwB-4\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "strtoll",
+      "native": "strtoll_nid_postfix",
+      "data": false,
+      "prototype": "long long strtoll_nid_postfix(const char* str, char** endptr, int base)",
+      "source": "core/libs/prx/libc/src/Strings.cpp"
+    },
+    "[\"sce\",\"4uJJNi+C9wk\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "isalnum",
+      "native": "isalnum_nid_postfix",
+      "data": false,
+      "prototype": "int isalnum_nid_postfix(int c)",
+      "source": "core/libs/prx/libc/src/LocaleSupport.cpp"
+    },
+    "[\"sce\",\"8u8lPzUEq+U\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "memchr",
+      "native": "memchr_nid_postfix",
+      "data": false,
+      "prototype": "const void* memchr_nid_postfix(const void* s, int c, size_t n)",
+      "source": "core/libs/prx/libc/src/Strings.cpp"
+    },
+    "[\"sce\",\"fZOeZIOEmLw\",\"libkernel\",1,\"libkernel\",1]": {
+      "name": "send",
+      "native": "send_nid_postfix",
+      "data": false,
+      "prototype": "std::int64_t send_nid_postfix(int descriptor, const void* buffer, std::uint64_t length, int flags)",
+      "source": "core/libs/prx/libkernel/Socket/src/Udp.cpp"
+    },
+    "[\"sce\",\"3e+4Iv7IJ8U\",\"libkernel\",1,\"libkernel\",1]": {
+      "name": "accept",
+      "native": "accept_nid_postfix",
+      "data": false,
+      "prototype": "int accept_nid_postfix(int descriptor, void* address, std::uint32_t* length)",
+      "source": "core/libs/prx/libkernel/Socket/src/Udp.cpp"
+    },
+    "[\"sce\",\"JfEPXVxhFqA\",\"libSceAudioOut\",1,\"libSceAudioOut\",1]": {
+      "name": "sceAudioOutInit",
+      "native": "sceAudioOutInit",
+      "data": false,
+      "prototype": "int sceAudioOutInit()",
+      "source": "core/libs/prx/libSceAudioOut/src/AudioOut.cpp"
+    },
+    "[\"sce\",\"ekNvsT22rsY\",\"libSceAudioOut\",1,\"libSceAudioOut\",1]": {
+      "name": "sceAudioOutOpen",
+      "native": "sceAudioOutOpen",
+      "data": false,
+      "prototype": "int sceAudioOutOpen(int userId, int type, int index, std::uint32_t len,\n    std::uint32_t freq, std::uint32_t param)",
+      "source": "core/libs/prx/libSceAudioOut/src/AudioOut.cpp"
+    },
+    "[\"sce\",\"s1--uE9mBFw\",\"libSceAudioOut\",1,\"libSceAudioOut\",1]": {
+      "name": "sceAudioOutClose",
+      "native": "sceAudioOutClose",
+      "data": false,
+      "prototype": "int sceAudioOutClose(int handle)",
+      "source": "core/libs/prx/libSceAudioOut/src/AudioOut.cpp"
+    },
+    "[\"sce\",\"QOQtbeDqsT4\",\"libSceAudioOut\",1,\"libSceAudioOut\",1]": {
+      "name": "sceAudioOutOutput",
+      "native": "sceAudioOutOutput",
+      "data": false,
+      "prototype": "int sceAudioOutOutput(int handle, const void* ptr)",
+      "source": "core/libs/prx/libSceAudioOut/src/AudioOut.cpp"
+    },
+    "[\"sce\",\"1jfXLRVzisc\",\"libkernel\",1,\"libkernel\",1]": {
+      "name": "sceKernelUsleep",
+      "native": "sceKernelUsleep_nid_postfix",
+      "data": false
+    },
+    "[\"sce\",\"bzQExy189ZI\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "_init_env",
+      "native": "_init_env_nid_postfix",
+      "data": false
+    },
+    "[\"sce\",\"kW3GLb7QfPg\",\"libSceAgc\",1,\"libSceAgc\",1]": {
+      "name": "sceAgcInit",
+      "native": "sceAgcInit",
+      "data": false,
+      "prototype": "int sceAgcInit(std::uint32_t version)",
+      "source": "core/libs/prx/libSceAgc/DcbState/src/Init.cpp"
+    },
+    "[\"sce\",\"0MtUJ3BpGhE\",\"libSceAgcDriver\",1,\"libSceAgcDriver\",1]": {
+      "name": "sceAgcDriverGetWaitRenderingPacketSizeInDwords",
+      "native": "sceAgcDriverGetWaitRenderingPacketSizeInDwords",
+      "data": false,
+      "prototype": "std::uint32_t sceAgcDriverGetWaitRenderingPacketSizeInDwords()",
+      "source": "core/libs/prx/libSceAgcDriver/Submit/src/Dcb.cpp"
+    },
+    "[\"sce\",\"u8BkdHb1+Po\",\"libSceAgcDriver\",1,\"libSceAgcDriver\",1]": {
+      "name": "sceAgcDriverWaitUntilSafeForRendering",
+      "native": "sceAgcDriverWaitUntilSafeForRendering",
+      "data": false,
+      "prototype": "std::uint32_t sceAgcDriverWaitUntilSafeForRendering(std::uint32_t** command,\n    std::uint32_t capacity, std::uint32_t mode, std::uint32_t handle, int index)",
+      "source": "core/libs/prx/libSceAgcDriver/Submit/src/Dcb.cpp"
+    },
+    "[\"sce\",\"57labkp+rSQ\",\"libSceAgc\",1,\"libSceAgc\",1]": {
+      "name": "sceAgcDcbAcquireMem",
+      "native": "sceAgcDcbAcquireMem",
+      "data": false,
+      "prototype": "std::uint32_t* sceAgcDcbAcquireMem(CommandBuffer* buf, std::uint8_t engine, std::uint32_t cbDbOp, std::uint32_t gcrControl, const volatile void* base, std::uint64_t sizeBytes, std::uint32_t pollCycles)",
+      "source": "core/libs/prx/libSceAgc/DcbFlow/src/Memory.cpp"
+    },
+    "[\"sce\",\"n2fD4A+pb+g\",\"libSceAgc\",1,\"libSceAgc\",1]": {
+      "name": "sceAgcCbSetShRegisterRangeDirect",
+      "native": "sceAgcCbSetShRegisterRangeDirect",
+      "data": false,
+      "prototype": "std::uint32_t* sceAgcCbSetShRegisterRangeDirect(CommandBuffer* buf, std::uint32_t offset, const std::uint32_t* values, std::uint32_t numValues)",
+      "source": "core/libs/prx/libSceAgc/Cb/src/Registers.cpp"
+    },
+    "[\"sce\",\"k3GhuSNmBLU\",\"libSceAgc\",1,\"libSceAgc\",1]": {
+      "name": "sceAgcCbDispatch",
+      "native": "sceAgcCbDispatch",
+      "data": false,
+      "prototype": "std::uint32_t* sceAgcCbDispatch(CommandBuffer* buf, std::uint32_t threadGroupX, std::uint32_t threadGroupY, std::uint32_t threadGroupZ, std::uint32_t modifier)",
+      "source": "core/libs/prx/libSceAgc/Cb/src/Dispatch.cpp"
+    },
+    "[\"sce\",\"YUeqkyT7mEQ\",\"libSceAgc\",1,\"libSceAgc\",1]": {
+      "name": "sceAgcDcbSetFlip",
+      "native": "sceAgcDcbSetFlip",
+      "data": false,
+      "prototype": "uint32_t* sceAgcDcbSetFlip(CommandBuffer* buf, uint32_t video_out_handle, int32_t display_buffer_index, uint32_t flip_mode, int64_t flip_arg)",
+      "source": "core/libs/prx/libSceAgc/DcbState/src/Display.cpp"
+    },
+    "[\"sce\",\"UglJIZjGssM\",\"libSceAgcDriver\",1,\"libSceAgcDriver\",1]": {
+      "name": "sceAgcDriverSubmitDcb",
+      "native": "sceAgcDriverSubmitDcb",
+      "data": false,
+      "prototype": "int sceAgcDriverSubmitDcb(const Packet* packet)",
+      "source": "core/libs/prx/libSceAgcDriver/Submit/src/Dcb.cpp"
+    },
+    "[\"sce\",\"h9z6+0hEydk\",\"libSceAgc\",1,\"libSceAgc\",1]": {
+      "name": "sceAgcSuspendPoint",
+      "native": "sceAgcSuspendPoint",
+      "data": false,
+      "prototype": "int sceAgcSuspendPoint(void)",
+      "source": "core/libs/prx/libSceAgc/Misc/src/Suspend.cpp"
+    },
+    "[\"sce\",\"qgxDBjorUxs\",\"libSceHttp\",1,\"libSceHttp\",1]": {
+      "name": "sceHttpCreateConnectionWithURL",
+      "native": "sceHttpCreateConnectionWithURL",
+      "data": false,
+      "prototype": "int sceHttpCreateConnectionWithURL(int tmpl_id, const char* url, int enable_keep_alive)",
+      "source": "core/libs/prx/libSceHttp/Export.cpp"
+    },
+    "[\"sce\",\"P6A3ytpsiYc\",\"libSceHttp\",1,\"libSceHttp\",1]": {
+      "name": "sceHttpDeleteConnection",
+      "native": "sceHttpDeleteConnection",
+      "data": false,
+      "prototype": "int sceHttpDeleteConnection(int conn_id)",
+      "source": "core/libs/prx/libSceHttp/Export.cpp"
+    },
+    "[\"sce\",\"Aeu5wVKkF9w\",\"libSceHttp\",1,\"libSceHttp\",1]": {
+      "name": "sceHttpCreateRequestWithURL",
+      "native": "sceHttpCreateRequestWithURL",
+      "data": false,
+      "prototype": "int sceHttpCreateRequestWithURL(int conn_id, int method, const char* url, uint64_t content_length)",
+      "source": "core/libs/prx/libSceHttp/Export.cpp"
+    },
+    "[\"sce\",\"EY28T2bkN7k\",\"libSceHttp\",1,\"libSceHttp\",1]": {
+      "name": "sceHttpAddRequestHeader",
+      "native": "sceHttpAddRequestHeader",
+      "data": false,
+      "prototype": "int sceHttpAddRequestHeader(int id, const char* name, const char* value, uint32_t mode)",
+      "source": "core/libs/prx/libSceHttp/Export.cpp"
+    },
+    "[\"sce\",\"1e2BNwI-XzE\",\"libSceHttp\",1,\"libSceHttp\",1]": {
+      "name": "sceHttpSendRequest",
+      "native": "sceHttpSendRequest",
+      "data": false,
+      "prototype": "int sceHttpSendRequest(int request_id, const void* post_data, size_t size)",
+      "source": "core/libs/prx/libSceHttp/Export.cpp"
+    },
+    "[\"sce\",\"0a2TBNfE3BU\",\"libSceHttp\",1,\"libSceHttp\",1]": {
+      "name": "sceHttpGetStatusCode",
+      "native": "sceHttpGetStatusCode",
+      "data": false,
+      "prototype": "int sceHttpGetStatusCode(int request_id, int* status_code)",
+      "source": "core/libs/prx/libSceHttp/Export.cpp"
+    },
+    "[\"sce\",\"aCYPMSUIaP8\",\"libSceHttp\",1,\"libSceHttp\",1]": {
+      "name": "sceHttpGetAllResponseHeaders",
+      "native": "sceHttpGetAllResponseHeaders",
+      "data": false,
+      "prototype": "int sceHttpGetAllResponseHeaders(int request_id, char** header, size_t* header_size)",
+      "source": "core/libs/prx/libSceHttp/Export.cpp"
+    },
+    "[\"sce\",\"hPTXo3bICzI\",\"libSceHttp\",1,\"libSceHttp\",1]": {
+      "name": "sceHttpParseResponseHeader",
+      "native": "sceHttpParseResponseHeader",
+      "data": false,
+      "prototype": "int sceHttpParseResponseHeader(const char* header, std::size_t headerLen, const char* fieldStr,\n                                       const char** fieldValue, std::size_t* valueLen)",
+      "source": "core/libs/prx/libSceHttp/Export.cpp"
+    },
+    "[\"sce\",\"qe7oZ+v4PWA\",\"libSceHttp\",1,\"libSceHttp\",1]": {
+      "name": "sceHttpDeleteRequest",
+      "native": "sceHttpDeleteRequest",
+      "data": false,
+      "prototype": "int sceHttpDeleteRequest(int req_id)",
+      "source": "core/libs/prx/libSceHttp/Export.cpp"
+    },
+    "[\"sce\",\"dgJBaeJnGpo\",\"libSceNet\",1,\"libSceNet\",1]": {
+      "name": "sceNetPoolCreate",
+      "native": "sceNetPoolCreate",
+      "data": false,
+      "prototype": "int sceNetPoolCreate(const char* name, int size, int flags)",
+      "source": "core/libs/prx/libSceNet/Export.cpp"
+    },
+    "[\"sce\",\"hdpVEUDFW3s\",\"libSceSsl\",1,\"libSceSsl\",1]": {
+      "name": "sceSslInit",
+      "native": "sceSslInit_nid_postfix",
+      "data": false,
+      "prototype": "int sceSslInit_nid_postfix(std::uint64_t poolSize)",
+      "source": "core/libs/prx/libSceSsl/Export.cpp"
+    },
+    "[\"sce\",\"A9cVMUtEp4Y\",\"libSceHttp\",1,\"libSceHttp\",1]": {
+      "name": "sceHttpInit",
+      "native": "sceHttpInit_nid_postfix",
+      "data": false,
+      "prototype": "int sceHttpInit_nid_postfix(int memid, int ssl_ctx_id, uint64_t pool_size)",
+      "source": "core/libs/prx/libSceHttp/Export.cpp"
+    },
+    "[\"sce\",\"0gYjPTR-6cY\",\"libSceHttp\",1,\"libSceHttp\",1]": {
+      "name": "sceHttpCreateTemplate",
+      "native": "sceHttpCreateTemplate",
+      "data": false,
+      "prototype": "int sceHttpCreateTemplate(int http_ctx_id, const char* user_agent, int http_ver, int is_auto_proxy_conf)",
+      "source": "core/libs/prx/libSceHttp/Export.cpp"
+    },
+    "[\"sce\",\"T-mGo9f3Pu4\",\"libSceHttp\",1,\"libSceHttp\",1]": {
+      "name": "sceHttpSetAutoRedirect",
+      "native": "sceHttpSetAutoRedirect",
+      "data": false,
+      "prototype": "int sceHttpSetAutoRedirect(int id, int enable)",
+      "source": "core/libs/prx/libSceHttp/Export.cpp"
+    },
+    "[\"sce\",\"Tc-hAYDKtQc\",\"libSceHttp\",1,\"libSceHttp\",1]": {
+      "name": "sceHttpSetResolveTimeOut",
+      "native": "sceHttpSetResolveTimeOut",
+      "data": false,
+      "prototype": "int sceHttpSetResolveTimeOut(int id, uint32_t usec)",
+      "source": "core/libs/prx/libSceHttp/Export.cpp"
+    },
+    "[\"sce\",\"0S9tTH0uqTU\",\"libSceHttp\",1,\"libSceHttp\",1]": {
+      "name": "sceHttpSetConnectTimeOut",
+      "native": "sceHttpSetConnectTimeOut",
+      "data": false,
+      "prototype": "int sceHttpSetConnectTimeOut(int id, uint32_t usec)",
+      "source": "core/libs/prx/libSceHttp/Export.cpp"
+    },
+    "[\"sce\",\"xegFfZKBVlw\",\"libSceHttp\",1,\"libSceHttp\",1]": {
+      "name": "sceHttpSetSendTimeOut",
+      "native": "sceHttpSetSendTimeOut",
+      "data": false,
+      "prototype": "int sceHttpSetSendTimeOut(int id, uint32_t usec)",
+      "source": "core/libs/prx/libSceHttp/Export.cpp"
+    },
+    "[\"sce\",\"yigr4V0-HTM\",\"libSceHttp\",1,\"libSceHttp\",1]": {
+      "name": "sceHttpSetRecvTimeOut",
+      "native": "sceHttpSetRecvTimeOut",
+      "data": false,
+      "prototype": "int sceHttpSetRecvTimeOut(int id, uint32_t usec)",
+      "source": "core/libs/prx/libSceHttp/Export.cpp"
+    },
+    "[\"sce\",\"f42K37mm5RM\",\"libSceHttp\",1,\"libSceHttp\",1]": {
+      "name": "sceHttpsEnableOption",
+      "native": "sceHttpsEnableOption",
+      "data": false,
+      "prototype": "int sceHttpsEnableOption(int id, uint32_t ssl_flags)",
+      "source": "core/libs/prx/libSceHttp/Export.cpp"
+    },
+    "[\"sce\",\"yuO2H2Uvnos\",\"libSceHttp\",1,\"libSceHttp\",1]": {
+      "name": "sceHttpGetResponseContentLength",
+      "native": "sceHttpGetResponseContentLength",
+      "data": false,
+      "prototype": "int sceHttpGetResponseContentLength(int request_id, int* result, uint64_t* content_length)",
+      "source": "core/libs/prx/libSceHttp/Export.cpp"
+    },
+    "[\"sce\",\"P5pdoykPYTk\",\"libSceHttp\",1,\"libSceHttp\",1]": {
+      "name": "sceHttpReadData",
+      "native": "sceHttpReadData",
+      "data": false,
+      "prototype": "int sceHttpReadData(int request_id, void* data, size_t size)",
+      "source": "core/libs/prx/libSceHttp/Export.cpp"
+    },
+    "[\"sce\",\"U52BlHBvYvE\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "_Getmbcurmax",
+      "native": "_Getmbcurmax_nid_postfix",
+      "data": false,
+      "prototype": "int _Getmbcurmax_nid_postfix()",
+      "source": "core/libs/prx/libc/src/Multibyte.cpp"
+    },
+    "[\"sce\",\"pO96TwzOm5E\",\"libkernel\",1,\"libkernel\",1]": {
+      "name": "sceKernelGetDirectMemorySize",
+      "native": "sceKernelGetDirectMemorySize",
+      "data": false
+    },
+    "[\"sce\",\"rTXw65xmLIA\",\"libkernel\",1,\"libkernel\",1]": {
+      "name": "sceKernelAllocateDirectMemory",
+      "native": "sceKernelAllocateDirectMemory",
+      "data": false
+    },
+    "[\"sce\",\"L-Q3LEjIbgA\",\"libkernel\",1,\"libkernel\",1]": {
+      "name": "sceKernelMapDirectMemory",
+      "native": "sceKernelMapDirectMemory",
+      "data": false
+    },
+    "[\"sce\",\"hv1luiJrqQM\",\"libScePad\",1,\"libScePad\",1]": {
+      "name": "scePadInit",
+      "native": "scePadInit_nid_postfix",
+      "data": false,
+      "prototype": "int scePadInit_nid_postfix(void)",
+      "source": "core/libs/prx/libScePad/Export.cpp"
+    },
+    "[\"sce\",\"xk0AcarP3V4\",\"libScePad\",1,\"libScePad\",1]": {
+      "name": "scePadOpen",
+      "native": "scePadOpen_nid_postfix",
+      "data": false,
+      "prototype": "int scePadOpen_nid_postfix(int userId, int type, int index, const void* param)",
+      "source": "core/libs/prx/libScePad/Export.cpp"
+    },
+    "[\"sce\",\"W2G-yoyMF5U\",\"libScePad\",1,\"libScePad\",1]": {
+      "name": "scePadSetVibrationMode",
+      "native": "scePadSetVibrationMode",
+      "data": false,
+      "prototype": "int scePadSetVibrationMode(int handle, int mode)",
+      "source": "core/libs/prx/libScePad/Export.cpp"
+    },
+    "[\"sce\",\"RR4novUEENY\",\"libScePad\",1,\"libScePad\",1]": {
+      "name": "scePadSetLightBar",
+      "native": "scePadSetLightBar",
+      "data": false,
+      "prototype": "int scePadSetLightBar(int handle, const PadLightBarParam* param)",
+      "source": "core/libs/prx/libScePad/Export.cpp"
+    },
+    "[\"sce\",\"yFVnOdGxvZY\",\"libScePad\",1,\"libScePad\",1]": {
+      "name": "scePadSetVibration",
+      "native": "scePadSetVibration",
+      "data": false,
+      "prototype": "int scePadSetVibration(int handle, const PadVibrationParam* param)",
+      "source": "core/libs/prx/libScePad/Export.cpp"
+    },
+    "[\"sce\",\"6ncge5+l5Qs\",\"libScePad\",1,\"libScePad\",1]": {
+      "name": "scePadClose",
+      "native": "scePadClose_nid_postfix",
+      "data": false,
+      "prototype": "int scePadClose_nid_postfix(int handle)",
+      "source": "core/libs/prx/libScePad/Export.cpp"
+    },
+    "[\"sce\",\"YndgXqQVV7c\",\"libScePad\",1,\"libScePad\",1]": {
+      "name": "scePadReadState",
+      "native": "scePadReadState",
+      "data": false,
+      "prototype": "int scePadReadState(int handle, PadData* data)",
+      "source": "core/libs/prx/libScePad/Export.cpp"
+    },
+    "[\"sce\",\"-Jp7F+pXxNg\",\"libkernel\",1,\"libkernel\",1]": {
+      "name": "pipe",
+      "native": "pipe_nid_postfix",
+      "data": false,
+      "prototype": "extern \"C\" int pipe_nid_postfix(int* descriptors)",
+      "source": "core/libs/prx/libkernel/File/src/Stdio.cpp"
+    },
+    "[\"sce\",\"qdlHjTa9hQ4\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "fdopen",
+      "native": "fdopen_nid_postfix",
+      "data": false,
+      "prototype": "FileStream* fdopen_nid_postfix(int descriptor, const char* mode)",
+      "source": "core/libs/prx/libc/src/FileAndHeap.cpp"
+    },
+    "[\"sce\",\"QMFyLoqNxIg\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "setvbuf",
+      "native": "setvbuf_nid_postfix",
+      "data": false,
+      "prototype": "int setvbuf_nid_postfix(FileStream* stream, char* buffer, int mode, std::size_t size)",
+      "source": "core/libs/prx/libc/src/StandardStreams.cpp"
+    },
+    "[\"sce\",\"j3YMu1MVNNo\",\"libSceUserService\",1,\"libSceUserService\",1]": {
+      "name": "sceUserServiceInitialize",
+      "native": "sceUserServiceInitialize",
+      "data": false,
+      "prototype": "int sceUserServiceInitialize(const void* params)",
+      "source": "core/libs/prx/libSceUserService/Export.cpp"
+    },
+    "[\"sce\",\"CdWp0oHWGr0\",\"libSceUserService\",1,\"libSceUserService\",1]": {
+      "name": "sceUserServiceGetInitialUser",
+      "native": "sceUserServiceGetInitialUser",
+      "data": false,
+      "prototype": "int sceUserServiceGetInitialUser(int* user_id)",
+      "source": "core/libs/prx/libSceUserService/Export.cpp"
+    },
+    "[\"sce\",\"9JYNqN6jAKI\",\"libkernel\",1,\"libkernel\",1]": {
+      "name": "sceKernelDebugOutText",
+      "native": "sceKernelDebugOutText",
+      "data": false,
+      "prototype": "extern \"C\" int sceKernelDebugOutText(int channel, const char* text)",
+      "source": "core/libs/prx/libkernel/System/src/Notification.cpp"
+    },
+    "[\"sce\",\"MUjC4lbHrK4\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "fflush",
+      "native": "fflush_nid_postfix",
+      "data": false,
+      "prototype": "int fflush_nid_postfix(FileStream* stream)",
+      "source": "core/libs/prx/libc/src/FileAndHeap.cpp"
+    },
+    "[\"sce\",\"JoBqSQt1yyA\",\"libSceSystemService\",1,\"libSceSystemService\",1]": {
+      "name": "sceSystemServiceLoadExec",
+      "native": "sceSystemServiceLoadExec",
+      "data": false,
+      "prototype": "int sceSystemServiceLoadExec(const char* path, const char* const* arguments)",
+      "source": "core/libs/prx/libSceSystemService/Export.cpp"
+    },
+    "[\"sce\",\"zl7hupSO0C0\",\"libkernel\",1,\"libkernel\",1]": {
+      "name": "sceKernelSendNotificationRequest",
+      "native": "sceKernelSendNotificationRequest",
+      "data": false
+    },
+    "[\"sce\",\"4J2sUJmuHZQ\",\"libkernel\",1,\"libkernel\",1]": {
+      "name": "sceKernelGetProcessTime",
+      "native": "sceKernelGetProcessTime",
+      "data": false,
+      "prototype": "std::uint64_t sceKernelGetProcessTime()",
+      "source": "core/libs/prx/libkernel/Time/Time.cpp"
+    },
+    "[\"sce\",\"1G3lF1Gg1k8\",\"libkernel\",1,\"libkernel\",1]": {
+      "name": "sceKernelOpen",
+      "native": "sceKernelOpen",
+      "data": false,
+      "prototype": "int sceKernelOpen(const char* path, int flags, std::uint16_t mode)",
+      "source": "core/libs/prx/libkernel/File/src/Open.cpp"
+    },
+    "[\"sce\",\"j2AIqSqJP0w\",\"libkernel\",1,\"libkernel\",1]": {
+      "name": "sceKernelGetdents",
+      "native": "sceKernelGetdents",
+      "data": false,
+      "prototype": "int sceKernelGetdents(int fd, char* buf, int nbytes)",
+      "source": "core/libs/prx/libkernel/File/src/Stdio.cpp"
+    },
+    "[\"sce\",\"UK2Tl2DWUns\",\"libkernel\",1,\"libkernel\",1]": {
+      "name": "sceKernelClose",
+      "native": "sceKernelClose",
+      "data": false,
+      "prototype": "int sceKernelClose(int d)",
+      "source": "core/libs/prx/libkernel/File/src/Open.cpp"
+    },
+    "[\"sce\",\"uoUpLGNkygk\",\"libSceCommonDialog\",1,\"libSceCommonDialog\",1]": {
+      "name": "sceCommonDialogInitialize",
+      "native": "sceCommonDialogInitialize",
+      "data": false,
+      "prototype": "int sceCommonDialogInitialize(void)",
+      "source": "core/libs/prx/libSceCommonDialog/Export.cpp"
+    },
+    "[\"sce\",\"g8cM39EUZ6o\",\"libSceSysmodule\",1,\"libSceSysmodule\",1]": {
+      "name": "sceSysmoduleLoadModule",
+      "native": "sceSysmoduleLoadModule",
+      "data": false,
+      "prototype": "int sceSysmoduleLoadModule(std::uint16_t id)",
+      "source": "core/libs/prx/libSceSysmodule/Export.cpp"
+    },
+    "[\"sce\",\"eNb53LQJmIM\",\"libSceUserService\",1,\"libSceUserService\",1]": {
+      "name": "sceUserServiceGetForegroundUser",
+      "native": "sceUserServiceGetForegroundUser",
+      "data": false,
+      "prototype": "int sceUserServiceGetForegroundUser(int* user_id)",
+      "source": "core/libs/prx/libSceUserService/Export.cpp"
+    },
+    "[\"sce\",\"NUeBrN7hzf0\",\"libSceImeDialog\",1,\"libSceImeDialog\",1]": {
+      "name": "sceImeDialogInit",
+      "native": "sceImeDialogInit",
+      "data": false,
+      "prototype": "int sceImeDialogInit(const Param* param, const ExtendedParam* extended)",
+      "source": "core/libs/prx/libSceImeDialog/Export.cpp"
+    },
+    "[\"sce\",\"IADmD4tScBY\",\"libSceImeDialog\",1,\"libSceImeDialog\",1]": {
+      "name": "sceImeDialogGetStatus",
+      "native": "sceImeDialogGetStatus",
+      "data": false,
+      "prototype": "int sceImeDialogGetStatus(void)",
+      "source": "core/libs/prx/libSceImeDialog/Export.cpp"
+    },
+    "[\"sce\",\"x01jxu+vxlc\",\"libSceImeDialog\",1,\"libSceImeDialog\",1]": {
+      "name": "sceImeDialogGetResult",
+      "native": "sceImeDialogGetResult",
+      "data": false,
+      "prototype": "int sceImeDialogGetResult(Result* result)",
+      "source": "core/libs/prx/libSceImeDialog/Export.cpp"
+    },
+    "[\"sce\",\"gyTyVn+bXMw\",\"libSceImeDialog\",1,\"libSceImeDialog\",1]": {
+      "name": "sceImeDialogTerm",
+      "native": "sceImeDialogTerm",
+      "data": false,
+      "prototype": "int sceImeDialogTerm(void)",
+      "source": "core/libs/prx/libSceImeDialog/Export.cpp"
+    },
+    "[\"sce\",\"Up36PTk687E\",\"libSceVideoOut\",1,\"libSceVideoOut\",1]": {
+      "name": "sceVideoOutOpen",
+      "native": "sceVideoOutOpen",
+      "data": false
+    },
+    "[\"sce\",\"CBiu4mCE1DA\",\"libSceVideoOut\",1,\"libSceVideoOut\",1]": {
+      "name": "sceVideoOutSetFlipRate",
+      "native": "sceVideoOutSetFlipRate",
+      "data": false
+    },
+    "[\"sce\",\"PjS5uASwcV8\",\"libSceVideoOut\",1,\"libSceVideoOut\",1]": {
+      "name": "sceVideoOutSetBufferAttribute2",
+      "native": "sceVideoOutSetBufferAttribute2",
+      "data": false
+    },
+    "[\"sce\",\"rKBUtgRrtbk\",\"libSceVideoOut\",1,\"libSceVideoOut\",1]": {
+      "name": "sceVideoOutRegisterBuffers2",
+      "native": "sceVideoOutRegisterBuffers2",
+      "data": false
+    },
+    "[\"sce\",\"uquVH4-Du78\",\"libSceVideoOut\",1,\"libSceVideoOut\",1]": {
+      "name": "sceVideoOutClose",
+      "native": "sceVideoOutClose",
+      "data": false,
+      "prototype": "int sceVideoOutClose(int handle)",
+      "source": "core/libs/prx/libSceVideoOut/src/Output.cpp"
+    },
+    "[\"sce\",\"zgXifHT9ErY\",\"libSceVideoOut\",1,\"libSceVideoOut\",1]": {
+      "name": "sceVideoOutIsFlipPending",
+      "native": "sceVideoOutIsFlipPending",
+      "data": false,
+      "prototype": "int sceVideoOutIsFlipPending(int handle)",
+      "source": "core/libs/prx/libSceVideoOut/src/Output.cpp"
+    },
+    "[\"sce\",\"U46NwOiJpys\",\"libSceVideoOut\",1,\"libSceVideoOut\",1]": {
+      "name": "sceVideoOutSubmitFlip",
+      "native": "sceVideoOutSubmitFlip",
+      "data": false
+    },
+    "[\"sce\",\"Vo5V8KAwCmk\",\"libSceSystemService\",1,\"libSceSystemService\",1]": {
+      "name": "sceSystemServiceHideSplashScreen",
+      "native": "sceSystemServiceHideSplashScreen",
+      "data": false
+    },
+    "[\"sce\",\"L1SBTkC+Cvw\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "abort",
+      "native": "abort_nid_postfix",
+      "data": false,
+      "prototype": "void abort_nid_postfix(uint64_t,uint64_t,uint64_t,uint64_t,uint64_t,uint64_t)",
+      "source": "core/libs/prx/libc/src/Process.cpp"
+    },
+    "[\"sce\",\"Noj9PsJrsa8\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "wmemmove",
+      "native": "wmemmove_nid_postfix",
+      "data": false,
+      "prototype": "char16_t* wmemmove_nid_postfix(char16_t* dest, const char16_t* src, size_t n)",
+      "source": "core/libs/prx/libc/src/Strings.cpp"
+    },
+    "[\"sce\",\"qVHpv0PxouI\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "mbrtowc",
+      "native": "mbrtowc_nid_postfix",
+      "data": false,
+      "prototype": "std::size_t mbrtowc_nid_postfix(std::uint16_t* destination, const char* source, std::size_t count, void*)",
+      "source": "core/libs/prx/libc/src/Multibyte.cpp"
+    },
+    "[\"sce\",\"y9OoA+P5cjk\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "wcrtomb",
+      "native": "wcrtomb_nid_postfix",
+      "data": false,
+      "prototype": "std::size_t wcrtomb_nid_postfix(char* destination, std::uint16_t value, void*)",
+      "source": "core/libs/prx/libc/src/Multibyte.cpp"
+    },
+    "[\"sce\",\"WkkeywLJcgU\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "wcslen",
+      "native": "wcslen_nid_postfix",
+      "data": false,
+      "prototype": "size_t wcslen_nid_postfix(const char16_t* s)",
+      "source": "core/libs/prx/libc/src/Strings.cpp"
+    },
+    "[\"sce\",\"DfivPArhucg\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "memcmp",
+      "native": "memcmp_nid_postfix",
+      "data": false,
+      "prototype": "int memcmp_nid_postfix(const void* s1, const void* s2, size_t n)",
+      "source": "core/libs/prx/libc/src/Strings.cpp"
+    },
+    "[\"sce\",\"Ls4tzzhimqQ\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "strcat",
+      "native": "strcat_nid_postfix",
+      "data": false,
+      "prototype": "char* strcat_nid_postfix(char* dest, const char* src)",
+      "source": "core/libs/prx/libc/src/Strings.cpp"
+    },
+    "[\"sce\",\"Ezzq78ZgHPs\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "wcschr",
+      "native": "wcschr_nid_postfix",
+      "data": false,
+      "prototype": "const char16_t* wcschr_nid_postfix(const char16_t* s, char16_t c)",
+      "source": "core/libs/prx/libc/src/Strings.cpp"
+    },
+    "[\"sce\",\"n7AepwR0s34\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "mktime",
+      "native": "mktime_nid_postfix",
+      "data": false,
+      "prototype": "int64_t mktime_nid_postfix(GuestTm* timeptr)",
+      "source": "core/libs/prx/libc/src/Time.cpp"
+    },
+    "[\"sce\",\"efhK-YSUYYQ\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "localtime",
+      "native": "localtime_nid_postfix",
+      "data": false,
+      "prototype": "GuestTm* localtime_nid_postfix(const int64_t* timer)",
+      "source": "core/libs/prx/libc/src/Time.cpp"
+    },
+    "[\"sce\",\"iVhJZvAO2aQ\",\"libSceLibcInternal\",1,\"libSceLibcInternal\",1]": {
+      "name": "lldiv",
+      "bridge": "qualified CRT"
+    },
+    "[\"sce\",\"Fjc4-n1+y2g\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "__elf_phdr_match_addr",
+      "native": "__elf_phdr_match_addr_nid_postfix",
+      "data": false
+    },
+    "[\"sce\",\"9BcDykPmo1I\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "__error",
+      "native": "__error_nid_postfix",
+      "data": false
+    },
+    "[\"sce\",\"djxxOmW6-aw\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "__progname",
+      "native": "__progname_nid_postfix",
+      "data": true
+    },
+    "[\"sce\",\"kbw4UHHSYy0\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "__pthread_cxa_finalize",
+      "native": "__pthread_cxa_finalize_nid_postfix",
+      "data": false
+    },
+    "[\"sce\",\"Ou3iL1abvng\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "__stack_chk_fail",
+      "native": "__stack_chk_fail_nid_postfix",
+      "data": false
+    },
+    "[\"sce\",\"f7uOxY9mM1U\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "__stack_chk_guard",
+      "native": "__stack_chk_guard_nid_postfix",
+      "data": true
+    },
+    "[\"sce\",\"vNe1w4diLCs\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "__tls_get_addr",
+      "native": "__tls_get_addr_nid_postfix",
+      "data": false
+    },
+    "[\"sce\",\"NNtFaKJbPt0\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "_close",
+      "native": "_close_nid_postfix",
+      "data": false
+    },
+    "[\"sce\",\"6Z83sYWFlA8\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "_exit",
+      "native": "_exit_nid_postfix",
+      "data": false
+    },
+    "[\"sce\",\"crb5j7mkk1c\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "_is_signal_return",
+      "native": "_is_signal_return_nid_postfix",
+      "data": false
+    },
+    "[\"sce\",\"NhpspxdjEKU\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "_nanosleep",
+      "native": "_nanosleep_nid_postfix",
+      "data": false
+    },
+    "[\"sce\",\"6c3rCVE-fTU\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "_open",
+      "native": "_open_nid_postfix",
+      "data": false
+    },
+    "[\"sce\",\"DRuBt2pvICk\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "_read",
+      "native": "_read_nid_postfix",
+      "data": false
+    },
+    "[\"sce\",\"p5EcQeEeJAE\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "_sceKernelRtldSetApplicationHeapAPI",
+      "native": "_sceKernelRtldSetApplicationHeapAPI_nid_postfix",
+      "data": false
+    },
+    "[\"sce\",\"8OnWXlgQlvo\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "_sceKernelRtldThreadAtexitDecrement",
+      "native": "_sceKernelRtldThreadAtexitDecrement_nid_postfix",
+      "data": false
+    },
+    "[\"sce\",\"Tz4RNUCBbGI\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "_sceKernelRtldThreadAtexitIncrement",
+      "native": "_sceKernelRtldThreadAtexitIncrement_nid_postfix",
+      "data": false
+    },
+    "[\"sce\",\"pB-yGZ2nQ9o\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "_sceKernelSetThreadAtexitCount",
+      "native": "_sceKernelSetThreadAtexitCount_nid_postfix",
+      "data": false
+    },
+    "[\"sce\",\"WhCc1w3EhSI\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "_sceKernelSetThreadAtexitReport",
+      "native": "_sceKernelSetThreadAtexitReport_nid_postfix",
+      "data": false
+    },
+    "[\"sce\",\"rNhWz+lvOMU\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "_sceKernelSetThreadDtors",
+      "native": "_sceKernelSetThreadDtors_nid_postfix",
+      "data": false
+    },
+    "[\"sce\",\"6xVpy0Fdq+I\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "_sigprocmask",
+      "native": "_sigprocmask_nid_postfix",
+      "data": false
+    },
+    "[\"sce\",\"FxVZqBAA7ks\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "_write",
+      "native": "_write_nid_postfix",
+      "data": false
+    },
+    "[\"sce\",\"lLMT9vJAck0\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "clock_gettime",
+      "native": "clock_gettime_nid_postfix",
+      "data": false
+    },
+    "[\"sce\",\"hHlZQUnlxSM\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "getrusage",
+      "native": "getrusage_nid_postfix",
+      "data": false
+    },
+    "[\"sce\",\"n88vx3C5nW8\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "gettimeofday",
+      "native": "gettimeofday_nid_postfix",
+      "data": false
+    },
+    "[\"sce\",\"Oy6IpwgtYOk\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "lseek",
+      "native": "lseek_nid_postfix",
+      "data": false
+    },
+    "[\"sce\",\"yS8U2TGCe1A\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "nanosleep",
+      "native": "nanosleep_nid_postfix",
+      "data": false
+    },
+    "[\"sce\",\"mkx2fVhNMsg\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "pthread_cond_broadcast",
+      "native": "pthread_cond_broadcast_nid_postfix",
+      "data": false
+    },
+    "[\"sce\",\"Op8TBGY5KHg\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "pthread_cond_wait",
+      "native": "pthread_cond_wait_nid_postfix",
+      "data": false
+    },
+    "[\"sce\",\"7H0iTOciTLo\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "pthread_mutex_lock",
+      "native": "pthread_mutex_lock_nid_postfix",
+      "data": false
+    },
+    "[\"sce\",\"2Z+PpY6CaJg\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "pthread_mutex_unlock",
+      "native": "pthread_mutex_unlock_nid_postfix",
+      "data": false
+    },
+    "[\"sce\",\"iGjsr1WAtI0\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "pthread_rwlock_rdlock",
+      "native": "pthread_rwlock_rdlock_nid_postfix",
+      "data": false
+    },
+    "[\"sce\",\"EgmLo6EWgso\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "pthread_rwlock_unlock",
+      "native": "pthread_rwlock_unlock_nid_postfix",
+      "data": false
+    },
+    "[\"sce\",\"sIlRvQqsN2Y\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "pthread_rwlock_wrlock",
+      "native": "pthread_rwlock_wrlock_nid_postfix",
+      "data": false
+    },
+    "[\"sce\",\"c7ZnT7V1B98\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "rmdir",
+      "native": "rmdir_nid_postfix",
+      "data": false
+    },
+    "[\"sce\",\"fgIsQ10xYVA\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "sceKernelChmod",
+      "native": "sceKernelChmod_nid_postfix",
+      "data": false
+    },
+    "[\"sce\",\"UK2Tl2DWUns\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "sceKernelClose",
+      "native": "sceKernelClose",
+      "data": false
+    },
+    "[\"sce\",\"0NTHN1NKONI\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "sceKernelConvertLocaltimeToUtc",
+      "native": "sceKernelConvertLocaltimeToUtc",
+      "data": false
+    },
+    "[\"sce\",\"-o5uEDpN+oY\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "sceKernelConvertUtcToLocaltime",
+      "native": "sceKernelConvertUtcToLocaltime",
+      "data": false
+    },
+    "[\"sce\",\"OMDRKKAZ8I4\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "sceKernelDebugRaiseException",
+      "native": "sceKernelDebugRaiseException",
+      "data": false
+    },
+    "[\"sce\",\"zE-wXIZjLoM\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "sceKernelDebugRaiseExceptionOnReleaseMode",
+      "native": "sceKernelDebugRaiseExceptionOnReleaseMode",
+      "data": false
+    },
+    "[\"sce\",\"RpQJJVKTiFM\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "sceKernelGetModuleInfoForUnwind",
+      "native": "sceKernelGetModuleInfoForUnwind",
+      "data": false
+    },
+    "[\"sce\",\"f7KBOafysXo\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "sceKernelGetModuleInfoFromAddr",
+      "native": "sceKernelGetModuleInfoFromAddr",
+      "data": false
+    },
+    "[\"sce\",\"959qrazPIrg\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "sceKernelGetProcParam",
+      "native": "sceKernelGetProcParam",
+      "data": false
+    },
+    "[\"sce\",\"4J2sUJmuHZQ\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "sceKernelGetProcessTime",
+      "native": "sceKernelGetProcessTime",
+      "data": false
+    },
+    "[\"sce\",\"py6L8jiVAN8\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "sceKernelGetSanitizerMallocReplaceExternal",
+      "native": "sceKernelGetSanitizerMallocReplaceExternal",
+      "data": false
+    },
+    "[\"sce\",\"bnZxYgAFeA0\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "sceKernelGetSanitizerNewReplaceExternal",
+      "native": "sceKernelGetSanitizerNewReplaceExternal",
+      "data": false
+    },
+    "[\"sce\",\"j2AIqSqJP0w\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "sceKernelGetdents",
+      "native": "sceKernelGetdents",
+      "data": false
+    },
+    "[\"sce\",\"-YTW+qXc3CQ\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "sceKernelInternalMemoryGetModuleSegmentInfo",
+      "native": "sceKernelInternalMemoryGetModuleSegmentInfo_nid_postfix",
+      "data": false
+    },
+    "[\"sce\",\"jh+8XiK4LeE\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "sceKernelIsAddressSanitizerEnabled",
+      "native": "sceKernelIsAddressSanitizerEnabled",
+      "data": false
+    },
+    "[\"sce\",\"mL8NDH86iQI\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "sceKernelMapNamedFlexibleMemory",
+      "native": "sceKernelMapNamedFlexibleMemory",
+      "data": false
+    },
+    "[\"sce\",\"1-LFLmRFxxM\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "sceKernelMkdir",
+      "native": "sceKernelMkdir",
+      "data": false
+    },
+    "[\"sce\",\"3k6kx-zOOSQ\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "sceKernelMlock",
+      "native": "sceKernelMlock_nid_postfix",
+      "data": false
+    },
+    "[\"sce\",\"cQke9UuBQOk\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "sceKernelMunmap",
+      "native": "sceKernelMunmap",
+      "data": false
+    },
+    "[\"sce\",\"1G3lF1Gg1k8\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "sceKernelOpen",
+      "native": "sceKernelOpen",
+      "data": false
+    },
+    "[\"sce\",\"52NcYU9+lEo\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "sceKernelRename",
+      "native": "sceKernelRename",
+      "data": false
+    },
+    "[\"sce\",\"eV9wAD2riIA\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "sceKernelStat",
+      "native": "sceKernelStat",
+      "data": false
+    },
+    "[\"sce\",\"WlyEA-sLDf0\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "sceKernelTruncate",
+      "native": "sceKernelTruncate_nid_postfix",
+      "data": false
+    },
+    "[\"sce\",\"AUXVxWeJU-A\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "sceKernelUnlink",
+      "native": "sceKernelUnlink",
+      "data": false
+    },
+    "[\"sce\",\"0Cq8ipKr9n0\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "sceKernelUtimes",
+      "native": "sceKernelUtimes_nid_postfix",
+      "data": false
+    },
+    "[\"sce\",\"62KCwEMmzcM\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "scePthreadAttrDestroy",
+      "native": "scePthreadAttrDestroy",
+      "data": false
+    },
+    "[\"sce\",\"x1X76arYMxU\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "scePthreadAttrGet",
+      "native": "scePthreadAttrGet",
+      "data": false
+    },
+    "[\"sce\",\"8+s5BzZjxSg\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "scePthreadAttrGetaffinity",
+      "native": "scePthreadAttrGetaffinity",
+      "data": false
+    },
+    "[\"sce\",\"JaRMy+QcpeU\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "scePthreadAttrGetdetachstate",
+      "native": "scePthreadAttrGetdetachstate",
+      "data": false
+    },
+    "[\"sce\",\"FXPWHNk8Of0\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "scePthreadAttrGetschedparam",
+      "native": "scePthreadAttrGetschedparam",
+      "data": false
+    },
+    "[\"sce\",\"nsYoNRywwNg\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "scePthreadAttrInit",
+      "native": "scePthreadAttrInit",
+      "data": false
+    },
+    "[\"sce\",\"eXbUSpEaTsA\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "scePthreadAttrSetinheritsched",
+      "native": "scePthreadAttrSetinheritsched",
+      "data": false
+    },
+    "[\"sce\",\"DzES9hQF4f4\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "scePthreadAttrSetschedparam",
+      "native": "scePthreadAttrSetschedparam",
+      "data": false
+    },
+    "[\"sce\",\"UTXzJbWhhTE\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "scePthreadAttrSetstacksize",
+      "native": "scePthreadAttrSetstacksize",
+      "data": false
+    },
+    "[\"sce\",\"JGgj7Uvrl+A\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "scePthreadCondBroadcast",
+      "native": "scePthreadCondBroadcast",
+      "data": false
+    },
+    "[\"sce\",\"g+PZd2hiacg\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "scePthreadCondDestroy",
+      "native": "scePthreadCondDestroy",
+      "data": false
+    },
+    "[\"sce\",\"2Tb92quprl0\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "scePthreadCondInit",
+      "native": "scePthreadCondInit",
+      "data": false
+    },
+    "[\"sce\",\"kDh-NfxgMtE\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "scePthreadCondSignal",
+      "native": "scePthreadCondSignal",
+      "data": false
+    },
+    "[\"sce\",\"BmMjYxmew1w\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "scePthreadCondTimedwait",
+      "native": "scePthreadCondTimedwait",
+      "data": false
+    },
+    "[\"sce\",\"WKAXJ4XBPQ4\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "scePthreadCondWait",
+      "native": "scePthreadCondWait",
+      "data": false
+    },
+    "[\"sce\",\"6UgtwV+0zb4\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "scePthreadCreate",
+      "native": "scePthreadCreate",
+      "data": false
+    },
+    "[\"sce\",\"4qGrR6eoP9Y\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "scePthreadDetach",
+      "native": "scePthreadDetach",
+      "data": false
+    },
+    "[\"sce\",\"3PtV6p3QNX4\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "scePthreadEqual",
+      "native": "scePthreadEqual",
+      "data": false
+    },
+    "[\"sce\",\"3kg7rT0NQIs\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "scePthreadExit",
+      "native": "scePthreadExit",
+      "data": false
+    },
+    "[\"sce\",\"How7B8Oet6k\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "scePthreadGetname",
+      "native": "scePthreadGetname",
+      "data": false
+    },
+    "[\"sce\",\"eoht7mQOCmo\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "scePthreadGetspecific",
+      "native": "scePthreadGetspecific",
+      "data": false
+    },
+    "[\"sce\",\"onNY9Byn-W8\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "scePthreadJoin",
+      "native": "scePthreadJoin",
+      "data": false
+    },
+    "[\"sce\",\"geDaqgH9lTg\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "scePthreadKeyCreate",
+      "native": "scePthreadKeyCreate",
+      "data": false
+    },
+    "[\"sce\",\"PrdHuuDekhY\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "scePthreadKeyDelete",
+      "native": "scePthreadKeyDelete",
+      "data": false
+    },
+    "[\"sce\",\"2Of0f+3mhhE\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "scePthreadMutexDestroy",
+      "native": "scePthreadMutexDestroy",
+      "data": false
+    },
+    "[\"sce\",\"cmo1RIYva9o\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "scePthreadMutexInit",
+      "native": "scePthreadMutexInit",
+      "data": false
+    },
+    "[\"sce\",\"9UK1vLZQft4\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "scePthreadMutexLock",
+      "native": "scePthreadMutexLock",
+      "data": false
+    },
+    "[\"sce\",\"IafI2PxcPnQ\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "scePthreadMutexTimedlock",
+      "native": "scePthreadMutexTimedlock",
+      "data": false
+    },
+    "[\"sce\",\"upoVrzMHFeE\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "scePthreadMutexTrylock",
+      "native": "scePthreadMutexTrylock",
+      "data": false
+    },
+    "[\"sce\",\"tn3VlD0hG60\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "scePthreadMutexUnlock",
+      "native": "scePthreadMutexUnlock",
+      "data": false
+    },
+    "[\"sce\",\"smWEktiyyG0\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "scePthreadMutexattrDestroy",
+      "native": "scePthreadMutexattrDestroy",
+      "data": false
+    },
+    "[\"sce\",\"F8bUHwAG284\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "scePthreadMutexattrInit",
+      "native": "scePthreadMutexattrInit",
+      "data": false
+    },
+    "[\"sce\",\"iMp8QpE+XO4\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "scePthreadMutexattrSettype",
+      "native": "scePthreadMutexattrSettype",
+      "data": false
+    },
+    "[\"sce\",\"14bOACANTBo\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "scePthreadOnce",
+      "native": "scePthreadOnce",
+      "data": false
+    },
+    "[\"sce\",\"aI+OeCz8xrQ\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "scePthreadSelf",
+      "native": "scePthreadSelf",
+      "data": false
+    },
+    "[\"sce\",\"+BzXYkqYeLE\",\"libkernel\",1,\"libkernel\",257]": {
+      "name": "scePthreadSetspecific",
+      "native": "scePthreadSetspecific",
+      "data": false
+    },
+    "[\"sce\",\"gQX+4GDQjpM\",\"libSceLibcInternalExt\",1,\"libSceLibcInternal\",257]": {
+      "name": "malloc",
+      "native": "malloc_nid_postfix",
+      "data": false
+    },
+    "[\"sce\",\"tIhsqj0qsFE\",\"libSceLibcInternalExt\",1,\"libSceLibcInternal\",257]": {
+      "name": "free",
+      "native": "free_nid_postfix",
+      "data": false
+    },
+    "[\"sce\",\"cVSk9y8URbc\",\"libSceLibcInternalExt\",1,\"libSceLibcInternal\",257]": {
+      "name": "posix_memalign",
+      "native": "posix_memalign_nid_postfix",
+      "data": false
+    },
+    "[\"sce\",\"NWtTN10cJzE\",\"libSceLibcInternalExt\",1,\"libSceLibcInternal\",257]": {
+      "name": "sceLibcHeapGetTraceInfo",
+      "native": "sceLibcHeapGetTraceInfo_nid_postfix",
+      "data": false
+    },
+    "[\"sce\",\"EHsF2i9FXPM\",\"libSceLibcInternalExt\",1,\"libSceLibcInternal\",257]": {
+      "name": "sceLibcInternalBacktraceForGame",
+      "native": "sceLibcInternalBacktraceForGame_nid_postfix",
+      "data": false
+    },
+    "[\"sce\",\"al3JzFI9MQ0\",\"libSceLibcInternalExt\",1,\"libSceLibcInternal\",257]": {
+      "name": "sceLibcInternalHeapErrorReportForGame",
+      "native": "sceLibcInternalHeapErrorReportForGame_nid_postfix",
+      "data": false
+    },
+    "[\"sce\",\"4fU5yvOkVG4\",\"libSceSysmodule\",1,\"libSceSysmodule\",257]": {
+      "name": "sceSysmoduleGetModuleInfoForUnwind",
+      "native": "sceSysmoduleGetModuleInfoForUnwind",
+      "data": false
+    }
+  },
+  "sources": {
+    "core/libs/SceTypes.hpp": "1fb2f8e7f03898bfa7ff1377e6038248bc0cb059696db96ce99fcc04dd554de5",
+    "core/libs/native/NativeAotSce.cpp": "152d960b3cda033f568840553fbf5832ab68af8ce1dadac1c7aa2f3672a50a1c",
+    "core/libs/native/NativeAotSce.hpp": "2d51a2a231298c4380340f145a15bd166d4ab60015c53232671d4baf9b545332",
+    "core/libs/native/NativeAotSceAbi.hpp": "b455886f8e3272d2f0aea1b91854cbb5056d64c84629fac4180785ee34b11957",
+    "core/libs/native/NativeAotSceCrt.cpp": "13e0e62c09c9834e8a309e26bbface863a1b9e16b308abc7fa0d9d21a2856fc6",
+    "core/libs/native/NativeAotSceCrt.hpp": "480addb14ebcb680d8b27f70677b120c96003c18b4fc63323fcfe97e41da8d5e",
+    "core/libs/prx/libSceAgc/Cb/src/Dispatch.cpp": "819d24d079dabeac9bc6a1d2fdd25f4d9d428070da5b51f17769911648672428",
+    "core/libs/prx/libSceAgc/Cb/src/Registers.cpp": "f454dd936c4769d6e05b03abae179a6ae56c99e6cf419984349adf7d91997020",
+    "core/libs/prx/libSceAgc/DcbFlow/src/Memory.cpp": "06606ba96e0181cbedfb05fa50ee0ecd436f42f8768419a5d06d9dcb5fac1fa7",
+    "core/libs/prx/libSceAgc/DcbState/src/Display.cpp": "c5bcfe8a763167ef1f90d744d5bb7560b6fe676faaff89391c039e84e991fdec",
+    "core/libs/prx/libSceAgc/DcbState/src/Init.cpp": "3735aadd176b25f566ffc14e3ed55afa84e4d9738b9f5776554abe3b67a41628",
+    "core/libs/prx/libSceAgc/Misc/src/Suspend.cpp": "3405a0566aaf47bf47f889a6f73bbf51cee84a7de65c39436a995fc449d94dd4",
+    "core/libs/prx/libSceAgcDriver/Submit/src/Dcb.cpp": "bf240893a142a99119f3657828a4869a08121e16b44efbb8c6ee409e8a08e9de",
+    "core/libs/prx/libSceAudioOut/src/AudioOut.cpp": "9c732d6c2ba9439b21480fe92e5bcb5c7a92550e0ca6e786c97289d9be2d45b4",
+    "core/libs/prx/libSceCommonDialog/Export.cpp": "5a18b3be04b031a973da092f94343233244375afc5798ae236faff8f1bf58a69",
+    "core/libs/prx/libSceHttp/Export.cpp": "daa72fa75a79b2eaa0199d8b296cbf5fe16945c37d17e9ba9774e2bf10731dd0",
+    "core/libs/prx/libSceImeDialog/Export.cpp": "499fd291a7a17bc32a9bd6f375b5fdbe0e82d8048ad9e2fd672dbe9b25561873",
+    "core/libs/prx/libSceNet/Export.cpp": "f951b6fb04747fae29d128058df84c48d19bfd3311cb9f8746128df00746e226",
+    "core/libs/prx/libScePad/Export.cpp": "8aa78f7ab58e86a93180ad046ba48fbb9a6fdb41acac7c5de4470afb16151add",
+    "core/libs/prx/libSceSsl/Export.cpp": "26459f0bc9ec29a3e483cc7546be5e4d03b442eda671ecaf3a2d49be3710cdb8",
+    "core/libs/prx/libSceSysmodule/Export.cpp": "f48904774b125f16a0330c3706472011591723e8070b5e5f8eaf36a523899522",
+    "core/libs/prx/libSceSystemService/Export.cpp": "6046d6dac7b211955231a5ab441a2ad37fa5e0957a6b0eff9f7d9f0447cba854",
+    "core/libs/prx/libSceUserService/Export.cpp": "5300859a15f76b56f05e12fb2989abc59878a35d1fff8547c2dd42f418f56a53",
+    "core/libs/prx/libSceVideoOut/src/Output.cpp": "985edb131f89a95a40bd2b33138ab07ead46d3f1e8a60f1771ff18a6359ecb35",
+    "core/libs/prx/libc/include/FileStream.hpp": "fc1d5ebd593fc2c50d0ef6e4649118f0293af64d90f081db18907512c96e876f",
+    "core/libs/prx/libc/include/GuestTime.hpp": "161c79f1b55c484583526d4b14488015f04daf801df2202b45e1e1a013ac6563",
+    "core/libs/prx/libc/include/WindowsFormatting.hpp": "e6ee4cd5e811d7576b0b595a9141c4c75ba87984c0d24b86a97b17a0103c743f",
+    "core/libs/prx/libc/include/WindowsScanning.hpp": "4d1cea8cf9262b84b90fb4121561969929bcd0500cb0fe6c7afd48b34d9ad1fa",
+    "core/libs/prx/libc/src/AllocatingStrings.cpp": "2febb41d6e03aea5dba527f4758588d194c2cbbe2466774f4eba97c5850b735e",
+    "core/libs/prx/libc/src/FileAndHeap.cpp": "5a5f83bc8cadd55d57b24b5522ce1c1911d2317e7f5701fc0bfb23119943d0c8",
+    "core/libs/prx/libc/src/Filesystem.cpp": "43af5375d044077df0b4ffc728b9b21f6b08d623e798f97067a88c8419d5f9e3",
+    "core/libs/prx/libc/src/LocaleSupport.cpp": "9cd8a36907253040d71802f461e73f220cee0beeb50721a7efe92fa716656095",
+    "core/libs/prx/libc/src/Multibyte.cpp": "86132c73761a0bbe569783e582cfad9c6943468f2edb86e549e414c30ef9ef26",
+    "core/libs/prx/libc/src/Process.cpp": "82925ab5a5a13063189a5ac8e0ff2e62b7c6a9873036fe7e738dca5c3e9a1fd8",
+    "core/libs/prx/libc/src/Rename.cpp": "eea4706db251e66839c5475e09bef2c9aae86197ae5b2038e66e6f32a80e2050",
+    "core/libs/prx/libc/src/StandardStreams.cpp": "e7611fe99fec22535475d66e9b57a494f3213bcece483583b7dbc0945479f630",
+    "core/libs/prx/libc/src/StringExtensions.cpp": "7b7a781d0f44c532fdf4c3219468ee2c85117312c7010b532f9ac6febc92c78f",
+    "core/libs/prx/libc/src/Strings.cpp": "fc3c551af89f114d07aa9a9b1ed76d531f7eae5ebd572b84939bb03ba5fffa37",
+    "core/libs/prx/libc/src/Time.cpp": "2c2572b7fada7eec562113374707bb286dd0681d2128ff328a143e51eb650ae4",
+    "core/libs/prx/libkernel/DirectMemory/PosixMemory.cpp": "dc63a47844692b3a62c2ac90166f1fb4ae198319085b45cb69faf2080ea52113",
+    "core/libs/prx/libkernel/File/src/Open.cpp": "68bbf41e80cf17e6aefdf3e961d52eef30f1b106ba68bf9b3772b3a0b6bd58a8",
+    "core/libs/prx/libkernel/File/src/Stdio.cpp": "bae25c1e8aca5adaa192c4e6537474594d3121729b87e88b294e7df84954c5bd",
+    "core/libs/prx/libkernel/Pthread/Posix/Mutex.cpp": "907afde3b1a765cc80c561447937f425cae6de3d85de2406e734c87b86bbfbd3",
+    "core/libs/prx/libkernel/Pthread/Posix/Thread.cpp": "2198d82baf5fd370e0fe6a8b7f1ab3405a99e35b02f7b22a4d283407d442af25",
+    "core/libs/prx/libkernel/Socket/include/GuestPoll.hpp": "28d36caaf33ea970ee609dc1e5cc17f0223ecc01aadc5b1f94bb52a7f07a230c",
+    "core/libs/prx/libkernel/Socket/src/Udp.cpp": "93aafccb4f1f1300ff389007787401e8b7961d96103262551ec93b1646e2a4b5",
+    "core/libs/prx/libkernel/System/src/Notification.cpp": "b6050f45e4d7abf37fc5c11874613d1035c456595b860d6d0cd78d8a811132d2",
+    "core/libs/prx/libkernel/Time/Time.cpp": "c114f078fd61e987c9c1252f717d49ad48256afeba4595fb66574a46108803b9"
+  },
+  "reference_frames": {
+    "demo1/frame00120.raw": "b30c7dda6e3605ec8c6f9fa058acb97784833d4a1db757ba218f38bb1292d065",
+    "demo1/frame00900.raw": "e4110411d94e15d3baafddb602574ccaed5d3d64a867331e172c65123dbd86b9",
+    "demo2/frame00120.raw": "6a891719779d3cd8cc65f3b4b741e08593637fcf21c02f4524526853db45fb83",
+    "demo2/frame00900.raw": "488a3f204c4dee8356cdcc8ac356bd3e6bd9443f1623ee74f238ec0bc615a811",
+    "demo3/frame00120.raw": "37aeb54f18f29a88aa6c5b5d37f0e75873036e2d7d6a324533363f8a9595e14e",
+    "demo3/frame00900.raw": "b70e231215a292252ef3056833e632b98296f721a6270a6a251e3c94d459f10b"
+  },
+  "tiling_header_sha256": "6e5164184881d740b1c0b71002e2967854cabb48a64bf2137c38cd7f55d09a04",
+  "wad_sha256": "1d7d43be501e67d927e415e0b8f3e29c3bf33075e859721816f652a526cac771"
+}

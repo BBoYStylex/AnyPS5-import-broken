@@ -1,3 +1,4 @@
+#include "prx/libkernel/Socket/include/GuestPoll.hpp"
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <winsock2.h>
@@ -408,11 +409,6 @@ using NativePollDescriptor = WSAPOLLFD;
 #else
 using NativePollDescriptor = pollfd;
 #endif
-struct GuestPollDescriptor {
-    int descriptor;
-    short events;
-    short revents;
-};
 struct PollFlag {
     short guest;
     short native;
