@@ -11,6 +11,7 @@ int APS5_VABI scePthreadAttrDestroy(PthreadAttr* attr);
 int APS5_VABI scePthreadAttrGet(Pthread thread, PthreadAttr* attr);
 int APS5_VABI scePthreadAttrGetguardsize(const PthreadAttr* attr, std::size_t* guardSize);
 int APS5_VABI scePthreadAttrSetguardsize(PthreadAttr* attr, std::size_t guardSize);
+int APS5_VABI scePthreadAttrSetstack(PthreadAttr* attr, void* addr, std::size_t size);
 Pthread APS5_VABI scePthreadSelf();
 int APS5_VABI pthread_attr_get_np_nid_postfix(Pthread thread, PthreadAttr* attr);
 int APS5_VABI pthread_attr_getguardsize_nid_postfix(const PthreadAttr* attr, std::size_t* guardSize);
@@ -19,6 +20,7 @@ int APS5_VABI pthread_attr_setguardsize_nid_postfix(PthreadAttr* attr, std::size
 
 static constexpr std::size_t DEFAULT_GUARD_SIZE = 0x1000;
 static constexpr std::size_t STALE_GUARD_SIZE = 0x7000;
+static constexpr std::size_t USER_STACK_SIZE = 0x40000;
 
 static void Require(bool value) { if (!value) std::abort(); }
 
@@ -70,9 +72,29 @@ static void CheckCreatedWith(const std::size_t* requested) {
     Require(scePthreadJoin(thread, nullptr) == 0);
 }
 
+static void CheckUserStackGuardSize() {
+    void* stack = std::aligned_alloc(0x1000, USER_STACK_SIZE);
+    Require(stack != nullptr);
+    PthreadAttr attr = nullptr;
+    Require(scePthreadAttrInit(&attr) == 0);
+    Require(scePthreadAttrSetstack(&attr, stack, USER_STACK_SIZE) == 0);
+    Require(scePthreadAttrSetguardsize(&attr, 0x2000) == 0);
+
+    std::promise<void> release;
+    auto released = release.get_future();
+    Request request{&released, 0};
+    Pthread thread = nullptr;
+    Require(scePthreadCreate(&thread, &attr, Worker, &request, nullptr) == 0);
+    Require(scePthreadAttrDestroy(&attr) == 0);
+    release.set_value();
+    Require(scePthreadJoin(thread, nullptr) == 0);
+    std::free(stack);
+}
+
 int main() {
     RequireReportedGuardSize(scePthreadSelf(), DEFAULT_GUARD_SIZE);
     CheckCreatedWith(nullptr);
     for (const std::size_t requested : {std::size_t{0}, std::size_t{0x2000}, std::size_t{0x10000}})
         CheckCreatedWith(&requested);
+    CheckUserStackGuardSize();
 }
