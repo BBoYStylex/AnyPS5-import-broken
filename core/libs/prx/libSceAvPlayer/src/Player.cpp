@@ -106,7 +106,11 @@ void Player::controllerLoop() {
         bool pending = false;
         {
             std::unique_lock lock(eventMutex);
+#if defined(__APPLE__)
+            eventCondition.WaitUntil(lock, TimedWait::DeadlineNanos(5000), [this] { return quit || !events.empty() || endSeen.exchange(false); });
+#else
             eventCondition.WaitUntil(lock, TimedWait::DeadlineNanos(5000), [this] { return quit || !events.empty(); });
+#endif
             if (quit) return;
             if (!events.empty()) {
                 event = events.front();
@@ -370,7 +374,19 @@ bool Player::GetAudioData(AvPlayerFrameInfo& info) {
 bool Player::IsActive() {
     std::lock_guard lock(mutex);
     if (!source || state == State::Initial || state == State::Stop || state == State::EndOfFile || state == State::Error) return false;
+#if defined(__APPLE__)
+    const bool finished = source->Finished();
+    if (finished && state == State::Play) {
+        {
+            std::lock_guard events(eventMutex);
+            endSeen.store(true);
+        }
+        eventCondition.NotifyAll();
+    }
+    return !finished;
+#else
     return !source->Finished();
+#endif
 }
 
 std::uint64_t Player::CurrentTime() {
