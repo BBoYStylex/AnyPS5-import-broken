@@ -65,6 +65,7 @@ bool GuestAllocationsCovers_nid_postfix(void* mutation, const void* pointer, std
 void GuestAllocationsTrimToRegistered_nid_postfix(void* mutation, const void** pointer, std::size_t* bytes);
 void GuestAllocationsGuestPages_nid_postfix(std::uintptr_t address, std::size_t bytes, std::size_t page, std::uintptr_t* first, std::uintptr_t* end);
 bool GuestAllocationsOverlaps_nid_postfix(void* mutation, const void* pointer, std::size_t bytes);
+bool GuestAllocationsForRegistered_nid_postfix(void* mutation, const void* pointer, std::size_t bytes, const std::function<void(const void*, std::size_t)>& visit);
 Range GuestAllocationsFind_nid_postfix(void* mutation, const void* pointer);
 void GuestAllocationsRemove_nid_postfix(void* mutation, const void* pointer);
 void GuestAllocationsProtect_nid_postfix(void* mutation, const void* pointer, std::size_t bytes, bool readable, bool writable, bool gpu, const std::function<void()>& apply);
@@ -106,6 +107,7 @@ public:
     bool Covers(const void* pointer, std::size_t bytes) const { return GuestAllocationsCovers_nid_postfix(handle, pointer, bytes); }
     void TrimToRegistered(const void*& pointer, std::size_t& bytes) const { GuestAllocationsTrimToRegistered_nid_postfix(handle, &pointer, &bytes); }
     bool Overlaps(const void* pointer, std::size_t bytes) const { return GuestAllocationsOverlaps_nid_postfix(handle, pointer, bytes); }
+    bool ForRegistered(const void* pointer, std::size_t bytes, const std::function<void(const void*, std::size_t)>& visit) const { return GuestAllocationsForRegistered_nid_postfix(handle, pointer, bytes, visit); }
     Range Find(const void* pointer) const { return GuestAllocationsFind_nid_postfix(handle, pointer); }
     void Remove(const void* pointer) { GuestAllocationsRemove_nid_postfix(handle, pointer); }
     void Unmap(const void* pointer, std::size_t bytes, const std::function<void(const void*, std::size_t, const void*, bool)>& apply) { GuestAllocationsUnmap_nid_postfix(handle, pointer, bytes, apply); }
