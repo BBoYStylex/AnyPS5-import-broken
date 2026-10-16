@@ -21,6 +21,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <tuple>
 #include <unordered_map>
 #include <utility>
@@ -1309,6 +1310,16 @@ void unwatchLocked(WriteTracker& tracker, std::uint64_t address, std::size_t byt
 }
 
 thread_local bool ownHostWrite = false;
+std::atomic<std::uint64_t> hostWritesInFlight{0};
+std::atomic<bool> hostWritesStopped{false};
+
+class HostWriteInFlight {
+public:
+    HostWriteInFlight() { hostWritesInFlight.fetch_add(1, std::memory_order_seq_cst); }
+    ~HostWriteInFlight() { hostWritesInFlight.fetch_sub(1, std::memory_order_seq_cst); }
+    HostWriteInFlight(const HostWriteInFlight&) = delete;
+    HostWriteInFlight& operator=(const HostWriteInFlight&) = delete;
+};
 
 class OwnHostWrite {
 public:
@@ -2103,8 +2114,20 @@ void FlushGpuWrites(std::uint64_t address, std::size_t bytes) {
 
 void PrepareHostWrite(std::uintptr_t address, std::size_t bytes) {
     if (ownHostWrite || bytes == 0) return;
+    const HostWriteInFlight inFlight;
+    if (hostWritesStopped.load(std::memory_order_seq_cst)) return;
     const ReadSiteScope site(ReadSite::Store);
     FlushGpuWrites(address, bytes);
+}
+
+bool StopHostWrites(std::uint32_t boundMs) {
+    hostWritesStopped.store(true, std::memory_order_seq_cst);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(boundMs);
+    while (hostWritesInFlight.load(std::memory_order_seq_cst) != 0) {
+        if (std::chrono::steady_clock::now() >= deadline) return false;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return true;
 }
 
 void Read(std::uint64_t address, std::span<std::byte> destination, std::size_t alignment) {

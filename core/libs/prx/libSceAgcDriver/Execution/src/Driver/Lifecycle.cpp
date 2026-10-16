@@ -102,6 +102,8 @@ void Driver::stop() {
     require(!onWorkerThread(), "worker cannot stop itself");
     std::lock_guard shutdownLock(shutdownMutex);
     if (stopped) return;
+    GuestArena::GuestArenaSetHostWriteHook_nid_no_patch(nullptr);
+    if (!GuestMemory::StopHostWrites(1000)) std::fprintf(stderr, "[driver] a host write was still inside the driver's hook 1 s into the shutdown; stopping without waiting for it\n");
     LibcRequestShutdown_nid_postfix();
     {
         std::lock_guard lock(mutex);
