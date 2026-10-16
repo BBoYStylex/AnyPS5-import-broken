@@ -46,3 +46,6 @@
 [submodule "3rdparty/ps5link-sdk"]
 	path = 3rdparty/ps5link-sdk
 	url = https://github.com/Rufidj/ps5link-sdk.git
+[submodule "3rdparty/mbedtls"]
+	path = 3rdparty/mbedtls
+	url = https://github.com/Mbed-TLS/mbedtls.git
