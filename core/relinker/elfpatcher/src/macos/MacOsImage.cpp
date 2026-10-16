@@ -22,6 +22,7 @@ namespace {
 using Windows::LoadRva;
 
 constexpr std::uint64_t PageSize = 0x1000;
+constexpr std::uint64_t UserAddressEnd = 0x7fffffe00000;
 
 constexpr std::uint32_t MhMagic64 = 0xfeedfacf;
 constexpr std::uint32_t CpuTypeX8664 = 0x01000007;
@@ -760,6 +761,8 @@ std::vector<std::uint8_t> WriteMacOsImage(MacOsImageInput& input) {
     const auto imageEnd = segments.back().Rva + AlignUp(segments.back().MemorySize, PageSize);
     if (file.size() > std::numeric_limits<std::uint32_t>::max())
         throw Domain::RelinkerException("Mach-O output exceeds 4 GiB");
+    if (imageBase + imageEnd + AlignUp(linkeditSize, PageSize) > UserAddressEnd)
+        throw Domain::RelinkerException("Mach-O image ends outside the macOS user address space");
 
     const auto writeSegment = [&](const std::size_t at, const std::uint64_t vmaddr, const std::uint64_t vmsize, const std::uint64_t fileoff, const std::uint64_t filesize) {
         Io::WriteU64(commands, at + 24, vmaddr);
