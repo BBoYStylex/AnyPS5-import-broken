@@ -32,7 +32,8 @@ function update() {
   const folderOption = $("save").querySelector('[value="disk"]');
   folderOption.disabled = !canStream || target === "windows";
   folderOption.textContent = target === "windows" ? "Save to folder · unavailable for Windows (DLL restrictions)" : "Save to folder · uncompressed";
-  const libraryBytes = release?.platforms[target]?.expandedBytes;
+  $("rosetta-option").hidden = target !== "macos";
+  const libraryBytes = target === "macos" && release && !release.platforms.macos ? 0 : release?.platforms[target]?.expandedBytes;
   const selectedBytes = summary ? target === "windows" ? summary.windowsSelectedBytes : summary.selectedBytes : null;
   const conversionTooLarge = selectedBytes !== null && selectedBytes > 256 * 1024 * 1024;
   const iconTooLarge = target === "windows" && Boolean(summary?.windowsIconTooLarge);
@@ -50,7 +51,7 @@ function update() {
 }
 
 function lock(value) {
-  for (const id of ["choose", "choose-folder", "change", "target", "save", "intel"]) $(id).disabled = value || !supported || (id === "choose-folder" && !("webkitdirectory" in $("folder")));
+  for (const id of ["choose", "choose-folder", "change", "target", "save", "intel", "rosetta"]) $(id).disabled = value || !supported || (id === "choose-folder" && !("webkitdirectory" in $("folder")));
 }
 
 async function fail(message) {
@@ -154,7 +155,9 @@ async function onMessage({ data }) {
         $("result-info").textContent += " · ZIP saved to disk";
       } else {
         $("result-info").textContent += ` · Saved in ${outputTransaction.name}/`;
-        if (document.querySelector('input[name="target"]:checked').value === "linux") $("result-info").textContent += ` · On Linux, run chmod +x "${data.outputName}" before launching.`;
+        const savedTarget = document.querySelector('input[name="target"]:checked').value;
+        if (savedTarget === "linux") $("result-info").textContent += ` · On Linux, run chmod +x "${data.outputName}" before launching.`;
+        if (savedTarget === "macos") $("result-info").textContent += ` · On macOS, run chmod +x "${data.outputName}" and remove the download quarantine with xattr -dr com.apple.quarantine . before launching.`;
       }
       $("result-note").hidden = data.mode === "disk";
       outputDirectory = null;
@@ -206,7 +209,7 @@ $("file").onchange = () => selectFile($("file").files[0]);
 for (const type of ["dragenter", "dragover"]) $("drop").addEventListener(type, event => { event.preventDefault(); if (!working) $("drop").classList.add("dragging"); });
 $("drop").ondragleave = () => $("drop").classList.remove("dragging");
 $("drop").ondrop = event => { event.preventDefault(); $("drop").classList.remove("dragging"); if (working) return; if (event.dataTransfer.files.length !== 1) { fail("Drop one ZIP archive at a time."); return; } selectFile(event.dataTransfer.files[0]); };
-for (const id of ["save", "target", "acknowledge"]) $(id).addEventListener("change", update);
+for (const id of ["save", "target", "acknowledge", "rosetta"]) $(id).addEventListener("change", update);
 $("cancel").onclick = () => fail("Cancelled. Choose the ZIP or folder again to restart.");
 $("convert").onclick = async () => {
   if ($("convert").disabled) return;
@@ -226,7 +229,7 @@ $("convert").onclick = async () => {
     $("status").hidden = false;
     $("cancel").hidden = false;
     $("error").hidden = true;
-    worker.postMessage({ type: "convert", target: document.querySelector('input[name="target"]:checked').value, toIntel: $("intel").checked, mode: $("save").value });
+    worker.postMessage({ type: "convert", target: document.querySelector('input[name="target"]:checked').value, toIntel: $("intel").checked, toRosetta: $("rosetta").checked, mode: $("save").value });
   } catch (error) {
     if (error.name === "AbortError") { working = false; lock(false); update(); }
     else await fail(error.message);

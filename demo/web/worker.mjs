@@ -21,7 +21,7 @@ export async function downloadLibraries(target) {
   if (!response.ok) throw new Error(`Cannot load release manifest (${response.status})`);
   const release = await response.json();
   const asset = release.platforms[target];
-  if (!asset || !/^libraries\/(windows|linux)-[a-f0-9]+\.zip$/u.test(asset.path) || !/^[a-f0-9]{64}$/u.test(asset.sha256)) throw new Error("Invalid release manifest");
+  if (!asset || !/^libraries\/(windows|linux|macos)-[a-f0-9]+\.zip$/u.test(asset.path) || !/^[a-f0-9]{64}$/u.test(asset.sha256)) throw new Error("Invalid release manifest");
   const latestResponse = await fetch("https://api.github.com/repos/boykopovar/AnyPS5/releases/latest", { headers: { Accept: "application/vnd.github+json" } });
   if (!latestResponse.ok) {
     const rateLimited = latestResponse.status === 429 || (latestResponse.status === 403 && latestResponse.headers.get("x-ratelimit-remaining") === "0");
@@ -38,6 +38,15 @@ export async function downloadLibraries(target) {
   const digest = [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))].map(byte => byte.toString(16).padStart(2, "0")).join("");
   if (digest !== asset.sha256) throw new Error("System library checksum mismatch");
   return { file: new Blob([bytes]), release, expandedBytes: asset.expandedBytes };
+}
+
+export async function macosLibraries() {
+  const response = await fetch("./release.json", { cache: "no-cache" });
+  if (!response.ok) throw new Error(`Cannot load release manifest (${response.status})`);
+  const release = await response.json();
+  if (release.platforms?.macos) return downloadLibraries("macos");
+  report({ phase: "Downloading system libraries", message: "No macOS system libraries are published yet; the result contains the converted app without libs/. Build them with the full macOS build." });
+  return { file: null, release: { tag: "no macOS" }, expandedBytes: 0 };
 }
 
 self.onmessage = async ({ data }) => {
@@ -61,13 +70,13 @@ self.onmessage = async ({ data }) => {
       if (!archive) throw new Error("Select a ZIP or folder first");
       const selectedBytes = archive.selectedBytesForTarget(data.target);
       if (selectedBytes > CONVERSION_LIMIT) throw new Error(`Selected ${data.target} conversion input exceeds the 256 MiB conversion limit. Use the native relinker for this app.`);
-      const libraries = await downloadLibraries(data.target);
+      const libraries = data.target === "macos" ? await macosLibraries() : await downloadLibraries(data.target);
       const estimate = memoryEstimate(archive.totalBytes, selectedBytes, libraries.expandedBytes, archive.entries.length);
       if (data.mode === "memory" && estimate > MEMORY_LIMIT) throw new Error("This result exceeds the 256 MiB memory-download budget. Use Save ZIP to disk in desktop Chrome or Edge.");
       report({ phase: "Loading converter" });
       const { default: createRelinker } = await import("./native/relinker_wasm.mjs");
       const native = await createRelinker();
-      let input = await archive.conversionInput(data.target, data.toIntel, report);
+      let input = await archive.conversionInput(data.target, data.toIntel, report, data.toRosetta);
       const outputName = input.outputName;
       const converted = native.Convert(input, report);
       input = null;
