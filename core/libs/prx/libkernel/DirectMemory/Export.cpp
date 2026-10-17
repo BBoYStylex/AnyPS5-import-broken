@@ -19,6 +19,10 @@
 #include <sstream>
 #include <sys/mman.h>
 #include <sys/resource.h>
+#ifdef __APPLE__
+#include <mach/mach.h>
+#include <mach/mach_vm.h>
+#endif
 #endif
 #include <algorithm>
 #include <cassert>
@@ -632,6 +636,21 @@ int UnlockHostPages(std::uintptr_t start, std::uintptr_t end) {
 int LockHostPages(std::uintptr_t start, std::uintptr_t end) {
     auto* const address = reinterpret_cast<void*>(start);
     const std::size_t bytes = end - start;
+#ifdef __APPLE__
+    // Linux mlock fails with ENOMEM on PROT_NONE or unmapped pages (reservations, unmapped guest ranges); macOS
+    // mlock succeeds there without pinning anything, so refuse any page whose host protection is none.
+    for (mach_vm_address_t cursor = start; cursor < end;) {
+        mach_vm_address_t region = cursor;
+        mach_vm_size_t size = 0;
+        vm_region_basic_info_data_64_t info{};
+        mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+        mach_port_t object = MACH_PORT_NULL;
+        if (mach_vm_region(mach_task_self(), &region, &size, VM_REGION_BASIC_INFO_64, reinterpret_cast<vm_region_info_t>(&info), &count, &object) != KERN_SUCCESS)
+            return SCE_KERNEL_ERROR_ENOMEM;
+        if (region > cursor || info.protection == VM_PROT_NONE) return SCE_KERNEL_ERROR_ENOMEM;
+        cursor = region + size;
+    }
+#endif
     if (::mlock(address, bytes) == 0) {
         RecordLockedRange(start, end);
         return 0;
