@@ -17,6 +17,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <initializer_list>
+#include <cstdlib>
 #include <string>
 #include <limits>
 #include <thread>
@@ -590,8 +591,6 @@ void testCompressedPresentation() {
     LibcRunShutdown_nid_postfix();
 }
 
-// Flips of two buffers submitted without waiting for each other: every one completes in order
-// (presentations trail on the GPU, APS5_FLIP_INFLIGHT), and the shutdown retires the ones in flight.
 void testBackToBack() {
     const int handle = sceVideoOutOpen(255, 0, 0, nullptr);
     auto cfg = VideoOutDriver::Get().GetConfig(handle);
@@ -953,7 +952,11 @@ void testOneDevice() {
 
 }
 
-int main(int argc, char** argv) {
+#ifdef __APPLE__
+extern "C" [[noreturn]] void Aps5StartGuest_nid_no_patch(void (*entry)(void*, void*), void* block);
+#endif
+
+int runTests(int argc, char** argv) {
     VideoOutTestEnvironment environment;
     try {
         if (argc == 2 && std::string(argv[1]) == "decode") testDecode();
@@ -988,4 +991,16 @@ int main(int argc, char** argv) {
         }
         return 1;
     }
+}
+
+int main(int argc, char** argv) {
+#ifdef __APPLE__
+    static int arguments;
+    static char** values;
+    arguments = argc;
+    values = argv;
+    Aps5StartGuest_nid_no_patch([](void*, void*) { std::exit(runTests(arguments, values)); }, nullptr);
+#else
+    return runTests(argc, argv);
+#endif
 }
