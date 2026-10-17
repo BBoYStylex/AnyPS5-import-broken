@@ -23,6 +23,7 @@ extern "C" void __cxa_rethrow_primary_exception_nid_postfix(void*);
 
 extern "C" [[noreturn]] void _ZSt14_Xout_of_rangePKc_nid_postfix(const char*);
 extern "C" [[noreturn]] void _ZSt13_Xrange_errorPKc_nid_postfix(const char*);
+extern "C" [[noreturn]] void _ZSt14_Atomic_assertPKcS0__nid_postfix(const char*, const char*);
 extern "C" [[noreturn]] void _ZNSt8__sce_v219_Xbad_function_callEv_nid_postfix();
 extern "C" [[noreturn]] void __cxa_bad_cast_nid_postfix();
 extern "C" [[noreturn]] void _ZSt19_Throw_bad_weak_ptrv_nid_postfix();
@@ -184,6 +185,27 @@ void CheckDefaultTerminateMessage() {
     assert(WIFSIGNALED(status) && WTERMSIG(status) == SIGABRT);
     assert(output.find("  what():  " + message + "\n") != std::string::npos);
 }
+void CheckAtomicAssert() {
+    int channel[2];
+    assert(pipe(channel) == 0);
+    pid_t child = fork();
+    assert(child >= 0);
+    if (child == 0) {
+        close(channel[0]);
+        dup2(channel[1], 2);
+        _ZSt14_Atomic_assertPKcS0__nid_postfix("EXPR_TEXT", "FILE_TEXT");
+    }
+    close(channel[1]);
+    std::string output;
+    char buffer[256];
+    for (ssize_t count; (count = read(channel[0], buffer, sizeof(buffer))) > 0;) output.append(buffer, static_cast<std::size_t>(count));
+    close(channel[0]);
+    int status;
+    assert(waitpid(child, &status, 0) == child);
+    assert(WIFSIGNALED(status) && WTERMSIG(status) == SIGABRT);
+    assert(output == "EXPR_TEXT in function FILE_TEXT\n");
+    try { _ZSt14_Atomic_assertPKcS0__nid_postfix(nullptr, "FILE_TEXT"); assert(false); } catch (const std::invalid_argument&) {}
+}
 struct ForcedGuard { ~ForcedGuard() { ++destroyed; } };
 [[gnu::noinline]] void ForceUnwind() {
     ForcedGuard guard;
@@ -256,6 +278,7 @@ int main() {
     CheckTerminate(UncaughtThrow);
     CheckTerminate(NoexceptThrow);
     CheckDefaultTerminateMessage();
+    CheckAtomicAssert();
     CheckForcedUnwind();
     int frames = 0;
     auto backtrace = _Unwind_Backtrace_nid_postfix([](_Unwind_Context* context, void* argument) {
