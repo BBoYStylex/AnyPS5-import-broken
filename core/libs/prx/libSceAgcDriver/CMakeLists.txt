@@ -1248,6 +1248,23 @@ if(BUILD_TESTING)
     endif()
 endif()
 
+add_test_executable(agc_command_batch_failure_tests EXCLUDE_FROM_ALL
+        tests/CommandBatch.cpp tests/CommandBatchFailure.cpp Graphics/src/Resources.cpp tests/AllocationFailure.cpp)
+target_include_directories(agc_command_batch_failure_tests PRIVATE
+        ${LIBS_INCLUDE_DIR} ${CMAKE_SOURCE_DIR}/core/shader/recompiler ${ANYPS5_VULKAN_HEADERS_INCLUDE_DIR})
+target_link_libraries(agc_command_batch_failure_tests PRIVATE libSceAgcDriver libc)
+set_target_properties(agc_command_batch_failure_tests PROPERTIES CXX_EXTENSIONS OFF)
+configure_windows_unwind(agc_command_batch_failure_tests)
+if(BUILD_TESTING)
+    set_target_properties(agc_command_batch_failure_tests PROPERTIES EXCLUDE_FROM_ALL OFF)
+    add_test(NAME agc_command_batch_failure COMMAND agc_command_batch_failure_tests)
+    set_tests_properties(agc_command_batch_failure PROPERTIES TIMEOUT 30)
+    if(WIN32)
+        set_tests_properties(agc_command_batch_failure PROPERTIES
+                ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+    endif()
+endif()
+
 add_test_executable(agc_host_import_retire_tests EXCLUDE_FROM_ALL tests/HostImportRetireHold.cpp)
 target_include_directories(agc_host_import_retire_tests PRIVATE ${LIBS_INCLUDE_DIR} ${CMAKE_SOURCE_DIR}/core/shader/recompiler ${ANYPS5_VULKAN_HEADERS_INCLUDE_DIR})
 target_link_libraries(agc_host_import_retire_tests PRIVATE libSceAgcDriver libc)
@@ -1337,6 +1354,22 @@ add_test_executable(agc_driver_graphics_tests EXCLUDE_FROM_ALL
         tests/TextureDetiler.cpp
         tests/DepthSurfaceReuse.cpp
 )
+
+if(BUILD_TESTING)
+    add_test_executable(agc_descriptor_cache_failure_tests
+        tests/DescriptorCacheFailure.cpp
+        Graphics/src/ShaderResources.cpp)
+    target_include_directories(agc_descriptor_cache_failure_tests PRIVATE
+        $<TARGET_PROPERTY:libSceAgcDriver,INCLUDE_DIRECTORIES>)
+    target_link_libraries(agc_descriptor_cache_failure_tests PRIVATE libSceAgcDriver shader_recompiler_agc_driver libc libkernel)
+    configure_windows_unwind(agc_descriptor_cache_failure_tests)
+    add_test(NAME agc_descriptor_cache_failure COMMAND agc_descriptor_cache_failure_tests)
+    set_tests_properties(agc_descriptor_cache_failure PROPERTIES TIMEOUT 20)
+    if(WIN32)
+        set_tests_properties(agc_descriptor_cache_failure PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+    endif()
+endif()
 
 target_include_directories(agc_driver_graphics_tests PRIVATE
         ${CMAKE_SOURCE_DIR}/3rdparty/freesper
@@ -1446,7 +1479,8 @@ foreach(agcExecutionTestName IN LISTS ANYPS5_AGC_EXECUTION_TESTS)
 endforeach()
 
 if(NOT ANYPS5_AGC_EXECUTION_TESTS OR "PooledBufferRange" IN_LIST ANYPS5_AGC_EXECUTION_TESTS)
-    target_sources(agc_driver_pooled_buffer_range_tests PRIVATE Graphics/src/BufferPool.cpp tests/AllocationFailure.cpp)
+    target_sources(agc_driver_pooled_buffer_range_tests PRIVATE
+            Graphics/src/BufferPool.cpp Graphics/src/Resources.cpp tests/AllocationFailure.cpp tests/CommandBatchFailure.cpp)
 endif()
 
 target_link_libraries(agc_driver_gpu_map_on_fiber_tests PRIVATE libSceFiber)
@@ -1794,12 +1828,13 @@ if(BUILD_TESTING)
         endif()
     endforeach()
     add_test(NAME agc_descriptor_pool_reset_failure COMMAND agc_driver_graphics_tests --descriptor-pool-reset-failure)
+    add_test(NAME agc_descriptor_cache COMMAND agc_driver_graphics_tests --descriptor-cache)
     add_test(NAME agc_driver_address_space_teardown COMMAND agc_driver_graphics_tests --address-space-teardown)
     set_tests_properties(agc_driver_address_space_teardown PROPERTIES ENVIRONMENT "ANYPS5_NO_SHADER_CACHE=1" WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
     add_test(NAME agc_driver_pm4_failure_inline COMMAND agc_driver_pm4_tests failure)
     set_tests_properties(agc_driver_pm4_failure_inline PROPERTIES ENVIRONMENT "ANYPS5_NO_SHADER_CACHE=1;APS5_PIPELINED_DRAWS=0" SKIP_RETURN_CODE 77)
     if(WIN32)
-        set_tests_properties(agc_driver_pm4_failure agc_driver_pm4_failure_inline agc_descriptor_pool_reset_failure agc_driver_address_space_teardown PROPERTIES ENVIRONMENT_MODIFICATION
+        set_tests_properties(agc_driver_pm4_failure agc_driver_pm4_failure_inline agc_descriptor_pool_reset_failure agc_descriptor_cache agc_driver_address_space_teardown PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
     endif()
     if(NOT WIN32)
