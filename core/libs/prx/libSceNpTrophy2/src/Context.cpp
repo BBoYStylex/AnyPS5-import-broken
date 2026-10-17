@@ -1,3 +1,4 @@
+#include <cstddef>
 #include <cstdint>
 #include <stdexcept>
 #include <string>
@@ -30,12 +31,19 @@ int APS5_VABI sceNpTrophy2RegisterContext(int context, int handle, uint64_t opti
     return SCE_NP_TROPHY2_OK;
 }
 
-std::int32_t APS5_VABI sceNpTrophy2UnregisterUnlockCallback(const void*, const void*, const void*, const void*) {
+int APS5_VABI sceNpTrophy2UnregisterUnlockCallback() {
     return SCE_NP_TROPHY2_OK;
 }
-// Reward icons are not available offline.
-std::int32_t APS5_VABI sceNpTrophy2GetRewardIcon(const void*, const void*, const void*, const void*) {
-    return static_cast<std::int32_t>(0x80551600u);
+
+
+int APS5_VABI sceNpTrophy2GetRewardIcon(int context, int handle, int reward_id, void* buffer, size_t* size) {
+    (void)context;
+    (void)handle;
+    (void)reward_id;
+    (void)buffer;
+    (void)size;
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
 }
 
 int APS5_VABI sceNpTrophy2ShowTrophyList(int context) {

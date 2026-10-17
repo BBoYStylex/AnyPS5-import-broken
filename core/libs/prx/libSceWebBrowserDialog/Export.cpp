@@ -66,15 +66,21 @@ int APS5_VABI sceWebBrowserDialogUpdateStatus(void) {
     return g_status.load();
 }
 
-std::int32_t APS5_VABI sceWebBrowserDialogResetCookie(const void*, const void*, const void*, const void*) {
+
+int APS5_VABI sceWebBrowserDialogSetCookie(void) {
+    NotImplemented_nid_no_patch(__func__);
     return 0;
 }
-std::int32_t APS5_VABI sceWebBrowserDialogSetCookie(const void*, const void*, const void*, const void*) {
+
+int APS5_VABI sceWebBrowserDialogOpenForPredeterminedContent(const void* param) {
+    (void)param;
+    NotImplemented_nid_no_patch(__func__);
     return 0;
 }
-// There is no browser to open.
-std::int32_t APS5_VABI sceWebBrowserDialogOpenForPredeterminedContent(const void*, const void*, const void*, const void*) {
-    return static_cast<std::int32_t>(0x80B80003u);
+
+int APS5_VABI sceWebBrowserDialogResetCookie() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
 }
 
 }

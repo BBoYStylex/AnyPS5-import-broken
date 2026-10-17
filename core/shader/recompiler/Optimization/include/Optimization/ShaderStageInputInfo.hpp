@@ -92,6 +92,7 @@ struct ShaderMeshInputInfo: ShaderWorkgroupInputInfo {
     std::uint32_t maxPrimitives = 0;
     std::uint32_t provokingVertex = 0;
     std::uint32_t esgsItemSize = 0;
+    std::uint32_t outputPrimitiveSize = 3;
 
     [[nodiscard]] std::uint32_t InputPrimitiveSize() const {
         switch (inputPrimitive) {
