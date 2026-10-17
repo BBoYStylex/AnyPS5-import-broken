@@ -38,7 +38,16 @@ std::vector<std::string> CaptureWrites(TAction action) {
     });
 #else
     int sockets[2];
+#ifdef __APPLE__
+    // macOS has no AF_UNIX SOCK_SEQPACKET; datagrams keep the same one-write-per-message boundaries once the
+    // buffers are raised past net.local.dgram.maxdgram (2048), which would otherwise reject long lines.
+    Require(socketpair(AF_UNIX, SOCK_DGRAM, 0, sockets) == 0, "message socket pair");
+    const int messageBytes = 1 << 20;
+    Require(setsockopt(sockets[0], SOL_SOCKET, SO_SNDBUF, &messageBytes, sizeof(messageBytes)) == 0, "message send buffer");
+    Require(setsockopt(sockets[1], SOL_SOCKET, SO_RCVBUF, &messageBytes, sizeof(messageBytes)) == 0, "message receive buffer");
+#else
     Require(socketpair(AF_UNIX, SOCK_SEQPACKET, 0, sockets) == 0, "message socket pair");
+#endif
     std::FILE* stream = fdopen(sockets[0], "w");
     std::thread reader([&] {
         std::string buffer(1 << 20, '\0');
