@@ -6,6 +6,9 @@
 #include <sys/socket.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#ifdef __APPLE__
+#include <mutex>
+#endif
 #endif
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include "prx/libc/include/HostThreadLocal.hpp"
@@ -175,6 +178,15 @@ GuestResolver::HostEntry* APS5_VABI gethostbyname_nid_postfix(const char* name) 
         if (!native) {
             const auto error = WSAGetLastError();
             *sceNetErrnoLoc() = error == WSAHOST_NOT_FOUND ? 1 : error == WSATRY_AGAIN ? 2 : error == WSANO_DATA ? 4 : 3;
+            return nullptr;
+        }
+#elif defined(__APPLE__)
+        // macOS has no gethostbyname_r; serialise the lookup and keep the lock until the result is copied below.
+        static std::mutex hostLookupLock;
+        std::unique_lock hostLock(hostLookupLock);
+        if (!numeric) native = ::gethostbyname(name);
+        if (!native) {
+            *sceNetErrnoLoc() = h_errno != 0 ? h_errno : 3;
             return nullptr;
         }
 #else

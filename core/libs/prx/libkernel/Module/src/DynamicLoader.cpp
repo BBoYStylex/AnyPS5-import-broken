@@ -21,7 +21,12 @@
 #include <windows.h>
 #else
 #include <dlfcn.h>
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#include <mach-o/loader.h>
+#else
 #include <link.h>
+#endif
 #endif
 
 #ifdef _WIN32
@@ -61,7 +66,42 @@ void* Symbol(Module& module, const char* name) {
     return ::dlsym(module.native, name);
 #endif
 }
-#ifndef _WIN32
+#ifdef __APPLE__
+bool FromGuestModule(void* address) {
+    Dl_info info{};
+    if (address == nullptr || !::dladdr(address, &info) || info.dli_fname == nullptr || info.dli_fbase == nullptr) return false;
+    if (static_cast<const mach_header_64*>(info.dli_fbase)->filetype == MH_EXECUTE) return true;
+    const std::string path(info.dli_fname);
+    return path.ends_with(".prx");
+}
+
+// dlopen handles are opaque on macOS; the loaded image's header is the base that GuestAllocations registered.
+const void* ImageBase(void* native) {
+    const auto count = _dyld_image_count();
+    void* self = ::dlopen(nullptr, RTLD_LAZY | RTLD_NOLOAD);
+    if (self != nullptr) ::dlclose(self);
+    if (native == self) {
+        for (std::uint32_t index = 0; index < count; ++index) {
+            const auto* header = reinterpret_cast<const mach_header_64*>(_dyld_get_image_header(index));
+            if (header != nullptr && header->filetype == MH_EXECUTE) return header;
+        }
+    }
+    for (std::uint32_t index = 0; index < count; ++index) {
+        const char* name = _dyld_get_image_name(index);
+        if (name == nullptr) continue;
+        void* probe = ::dlopen(name, RTLD_LAZY | RTLD_NOLOAD);
+        if (probe == nullptr) continue;
+        ::dlclose(probe);
+        if (probe == native) return _dyld_get_image_header(index);
+    }
+    throw std::runtime_error("dlclose: cannot find the image of a module handle");
+}
+
+void* DefaultScopeSymbol(const char* symbolName) {
+    auto* result = ::dlsym(RTLD_DEFAULT, symbolName);
+    return FromGuestModule(result) ? result : nullptr;
+}
+#elif !defined(_WIN32)
 const link_map* MainProgramMap() {
     static const link_map* const map = [] {
         void* handle = ::dlopen(nullptr, RTLD_LAZY);
@@ -242,6 +282,8 @@ int APS5_VABI dlclose_nid_postfix(void* handle) {
         GuestAllocations::Mutation mutation;
 #ifdef _WIN32
         mutation.UnregisterImage(module->native);
+#elif defined(__APPLE__)
+        mutation.UnregisterImage(ImageBase(module->native));
 #else
         mutation.UnregisterImage(reinterpret_cast<const void*>(static_cast<link_map*>(module->native)->l_addr));
 #endif

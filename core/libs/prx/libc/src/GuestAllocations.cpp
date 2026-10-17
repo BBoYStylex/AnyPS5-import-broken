@@ -257,7 +257,7 @@ void addSegmentPages(ImagePages& collected, std::uintptr_t address, std::uint64_
     }
 }
 
-void collectImagePages(ImagePages& collected) {
+void collectMachImagePages(ImagePages& collected) {
     const auto count = _dyld_image_count();
     for (std::uint32_t index = 0; index < count; ++index) {
         const auto* header = reinterpret_cast<const mach_header_64*>(_dyld_get_image_header(index));
@@ -295,10 +295,6 @@ int collectImagePages(dl_phdr_info* image, std::size_t, void* data) {
     }
     return 1;
 }
-
-void collectImagePages(ImagePages& collected) {
-    dl_iterate_phdr(collectImagePages, &collected);
-}
 #endif
 
 std::uintptr_t registerImagePages(const ImagePages& collected) {
@@ -329,7 +325,11 @@ void GuestAllocationsRegisterMainImage_nid_postfix(void*) {
     auto& state = registry();
     if (state.mainImageRegistered) return;
     ImagePages collected{.main = true, .pageSize = static_cast<std::uint64_t>(::sysconf(_SC_PAGESIZE))};
-    collectImagePages(collected);
+#ifdef __APPLE__
+    collectMachImagePages(collected);
+#else
+    dl_iterate_phdr(collectImagePages, &collected);
+#endif
     require(!collected.pages.empty(), "main guest image has no loadable segments");
     registerImagePages(collected);
     state.mainImageRegistered = true;
@@ -341,7 +341,11 @@ void GuestAllocationsRegisterImage_nid_postfix(void*, const void* image) {
     const auto base = reinterpret_cast<std::uintptr_t>(image);
     if (state.registeredImages.contains(base)) return;
     ImagePages collected{.base = base, .pageSize = static_cast<std::uint64_t>(::sysconf(_SC_PAGESIZE))};
-    collectImagePages(collected);
+#ifdef __APPLE__
+    collectMachImagePages(collected);
+#else
+    dl_iterate_phdr(collectImagePages, &collected);
+#endif
     require(collected.found, "cannot locate a guest image");
     require(!collected.pages.empty(), "guest image has no loadable segments");
     require(collected.pages.begin()->first == base, "guest image does not start at its base");
