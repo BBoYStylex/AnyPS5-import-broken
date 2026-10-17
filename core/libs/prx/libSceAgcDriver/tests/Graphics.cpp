@@ -4130,6 +4130,21 @@ void oversizedDescriptorTests() {
     ::operator delete(block, std::align_val_t{blockBytes});
 }
 
+void guestBufferViewBytesRemainderTests() {
+    for (std::uint64_t bytes = 1; bytes <= 63; ++bytes) {
+        for (std::uint32_t adjustment = 0; adjustment <= 63; ++adjustment) {
+            const std::uint64_t expected = adjustment % 4 == 0 ? bytes + adjustment : 4 * ((adjustment + bytes + 3) / 4);
+            Require(AgcDriver::Graphics::GuestBufferMemory::ViewBytes(bytes, adjustment) == expected, "a guest buffer view range did not cover the whole view");
+        }
+    }
+    for (const std::uint64_t bytes : {4097ull, 4098ull, 4099ull, 8190ull}) {
+        for (const std::uint32_t adjustment : {1u, 2u, 3u}) {
+            const std::uint64_t expected = 4 * ((adjustment + bytes + 3) / 4);
+            Require(AgcDriver::Graphics::GuestBufferMemory::ViewBytes(bytes, adjustment) == expected, "a large guest buffer view range did not cover the whole view");
+        }
+    }
+}
+
 void descriptorLayoutFlagTests() {
     constexpr VkDescriptorBindingFlags indexed = VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT;
     mock = MockVulkan{};
@@ -7988,6 +8003,7 @@ int main(int argc, char** argv) {
         oversizedDescriptorTests();
         descriptorSnapshotTests();
         descriptorCacheTests();
+        guestBufferViewBytesRemainderTests();
         bufferBudgetPlacementTests();
         imageTableAllocationTests();
         imageTableSnapshotAllocationTests();
