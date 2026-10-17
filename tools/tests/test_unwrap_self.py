@@ -241,6 +241,33 @@ class UnwrapTest(unittest.TestCase):
                 self.assertEqual(data[headers[1][2]:headers[1][2] + headers[1][5]], pattern(9, 0x80))
                 self.assertEqual((Path(self.directory) / "input.self").read_bytes(), original)
 
+    def test_invalid_load_metadata_is_refused_before_replacing_output(self):
+        output = Path(self.directory) / "output.elf"
+        for field, value, message in ((40, 0xff, "file size exceeds memory size"),
+                                      (48, 3, "alignment is not a power of two"),
+                                      (48, 24, "alignment is not a power of two"),
+                                      (16, 0xffffffffffffffff, "memory range exceeds ELF64")):
+            with self.subTest(field=field, value=value):
+                container = bytearray(build_container(default_segments(), default_records(), default_payloads()))
+                struct.pack_into("<Q", container, ELF_HEADER_OFFSET + PROGRAM_TABLE_OFFSET + field, value)
+                output.write_bytes(b"previous output")
+                result, output = self.convert(container)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn(message, result.stderr)
+                self.assertNotIn("Traceback", result.stderr)
+                self.assertEqual(output.read_bytes(), b"previous output")
+
+    def test_load_alignment_zero_and_one_remain_supported(self):
+        for alignment in (0, 1):
+            with self.subTest(alignment=alignment):
+                container = bytearray(build_container(default_segments(), default_records(), default_payloads()))
+                struct.pack_into("<Q", container, ELF_HEADER_OFFSET + PROGRAM_TABLE_OFFSET + 48, alignment)
+                result, output = self.convert(container)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                data, headers = read_program_headers(output)
+                self.assertEqual(headers[0][7], alignment)
+                self.assertEqual(data[headers[0][2]:headers[0][2] + headers[0][5]], pattern(1, 0x100))
+
     def test_nonempty_load_with_unmapped_offset_is_still_refused(self):
         segments = default_segments() + [(PT_LOAD, 6, 0x1900, 0x4000, 1, PAGE)]
         container = build_container(segments, default_records(), default_payloads())
