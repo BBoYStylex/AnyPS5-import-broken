@@ -193,8 +193,14 @@ std::uint64_t GuestSegmentBytes() {
     std::uint64_t bytes = 0;
     for (const auto& image : MachImages()) {
         if (image.header->filetype != MH_EXECUTE && !ImagePath(image).ends_with(GuestModuleSuffix)) continue;
+        // Like Linux's PT_LOAD rule (which skips the read-execute segment carrying the headers) and Windows'
+        // non-relinked sections: a relinked image counts its __ELF<n> segments, any other guest module its loaded
+        // segments except __TEXT (the header segment) and __LINKEDIT. A zero-fill __DATA has file offset 0, so
+        // the segment name, not the offset, identifies the header segment.
+        const bool relinked = Relinked(image);
         ForEachSegment(image, [&](const segment_command_64& segment) {
-            if (GuestSegment(segment) && Reported(segment, true) && (segment.initprot & allAccess) != allAccess)
+            const bool header = std::strncmp(segment.segname, SEG_TEXT, sizeof(segment.segname)) == 0;
+            if (Reported(segment, relinked) && (relinked || !header) && (segment.initprot & allAccess) != allAccess)
                 bytes += PageSpan(segment.vmaddr, segment.vmsize);
         });
     }
