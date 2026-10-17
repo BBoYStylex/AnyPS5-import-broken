@@ -2,6 +2,7 @@
 #include <cstddef>
 #include <cstdlib>
 #include <future>
+#include <new>
 
 extern "C" {
 int APS5_VABI scePthreadCreate(Pthread* thread, const PthreadAttr* attr, PthreadEntry entry, void* arg, const char* name);
@@ -73,7 +74,7 @@ static void CheckCreatedWith(const std::size_t* requested) {
 }
 
 static void CheckUserStackGuardSize() {
-    void* stack = std::aligned_alloc(0x1000, USER_STACK_SIZE);
+    void* stack = ::operator new(USER_STACK_SIZE, std::align_val_t{0x1000});
     Require(stack != nullptr);
     PthreadAttr attr = nullptr;
     Require(scePthreadAttrInit(&attr) == 0);
@@ -88,7 +89,7 @@ static void CheckUserStackGuardSize() {
     Require(scePthreadAttrDestroy(&attr) == 0);
     release.set_value();
     Require(scePthreadJoin(thread, nullptr) == 0);
-    std::free(stack);
+    ::operator delete(stack, std::align_val_t{0x1000});
 }
 
 int main() {
