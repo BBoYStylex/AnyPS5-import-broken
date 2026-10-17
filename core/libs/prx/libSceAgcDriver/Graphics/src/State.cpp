@@ -1509,7 +1509,10 @@ ColorTarget DecodeColorBuffer(const Registers& cx, std::uint32_t slot, bool allo
     if (!volume && lastSlice != slice) {
         const auto exports = find(cx, 0x207);
         if (exports != cx.end() && (exports->second & (1u << 18u)) != 0) {
-            Require(color.arrayLastSlice != 0 && lastSlice > slice, "layered draws into a color view of several slices of a surface that is not a 2D array are unsupported");
+            if (color.arrayLastSlice == 0) {
+                color.arrayLastSlice = lastSlice;
+                color.arraySlice = slice;
+            }
             color.layers = lastSlice + 1u - slice;
         }
     }
