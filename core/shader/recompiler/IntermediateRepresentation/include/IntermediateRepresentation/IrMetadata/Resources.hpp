@@ -93,6 +93,7 @@ struct ImageResource {
     bool singleMipPlaneBiasCompatible = false;
     bool flatLineCompatible = true;
     bool flatVolumeLineCompatible = true;
+    bool dimensionQueryOnly = true;
     bool foldTexelOffsetsOnly = false;
     std::uint32_t byElements = 0;
     std::uint32_t byComponents = 0;
