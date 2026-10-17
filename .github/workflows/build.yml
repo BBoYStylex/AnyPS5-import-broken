@@ -84,9 +84,9 @@ jobs:
               };
             };
             const relinkerHosts = (full, linux) => JSON.stringify([
-              ...(full && linux ? [] : [{ os: 'ubuntu-latest', compiler: 'g++' }]),
-              ...(full ? [] : [{ os: 'windows-latest', compiler: 'g++' }]),
-              { os: 'macos-latest', compiler: 'clang++' },
+              ...(full && linux ? [] : [{ os: 'ubuntu-latest', compiler: 'g++', architectures: '' }]),
+              ...(full ? [] : [{ os: 'windows-latest', compiler: 'g++', architectures: '' }]),
+              { os: 'macos-latest', compiler: 'clang++', architectures: '' },
               { os: 'macos-latest', compiler: 'clang++', architectures: 'x86_64' },
             ]);
             if (context.eventName === 'push') {
