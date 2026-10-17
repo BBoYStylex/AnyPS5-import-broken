@@ -8,6 +8,7 @@
 #endif
 #include "prx/libSceAgcDriver/Graphics/include/PipelineJournal.hpp"
 #include "prx/libSceAgcDriver/Execution/include/VulkanDevice.hpp"
+#include "prx/libSceAgcDriver/Execution/include/VulkanDriverSelection.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver/Shaders/ShaderRegistry.hpp"
 #include "prx/libSceAgcDriver/Execution/include/PerformanceTimer.hpp"
@@ -48,7 +49,6 @@
 #include <condition_variable>
 #include <future>
 #include <fstream>
-#include <cctype>
 #include <cstdlib>
 #include <ctime>
 #include <mutex>
@@ -1030,17 +1030,9 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window, bool compileOnly) :
     int selectedRank = -1;
     const char* requestedName = std::getenv("ANYPS5_GPU");
     if (requestedName != nullptr && *requestedName == '\0') requestedName = nullptr;
-    const auto matchesRequest = [&](const char* deviceName) {
-        const std::string_view name(deviceName);
-        const std::string_view request(requestedName);
-        if (request.size() > name.size()) return false;
-        for (std::size_t start = 0; start + request.size() <= name.size(); ++start) {
-            std::size_t index = 0;
-            while (index < request.size() && std::tolower(static_cast<unsigned char>(name[start + index])) == std::tolower(static_cast<unsigned char>(request[index]))) ++index;
-            if (index == request.size()) return true;
-        }
-        return false;
-    };
+    const char* requestedDriver = std::getenv("ANYPS5_VULKAN_DRIVER");
+    if (requestedDriver != nullptr && *requestedDriver == '\0') requestedDriver = nullptr;
+    VkPhysicalDeviceDriverProperties selectedDriver{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES};
     std::string candidateNames;
     const auto rankDeviceType = [](VkPhysicalDeviceType type) {
         switch (type) {
@@ -1054,23 +1046,27 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window, bool compileOnly) :
     for (auto physical : devices) {
         VkPhysicalDeviceProperties properties{};
         state->InstanceFunction<PFN_vkGetPhysicalDeviceProperties>("vkGetPhysicalDeviceProperties")(physical, &properties);
-        APS5_LOG_OUT("Physical device candidate=%p name=%s api=0x%x type=%d", reinterpret_cast<void*>(physical), properties.deviceName, properties.apiVersion, static_cast<int>(properties.deviceType));
+        std::uint32_t candidateExtensionCount = 0;
+        const auto enumerateExtensions = state->InstanceFunction<PFN_vkEnumerateDeviceExtensionProperties>("vkEnumerateDeviceExtensionProperties");
+        check(enumerateExtensions(physical, nullptr, &candidateExtensionCount, nullptr), "vkEnumerateDeviceExtensionProperties");
+        std::vector<VkExtensionProperties> extensions(candidateExtensionCount);
+        check(enumerateExtensions(physical, nullptr, &candidateExtensionCount, extensions.data()), "vkEnumerateDeviceExtensionProperties");
+        extensions.resize(candidateExtensionCount);
+        const auto driver = QueryVulkanDriverProperties(physical, properties.apiVersion, extensions, state->InstanceFunction<PFN_vkGetPhysicalDeviceProperties2>("vkGetPhysicalDeviceProperties2"));
+        const char* driverName = driver.driverName[0] != '\0' ? driver.driverName : "unavailable";
+        APS5_LOG_OUT("Physical device candidate=%p name=%s api=0x%x type=%d driver=%s driverId=%d driverInfo=%s", reinterpret_cast<void*>(physical), properties.deviceName, properties.apiVersion, static_cast<int>(properties.deviceType), driverName, static_cast<int>(driver.driverID), driver.driverInfo);
         if (!candidateNames.empty()) candidateNames += ", ";
         candidateNames += properties.deviceName;
+        candidateNames += std::string(" [driver=") + driverName + "]";
         if (properties.apiVersion < VK_API_VERSION_1_1) {
             continue;
         }
-        if (requestedName != nullptr && !matchesRequest(properties.deviceName)) continue;
+        if (!VulkanDeviceMatchesRequest(properties.deviceName, driver.driverName, requestedName != nullptr ? requestedName : "", requestedDriver != nullptr ? requestedDriver : "")) continue;
         const int rank = requestedName != nullptr ? 4 : rankDeviceType(properties.deviceType);
         if (rank <= selectedRank) {
             continue;
         }
         if (window != nullptr) {
-            std::uint32_t extensionCount = 0;
-            auto enumerateExtensions = state->InstanceFunction<PFN_vkEnumerateDeviceExtensionProperties>("vkEnumerateDeviceExtensionProperties");
-            check(enumerateExtensions(physical, nullptr, &extensionCount, nullptr), "vkEnumerateDeviceExtensionProperties");
-            std::vector<VkExtensionProperties> extensions(extensionCount);
-            check(enumerateExtensions(physical, nullptr, &extensionCount, extensions.data()), "vkEnumerateDeviceExtensionProperties");
             const bool supported = std::all_of(presentationExtensions.begin(), presentationExtensions.end(), [&](const char* name) {
                 return std::any_of(extensions.begin(), extensions.end(), [&](const auto& item) { return std::strcmp(item.extensionName, name) == 0; });
             });
@@ -1089,19 +1085,25 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window, bool compileOnly) :
                     if (!supported) continue;
                 }
                 selected = physical;
+                selectedDriver = driver;
                 family = i;
                 selectedRank = rank;
                 break;
             }
         }
     }
-    if (selected == VK_NULL_HANDLE && requestedName != nullptr) {
-        throw std::runtime_error(std::string("Vulkan: no usable device whose name contains ANYPS5_GPU=\"") + requestedName + "\"; devices: " + candidateNames);
+    if (selected == VK_NULL_HANDLE && (requestedName != nullptr || requestedDriver != nullptr)) {
+        std::string request;
+        if (requestedName != nullptr) request += std::string(" ANYPS5_GPU=\"") + requestedName + "\"";
+        if (requestedDriver != nullptr) request += std::string(" ANYPS5_VULKAN_DRIVER=\"") + requestedDriver + "\"";
+        throw std::runtime_error("Vulkan: no usable device matching" + request + "; devices: " + candidateNames);
     }
     if (selected == VK_NULL_HANDLE) {
         throw std::runtime_error(window ? "Vulkan: no Vulkan 1.1 device with graphics, compute and swapchain presentation" : "Vulkan: no Vulkan 1.1 graphics and compute queue");
     }
     APS5_LOG_OUT("Physical device selected physical=%p queueFamily=%u", reinterpret_cast<void*>(selected), family);
+    if (selectedDriver.driverName[0] != '\0') state->driverInfo = std::string(selectedDriver.driverName) + " " + selectedDriver.driverInfo;
+    APS5_LOG_OUT("Selected Vulkan driver name=%s id=%d info=%s", selectedDriver.driverName, static_cast<int>(selectedDriver.driverID), selectedDriver.driverInfo);
     VkPhysicalDeviceProperties2 properties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
     properties.pNext = &state->subgroup;
     state->InstanceFunction<PFN_vkGetPhysicalDeviceProperties2>("vkGetPhysicalDeviceProperties2")(selected, &properties);
@@ -1124,12 +1126,6 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window, bool compileOnly) :
     std::vector<VkExtensionProperties> availableExtensions(extensionCount);
     check(enumerateDeviceExtensions(selected, nullptr, &extensionCount, availableExtensions.data()), "vkEnumerateDeviceExtensionProperties");
     const auto hasExtension = [&](const char* name) { return std::any_of(availableExtensions.begin(), availableExtensions.end(), [&](const auto& item) { return std::strcmp(item.extensionName, name) == 0; }); };
-    if (hasExtension(VK_KHR_DRIVER_PROPERTIES_EXTENSION_NAME)) {
-        VkPhysicalDeviceDriverProperties driver{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES};
-        VkPhysicalDeviceProperties2 driverProperties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &driver};
-        state->InstanceFunction<PFN_vkGetPhysicalDeviceProperties2>("vkGetPhysicalDeviceProperties2")(selected, &driverProperties);
-        state->driverInfo = std::string(driver.driverName) + " " + driver.driverInfo;
-    }
     auto byteFeatures = QueryBdaByteFeatures(selected, state->InstanceFunction<PFN_vkGetPhysicalDeviceFeatures2>("vkGetPhysicalDeviceFeatures2"), availableExtensions);
     auto bdaFeatures = QueryBdaFeatures(selected, state->InstanceFunction<PFN_vkGetPhysicalDeviceFeatures2>("vkGetPhysicalDeviceFeatures2"), availableExtensions);
     require(hasExtension(VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME), "VK_KHR_shader_float_controls is unavailable");
