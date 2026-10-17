@@ -9,6 +9,7 @@
 #include <sched.h>
 #include <unistd.h>
 #ifdef __APPLE__
+#include <crt_externs.h>
 #include <mach/mach.h>
 #include <pthread.h>
 #endif
@@ -92,6 +93,15 @@ public:
             arguments.erase(arguments.begin());
             if (_wputenv_s(L"ANYPS5_LOADEXEC_ARGV_SKIP", L"") != 0 || !SetEnvironmentVariableW(L"ANYPS5_LOADEXEC_ARGV_SKIP", nullptr))
                 throw std::runtime_error("LoadExec: cannot clear the argument marker");
+        }
+#elif defined(__APPLE__)
+        const int count = *_NSGetArgc();
+        char** values = *_NSGetArgv();
+        if (values == nullptr || count <= 0)
+            throw std::runtime_error("Cannot read process arguments");
+        for (int index = 0; index < count; ++index) {
+            if (values[index] == nullptr) throw std::runtime_error("Unterminated process argument");
+            arguments.emplace_back(values[index]);
         }
 #else
         std::ifstream stream("/proc/self/cmdline", std::ios::binary);
