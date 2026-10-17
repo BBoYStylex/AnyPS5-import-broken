@@ -36,8 +36,7 @@ int APS5_VABI sceNpTrophy2UnregisterUnlockCallback() {
 
 
 int APS5_VABI sceNpTrophy2GetRewardIcon(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    throw std::runtime_error("sceNpTrophy2GetRewardIcon: reward icons are not supported");
 }
 
 int APS5_VABI sceNpTrophy2ShowTrophyList(int context) {

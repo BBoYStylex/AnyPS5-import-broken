@@ -10,6 +10,7 @@ int APS5_VABI sceNpTrophy2GetGameInfo(int, int, NpTrophy2GameDetails*, NpTrophy2
 int APS5_VABI sceNpTrophy2GetGroupInfo(int, int, int, NpTrophy2GroupDetails*, NpTrophy2GroupData*);
 int APS5_VABI sceNpTrophy2GetTrophyInfo(int, int, int, NpTrophy2Details*, NpTrophy2Data*);
 int APS5_VABI sceNpTrophy2ShowTrophyList(int);
+int APS5_VABI sceNpTrophy2GetRewardIcon(void);
 }
 
 static void Require(bool value) { if (!value) std::abort(); }
@@ -57,4 +58,12 @@ int main() {
     Require(sceNpTrophy2GetTrophyInfo(1, 1, 3, nullptr, &trophyData) == 0);
     Require(trophyData.trophy_id == 3);
     Require(ThrowsInvalidArgument([] { sceNpTrophy2GetTrophyInfo(1, 1, 3, nullptr, nullptr); }));
+
+    bool threw = false;
+    try {
+        sceNpTrophy2GetRewardIcon();
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    Require(threw);
 }
