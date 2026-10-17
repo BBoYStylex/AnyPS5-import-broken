@@ -8,12 +8,25 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #endif
+#ifdef __APPLE__
+#include <libproc.h>
+#include <sys/proc_info.h>
+#include <unistd.h>
+#endif
 #include "prx/libkernel/Socket/include/SocketError.hpp"
 #include "prx/libkernel/Socket/include/SocketOptions.hpp"
 #include <algorithm>
 #include <cstring>
 
 namespace GuestSockets {
+#ifdef __APPLE__
+// macOS refuses getsockopt(SO_ACCEPTCONN) with ENOPROTOOPT; the kernel's socket info carries the same option bit.
+bool HostSocketListening(int handle) {
+    socket_fdinfo info{};
+    const int bytes = proc_pidfdinfo(getpid(), handle, PROC_PIDFDSOCKETINFO, &info, sizeof(info));
+    return bytes == static_cast<int>(sizeof(info)) && (info.psi.soi_options & SO_ACCEPTCONN) != 0;
+}
+#endif
 namespace {
 
 constexpr int GuestAcceptConnection = 0x2;
@@ -179,10 +192,14 @@ int GetSocketLevelOption(std::uintptr_t native, SocketOptionState& state, int ty
         if (::getsockopt(handle, SOL_SOCKET, nativeOption, reinterpret_cast<NativeOptionOutput>(&enabled), &size)) return HostError();
         number = enabled != 0 ? option : 0;
     } else if (option == GuestAcceptConnection) {
+#ifdef __APPLE__
+        number = GuestSockets::HostSocketListening(handle) ? GuestAcceptConnection : 0;
+#else
         int listening = 0;
         socklen_t size = sizeof(listening);
         if (::getsockopt(handle, SOL_SOCKET, SO_ACCEPTCONN, reinterpret_cast<NativeOptionOutput>(&listening), &size)) return HostError();
         number = listening != 0 ? GuestAcceptConnection : 0;
+#endif
     } else if (option == GuestType) {
         number = type;
     } else if (option == GuestNoSigpipe) {
