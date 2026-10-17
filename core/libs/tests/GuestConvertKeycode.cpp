@@ -3,10 +3,12 @@
 #include <cstdint>
 #include <cstdlib>
 #include <initializer_list>
+#include <stdexcept>
 
 extern "C" {
 int APS5_VABI sceConvertKeycodeGetImeKeyboardType(std::int32_t, std::uint32_t*);
 int APS5_VABI sceConvertKeycodeGetCharacter(std::uint16_t, std::uint32_t, std::uint32_t, char16_t*);
+int APS5_VABI sceConvertKeycodeGetCharacterFromKeyboardData(void);
 }
 
 static void Require(bool value) { if (!value) std::abort(); }
@@ -41,5 +43,14 @@ int main() {
         Require(sceConvertKeycodeGetCharacter(0x32, state, 0, character) == 0);
         Require(character[0] == 0);
     }
+
+    bool threw = false;
+    try {
+        sceConvertKeycodeGetCharacterFromKeyboardData();
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    Require(threw);
+
     return 0;
 }
