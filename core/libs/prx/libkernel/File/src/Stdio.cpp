@@ -1021,6 +1021,66 @@ int APS5_VABI sceKernelGetdents(int fd, char* buf, int nbytes) {
 
 #else
 
+#ifdef __APPLE__
+// APFS reports d_seekoff 0 for every entry and leaves the descriptor offset at 0x7fffffff after a read, so host
+// positions cannot resume a listing. The guest position is kept as an entry index in the descriptor offset
+// instead: each call rewinds, skips that many entries, and stores the index of the first entry it did not return.
+int APS5_VABI sceKernelGetdirentries(int fd, char* buf, int nbytes, int64_t* basep) {
+    if (GuestSockets::IsOpen(fd)) return SceErrorFromErrno(GUEST_EINVAL);
+    File::RefuseArchivedFile(fd, "getdirentries");
+    constexpr std::size_t GuestHeaderBytes = 8;
+    constexpr std::size_t GuestMaxName = 255;
+    if (buf == nullptr) return SceErrorFromErrno(GUEST_EFAULT);
+    if (nbytes <= 0) return SceErrorFromErrno(GUEST_EINVAL);
+    const off_t base = ::lseek(fd, 0, SEEK_CUR);
+    if (base < 0) return SceErrorFromErrno(errno);
+    if (basep != nullptr) *basep = static_cast<int64_t>(base);
+    if (::lseek(fd, 0, SEEK_SET) < 0) return SceErrorFromErrno(errno);
+    std::vector<char> listing;
+    for (;;) {
+        constexpr std::size_t Chunk = 64 * 1024;
+        const auto start = listing.size();
+        listing.resize(start + Chunk);
+        off_t position = 0;
+        const auto read = ::__getdirentries64(fd, listing.data() + start, Chunk, &position);
+        if (read < 0) {
+            const int error = errno;
+            ::lseek(fd, base, SEEK_SET);
+            return SceErrorFromErrno(error);
+        }
+        listing.resize(start + static_cast<std::size_t>(read));
+        if (read == 0) break;
+    }
+    std::size_t written = 0;
+    off_t index = 0;
+    for (std::size_t offset = 0; offset < listing.size(); ++index) {
+        const auto* entry = reinterpret_cast<const struct dirent*>(listing.data() + offset);
+        if (entry->d_reclen == 0) break;
+        offset += entry->d_reclen;
+        if (index < base) continue;
+        const auto nameLength = std::strlen(entry->d_name);
+        const auto record = (GuestHeaderBytes + nameLength + 1 + 3) & ~std::size_t{3};
+        if (nameLength > GuestMaxName || written + record > static_cast<std::size_t>(nbytes)) {
+            if (::lseek(fd, index, SEEK_SET) < 0) return SceErrorFromErrno(errno);
+            if (written != 0) return static_cast<int>(written);
+            return nameLength > GuestMaxName ? static_cast<int>(0x80020000u | GUEST_ENAMETOOLONG) : SceErrorFromErrno(GUEST_EINVAL);
+        }
+        char* out = buf + written;
+        std::memset(out, 0, record);
+        const auto fileNumber = static_cast<std::uint32_t>(entry->d_ino);
+        const auto recordLength = static_cast<std::uint16_t>(record);
+        const auto nameBytes = static_cast<std::uint8_t>(nameLength);
+        std::memcpy(out, &fileNumber, sizeof(fileNumber));
+        std::memcpy(out + 4, &recordLength, sizeof(recordLength));
+        out[6] = static_cast<char>(entry->d_type);
+        out[7] = static_cast<char>(nameBytes);
+        std::memcpy(out + GuestHeaderBytes, entry->d_name, nameLength);
+        written += record;
+    }
+    if (::lseek(fd, index, SEEK_SET) < 0) return SceErrorFromErrno(errno);
+    return static_cast<int>(written);
+}
+#else
 int APS5_VABI sceKernelGetdirentries(int fd, char* buf, int nbytes, int64_t* basep) {
     if (GuestSockets::IsOpen(fd)) return SceErrorFromErrno(GUEST_EINVAL);
     File::RefuseArchivedFile(fd, "getdirentries");
@@ -1032,21 +1092,12 @@ int APS5_VABI sceKernelGetdirentries(int fd, char* buf, int nbytes, int64_t* bas
     if (base < 0) return SceErrorFromErrno(errno);
     if (basep != nullptr) *basep = static_cast<int64_t>(base);
     std::vector<char> host(static_cast<std::size_t>(nbytes) < 4096 ? 4096 : static_cast<std::size_t>(nbytes));
-#ifdef __APPLE__
-    off_t position = base;
-    const auto read = ::__getdirentries64(fd, host.data(), host.size(), &position);
-#else
     const auto read = ::syscall(SYS_getdents64, fd, host.data(), host.size());
-#endif
     if (read < 0) return SceErrorFromErrno(errno);
     std::size_t written = 0;
     off_t resume = base;
     for (long offset = 0; offset < read;) {
-#ifdef __APPLE__
-        const auto* entry = reinterpret_cast<const struct dirent*>(host.data() + offset);
-#else
         const auto* entry = reinterpret_cast<const struct dirent64*>(host.data() + offset);
-#endif
         const auto nameLength = std::strlen(entry->d_name);
         const auto record = (GuestHeaderBytes + nameLength + 1 + 3) & ~std::size_t{3};
         if (nameLength > GuestMaxName || written + record > static_cast<std::size_t>(nbytes)) {
@@ -1065,16 +1116,13 @@ int APS5_VABI sceKernelGetdirentries(int fd, char* buf, int nbytes, int64_t* bas
         out[7] = static_cast<char>(nameBytes);
         std::memcpy(out + GuestHeaderBytes, entry->d_name, nameLength);
         written += record;
-#ifdef __APPLE__
-        resume = static_cast<off_t>(entry->d_seekoff);
-#else
         resume = entry->d_off;
-#endif
         offset += entry->d_reclen;
     }
     if (::lseek(fd, resume, SEEK_SET) < 0) return SceErrorFromErrno(errno);
     return static_cast<int>(written);
 }
+#endif
 
 int APS5_VABI sceKernelGetdents(int fd, char* buf, int nbytes) {
     return sceKernelGetdirentries(fd, buf, nbytes, nullptr);

@@ -10,6 +10,10 @@
 #else
 #include <unistd.h>
 #endif
+#ifdef __APPLE__
+#include <filesystem>
+#include <sys/stat.h>
+#endif
 
 struct LibcStatvfs;
 extern "C" int APS5_VABI fstatvfs_nid_postfix(int, LibcStatvfs*);
@@ -101,8 +105,19 @@ int OpenMetadata(const std::filesystem::path& path, bool directory) {
     return descriptor;
 #else
 #ifdef __APPLE__
-    // macOS has no O_PATH; O_EVTONLY opens without requiring read access to the file.
-    const int descriptor = ::open(path.c_str(), O_EVTONLY | O_CLOEXEC | (directory ? O_DIRECTORY : 0));
+    // macOS has no O_PATH, and O_EVTONLY still needs read permission and blocks on FIFOs. stat() reports the same
+    // errors O_PATH would (search permission, ENOENT, ENOTDIR, ELOOP); the volume is then read from the directory
+    // itself, or from a non-directory's parent, which is on the same file system.
+    struct stat target{};
+    if (::stat(path.c_str(), &target) != 0) return Fail(HostError(errno));
+    if (directory && !S_ISDIR(target.st_mode)) return Fail(20);
+    std::error_code error;
+    auto volume = std::filesystem::canonical(path, error);
+    if (error) return Fail(HostError(error.value()));
+    if (!S_ISDIR(target.st_mode)) volume = volume.parent_path();
+    int descriptor = ::open(volume.c_str(), O_EVTONLY | O_CLOEXEC | O_DIRECTORY);
+    if (descriptor < 0 && errno == EACCES && volume.has_parent_path())
+        descriptor = ::open(volume.parent_path().c_str(), O_EVTONLY | O_CLOEXEC | O_DIRECTORY);
 #else
     const int descriptor = ::open(path.c_str(), O_PATH | O_CLOEXEC | (directory ? O_DIRECTORY : 0));
 #endif
