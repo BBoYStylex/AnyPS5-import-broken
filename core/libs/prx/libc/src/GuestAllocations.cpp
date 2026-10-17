@@ -484,6 +484,54 @@ bool GuestAllocationsForRegistered_nid_postfix(void*, const void* pointer, std::
     return any;
 }
 
+void GuestAllocationsGuestPages_nid_postfix(std::uintptr_t address, std::size_t bytes, std::size_t page, std::uintptr_t* first, std::uintptr_t* end) {
+    std::uintptr_t bias = 0;
+#ifdef __APPLE__
+    struct Search {
+        std::uintptr_t address;
+        std::uintptr_t bias;
+    } search{address, 0};
+    dl_iterate_phdr([](dl_phdr_info* image, std::size_t, void* data) {
+        auto& found = *static_cast<Search*>(data);
+        for (unsigned index = 0; index < image->dlpi_phnum; ++index) {
+            const auto& header = image->dlpi_phdr[index];
+            const auto start = static_cast<std::uintptr_t>(image->dlpi_addr + header.p_vaddr);
+            if (header.p_type == PT_LOAD && found.address >= start && found.address - start < header.p_memsz) {
+                found.bias = static_cast<std::uintptr_t>(image->dlpi_addr);
+                return 1;
+            }
+        }
+        return 0;
+    }, &search);
+    bias = search.bias;
+#endif
+    const auto mask = static_cast<std::uintptr_t>(page - 1);
+    *first = bias + ((address - bias) & ~mask);
+    *end = bias + ((address + bytes - bias + mask) & ~mask);
+}
+
+void GuestAllocationsTrimToRegistered_nid_postfix(void*, const void** pointer, std::size_t* bytes) {
+#ifdef __APPLE__
+    constexpr std::uint64_t guestPage = 0x4000;
+    auto start = reinterpret_cast<std::uintptr_t>(*pointer);
+    auto end = start + *bytes;
+    const auto& ranges = registry().ranges;
+    const auto following = ranges.upper_bound(start);
+    const bool startCovered = following != ranges.begin() && std::prev(following)->first + std::prev(following)->second->bytes > start;
+    if (!startCovered && following != ranges.end() && following->first < end && following->first - start < guestPage) start = following->first;
+    const auto beyond = ranges.lower_bound(end);
+    if (beyond != ranges.begin()) {
+        const auto finish = std::prev(beyond)->first + std::prev(beyond)->second->bytes;
+        if (finish < end && finish > start && end - finish < guestPage) end = finish;
+    }
+    *pointer = reinterpret_cast<const void*>(start);
+    *bytes = end - start;
+#else
+    static_cast<void>(pointer);
+    static_cast<void>(bytes);
+#endif
+}
+
 bool GuestAllocationsCovers_nid_postfix(void*, const void* pointer, std::size_t bytes) {
     const auto address = reinterpret_cast<std::uintptr_t>(pointer);
     require(address != 0 && bytes != 0 && bytes <= std::numeric_limits<std::uint64_t>::max() - address, "invalid guest allocation range");
