@@ -200,6 +200,12 @@ int main(int argc, char** argv) {
         require(initializes == 1);
         return 0;
     }
+    if (argc > 1 && std::strcmp(argv[1], "exit-order") == 0) {
+        require(atexit_nid_postfix(exitCallbackAllocates) == 0);
+        ApplicationHeapInitialize_nid_no_patch(process.data());
+        require(initializes == 1);
+        return 0;
+    }
 #ifdef _WIN32
     if (argc > 1 && std::strcmp(argv[1], "none") == 0) {
         installProcessParameters(false);
@@ -214,12 +220,6 @@ int main(int argc, char** argv) {
         return 0;
     }
 #endif
-    if (argc > 1 && std::strcmp(argv[1], "exit-order") == 0) {
-        require(atexit_nid_postfix(exitCallbackAllocates) == 0);
-        ApplicationHeapInitialize_nid_no_patch(process.data());
-        require(initializes == 1);
-        return 0;
-    }
     if (argc > 1 && std::strcmp(argv[1], "default") == 0) {
         std::array<void*, 10> partial{};
         partial[0] = reinterpret_cast<void*>(&allocate);
