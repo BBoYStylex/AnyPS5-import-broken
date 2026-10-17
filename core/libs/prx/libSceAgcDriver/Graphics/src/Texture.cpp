@@ -1532,7 +1532,7 @@ VkImageView StorageTexture::AttachmentView(VkFormat format, std::uint32_t mip, s
     const bool volume = descriptor.dimension == TextureDimension::k3D;
     const bool array = !volume && descriptor.dimension == TextureDimension::k2DArray;
     Require((depthSlice == 0 && layers == 1) || (volume && mip == 0 && layers != 0 && depthSlice + layers - 1u <= descriptor.depthOrLastArray) || (array && depthSlice == 0 && layers != 0), "attachment slice is outside the storage image");
-    Require((layer == 0 && layers == 1) || volume || (array && descriptor.baseArray + layer + layers - 1u <= descriptor.depthOrLastArray), "attachment layer is outside the storage image");
+    Require((layer == 0 && layers == 1) || (volume && layer == 0) || (array && descriptor.baseArray + layer + layers - 1u <= descriptor.depthOrLastArray), "attachment layer is outside the storage image");
     const auto found = attachmentViews.find({format, mip, depthSlice, layers, layer});
     if (found != attachmentViews.end()) return found->second;
     VkImageViewUsageCreateInfo usage{VK_STRUCTURE_TYPE_IMAGE_VIEW_USAGE_CREATE_INFO};
