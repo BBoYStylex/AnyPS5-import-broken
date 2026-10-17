@@ -147,7 +147,7 @@ public:
         std::vector<const IrValue*> referenced;
         for (const auto& plan : m_tableColumns) {
             for (std::uint32_t argument = 0; argument < plan.handle->ArgumentCount(); argument++) {
-                plan.handle->ReplaceArgument(argument, plan.offset);
+                plan.handle->ReplaceArgument(argument, argument == 1u && plan.parentOffset != nullptr ? plan.parentOffset : plan.offset);
             }
             const auto& column = *m_sources[plan.source].tableColumn;
             KeepSourceAlive(*plan.handle, m_sources[column.heapSource], referenced);
@@ -184,6 +184,7 @@ private:
         IrValue* handle = nullptr;
         std::uint32_t source = 0;
         IrValue* offset = nullptr;
+        IrValue* parentOffset = nullptr;
         std::vector<std::uint32_t> memory;
         std::vector<const IrValue*> reads;
         std::optional<KeyDomain> keyDomain;
@@ -550,9 +551,9 @@ private:
         return value;
     }
 
-    bool TryMakeTableColumn(IrValue& handle, bool sampler, bool r128, TableColumnPlan& plan) {
-        const auto expected = sampler ? IrOpcode::GetSamplerResource : IrOpcode::GetImageResource;
-        const std::uint32_t width = sampler ? 4u : 8u;
+    bool TryMakeTableColumn(IrValue& handle, bool sampler, bool r128, TableColumnPlan& plan, bool buffer = false) {
+        const auto expected = buffer ? IrOpcode::GetBufferResource : sampler ? IrOpcode::GetSamplerResource : IrOpcode::GetImageResource;
+        const std::uint32_t width = sampler || buffer ? 4u : 8u;
         if (handle.Opcode() != expected || handle.ArgumentCount() != width) {
             return false;
         }
@@ -637,7 +638,18 @@ private:
         DescriptorSource heapSource;
         std::uint32_t heapIndex = 0;
         if (!MakeRuntimeSource(*heapHandle, address ? IrOpcode::GetAddressResource : IrOpcode::GetBufferResource, address ? 2u : 4u, heapIndex, heapSource)) {
-            return false;
+            if (sampler || address || buffer || heapHandle->Opcode() != IrOpcode::GetBufferResource || !std::ranges::all_of(heapHandle->Uses(), [&](const IrValue* use) { return std::ranges::find(plan.reads, use) != plan.reads.end(); })) return false;
+            TableColumnPlan parent;
+            if (!TryMakeTableColumn(*heapHandle, false, false, parent, true)) return false;
+            if (!std::ranges::all_of(parent.reads, [&](const IrValue* read) {
+                return std::ranges::all_of(read->Uses(), [&](const IrValue* user) {
+                    return user->Opcode() == IrOpcode::GetBufferResource && std::ranges::all_of(user->Uses(), [&](const IrValue* use) { return std::ranges::find(plan.reads, use) != plan.reads.end(); });
+                });
+            })) return false;
+            heapIndex = parent.source;
+            heapSource = m_sources[heapIndex];
+            plan.parentOffset = parent.offset;
+            m_tableColumns.push_back(std::move(parent));
         }
         TableColumn column;
         column.heapSource = heapIndex;
@@ -648,6 +660,7 @@ private:
         column.maxKey = possibleU32Bits(key);
         column.sampler = sampler;
         column.address = address;
+        column.buffer = buffer;
         column.foldedAddend = folded ? baseAddend : 0u;
         column.foldedCarry = folded ? carry : 0u;
         const auto domain = masked ? std::optional<KeyDomain>{} : MatchKeyDomain(key);
@@ -710,6 +723,7 @@ private:
         column.maxKey = possibleU32Bits(key);
         column.sampler = sampler;
         column.indirect = true;
+        column.buffer = handle.Opcode() == IrOpcode::GetBufferResource;
         column.indirectOffset = descriptorOffset;
         column.indirectImmediate = descriptorImmediate;
         const auto domain = MatchKeyDomain(key);

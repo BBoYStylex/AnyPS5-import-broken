@@ -1648,7 +1648,7 @@ IrResourcePlan handBuiltPlan() {
     DescriptorSource table;
     table.dwordCount = 8u;
     table.dwords[0] = &readConst(3);
-    table.tableColumn = TableColumn{2u, 32u, 16u, 4u, 8u, 0xffu, false, true, {KeyDomain{3u, 4u, 16u, false}, KeyDomain{2u, 8u, 4u, true}}, false};
+    table.tableColumn = TableColumn{2u, 32u, 16u, 4u, 8u, 0xffu, false, true, false, {KeyDomain{3u, 4u, 16u, false}, KeyDomain{2u, 8u, 4u, true}}, false};
     DescriptorSource heap;
     heap.dwordCount = 4u;
     heap.dwords[1] = &readConst(6);
@@ -1897,6 +1897,9 @@ void verifyMalformedPlans() {
     rejects("a uniform fill of five words", [](IrResourcePlan& plan) { plan.uniformFill.fill.words = 5u; });
     rejects("an image table heap past the sources", [](IrResourcePlan& plan) { plan.descriptorSources[1].tableColumn->heapSource = 4u; });
     rejects("an image table key past the sources", [](IrResourcePlan& plan) { plan.descriptorSources[1].tableColumn->keyDomains[1].source = 4u; });
+    rejects("a buffer table with eight dwords", [](IrResourcePlan& plan) { plan.descriptorSources[1].tableColumn->buffer = true; });
+    rejects("an image table cycle", [](IrResourcePlan& plan) { plan.descriptorSources[1].tableColumn->heapSource = 1u; });
+    rejects("an image table parent that is not a buffer", [](IrResourcePlan& plan) { plan.descriptorSources[2].tableColumn = *plan.descriptorSources[1].tableColumn; });
     auto foreign = handBuiltPlan();
     IrValue stray(IrOpcode::Void, IrType::U32, 99u);
     foreign.srtReads[0].value = &stray;
@@ -1920,6 +1923,12 @@ void verifyPlanRoundTrip() {
     require(phi.IsPhi() && phi.PhiBlockCount() == 2u && phi.PhiBlock(0)->Id() == 3u && phi.PhiBlock(1)->Id() == 7u && phi.Argument(1)->ImmediateU32() == 0u, "the decoded phi lost its blocks or operands");
     require(handDecoded.uniformFill.values[0] == handDecoded.uniformFill.values[1] && handDecoded.uniformFill.values[0] != nullptr && handDecoded.uniformFill.values[2] == nullptr, "the decoded uniform fill lost its shared or null values");
     require(samePlan(handBuilt, handDecoded), "the decoded hand-built plan differs from the plan in a field or a value");
+    auto bufferTable = handBuiltPlan();
+    bufferTable.descriptorSources[1].tableColumn->buffer = true;
+    bufferTable.descriptorSources[1].tableColumn->dwordCount = 4u;
+    const auto bufferBytes = encodedPlan(bufferTable);
+    IrResourcePlan bufferDecoded;
+    require(bufferBytes != handBytes && ShaderDiskCache::DecodePlan(bufferBytes, bufferDecoded) && samePlan(bufferTable, bufferDecoded), "the nested buffer column changed in a disk-cache round trip");
     PlanFixture handFixture;
     handFixture.userData = {static_cast<std::uint32_t>(PlanSrtAddress), static_cast<std::uint32_t>(PlanSrtAddress >> 32u), 0u, 0u};
     std::vector<std::uint32_t> handSrt(16, 0u);
