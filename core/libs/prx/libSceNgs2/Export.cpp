@@ -14,14 +14,7 @@ int APS5_VABI sceNgs2CalcWaveformBlock(const Ngs2WaveformFormat* format, uint32_
  return 0;
 }
 
-int APS5_VABI sceNgs2GeomApply(const Ngs2GeomListenerWork* listener, const Ngs2GeomSourceParam* source, Ngs2GeomAttribute* out_attrib, uint32_t flags) {
- (void)listener;
- (void)source;
- (void)out_attrib;
- (void)flags;
- NotImplemented_nid_no_patch(__func__);
- return 0;
-}
+
 
 int APS5_VABI sceNgs2GeomCalcListener(const Ngs2GeomListenerParam* param, Ngs2GeomListenerWork* out_work, uint32_t flags) {
  (void)param;
