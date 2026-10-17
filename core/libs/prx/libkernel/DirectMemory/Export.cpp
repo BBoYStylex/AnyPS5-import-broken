@@ -708,7 +708,7 @@ int APS5_VABI sceKernelMunlock_nid_postfix(void* address, std::uint64_t length) 
 }
 
 int APS5_VABI sceKernelMunlockall_nid_postfix() {
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__APPLE__)
     ::munlockall();
 #endif
     std::map<uintptr_t, size_t> ranges;
@@ -734,6 +734,12 @@ int APS5_VABI sceKernelMunlockall_nid_postfix() {
             cursor = next;
         }
     }
+#elif defined(__APPLE__)
+    // macOS has no munlockall (it fails with ENOSYS and overwrites errno), so unlock each range this process locked
+    // and leave errno as the guest had it, matching Linux's successful munlockall.
+    const int savedError = errno;
+    for (const auto& [start, len] : ranges) ::munlock(reinterpret_cast<void*>(start), len);
+    errno = savedError;
 #endif
     return 0;
 }
