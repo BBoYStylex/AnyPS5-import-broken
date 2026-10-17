@@ -2,6 +2,7 @@
 #include "Optimization/ResourceProgram.hpp"
 #include "ControlFlow/RequestSerializer.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver/Shaders/ShaderRegistry.hpp"
+#include "prx/libSceAgcDriver/Execution/include/Driver/Queues/Submission.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/ShaderInputState.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver/Driver.hpp"
@@ -13,6 +14,7 @@
 #include <spirv/unified1/spirv.hpp>
 #include <algorithm>
 #include <array>
+#include <map>
 #include <cstddef>
 #include <cstring>
 #include <chrono>
@@ -23,6 +25,8 @@
 #include <vector>
 #include <future>
 #include <barrier>
+#include <latch>
+#include <semaphore>
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
@@ -313,29 +317,100 @@ std::exception_ptr InjectedFailure() {
     }
 }
 
-void AwaitedRegistrationPreparation() {
+void ReferencedRegistrationPreparation() {
+    using AgcDriver::DriverDetail::ShaderSnapshot;
+    alignas(256) static const std::array<std::uint32_t, 1> boundCode{0xbf810000u};
+    alignas(256) static const std::array<std::uint32_t, 1> unrelatedCode{0xbf810000u};
+    const auto bound = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(boundCode.data()));
+    const auto unrelated = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(unrelatedCode.data()));
+    const auto boundSnapshot = std::make_shared<ShaderSnapshot>(ShaderSnapshot{bound, 0, 0, {boundCode.begin(), boundCode.end()}, {}});
+    const auto unrelatedSnapshot = std::make_shared<ShaderSnapshot>(ShaderSnapshot{unrelated, 0, 0, {unrelatedCode.begin(), unrelatedCode.end()}, {}});
+    AgcDriver::DriverDetail::ShaderRegistry registry;
+    registry[bound].push_back(boundSnapshot);
+    registry[unrelated].push_back(unrelatedSnapshot);
+    const std::vector<std::uint32_t> commands{0xc0027600u, 0x20cu, static_cast<std::uint32_t>(bound >> 8u), static_cast<std::uint32_t>(bound >> 40u)};
+    Require(AgcDriver::DriverDetail::ReferencedPrograms(commands, {}) == std::vector<std::uint64_t>{bound}, "a compute program bound with SET_SH_REG was not found in the submission");
+    const std::vector<std::uint32_t> indirect{0xc0036300u, 0, 0, 0, 2};
+    const std::map<std::size_t, std::vector<std::uint32_t>> lists{{0, {0xc8u, static_cast<std::uint32_t>(unrelated >> 8u), 0xc9u, static_cast<std::uint32_t>(unrelated >> 40u)}}};
+    Require(AgcDriver::DriverDetail::ReferencedPrograms(indirect, lists) == std::vector<std::uint64_t>{unrelated}, "a vertex program bound through an indirect register list was not found in the submission");
+    const std::vector<std::uint32_t> lowOnly{0xc0017600u, 0x008u, static_cast<std::uint32_t>(bound >> 8u)};
+    Require(AgcDriver::DriverDetail::ReferencedPrograms(lowOnly, {}).empty(), "a program address without its high register was resolved");
+    const auto workers = std::max(2u, std::thread::hardware_concurrency() / 2u);
+    std::barrier started(static_cast<std::ptrdiff_t>(workers + 1u));
+    std::counting_semaphore<> release(0);
+    std::latch finished(static_cast<std::ptrdiff_t>(workers));
+    for (unsigned index = 0; index < workers; ++index) {
+        AgcDriver::DriverDetail::SubmitRegistrationPreparation([&] {
+            started.arrive_and_wait();
+            release.acquire();
+            finished.count_down();
+        });
+    }
+    started.arrive_and_wait();
+    const auto pending = [](const std::shared_ptr<ShaderSnapshot>& snapshot) {
+        std::lock_guard lock(snapshot->prepared->mutex);
+        return snapshot->prepared->pending;
+    };
+    const auto settle = [](const std::shared_ptr<ShaderSnapshot>& snapshot) {
+        {
+            std::lock_guard lock(snapshot->prepared->mutex);
+            snapshot->prepared->pending = false;
+        }
+        snapshot->prepared->settled.notify_all();
+    };
+    boundSnapshot->prepared->pending = true;
+    unrelatedSnapshot->prepared->pending = true;
+    std::atomic<unsigned> order{0};
+    std::atomic<unsigned> boundOrder{~0u};
+    std::atomic<unsigned> unrelatedOrder{~0u};
+    std::counting_semaphore<> unrelatedGate(0);
+    AgcDriver::DriverDetail::SubmitRegistrationPreparation([unrelatedSnapshot, settle, &order, &unrelatedOrder, &unrelatedGate] {
+        unrelatedOrder.store(order.fetch_add(1u));
+        static_cast<void>(unrelatedGate.try_acquire_for(std::chrono::seconds(5)));
+        settle(unrelatedSnapshot);
+    }, unrelatedSnapshot->prepared.get());
+    AgcDriver::DriverDetail::SubmitRegistrationPreparation([boundSnapshot, settle, &order, &boundOrder] {
+        boundOrder.store(order.fetch_add(1u));
+        settle(boundSnapshot);
+    }, boundSnapshot->prepared.get());
+    auto releaser = std::async(std::launch::async, [&] {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (!boundSnapshot->prepared->demanded.load() && std::chrono::steady_clock::now() < deadline) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        release.release();
+    });
+    AgcDriver::DriverDetail::AwaitReferencedPreparations(registry, AgcDriver::DriverDetail::ReferencedPrograms(commands, {}));
+    const bool boundPending = pending(boundSnapshot);
+    const bool unrelatedPending = pending(unrelatedSnapshot);
+    const auto boundRank = boundOrder.load();
+    unrelatedGate.release();
+    releaser.get();
+    release.release(static_cast<std::ptrdiff_t>(workers - 1u));
+    const std::array<std::uint64_t, 1> unrelatedAddress{unrelated};
+    AgcDriver::DriverDetail::AwaitReferencedPreparations(registry, unrelatedAddress);
+    const bool unrelatedSettled = !pending(unrelatedSnapshot);
+    finished.wait();
+    Require(!boundPending, "a submission did not wait for the preparation of a program its commands bind");
+    Require(boundRank == 0u, "the queued preparation of a bound program was not moved ahead of unrelated queued work");
+    Require(unrelatedPending, "a preparation of a program the commands do not bind held the submission back");
+    Require(unrelatedSettled && unrelatedOrder.load() == 1u, "a submission binding the queued program did not wait for its preparation");
+}
+
+void UnrelatedPreparationAtSubmit() {
     std::atomic<bool> ran{false};
     AgcDriver::DriverDetail::SubmitRegistrationPreparation([&] {
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        std::this_thread::sleep_for(std::chrono::milliseconds(1500));
         ran.store(true, std::memory_order_release);
     });
-    AgcDriver::DriverDetail::AwaitRegistrationPreparation();
-    Require(ran.load(std::memory_order_acquire), "a submission did not wait for the registration preparation queued before it");
-    std::atomic<bool> slow{false};
-    std::atomic<bool> fast{false};
-    AgcDriver::DriverDetail::SubmitRegistrationPreparation([&] {
-        std::this_thread::sleep_for(std::chrono::milliseconds(300));
-        slow.store(true, std::memory_order_release);
-    });
-    auto waiter = std::async(std::launch::async, [&] {
-        AgcDriver::DriverDetail::AwaitRegistrationPreparation();
-        return slow.load(std::memory_order_acquire);
-    });
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    AgcDriver::DriverDetail::SubmitRegistrationPreparation([&] { fast.store(true, std::memory_order_release); });
-    Require(waiter.get(), "a submission stopped waiting for an earlier preparation once a later one finished");
-    AgcDriver::DriverDetail::AwaitRegistrationPreparation();
-    Require(fast.load(std::memory_order_acquire), "the later preparation did not run");
+    std::vector<std::uint32_t> commands{0xc0001000u, 0};
+    Packet packet{commands.data(), static_cast<std::uint32_t>(commands.size()), 0, {}};
+    const auto began = std::chrono::steady_clock::now();
+    Require(sceAgcDriverSubmitDcb(&packet) == 0, "a submission behind an unrelated preparation failed");
+    const auto waited = std::chrono::steady_clock::now() - began;
+    const bool done = ran.load(std::memory_order_acquire);
+    AgcDriverWaitIdle_nid_postfix();
+    while (!ran.load(std::memory_order_acquire)) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    Require(!done && waited < std::chrono::milliseconds(1000), "a submission waited for a preparation its commands do not use");
 }
 
 void PendingRegistrationPreparation(AgcDriver::VulkanDevice& device) {
@@ -809,11 +884,12 @@ int main(int argc, char** argv) {
         RegisteredVertexWorkgroup(device->Target());
         FailureCapture(*device);
         PendingRegistrationPreparation(*device);
-        AwaitedRegistrationPreparation();
+        ReferencedRegistrationPreparation();
         Require(argc != 2 || std::string_view(argv[1]) != "--fail-before-registration", "injected failure before registration");
         PrepareMultisampledStorage(*device);
         device.reset();
         SharedCodeHeaders();
+        UnrelatedPreparationAtSubmit();
         RegistrationWithoutSpecials();
         Registration(argc == 2);
         std::cout << "prepared shader and transactional registration tests passed\n";
