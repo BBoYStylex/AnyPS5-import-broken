@@ -365,6 +365,7 @@ struct ColumnRecords {
     bool nested = false;
     std::vector<RecordState> states;
     std::vector<std::uint32_t> words;
+    std::vector<std::uint64_t> pointers;
     std::vector<std::pair<std::uint64_t, std::uint64_t>> readRanges;
 };
 
@@ -576,7 +577,8 @@ private:
                 if (column.buffer) records.readRanges.emplace_back(records.base, records.size);
             }
         }
-        ReadColumn(column, records, ImageTableAbi::MaxKeys);
+        ReadColumn(column, records, column.buffer ? parentKeysRemaining : ImageTableAbi::MaxKeys);
+        if (column.buffer) parentKeysRemaining -= records.keys;
         return records;
     }
 
@@ -591,6 +593,7 @@ private:
         records.words.assign(records.keys, 0u);
         const auto end = records.base + records.size;
         if (column.indirect) {
+            if (column.buffer) records.pointers.assign(records.keys, ImageTableAbi::UncapturedPointer);
             for (std::uint32_t record = 0; record < records.keys; record++) {
                 if (records.states[record] != RecordState::Read) continue;
                 const auto offset = column.addend + record * column.stride;
@@ -601,6 +604,7 @@ private:
                     continue;
                 }
                 const std::uint64_t pointer = (static_cast<std::uint64_t>(Read(records.base + *highWord)) << 32u) | Read(records.base + *lowWord);
+                if (column.buffer) records.pointers[record] = pointer;
                 DescriptorValue value;
                 value.dwordCount = column.sampler || column.buffer ? 4u : 8u;
                 std::uint64_t first = std::numeric_limits<std::uint64_t>::max();
@@ -746,6 +750,7 @@ private:
         out.outside = records.outside;
         out.nested = records.nested;
         out.codes.assign(records.keys, 0u);
+        out.pointers = records.pointers;
         out.readRanges = records.readRanges;
         auto& counters = tableCounters();
         if (records.fault != 0u) counters.poison[records.fault & ~ImageTableAbi::PoisonFlag].fetch_add(1, std::memory_order_relaxed);
@@ -769,7 +774,6 @@ private:
         records = Column(column.heapSource);
         records.nested = true;
         std::map<std::array<std::uint32_t, 8>, std::uint32_t> children;
-        std::uint32_t remaining = ImageTableAbi::MaxKeys;
         for (std::uint32_t key = 0; key < records.keys; ++key) {
             if (records.states[key] != RecordState::Read) continue;
             const auto value = tables.words.at(records.words[key]);
@@ -793,8 +797,8 @@ private:
                     tables.ranges.emplace_back(child.base, child.size);
                     records.readRanges.emplace_back(child.base, child.size);
                 }
-                ReadColumn(column, child, remaining);
-                remaining -= child.keys;
+                ReadColumn(column, child, nestedKeysRemaining);
+                nestedKeysRemaining -= child.keys;
             }
             const auto index = static_cast<std::uint32_t>(tables.nested.size());
             tables.nested.push_back(CopyRecords(child));
@@ -820,6 +824,8 @@ private:
     SrtWalker& walker;
     const std::vector<std::uint8_t>& activeSources;
     ImageTableSnapshot& tables;
+    std::uint32_t parentKeysRemaining = ImageTableAbi::MaxParentKeys;
+    std::uint32_t nestedKeysRemaining = ImageTableAbi::MaxNestedKeys;
     std::map<std::uint32_t, ColumnRecords> columns;
     struct WordsHash {
         using Key = std::tuple<std::array<std::uint32_t, 8>, std::uint32_t, std::uint8_t>;
@@ -1123,7 +1129,11 @@ ResolvedImageTables ResourceMaterializer::ResolveImageTables(const ShaderInfo& i
     const auto& tables = snapshot.tables;
     if (tables.tables.size() != count) throw std::runtime_error("image table snapshot disagrees with the static tables");
     if (info.runtimeImageModes.size() != info.images.size()) throw std::runtime_error("prepared runtime image modes are missing");
+    if (count > (Abi::MaxMapWords - Abi::HeaderWords) / Abi::TableWords) throw std::runtime_error("image table map exceeds its word budget");
     out.map.assign(Abi::HeaderWords + Abi::TableWords * count, 0u);
+    const auto growMap = [&](std::size_t words) {
+        if (out.map.size() > Abi::MaxMapWords || words > Abi::MaxMapWords - out.map.size()) throw std::runtime_error("image table map exceeds its word budget");
+    };
     out.map[Abi::HeaderVersion] = Abi::Version;
     out.poison.push_back({{}, 0u, NoTable, PoisonReason::OutsideSnapshot});
     out.poison.push_back({{}, 0u, NoTable, PoisonReason::OutsideDomain});
@@ -1153,6 +1163,7 @@ ResolvedImageTables ResourceMaterializer::ResolveImageTables(const ShaderInfo& i
         if ((words.availableDwordMask & (1u << 3u)) == 0u) {
             record[Abi::ImageRecordFlags] = poison(resource, PoisonReason::OutsideSnapshot, &words);
             const auto offset = static_cast<std::uint32_t>(out.map.size());
+            growMap(record.size());
             out.map.insert(out.map.end(), record.begin(), record.end());
             return offset;
         }
@@ -1182,6 +1193,7 @@ ResolvedImageTables ResourceMaterializer::ResolveImageTables(const ShaderInfo& i
             }
         }
         const auto offset = static_cast<std::uint32_t>(out.map.size());
+        growMap(record.size());
         out.map.insert(out.map.end(), record.begin(), record.end());
         return offset;
     };
@@ -1207,6 +1219,7 @@ ResolvedImageTables ResourceMaterializer::ResolveImageTables(const ShaderInfo& i
             }
         }
         const auto offset = static_cast<std::uint32_t>(out.map.size());
+        growMap(record.size());
         out.map.insert(out.map.end(), record.begin(), record.end());
         return offset;
     };
@@ -1225,11 +1238,18 @@ ResolvedImageTables ResourceMaterializer::ResolveImageTables(const ShaderInfo& i
         }
         outside[table] = outside[table] || column.outside;
         const auto mapStart = static_cast<std::uint32_t>(out.map.size());
-        out.map[header + Abi::TableMapStart] = mapStart;
-        out.map.resize(out.map.size() + column.keys, 0u);
+        if (!column.nested) {
+            growMap(column.keys);
+            out.map[header + Abi::TableMapStart] = mapStart;
+            out.map.resize(out.map.size() + column.keys, 0u);
+        } else if (column.pointers.size() != column.keys) {
+            throw std::runtime_error("nested image table snapshot has no pointer for each record");
+        }
+        std::map<std::uint64_t, std::uint32_t> pointers;
         std::unordered_map<std::uint32_t, std::uint32_t> records;
         for (std::uint32_t key = 0; key < column.keys; key++) {
             const auto code = column.codes[key];
+            if (column.nested && column.pointers[key] == Abi::UncapturedPointer) continue;
             std::uint32_t mapped = Abi::NullCode;
             if ((code & Abi::PoisonFlag) != 0u) {
                 const auto reason = static_cast<PoisonReason>(code & ~Abi::PoisonFlag);
@@ -1240,6 +1260,7 @@ ResolvedImageTables ResourceMaterializer::ResolveImageTables(const ShaderInfo& i
                     const auto& child = tables.nested.at(code);
                     if (child.nested) throw std::runtime_error("image table snapshot has unsupported recursive children");
                     found->second = static_cast<std::uint32_t>(out.map.size());
+                    growMap(Abi::TableWords);
                     out.map.resize(out.map.size() + Abi::TableWords, 0u);
                     self(self, resource, table, sampler, child, found->second);
                 }
@@ -1252,9 +1273,23 @@ ResolvedImageTables ResourceMaterializer::ResolveImageTables(const ShaderInfo& i
                     mapped = found->second;
                 }
             }
-            out.map[mapStart + key] = mapped;
+            if (column.nested) {
+                const auto [found, inserted] = pointers.try_emplace(column.pointers[key], mapped);
+                if (!inserted && found->second != mapped) throw std::runtime_error("nested image table captured conflicting values at one pointer");
+            } else {
+                out.map[mapStart + key] = mapped;
+            }
         }
         if (column.nested) {
+            if (pointers.size() > Abi::MaxParentKeys) throw std::runtime_error("nested image table has too many pointers");
+            growMap(pointers.size() * Abi::PointerRecordWords);
+            out.map[header + Abi::TableKeyCount] = static_cast<std::uint32_t>(pointers.size());
+            out.map[header + Abi::TableMapStart] = static_cast<std::uint32_t>(out.map.size());
+            for (const auto& [pointer, code] : pointers) {
+                out.map.push_back(static_cast<std::uint32_t>(pointer));
+                out.map.push_back(static_cast<std::uint32_t>(pointer >> 32u));
+                out.map.push_back(code);
+            }
             out.map[header + Abi::TableOutsideCode] = poison(resource, PoisonReason::Unmapped, nullptr);
         } else if (sampler && out.map[header + Abi::TableFault] == 0u) {
             DescriptorValue zero;
@@ -1273,8 +1308,10 @@ ResolvedImageTables ResourceMaterializer::ResolveImageTables(const ShaderInfo& i
     out.map[Abi::HeaderPoisonCount] = static_cast<std::uint32_t>(out.poison.size());
     out.map[Abi::HeaderTableCount] = count;
     out.map[Abi::HeaderElementFaults] = static_cast<std::uint32_t>(out.map.size());
+    growMap(out.elements.size());
     out.map.resize(out.map.size() + out.elements.size(), 0u);
     out.map[Abi::HeaderSamplerFaults] = static_cast<std::uint32_t>(out.map.size());
+    growMap(out.samplers.size() / Abi::SamplerEntryElements);
     out.map.resize(out.map.size() + out.samplers.size() / Abi::SamplerEntryElements, 0u);
     out.faults = static_cast<std::uint32_t>(expected.size() + static_cast<std::size_t>(std::count(outside.begin(), outside.end(), true)));
     return out;
