@@ -82,6 +82,23 @@ def read_program_headers(path):
 
 
 class UnwrapTest(unittest.TestCase):
+    def test_output_aliases_cannot_replace_the_input_container(self):
+        container = build_container(default_segments(), default_records(), default_payloads())
+        source = Path(self.directory) / "input.self"
+        source.write_bytes(container)
+        alias = Path(self.directory) / "alias.elf"
+        import os
+        os.link(source, alias)
+        for output in (source, source.parent / "." / source.name, alias):
+            with self.subTest(output=output):
+                result = subprocess.run([sys.executable, str(Path(unwrap_self.__file__)), str(source), str(output)],
+                                        capture_output=True, text=True, timeout=30)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn("output aliases the input", result.stderr)
+                self.assertNotIn("Traceback", result.stderr)
+                self.assertEqual(source.read_bytes(), container)
+                self.assertEqual(alias.read_bytes(), container)
+
     def convert(self, container, name="input.self"):
         directory = Path(self.directory)
         source = directory / name
