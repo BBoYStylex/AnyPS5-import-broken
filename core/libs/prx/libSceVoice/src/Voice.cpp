@@ -5,6 +5,7 @@
 #include <map>
 #include <mutex>
 #include <set>
+#include <stdexcept>
 #include <vector>
 #include "SceTypes.hpp"
 
@@ -74,6 +75,18 @@ Port* find(const std::uint32_t id) {
 }
 
 extern "C" {
+int APS5_VABI sceVoiceGetResourceInfo(VoiceResourceInfo* info) {
+    if (info == nullptr) throw std::invalid_argument("sceVoiceGetResourceInfo: invalid argument");
+    std::lock_guard lock(g_lock);
+    if (!g_initialised) throw std::logic_error("sceVoiceGetResourceInfo: library not initialized");
+    info->max_voice_input_ports = 7;
+    info->max_voice_output_ports = 7;
+    info->max_device_input_ports = 1;
+    info->max_device_output_ports = 1;
+    info->max_ports = 64;
+    return 0;
+}
+
 
 int APS5_VABI sceVoiceInit(VoiceInitParam* param, std::int32_t version) {
     (void)version;
