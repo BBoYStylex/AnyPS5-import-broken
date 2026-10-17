@@ -1,4 +1,5 @@
 #include "ShaderDiskCache.hpp"
+#include "prx/libc/include/RemoveTree.hpp"
 #include "CacheKey.hpp"
 #include "ShaderCachePack.hpp"
 #include "ShaderCacheDirectory.hpp"
@@ -1575,10 +1576,7 @@ private:
             std::error_code timeError;
             auto used = std::filesystem::last_write_time(it->path() / "last-used", timeError);
             if (timeError) used = std::filesystem::last_write_time(it->path(), timeError);
-            if (!timeError && now - used > std::chrono::hours(24 * 14)) {
-                std::error_code removeError;
-                std::filesystem::remove_all(it->path(), removeError);
-            }
+            if (!timeError && now - used > std::chrono::hours(24 * 14)) RemoveTree(it->path());
         }
         error.clear();
         for (std::filesystem::directory_iterator it(directory, error), end; !error && it != end; it.increment(error)) {
