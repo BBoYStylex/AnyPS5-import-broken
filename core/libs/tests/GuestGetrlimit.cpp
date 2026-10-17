@@ -174,12 +174,18 @@ int main() {
          }) {
         RequireUnsupported(resource);
     }
-    bool unsupported = false;
-    try {
-        getdtablesize_nid_postfix();
-    } catch (const std::runtime_error&) {
-        unsupported = true;
-    }
-    Require(unsupported);
+    const ResourceLimit nofileLimit = GuestLimit(GUEST_RLIMIT_NOFILE);
+    const int dtable = getdtablesize_nid_postfix();
+    const std::int64_t expected = nofileLimit.rlim_cur > static_cast<std::int64_t>(std::numeric_limits<int>::max())
+        ? std::numeric_limits<int>::max()
+        : nofileLimit.rlim_cur;
+    Require(dtable == static_cast<int>(expected));
+    const ResourceLimit loweredNofile{nofileLimit.rlim_max > 1 ? nofileLimit.rlim_max - 1 : 1, nofileLimit.rlim_max};
+    Require(setrlimit_nid_postfix(GUEST_RLIMIT_NOFILE, &loweredNofile) == 0);
+    const std::int64_t loweredExpected = loweredNofile.rlim_cur > static_cast<std::int64_t>(std::numeric_limits<int>::max())
+        ? std::numeric_limits<int>::max()
+        : loweredNofile.rlim_cur;
+    Require(getdtablesize_nid_postfix() == static_cast<int>(loweredExpected));
+    Require(setrlimit_nid_postfix(GUEST_RLIMIT_NOFILE, &nofileLimit) == 0);
     CheckOpenFileLimit();
 }
