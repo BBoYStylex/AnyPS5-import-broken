@@ -1178,6 +1178,9 @@ int DoMprotect(const void* addr, size_t len, int prot) {
         if (nativeProtection != PROT_NONE && !KernelArena::Get().Owns(insidePointer, insideBytes)) CommitReservedPages(insidePointer, insideBytes);
 #endif
         if (mprotect(insidePointer, insideBytes, nativeProtection) != 0) throw std::system_error(errno, std::generic_category(), "mprotect failed");
+#ifdef __APPLE__
+        GuestWriteWatch::GuestWriteWatchProtectionChanged_nid_postfix(insidePointer, insideBytes, nativeProtection);
+#endif
         NoteGuestStackProtection(inside, insideBytes, (prot & 3) == 3);
         RecordProtection(insidePointer, insideBytes, prot);
         return 0;
@@ -1212,6 +1215,11 @@ int DoMprotect(const void* addr, size_t len, int prot) {
         mutation.Protect(span, spanBytes, (prot & 3) != 0, (prot & 2) != 0, (prot & GuestProtGpuReadWrite) != 0, [&] {
             if (mprotect(const_cast<void*>(span), spanBytes, nativeProtection) != 0) throw std::system_error(errno, std::generic_category(), "mprotect failed");
         });
+#ifdef __APPLE__
+        // macOS write watching keeps each watched page's guest protection; without this its fault handler would
+        // restore PROT_WRITE on a page the guest just made read-only.
+        GuestWriteWatch::GuestWriteWatchProtectionChanged_nid_postfix(span, spanBytes, nativeProtection);
+#endif
         RecordProtection(span, spanBytes, prot);
     }
     return 0;
