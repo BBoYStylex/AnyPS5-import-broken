@@ -35,6 +35,8 @@ std::int64_t APS5_VABI pwrite_nid_disambig1_nid_postfix(int, const void*, std::s
 std::int64_t APS5_VABI sceKernelRead(int, void*, std::size_t);
 std::int64_t APS5_VABI sceKernelWrite(int, const void*, std::size_t);
 std::int64_t APS5_VABI sceKernelLseek(int, std::int64_t, int);
+int APS5_VABI sceKernelTruncate_nid_postfix(const char*, std::int64_t);
+int APS5_VABI sceKernelUtimes_nid_postfix(const char*, const void*);
 }
 
 static void Check(bool value, int line) {
@@ -153,6 +155,8 @@ int main() {
     Require(sceKernelWrite(descriptor, nullptr, 0) == 0);
     Require(sceKernelRead(-1, nullptr, 0) == static_cast<std::int32_t>(0x80020009u));
     Require(sceKernelWrite(-1, nullptr, 0) == static_cast<std::int32_t>(0x80020009u));
+    Require(sceKernelTruncate_nid_postfix(nullptr, 0) == static_cast<std::int32_t>(0x8002000eu));
+    Require(sceKernelUtimes_nid_postfix(nullptr, nullptr) == static_cast<std::int32_t>(0x8002000eu));
     Require(close_nid_postfix(descriptor) == 0);
     const int readOnly = open_nid_postfix(fileName.c_str(), SCE_KERNEL_O_RDONLY, 0);
     Require(readOnly >= 0);
