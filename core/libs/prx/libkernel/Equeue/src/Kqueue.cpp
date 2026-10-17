@@ -191,6 +191,11 @@ void WatchEdges(KernelEqueueEvent& event, bool socket) {
     event.filter.resetFunc = ResetEdge;
 }
 
+bool IsRegularFile(int descriptor) {
+    FileStat status{};
+    return !GuestSockets::IsOpen(descriptor) && sceKernelFstat(descriptor, &status) == 0 && (status.st_mode & 0170000) == 0100000;
+}
+
 int AddDescriptorKnote(const KernelEqueueRef& queue, KernelEvent& change, std::uint16_t flags) {
     const int descriptor = static_cast<int>(change.ident);
     if (IsKqueueDescriptor(descriptor)) {
@@ -201,6 +206,15 @@ int AddDescriptorKnote(const KernelEqueueRef& queue, KernelEvent& change, std::u
     }
     if (descriptor == 0 && change.filter == EVFILT_READ && File::IsHostStream(descriptor)) {
         return AddStandardInputKnote(queue, change, flags);
+    }
+    if (IsRegularFile(descriptor)) {
+        if ((flags & EV_CLEAR) != 0) {
+            NotImplemented_nid_no_patch("kevent: EV_CLEAR on a regular file");
+        }
+        const std::uint32_t notes = change.fflags;
+        change.fflags = 0;
+        change.data = 0;
+        return AddFileDataEvent(queue, descriptor, change.filter, notes, flags, change.udata);
     }
     const bool socket = GuestSockets::IsOpen(descriptor);
     std::int64_t data = 0;
@@ -312,6 +326,8 @@ int ModifyKnote(const KernelEqueueRef& queue, KernelEvent& change) {
             TouchUserKnote(event, change);
         } else if (change.filter == EVFILT_VNODE) {
             SetVnodeNotes(event, change.fflags);
+        } else if (IsFileDataEvent(event)) {
+            SetFileDataNotes(event, change.fflags);
         }
     }));
 }
