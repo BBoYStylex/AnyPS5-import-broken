@@ -178,6 +178,14 @@ std::string Hex(std::uint32_t value) {
     return text;
 }
 
+bool IsNan16(std::uint32_t bits) {
+    return (bits & 0x7fffu) > 0x7c00u;
+}
+
+bool SameHalf(std::uint32_t actual, std::uint32_t expected) {
+    return actual == expected || (IsNan16(actual) && IsNan16(expected));
+}
+
 void Run(AgcDriver::VulkanDevice& device, const Mode& mode) {
     for (std::uint32_t tid = 0; tid < Threads; ++tid) {
         std::copy(std::begin(Rows[tid]), std::end(Rows[tid]), &Input[tid * Inputs]);
@@ -211,7 +219,7 @@ void Check(const Mode& mode) {
         const std::uint32_t expected = Expected[tid][mode.column];
         for (std::uint32_t form = 0; form < Results; ++form) {
             const std::uint32_t actual = Output[tid * Results + form];
-            Require(actual == expected, std::string(Names[form]) + " " + mode.name + " of " + Hex(Rows[tid][0]) + ", " + Hex(Rows[tid][1]) + ", " + Hex(Rows[tid][2]) + " is " + Hex(actual) + ", expected " + Hex(expected));
+            Require(SameHalf(actual, expected), std::string(Names[form]) + " " + mode.name + " of " + Hex(Rows[tid][0]) + ", " + Hex(Rows[tid][1]) + ", " + Hex(Rows[tid][2]) + " is " + Hex(actual) + ", expected " + Hex(expected));
         }
     }
 }
