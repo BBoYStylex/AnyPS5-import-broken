@@ -355,6 +355,8 @@ void StubBodyBuilder::MoveControlFlow(const std::span<const std::uint8_t> instru
     const auto end = _siteOffset + static_cast<std::int64_t>(instruction.size());
     if (info.FlowKind == ControlFlowKind::IndirectCall && !info.HasRipRelativeDisp)
         throw CodegenException("A register or memory call cannot move into a stub");
+    if (info.TruncatesBranchTarget)
+        throw CodegenException("A relative branch with this prefix cannot move into a stub");
     if ((info.FlowKind == ControlFlowKind::Call || info.FlowKind == ControlFlowKind::IndirectCall) && info.HasRipRelativeDisp) {
         _pushReturnAddress(end);
         std::vector<std::uint8_t> jump(instruction.begin(), instruction.end());
