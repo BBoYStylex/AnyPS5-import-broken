@@ -50,9 +50,32 @@ class ProgressHistoryTests(unittest.TestCase):
                      **{name: {"done": i, "total": count, "percent": 100 * i / count} for name in ("libraries", "shaders")}}
                     for i in range(count)]
         short, medium, long = (progress_history.chart(series(count)) for count in (20, 100, 400))
-        self.assertEqual((short.count("rotate(60)"), short.count("<circle")), (20, 40))
-        self.assertEqual((medium.count("rotate(60)"), medium.count("<circle")), (14, 0))
-        self.assertEqual((long.count("rotate(60)"), long.count("<circle")), (14, 0))
+        self.assertNotIn("rotate(60)", short + medium + long)
+        self.assertEqual((short.count("<circle"), medium.count("<circle"), long.count("<circle")), (40, 0, 0))
+        self.assertEqual((short.count("<title>"), medium.count("<title>"), long.count("<title>")), (60, 100, 400))
+
+    def test_chart_shows_a_declared_total_per_panel(self):
+        points = [{"date": f"2026-01-0{day}",
+                   "libraries": {"done": day, "total": 10, "percent": 10.0 * day},
+                   "shaders": {"done": day, "total": 20, "percent": 5.0 * day}} for day in range(1, 6)]
+        svg = progress_history.chart(points)
+        self.assertIn("System library functions", svg)
+        self.assertIn("GPU shader instructions", svg)
+        self.assertEqual(svg.count('stroke-dasharray="6 4"'), 2)
+        self.assertIn("Implemented 5 (50.0%)", svg)
+        self.assertIn("Implemented 5 (25.0%)", svg)
+        self.assertIn("Declared 10", svg)
+        self.assertIn("Declared 20", svg)
+
+    def test_axis_labels_fall_on_calendar_days_without_commits(self):
+        start = date(2026, 8, 3).toordinal()
+        skipped = {date(2026, 8, 10), date(2026, 8, 17), date(2026, 8, 31)}
+        points = [{"date": day.isoformat(),
+                   **{name: {"done": i, "total": 70, "percent": 100 * i / 70} for name in ("libraries", "shaders")}}
+                  for i, day in enumerate(date.fromordinal(start + i) for i in range(70)) if day not in skipped]
+        svg = progress_history.chart(points)
+        for label in ("08-03", "08-10", "08-17", "08-24", "08-31"):
+            self.assertIn(f">{label}<", svg)
 
 
 if __name__ == "__main__":
