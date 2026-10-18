@@ -1,5 +1,4 @@
 #include "prx/libSceMouse/include/MouseState.hpp"
-#include "prx/libc/include/General.hpp"
 
 extern "C" {
 
@@ -23,8 +22,8 @@ void MousePublishInput_nid_no_patch(const MouseInputEvent& event) {
     Mouse::Publish(event);
 }
 
-int APS5_VABI sceMouseResetAbsolutePosition() {
-    return MOUSE_OK;
+int APS5_VABI sceMouseResetAbsolutePosition(std::int32_t handle, std::uint16_t x, std::uint16_t y) {
+    return Mouse::ResetAbsolutePosition(handle, x, y);
 }
 
 bool MouseIsOpen_nid_no_patch() {

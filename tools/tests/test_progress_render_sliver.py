@@ -16,7 +16,8 @@ class ProgressRenderSliverTests(unittest.TestCase):
         shaders = {"done": 0, "total": 0, "percent": 0, "groups": []}
         svg = progress.render(libraries, shaders)
         self.assertIn("<svg", svg)
-        self.assertNotRegex(svg, re.compile(r'font-size="12"[^>]*>lib</text>'))
+        self.assertIn(">libA</text>", svg)
+        self.assertNotIn(">lib</text>", svg)
 
     def test_cells_without_area(self):
         self.assertEqual(progress.cells(5, 0, 0, 0, 10), [])

@@ -25,7 +25,6 @@ std::atomic<Ngs2Handle> g_next_report_handle{1};
 }
 
 extern "C" {
-
 int APS5_VABI sceNgs2ReportRegisterHandler(uint32_t report_type, void* handler, uintptr_t user_data, Ngs2Handle* out_handle) {
     if (handler == nullptr || out_handle == nullptr) {
         throw std::runtime_error("sceNgs2ReportRegisterHandler: invalid argument");
