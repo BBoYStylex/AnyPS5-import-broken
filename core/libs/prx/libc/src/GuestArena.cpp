@@ -125,8 +125,14 @@ public:
         std::lock_guard lock(_lock);
         const auto start = reinterpret_cast<std::uintptr_t>(pointer);
         const auto end = start + bytes;
-        const auto exact = _used.find(start);
-        if (exact != _used.end() && exact->second >= end) return false;
+        auto covering = _used.upper_bound(start);
+        if (covering != _used.begin()) {
+            auto covered = start;
+            for (--covering; covering != _used.end() && covering->first <= covered && covering->second > covered; ++covering) {
+                covered = covering->second;
+                if (covered >= end) return false;
+            }
+        }
         const auto next = _used.lower_bound(start);
         if ((next != _used.end() && next->first < end) || (next != _used.begin() && std::prev(next)->second > start)) {
             char message[160];
