@@ -11,11 +11,10 @@ struct RenderOverride {
     bool disableDepthTest = false;
     bool forceDepthWrite = false;
     bool disableBlend = false;
-    bool fallbackMagenta = false;
     bool disableDcc = false;
 
     bool Any() const {
-        return forceWireframe || disableCull || disableDepthTest || forceDepthWrite || disableBlend || fallbackMagenta || disableDcc;
+        return forceWireframe || disableCull || disableDepthTest || forceDepthWrite || disableBlend || disableDcc;
     }
 
     bool ChangesDrawState() const {

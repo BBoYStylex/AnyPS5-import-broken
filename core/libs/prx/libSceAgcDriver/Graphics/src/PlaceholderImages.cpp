@@ -1,5 +1,4 @@
 #include "prx/libSceAgcDriver/Graphics/include/PlaceholderImages.hpp"
-#include "prx/libSceAgcDriver/Graphics/include/RenderOverride.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Resources.hpp"
 #include <string>
 #include <vector>
@@ -20,7 +19,6 @@ bool Supported(const Context& context, const PlaceholderImageShape& shape) {
 
 PlaceholderImages::PlaceholderImages(const Context& context) : context(context) {
     try {
-        const auto renderOverride = CurrentRenderOverride();
         std::vector<VkImageMemoryBarrier> toClear;
         for (std::uint32_t index = 0; index < images.size(); ++index) {
             const auto shape = PlaceholderImageShapeOf(ShaderRecompiler::RuntimeAbi::FirstImageBinding + index);
@@ -72,12 +70,7 @@ PlaceholderImages::PlaceholderImages(const Context& context) : context(context) 
                 const VkClearDepthStencilValue zero{0.0f, 0};
                 context.Function<PFN_vkCmdClearDepthStencilImage>("vkCmdClearDepthStencilImage")(commands, barrier.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &zero, 1, &barrier.subresourceRange);
             } else {
-                VkClearColorValue clear{};
-                if (renderOverride.fallbackMagenta) {
-                    clear.float32[0] = 1.0f;
-                    clear.float32[2] = 1.0f;
-                    clear.float32[3] = 1.0f;
-                }
+                const VkClearColorValue clear{};
                 context.Function<PFN_vkCmdClearColorImage>("vkCmdClearColorImage")(commands, barrier.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clear, 1, &barrier.subresourceRange);
             }
             auto general = barrier;

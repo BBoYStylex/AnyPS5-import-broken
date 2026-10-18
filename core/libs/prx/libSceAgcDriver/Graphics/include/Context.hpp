@@ -190,6 +190,7 @@ struct Context {
     bool depthBounds = false;
     bool depthBiasClamp = false;
     bool dualSrcBlend = false;
+    bool fillModeNonSolid = false;
     bool samplerFilterMinmax = false;
     bool nonSeamlessCubeMap = false;
     bool conservativeRasterization = false;

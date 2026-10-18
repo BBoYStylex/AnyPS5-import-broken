@@ -10,6 +10,7 @@
 #include "prx/libc/include/HostThreadLocal.hpp"
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -449,7 +450,14 @@ Pipeline::Pipeline(const Context& context, const State& state, const VertexInput
         dynamic.pDynamicStates = dynamicStates.data();
         const auto renderOverride = CurrentRenderOverride();
         VkPipelineRasterizationStateCreateInfo raster{VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
-        raster.polygonMode = renderOverride.forceWireframe ? VK_POLYGON_MODE_LINE : VK_POLYGON_MODE_FILL;
+        raster.polygonMode = VK_POLYGON_MODE_FILL;
+        if (renderOverride.forceWireframe) {
+            if (context.fillModeNonSolid) raster.polygonMode = VK_POLYGON_MODE_LINE;
+            else {
+                static std::atomic<bool> reported{false};
+                if (!reported.exchange(true)) std::fprintf(stderr, "[HOT-RELOAD] force_wireframe ignored: fillModeNonSolid is unavailable\n");
+            }
+        }
         raster.depthClampEnable = state.depthClamp && context.depthClamp ? VK_TRUE : VK_FALSE;
         Require(!state.depthBiasPerFace || (depthBias && state.cullMode == VK_CULL_MODE_NONE), "per-face depth bias needs both faces rasterized");
         raster.cullMode = renderOverride.disableCull ? VK_CULL_MODE_NONE : (state.depthBiasPerFace ? VK_CULL_MODE_BACK_BIT : state.cullMode);

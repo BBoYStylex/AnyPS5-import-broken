@@ -2273,17 +2273,17 @@ void Draw(const Context& context, const State& state, const Pm4::DrawParameters&
     }
     const auto renderOverride = CurrentRenderOverride();
     const State& baseState = masked.has_value() ? *masked : state;
-    State overriddenState;
+    std::optional<State> overriddenState;
     const State* pipelineSource = &baseState;
     if (renderOverride.ChangesDrawState()) {
         overriddenState = baseState;
-        if (renderOverride.disableCull) overriddenState.cullMode = VK_CULL_MODE_NONE;
-        if (renderOverride.disableDepthTest) overriddenState.depthTest = false;
-        if (renderOverride.forceDepthWrite) overriddenState.depthWrite = true;
+        if (renderOverride.disableCull) overriddenState->cullMode = VK_CULL_MODE_NONE;
+        if (renderOverride.disableDepthTest) overriddenState->depthTest = false;
+        if (renderOverride.forceDepthWrite) overriddenState->depthWrite = true;
         if (renderOverride.disableBlend) {
-            for (auto& blend : overriddenState.blends) blend.blendEnable = VK_FALSE;
+            for (auto& blend : overriddenState->blends) blend.blendEnable = VK_FALSE;
         }
-        pipelineSource = &overriddenState;
+        pipelineSource = &*overriddenState;
     }
     const State& pipelineState = *pipelineSource;
     static const bool verifySetLayouts = std::getenv("APS5_VERIFY_SET_LAYOUTS") != nullptr;

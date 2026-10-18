@@ -28,8 +28,7 @@ void applyLine(RenderOverride& state, const char* line) {
     else if (std::strcmp(trimmed, "disable_cull") == 0) state.disableCull = enabled;
     else if (std::strcmp(trimmed, "disable_depth_test") == 0) state.disableDepthTest = enabled;
     else if (std::strcmp(trimmed, "force_depth_write") == 0) state.forceDepthWrite = enabled;
-    else if (std::strcmp(trimmed, "disable_blend") == 0 || std::strcmp(trimmed, "disable_blending") == 0 || std::strcmp(trimmed, "force_opaque_alpha") == 0) state.disableBlend = enabled;
-    else if (std::strcmp(trimmed, "fallback_magenta") == 0) state.fallbackMagenta = enabled;
+    else if (std::strcmp(trimmed, "disable_blend") == 0 || std::strcmp(trimmed, "disable_blending") == 0) state.disableBlend = enabled;
     else if (std::strcmp(trimmed, "disable_dcc") == 0) state.disableDcc = enabled;
 }
 
@@ -69,8 +68,8 @@ bool PollRenderOverride() {
         renderOverride = next;
     }
     std::fprintf(stderr, "[HOT-RELOAD] Render state updated from %s:\n", path.string().c_str());
-    std::fprintf(stderr, "  force_wireframe=%d disable_cull=%d disable_depth_test=%d force_depth_write=%d disable_blend=%d fallback_magenta=%d disable_dcc=%d\n",
-        next.forceWireframe, next.disableCull, next.disableDepthTest, next.forceDepthWrite, next.disableBlend, next.fallbackMagenta, next.disableDcc);
+    std::fprintf(stderr, "  force_wireframe=%d disable_cull=%d disable_depth_test=%d force_depth_write=%d disable_blend=%d disable_dcc=%d\n",
+        next.forceWireframe, next.disableCull, next.disableDepthTest, next.forceDepthWrite, next.disableBlend, next.disableDcc);
     return true;
 }
 
