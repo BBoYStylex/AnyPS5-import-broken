@@ -1105,6 +1105,140 @@ int main() {
         return !StencilReplaySafe(b.program);
     });
 
+    const auto quadActiveWord = [](Builder& b, std::uint32_t half) -> IrValue& {
+        const auto [low, high] = b.ballotWords(b.truth());
+        auto& wqm = b.emit(IrOpcode::WqmU64, IrType::U64, {&b.emit(IrOpcode::CompositeConstructU64, IrType::U64, {low, high})});
+        return b.emit(IrOpcode::CompositeExtractU64, IrType::U32, {&wqm, &b.constant(half)});
+    };
+
+    enum class ActiveLanes { Ballot, WholeQuads, WholeQuadsWithoutOuterMask };
+
+    const auto quadSelect = [&](const std::function<IrValue&(Builder&)>& live, bool divergent = false, bool crossLane = false, ActiveLanes active = ActiveLanes::Ballot) {
+        Builder b;
+        b.program.Resources().stage = IrShaderStage::Pixel;
+        auto& predicate = live(b);
+        if (divergent) {
+            auto& entry = *b.block;
+            auto& body = b.newBlock();
+            auto& merge = b.newBlock();
+            entry.AddBranch(&body);
+            entry.AddBranch(&merge);
+            body.AddBranch(&merge);
+            b.block = &body;
+        }
+        const auto [liveLow, liveHigh] = b.ballotWords(predicate);
+        const bool wholeQuads = active != ActiveLanes::Ballot;
+        const auto [ballotLow, ballotHigh] = b.ballotWords(b.truth());
+        IrValue& entryLow = wholeQuads ? quadActiveWord(b, 0u) : *ballotLow;
+        IrValue& entryHigh = wholeQuads ? quadActiveWord(b, 1u) : *ballotHigh;
+        auto& wqm = b.emit(IrOpcode::WqmU64, IrType::U64, {&b.emit(IrOpcode::CompositeConstructU64, IrType::U64, {&b.wordAnd(*liveLow, entryLow), &b.wordAnd(*liveHigh, entryHigh)})});
+        auto& wqmLow = b.emit(IrOpcode::CompositeExtractU64, IrType::U32, {&wqm, &b.constant(0u)});
+        auto& wqmHigh = b.emit(IrOpcode::CompositeExtractU64, IrType::U32, {&wqm, &b.constant(1u)});
+        const auto [activeLow, activeHigh] = b.ballotWords(b.truth());
+        IrValue& outerLow = wholeQuads ? quadActiveWord(b, 0u) : *activeLow;
+        IrValue& outerHigh = wholeQuads ? quadActiveWord(b, 1u) : *activeHigh;
+        auto& guard = active == ActiveLanes::WholeQuadsWithoutOuterMask ? b.threadBit(wqmLow, wqmHigh) : b.threadBit(b.wordAnd(wqmLow, outerLow), b.wordAnd(outerHigh, wqmHigh));
+        auto& old = b.lane();
+        auto& written = b.select(guard, b.add(old, 1u), old);
+        auto& exported = crossLane ? b.emit(IrOpcode::ReadLane, IrType::U32, {&written, &b.constant(63u)}) : written;
+        ExportInfo info{};
+        info.kind = ExportTargetKind::Mrt;
+        info.en = 15u;
+        ExportFlags flags{static_cast<std::uint32_t>(b.program.Metadata().exportInfo.size())};
+        b.program.Metadata().exportInfo.push_back(info);
+        std::uint64_t bits = 0;
+        std::memcpy(&bits, &flags, sizeof(flags));
+        auto& zero = b.constant(0u);
+        b.emit(IrOpcode::SetAttribute, IrType::Void, {&b.emit(IrOpcode::CompositeConstructU32x4, IrType::U32x4, {&exported, &zero, &zero, &zero}), &b.truth()}, bits);
+        b.eliminate();
+        return removed(written);
+    };
+
+    passed &= run("a select under the whole quads of the live entry lanes is removed", [&] {
+        return quadSelect([&](Builder& b) -> IrValue& { return helperPredicate(b, false); });
+    });
+
+    passed &= run("a select under the whole quads of every entry lane is removed", [&] {
+        return quadSelect([](Builder& b) -> IrValue& { return b.truth(); });
+    });
+
+    passed &= run("a select under the whole quads of a partial mask is kept", [&] {
+        return !quadSelect([](Builder& b) -> IrValue& { return b.mask(16u); });
+    });
+
+    passed &= run("a select under the whole quads of the live entry lanes, with pixel EXEC words, is removed", [&] {
+        return quadSelect([&](Builder& b) -> IrValue& { return helperPredicate(b, false); }, false, false, ActiveLanes::WholeQuads) &&
+               quadSelect([&](Builder& b) -> IrValue& { return helperPredicate(b, false); }, false, false, ActiveLanes::WholeQuadsWithoutOuterMask);
+    });
+
+    passed &= run("a select under the whole quads of a partial mask, with pixel EXEC words, is kept", [&] {
+        return !quadSelect([](Builder& b) -> IrValue& { return b.mask(16u); }, false, false, ActiveLanes::WholeQuads) &&
+               !quadSelect([](Builder& b) -> IrValue& { return b.mask(16u); }, false, false, ActiveLanes::WholeQuadsWithoutOuterMask);
+    });
+
+    passed &= run("a select under the whole quads of live lanes balloted after a discard, with pixel EXEC words, is kept", [&] {
+        return !quadSelect([&](Builder& b) -> IrValue& {
+            auto& predicate = helperPredicate(b, false);
+            b.emit(IrOpcode::Discard, IrType::Void, {});
+            return predicate;
+        }, false, false, ActiveLanes::WholeQuadsWithoutOuterMask);
+    });
+
+    passed &= run("a select under the whole quads of the helper lanes is kept", [&] {
+        return !quadSelect([&](Builder& b) -> IrValue& { return helperPredicate(b, true); });
+    });
+
+    passed &= run("a select under the whole quads of live lanes balloted after divergence is kept", [&] {
+        return !quadSelect([&](Builder& b) -> IrValue& { return helperPredicate(b, false); }, true);
+    });
+
+    passed &= run("a select under the whole quads of the live entry lanes is kept when another lane reads it", [&] {
+        return !quadSelect([&](Builder& b) -> IrValue& { return helperPredicate(b, false); }, false, true);
+    });
+
+    passed &= run("a select under the whole quads of live lanes balloted after a discard is kept", [&] {
+        return !quadSelect([&](Builder& b) -> IrValue& {
+            auto& predicate = helperPredicate(b, false);
+            b.emit(IrOpcode::Discard, IrType::Void, {});
+            return predicate;
+        });
+    });
+
+    const auto survivingQuadSelect = [&](bool exportEveryLane, bool activeLanes) {
+        Builder b;
+        b.program.Resources().stage = IrShaderStage::Pixel;
+        const auto [liveLow, liveHigh] = b.ballotWords(b.logicalAnd(helperPredicate(b, false), b.mask(16u)));
+        auto& wqm = b.emit(IrOpcode::WqmU64, IrType::U64, {&b.emit(IrOpcode::CompositeConstructU64, IrType::U64, {liveLow, liveHigh})});
+        const auto [activeLow, activeHigh] = b.ballotWords(activeLanes ? b.truth() : b.mask(8u));
+        auto& guard = b.threadBit(b.wordAnd(b.emit(IrOpcode::CompositeExtractU64, IrType::U32, {&wqm, &b.constant(0u)}), *activeLow), b.wordAnd(b.emit(IrOpcode::CompositeExtractU64, IrType::U32, {&wqm, &b.constant(1u)}), *activeHigh));
+        auto& old = b.lane();
+        auto& written = b.select(guard, b.add(old, 1u), old);
+        ExportInfo info{};
+        info.kind = ExportTargetKind::Mrt;
+        info.en = 15u;
+        ExportFlags flags{static_cast<std::uint32_t>(b.program.Metadata().exportInfo.size())};
+        b.program.Metadata().exportInfo.push_back(info);
+        std::uint64_t bits = 0;
+        std::memcpy(&bits, &flags, sizeof(flags));
+        auto& zero = b.constant(0u);
+        auto& exported = exportEveryLane ? b.truth() : b.threadBit(*liveLow, *liveHigh);
+        b.emit(IrOpcode::SetAttribute, IrType::Void, {&b.emit(IrOpcode::CompositeConstructU32x4, IrType::U32x4, {&written, &zero, &zero, &zero}), &exported}, bits);
+        b.eliminate();
+        return removed(written);
+    };
+
+    passed &= run("a select under the active whole quads of the surviving lanes is removed when only surviving lanes export", [&] {
+        return survivingQuadSelect(false, true);
+    });
+
+    passed &= run("a select under the active whole quads of the surviving lanes is kept when every lane exports", [&] {
+        return !survivingQuadSelect(true, true);
+    });
+
+    passed &= run("a select under the whole quads of the surviving lanes and a partial ballot is kept", [&] {
+        return !survivingQuadSelect(false, false);
+    });
+
     passed &= run("a captured active ballot cannot provide helper texture coordinates", [&] {
         Builder b;
         b.program.Resources().stage = IrShaderStage::Pixel;

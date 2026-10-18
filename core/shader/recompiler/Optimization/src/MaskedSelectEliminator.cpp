@@ -1,4 +1,5 @@
 #include "Optimization/MaskedSelectEliminator.hpp"
+#include "IntermediateRepresentation/IrMetadata/StageIO.hpp"
 #include "Optimization/DeadCodeEliminator.hpp"
 #include "RdnaDecoder/RdnaInstruction.hpp"
 #include <algorithm>
@@ -321,15 +322,145 @@ bool withinWords(const IrValue* condition, const IrValue* low, const IrValue* hi
            (withinWords(condition, lowLeft, highRight, waveSize, uniform, depth + 1u) && withinWords(condition, lowRight, highLeft, waveSize, uniform, depth + 1u));
 }
 
-const IrValue* wholeQuadSource(const IrValue* mask, std::uint32_t waveSize) {
-    const auto bit = threadBit(mask, waveSize);
-    if (!bit || bit->low->Opcode() != IrOpcode::CompositeExtractU64 || !isImmediate(bit->low->Argument(1)->Resolve(), 0u)) return nullptr;
-    const IrValue* wqm = bit->low->Argument(0)->Resolve();
-    if (waveSize != 32u && (bit->high->Opcode() != IrOpcode::CompositeExtractU64 || bit->high->Argument(0)->Resolve() != wqm || !isImmediate(bit->high->Argument(1)->Resolve(), 1u))) return nullptr;
+const IrValue* ballotOfWord(const IrValue* word, std::uint32_t half) {
+    if (word->Opcode() != IrOpcode::CompositeExtractU32x4 || !isImmediate(word->Argument(1)->Resolve(), half)) return nullptr;
+    const IrValue* ballot = word->Argument(0)->Resolve();
+    return ballot->Opcode() == IrOpcode::Ballot ? ballot : nullptr;
+}
+
+bool plainActiveBallotWord(const IrValue* word, std::uint32_t half) {
+    const IrValue* ballot = ballotOfWord(word, half);
+    if (ballot == nullptr) return false;
+    const IrValue* predicate = ballot->Argument(0)->Resolve();
+    return predicate->HasImmediate() && predicate->Type() == IrType::Bool && predicate->ImmediateBool();
+}
+
+const IrValue* wholeQuadOfWord(const IrValue* word, std::uint32_t half) {
+    if (word->Opcode() != IrOpcode::CompositeExtractU64 || !isImmediate(word->Argument(1)->Resolve(), half)) return nullptr;
+    const IrValue* wqm = word->Argument(0)->Resolve();
     if (wqm->Opcode() != IrOpcode::WqmU64) return nullptr;
     const IrValue* source = wqm->Argument(0)->Resolve();
     return source->Opcode() == IrOpcode::CompositeConstructU64 ? source : nullptr;
 }
+
+bool activeBallotWord(const IrValue* word, std::uint32_t half) {
+    if (plainActiveBallotWord(word, half)) return true;
+    const IrValue* source = wholeQuadOfWord(word, half);
+    return source != nullptr && plainActiveBallotWord(source->Argument(0)->Resolve(), 0u) && plainActiveBallotWord(source->Argument(1)->Resolve(), 1u);
+}
+
+const IrValue* withoutActiveBallot(const IrValue* word, std::uint32_t half) {
+    if (word->Opcode() != IrOpcode::BitwiseAnd32) return word;
+    const IrValue* left = word->Argument(0)->Resolve();
+    const IrValue* right = word->Argument(1)->Resolve();
+    if (activeBallotWord(right, half)) return left;
+    if (activeBallotWord(left, half)) return right;
+    return word;
+}
+
+const IrValue* wholeQuadWords(const IrValue* low, const IrValue* high, std::uint32_t waveSize) {
+    if (low->Opcode() != IrOpcode::CompositeExtractU64 || !isImmediate(low->Argument(1)->Resolve(), 0u)) return nullptr;
+    const IrValue* wqm = low->Argument(0)->Resolve();
+    if (waveSize != 32u && (high->Opcode() != IrOpcode::CompositeExtractU64 || high->Argument(0)->Resolve() != wqm || !isImmediate(high->Argument(1)->Resolve(), 1u))) return nullptr;
+    if (wqm->Opcode() != IrOpcode::WqmU64) return nullptr;
+    const IrValue* source = wqm->Argument(0)->Resolve();
+    return source->Opcode() == IrOpcode::CompositeConstructU64 ? source : nullptr;
+}
+
+const IrValue* wholeQuadSource(const IrValue* mask, std::uint32_t waveSize) {
+    const auto bit = threadBit(mask, waveSize);
+    if (!bit) return nullptr;
+    return wholeQuadWords(withoutActiveBallot(bit->low, 0u), withoutActiveBallot(bit->high, waveSize == 32u ? 0u : 1u), waveSize);
+}
+
+BlockSet undiscardedEntryBlocks(const IrProgram& program, const BlockSet& uniform) {
+    BlockSet result;
+    const IrBlock* block = program.BlockOrder().empty() ? nullptr : program.BlockOrder().front();
+    while (block != nullptr && uniform.contains(block) && !result.contains(block)) {
+        if (std::ranges::any_of(block->Instructions(), [](const IrValue* inst) { return inst->Opcode() == IrOpcode::Discard; })) break;
+        result.insert(block);
+        block = block->Successors().size() == 1u ? block->Successors().front() : nullptr;
+    }
+    return result;
+}
+
+class OwnLaneProof {
+public:
+    OwnLaneProof(const IrProgram& program, const BlockSet& uniform) : waveSize(program.WaveSize()), pixel(program.Resources().stage == IrShaderStage::Pixel), entry(undiscardedEntryBlocks(program, uniform)) {}
+
+    bool AlwaysTrue(const IrValue* value, std::uint32_t depth = 0) const {
+        value = value->Resolve();
+        if (value->HasImmediate()) return value->Type() == IrType::Bool && value->ImmediateBool();
+        if (depth > DepthLimit) return false;
+        if (value->Opcode() == IrOpcode::LogicalAnd) return AlwaysTrue(value->Argument(0), depth + 1u) && AlwaysTrue(value->Argument(1), depth + 1u);
+        const auto bit = threadBit(value, waveSize);
+        return bit && ownLane(bit->low, bit->high, depth + 1u);
+    }
+
+private:
+    template<typename TProof>
+    bool bothWords(const IrValue* low, const IrValue* high, const TProof& proof) const {
+        if (low->Opcode() != IrOpcode::BitwiseAnd32) return false;
+        const IrValue* lowLeft = low->Argument(0)->Resolve();
+        const IrValue* lowRight = low->Argument(1)->Resolve();
+        if (waveSize == 32u) return proof(lowLeft, lowLeft) && proof(lowRight, lowRight);
+        if (high->Opcode() != IrOpcode::BitwiseAnd32) return false;
+        const IrValue* highLeft = high->Argument(0)->Resolve();
+        const IrValue* highRight = high->Argument(1)->Resolve();
+        return (proof(lowLeft, highLeft) && proof(lowRight, highRight)) || (proof(lowLeft, highRight) && proof(lowRight, highLeft));
+    }
+
+    template<typename TPredicate>
+    bool ballotWords(const IrValue* low, const IrValue* high, const TPredicate& predicate) const {
+        const IrValue* lowBallot = ballotOfWord(low, 0u);
+        if (lowBallot == nullptr || !predicate(*lowBallot)) return false;
+        if (waveSize == 32u) return true;
+        const IrValue* highBallot = ballotOfWord(high, 1u);
+        return highBallot != nullptr && predicate(*highBallot);
+    }
+
+    bool ownLane(const IrValue* low, const IrValue* high, std::uint32_t depth) const {
+        if (isImmediate(low, 0xffffffffu) && (waveSize == 32u || isImmediate(high, 0xffffffffu))) return true;
+        if (depth > DepthLimit) return false;
+        if (ballotWords(low, high, [&](const IrValue& ballot) { return AlwaysTrue(ballot.Argument(0), depth + 1u); })) return true;
+        if (const IrValue* source = wholeQuadWords(low, high, waveSize)) {
+            const IrValue* sourceLow = source->Argument(0)->Resolve();
+            const IrValue* sourceHigh = waveSize == 32u ? sourceLow : source->Argument(1)->Resolve();
+            return ownLane(sourceLow, sourceHigh, depth + 1u) || coversLiveLanes(sourceLow, sourceHigh, depth + 1u);
+        }
+        if (ownLaneWholeQuadWord(low, 0u, depth) && (waveSize == 32u || ownLaneWholeQuadWord(high, 1u, depth))) return true;
+        return bothWords(low, high, [&](const IrValue* left, const IrValue* right) { return ownLane(left, right, depth + 1u); });
+    }
+
+    bool ownLaneWholeQuadWord(const IrValue* word, std::uint32_t half, std::uint32_t depth) const {
+        const IrValue* source = wholeQuadOfWord(word, half);
+        if (source == nullptr) return false;
+        const IrValue* sourceLow = source->Argument(0)->Resolve();
+        const IrValue* sourceHigh = waveSize == 32u ? sourceLow : source->Argument(1)->Resolve();
+        return ownLane(sourceLow, sourceHigh, depth + 1u) || coversLiveLanes(sourceLow, sourceHigh, depth + 1u);
+    }
+
+    bool notHelper(const IrValue* predicate) const {
+        predicate = predicate->Resolve();
+        if (predicate->HasImmediate()) return predicate->Type() == IrType::Bool && predicate->ImmediateBool();
+        if (!pixel || predicate->Opcode() != IrOpcode::IEqual32) return false;
+        const IrValue* value = otherArgument(predicate, 0u);
+        if (value == nullptr || value->Opcode() != IrOpcode::GetBuiltin || !entry.contains(value->Parent())) return false;
+        return static_cast<StageInputKind>(value->Argument(0)->Resolve()->ImmediateU32()) == StageInputKind::HelperInvocation;
+    }
+
+    bool coversLiveLanes(const IrValue* low, const IrValue* high, std::uint32_t depth) const {
+        if (isImmediate(low, 0xffffffffu) && (waveSize == 32u || isImmediate(high, 0xffffffffu))) return true;
+        if (depth > DepthLimit) return false;
+        if (ballotWords(low, high, [&](const IrValue& ballot) { return entry.contains(ballot.Parent()) && notHelper(ballot.Argument(0)); })) return true;
+        if (ownLaneWholeQuadWord(low, 0u, depth) && (waveSize == 32u || ownLaneWholeQuadWord(high, 1u, depth))) return true;
+        return bothWords(low, high, [&](const IrValue* left, const IrValue* right) { return coversLiveLanes(left, right, depth + 1u); });
+    }
+
+    std::uint32_t waveSize;
+    bool pixel;
+    BlockSet entry;
+};
 
 enum class Region : std::uint8_t { Unreached, Once, Loop };
 
@@ -542,10 +673,11 @@ struct ImplicationKeyHash {
 
 class ImpliedMasks {
 public:
-    ImpliedMasks(const std::vector<Region>& regions, const BlockSet& uniform, std::uint32_t waveSize, MaskFamily family, MaskSets& sets, std::uint64_t& steps) : regions(regions), uniform(uniform), waveSize(waveSize), family(family), sets(sets), steps(steps) {}
+    ImpliedMasks(const std::vector<Region>& regions, const BlockSet& uniform, std::uint32_t waveSize, MaskFamily family, MaskSets& sets, std::uint64_t& steps, const OwnLaneProof* ownLanes = nullptr) : regions(regions), uniform(uniform), waveSize(waveSize), family(family), sets(sets), steps(steps), ownLanes(ownLanes) {}
 
     void AddMask(const IrValue* mask) {
         if (!mark(masks, mask)) return;
+        if (ownLanes != nullptr && ownLanes->AlwaysTrue(mask)) everyLane = sets.Union(everyLane, sets.Single(mask->Id()));
         const auto bit = threadBit(mask, waveSize);
         if (bit) {
             mark(followed, bit->word);
@@ -570,6 +702,10 @@ public:
 
     [[nodiscard]] bool Follows(const IrValue& value) const {
         return value.Id() < followed.size() && followed[value.Id()] != 0u;
+    }
+
+    [[nodiscard]] MaskSet EveryLane() const {
+        return everyLane;
     }
 
 private:
@@ -765,6 +901,8 @@ private:
     MaskFamily family;
     MaskSets& sets;
     std::uint64_t& steps;
+    const OwnLaneProof* ownLanes;
+    MaskSet everyLane = MaskSets::None;
     std::vector<std::uint8_t> masks;
     std::vector<std::uint8_t> followed;
     std::vector<Quads> quads;
@@ -989,8 +1127,8 @@ using FirstLaneReads = std::array<std::unique_ptr<UnreadLanes>, 4>;
 
 class UnreadLanes {
 public:
-    UnreadLanes(IrProgram& program, const std::vector<Region>& regions, const BlockSet& uniform, MaskFamily family, std::uint64_t& steps, FirstLaneReads* shared = nullptr)
-        : program(program), regions(regions), uniform(uniform), family(family), sampledByQuad(family.wholeQuads && program.Resources().stage == IrShaderStage::Pixel), firstLane(shared != nullptr), sameBlock(firstLane && !family.acrossLoops), steps(steps), sets(steps), implied(regions, uniform, program.WaveSize(), family, sets, steps), firstLanes(firstLane ? *shared : owned) {
+    UnreadLanes(IrProgram& program, const std::vector<Region>& regions, const BlockSet& uniform, const OwnLaneProof& ownLanes, MaskFamily family, std::uint64_t& steps, FirstLaneReads* shared = nullptr)
+        : program(program), regions(regions), uniform(uniform), ownLanes(ownLanes), family(family), sampledByQuad(family.wholeQuads && program.Resources().stage == IrShaderStage::Pixel), firstLane(shared != nullptr), sameBlock(firstLane && !family.acrossLoops), steps(steps), sets(steps), implied(regions, uniform, program.WaveSize(), family, sets, steps, &ownLanes), firstLanes(firstLane ? *shared : owned) {
         if (!firstLane) return;
         for (const IrBlock* block : program.BlockOrder()) {
             for (const IrValue* inst : block->Instructions()) {
@@ -1081,7 +1219,7 @@ private:
         if (solvedHere(read)) return sets.Contains(unread[read.Id()], mask->Id());
         const MaskFamily readFamily = familyOf(regions, mask, program.WaveSize());
         auto& reads = firstLanes[(readFamily.acrossLoops ? 2u : 0u) + (readFamily.wholeQuads ? 1u : 0u)];
-        if (!reads) reads = std::make_unique<UnreadLanes>(program, regions, uniform, readFamily, steps, &firstLanes);
+        if (!reads) reads = std::make_unique<UnreadLanes>(program, regions, uniform, ownLanes, readFamily, steps, &firstLanes);
         return reads->UnreadOutsideItsMask(read);
     }
 
@@ -1103,7 +1241,7 @@ private:
         } else if (user->Opcode() == IrOpcode::LogicalAnd && use.operand < 2u) {
             guarded = implied.Of(user->Argument(1u - use.operand));
         } else if (readsOnlyWhereActive(user->Opcode()) && use.operand + 1u < user->ArgumentCount()) {
-            guarded = implied.Of(user->Argument(user->ArgumentCount() - 1u));
+            guarded = sets.Union(implied.Of(user->Argument(user->ArgumentCount() - 1u)), implied.EveryLane());
         } else if (readsFirstLane(use)) {
             guarded = implied.Of(user->Argument(1));
             if (guarded != MaskSets::None && !unreadOutsideItsMask(*user)) guarded = MaskSets::None;
@@ -1161,6 +1299,7 @@ private:
     IrProgram& program;
     const std::vector<Region>& regions;
     const BlockSet& uniform;
+    const OwnLaneProof& ownLanes;
     MaskFamily family;
     bool sampledByQuad;
     bool firstLane;
@@ -1220,11 +1359,12 @@ MaskedSelectEliminationStats MaskedSelectEliminator::Eliminate(IrProgram& progra
     const auto regions = blockRegions(program);
     const BlockSet uniform = uniformEntryBlocks(program);
     std::vector<IrValue*> selects;
+    const OwnLaneProof ownLanes(program, uniform);
     std::uint32_t removed = 1;
     while (removed != 0u) {
         removed = removeFullWaveSelects(program, regions, selects);
         for (const MaskFamily family : {MaskFamily{true, false}, MaskFamily{true, true}, MaskFamily{false, false}, MaskFamily{false, true}}) {
-            if (hasUnreadCandidate(selects, regions, family, program.WaveSize())) removed += UnreadLanes(program, regions, uniform, family, stats.steps).Remove();
+            if (hasUnreadCandidate(selects, regions, family, program.WaveSize())) removed += UnreadLanes(program, regions, uniform, ownLanes, family, stats.steps).Remove();
         }
         stats.removedSelects += removed;
         if (removed != 0u) DeadCodeEliminator{}.Eliminate(program);
