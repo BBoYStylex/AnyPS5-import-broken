@@ -313,12 +313,30 @@ void alloc_randomized_first_fit() {
     CHECK(PoolEmpty());
 }
 
+void alloc_page_granular_prefix() {
+    constexpr std::size_t blocks = 16384;
+    for (std::size_t i = 0; i < blocks; ++i) {
+        int64_t address = -1;
+        CHECK(DirectMemoryAlloc(i * kPage, (i + 1) * kPage, kPage, kPage, 1, &address) == 0);
+        CHECK(address == static_cast<int64_t>(i * kPage));
+    }
+    const auto first = (blocks + 2) / 3 * 3 * kPage;
+    int64_t address = -1;
+    CHECK(DirectMemoryAlloc(0, first + 4 * kPage - 1, 4 * kPage, 3 * kPage, 1, &address) == SCE_KERNEL_ERROR_EAGAIN);
+    CHECK(address == -1);
+    CHECK(DirectMemoryAlloc(0, first + 4 * kPage, 4 * kPage, 3 * kPage, 1, &address) == 0);
+    CHECK(address == static_cast<int64_t>(first));
+    DirectMemoryFree(0, kPool);
+    CHECK(PoolEmpty());
+}
+
 struct Case {
     const char* name;
     void (*fn)();
 };
 
 const Case kCases[] = {
+    {"alloc_page_granular_prefix", alloc_page_granular_prefix},
     {"alloc_randomized_first_fit", alloc_randomized_first_fit},
     {"alloc_unplaceable_requests", alloc_unplaceable_requests},
     {"alloc_null_out", alloc_null_out},

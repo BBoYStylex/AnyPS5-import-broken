@@ -171,11 +171,21 @@ private:
     bool _findFree(uint64_t& cur, uint64_t end, uint64_t length, uint64_t alignment) const {
         auto block = _blocks.upper_bound(cur);
         if (block != _blocks.begin() && std::prev(block)->second.end > cur) --block;
+        size_t probes = 0;
         while (cur <= end && length <= end - cur) {
+            if (probes++ == 8) break;
             while (block != _blocks.end() && block->second.end <= cur) ++block;
             if (block == _blocks.end() || block->first >= cur + length) return true;
             if (!RoundUp(block->second.end, alignment, cur)) return false;
             ++block;
+        }
+        const auto pageCount = static_cast<size_t>(length / kPage);
+        while (cur <= end && length <= end - cur) {
+            const auto first = static_cast<size_t>(cur / kPage);
+            auto remaining = pageCount;
+            while (remaining != 0 && !_used[first + remaining - 1]) --remaining;
+            if (remaining == 0) return true;
+            if (!RoundUp(static_cast<uint64_t>(first + remaining) * kPage, alignment, cur)) break;
         }
         return false;
     }
