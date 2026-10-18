@@ -1053,8 +1053,15 @@ int APS5_VABI sceSslGetFingerprint(int sslCtxId, void* sslCert, int hashType, un
     return 0;
 }
 
-int APS5_VABI sceSslGetPem(void) {
-    NotImplemented_nid_no_patch(__func__);
+int APS5_VABI sceSslGetPem(int sslCtxId, void* sslCert, void* pem, size_t* pemLen) {
+    if (!pemLen) return ErrorInvalidArg;
+    std::lock_guard lock(State().mutex);
+    const auto* crt = RequireCertificate(__func__, sslCtxId, sslCert);
+    if (!crt) return ErrorInvalidArg;
+    if (pem && *pemLen >= crt->raw.len) {
+        std::memcpy(pem, crt->raw.p, crt->raw.len);
+    }
+    *pemLen = crt->raw.len;
     return 0;
 }
 
