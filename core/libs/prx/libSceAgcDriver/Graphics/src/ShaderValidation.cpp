@@ -130,10 +130,6 @@ struct Module {
                 position = true;
                 return;
             }
-            if (value == spv::BuiltInClipDistance && (stage == Stage::TessellationControl || input)) {
-                Require(signature == "f32[1]", "invalid tessellation clip distance");
-                return;
-            }
             if (stage == Stage::TessellationControl || stage == Stage::TessellationEvaluation) {
                 const bool clipInput = value == spv::BuiltInClipDistance && signature.size() == 6 && signature.starts_with("f32[") && signature[4] >= '1' && signature[4] <= '8' && signature[5] == ']';
                 Require(input && (clipInput || (value == spv::BuiltInPosition && signature == "f32x4") || (value == spv::BuiltInTessCoord && stage == Stage::TessellationEvaluation && signature == "f32x3") || ((value == spv::BuiltInInvocationId || value == spv::BuiltInPrimitiveId || value == spv::BuiltInPatchVertices) && (signature == "i32" || signature == "u32"))), "unsupported tessellation built-in");
