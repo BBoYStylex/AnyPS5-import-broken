@@ -14,6 +14,7 @@
 #include <mbedtls/asn1.h>
 #include <mbedtls/ctr_drbg.h>
 #include <mbedtls/entropy.h>
+#include <mbedtls/md.h>
 #include <mbedtls/net_sockets.h>
 #include <mbedtls/oid.h>
 #include <mbedtls/pk.h>
@@ -68,6 +69,26 @@ using NativeSocket = int;
 #ifndef MSG_NOSIGNAL
 #define MSG_NOSIGNAL 0
 #endif
+
+constexpr std::int64_t TicksPerSecond = 1000000;
+constexpr std::int64_t TicksPerMinute = 60 * TicksPerSecond;
+constexpr std::int64_t TicksPerHour = 60 * TicksPerMinute;
+constexpr std::int64_t TicksPerDay = 24 * TicksPerHour;
+constexpr std::int64_t UnixEpochDays = 719162;
+
+std::int64_t DaysFromCivil(std::int64_t year, unsigned month, unsigned day) {
+    year -= month <= 2;
+    const std::int64_t era = (year >= 0 ? year : year - 399) / 400;
+    const auto yearOfEra = static_cast<unsigned>(year - era * 400);
+    const unsigned dayOfYear = (153 * (month > 2 ? month - 3 : month + 9) + 2) / 5 + day - 1;
+    const unsigned dayOfEra = yearOfEra * 365 + yearOfEra / 4 - yearOfEra / 100 + dayOfYear;
+    return era * 146097 + static_cast<std::int64_t>(dayOfEra) - 719468 + UnixEpochDays;
+}
+
+std::uint64_t TimeToTick(const mbedtls_x509_time& time) {
+    return static_cast<std::uint64_t>(DaysFromCivil(time.year, time.mon, time.day)) * TicksPerDay
+        + time.hour * TicksPerHour + time.min * TicksPerMinute + time.sec * TicksPerSecond;
+}
 
 struct Pool {
     std::size_t size, current = 0, peak = 0;
@@ -921,6 +942,42 @@ int APS5_VABI sceSslGetNameEntryInfo(int sslCtxId, void* certName, int entryNum,
         value[copyLen] = '\0';
     }
     if (valueLen) *valueLen = entry.value.size();
+    return 0;
+}
+
+int APS5_VABI sceSslGetNotBefore(int sslCtxId, void* sslCert, SceSsl::RtcTick* begin) {
+    if (!begin) return ErrorInvalidArg;
+    std::lock_guard lock(State().mutex);
+    const auto* crt = RequireCertificate(__func__, sslCtxId, sslCert);
+    begin->tick = TimeToTick(crt->valid_from);
+    return 0;
+}
+
+int APS5_VABI sceSslGetNotAfter(int sslCtxId, void* sslCert, SceSsl::RtcTick* limit) {
+    if (!limit) return ErrorInvalidArg;
+    std::lock_guard lock(State().mutex);
+    const auto* crt = RequireCertificate(__func__, sslCtxId, sslCert);
+    limit->tick = TimeToTick(crt->valid_to);
+    return 0;
+}
+
+int APS5_VABI sceSslGetFingerprint(int sslCtxId, void* sslCert, int hashType, unsigned char* fingerprint) {
+    if (!fingerprint) return ErrorInvalidArg;
+    mbedtls_md_type_t mdType;
+    switch (hashType) {
+    case 0: mdType = MBEDTLS_MD_MD5; break;
+    case 1: mdType = MBEDTLS_MD_SHA1; break;
+    case 2: mdType = MBEDTLS_MD_SHA224; break;
+    case 3: mdType = MBEDTLS_MD_SHA256; break;
+    case 4: mdType = MBEDTLS_MD_SHA384; break;
+    case 5: mdType = MBEDTLS_MD_SHA512; break;
+    default: return ErrorInvalidArg;
+    }
+    const auto* info = mbedtls_md_info_from_type(mdType);
+    if (!info) return ErrorInvalidArg;
+    std::lock_guard lock(State().mutex);
+    const auto* crt = RequireCertificate(__func__, sslCtxId, sslCert);
+    if (mbedtls_md(info, crt->raw.p, crt->raw.len, fingerprint) != 0) return ErrorInvalidArg;
     return 0;
 }
 
