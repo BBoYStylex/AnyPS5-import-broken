@@ -38,6 +38,7 @@
 #include <pthread.h>
 #include <sstream>
 #include <sys/ioctl.h>
+#include <sys/uio.h>
 #include <unistd.h>
 #include "prx/libc/include/specifics/linux/HostMapping.hpp"
 #endif
@@ -720,11 +721,35 @@ bool onOwnLiveStack(std::uintptr_t address, std::size_t bytes) {
     return bounds.high != 0 && frame >= bounds.low && frame < bounds.high && address >= frame && address < bounds.high && bytes <= bounds.high - address;
 }
 
+#ifdef __linux__
+bool pageStateRecorded(std::uintptr_t address, std::size_t bytes) {
+    auto& pages = Pages();
+    pages.initialize();
+    for (auto at = address & ~static_cast<std::uintptr_t>(PageBytes - 1); at < address + bytes; at += PageBytes) {
+        if (const auto* span = pages.spanOf(at); span != nullptr && span->load(at) != 0) return true;
+    }
+    return false;
+}
+
+bool readableWithoutQuery(std::uintptr_t address, std::size_t bytes) {
+    constexpr std::size_t limit = 4096;
+    if (bytes > limit || HostMapping::QueryFd() >= 0 || pageStateRecorded(address, bytes)) return false;
+    thread_local std::array<std::byte, limit> scratch;
+    iovec local{scratch.data(), bytes};
+    iovec remote{reinterpret_cast<void*>(address), bytes};
+    static const pid_t self = getpid();
+    return ::process_vm_readv(self, &local, 1, &remote, 1, 0) == static_cast<ssize_t>(bytes);
+}
+#endif
+
 // Checks that [address, address + bytes) is mapped with read (and, if asked, write) access. Returns
 // an empty string when it is, otherwise why it is not.
 std::string verify(std::uintptr_t address, std::size_t bytes, bool writable) {
     const TimedAccess timed(CounterVerify, bytes);
     if (onOwnLiveStack(address, bytes)) return {};
+#ifdef __linux__
+    if (!writable && readableWithoutQuery(address, bytes)) return {};
+#endif
     std::string reason;
     const bool queried = describePages(address, bytes, [&](const PageRun& run) {
         if (!run.readable) {
