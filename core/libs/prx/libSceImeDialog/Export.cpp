@@ -12,6 +12,7 @@ constexpr int StatusRunning = 1;
 constexpr int StatusFinished = 2;
 constexpr std::uint32_t EndStatusOk = 0;
 constexpr std::uint32_t EndStatusAborted = 2;
+constexpr int ErrorBusy = static_cast<int>(0x80bc0001u);
 constexpr int ErrorNotOpened = static_cast<int>(0x80bc0002u);
 
 std::atomic<int> status{StatusNone};
@@ -66,6 +67,7 @@ int APS5_VABI sceImeDialogGetStatus(void) {
 }
 
 int APS5_VABI sceImeDialogInit(const Param* param, const ExtendedParam* extended) {
+    if (status.load() != StatusNone) return ErrorBusy;
     (void)extended;
     static std::atomic<int> reported{0};
     bool filled = false;
