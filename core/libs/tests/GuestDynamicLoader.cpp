@@ -151,6 +151,12 @@ int main(int argc, char** argv) {
     Require(add && add(2, 3) == 5);
     Require(dlclose_nid_postfix(second) == 0);
     Require(dlclose_nid_postfix(second) == -1);
+#ifdef __APPLE__
+    void* localOnly = dlopen_nid_postfix(argv[1], 2);
+    Require(localOnly != nullptr && dlsym_nid_postfix(localOnly, "GuestModuleAdd") != nullptr);
+    Require(dlsym_nid_postfix(nullptr, "GuestModuleAdd") == nullptr);
+    Require(dlclose_nid_postfix(localOnly) == 0);
+#endif
 
     const std::filesystem::path guest = "anyps5-relinked-module-for-test.prx";
     auto relinked = guest;
