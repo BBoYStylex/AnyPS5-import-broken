@@ -304,11 +304,11 @@ int APS5_VABI _umtx_op_nid_postfix(void* object, int operation, std::uint64_t va
             if (operation < 0 || operation >= UMTX_OP_MAX) {
                 error = GUEST_EINVAL;
             } else if (operation == UMTX_OP_RESERVED1) {
-                NotImplemented_nid_no_patch("_umtx_op operation 1");
+                throw std::runtime_error("_umtx_op operation 1");
             } else if (operation < UMTX_OP_RESERVED1) {
                 error = GUEST_EOPNOTSUPP;
             } else {
-                NotImplemented_nid_no_patch(("_umtx_op operation " + std::to_string(operation)).c_str());
+                throw std::runtime_error("_umtx_op operation " + std::to_string(operation));
             }
             break;
     }

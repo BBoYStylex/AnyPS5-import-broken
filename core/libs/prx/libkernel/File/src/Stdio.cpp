@@ -618,8 +618,7 @@ int APS5_VABI nmount_nid_postfix(const KernelIovec* iov, unsigned int niov, int 
     (void)iov;
     (void)niov;
     (void)flags;
-    NotImplemented_nid_no_patch("nmount: mounting file systems");
-    return -1;
+    return PosixFailure(GUEST_EOPNOTSUPP);
 }
 
 int APS5_VABI close_nid_postfix(int d) {

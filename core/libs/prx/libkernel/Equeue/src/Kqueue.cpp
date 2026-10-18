@@ -129,13 +129,13 @@ std::int64_t DescriptorLowWater(const KernelEvent& change) {
         return 0;
     }
     if (change.data < 1) {
-        NotImplemented_nid_no_patch("kevent: NOTE_LOWAT below 1 on a socket");
+        throw std::runtime_error("kevent: NOTE_LOWAT below 1 on a socket");
     }
     if (change.filter == EVFILT_WRITE && change.data > 1) {
-        NotImplemented_nid_no_patch("kevent: NOTE_LOWAT above 1 on EVFILT_WRITE");
+        throw std::runtime_error("kevent: NOTE_LOWAT above 1 on EVFILT_WRITE");
     }
     if (change.data > 1 && GuestSockets::Type(static_cast<int>(change.ident)) != 1) {
-        NotImplemented_nid_no_patch("kevent: NOTE_LOWAT above 1 on a socket that is not a stream");
+        throw std::runtime_error("kevent: NOTE_LOWAT above 1 on a socket that is not a stream");
     }
     return change.data;
 }
@@ -146,18 +146,18 @@ int AddDescriptorKnote(const KernelEqueueRef& queue, KernelEvent& change, std::u
         if (change.filter != EVFILT_READ) {
             return GUEST_EINVAL;
         }
-        NotImplemented_nid_no_patch("kevent: EVFILT_READ on a kqueue descriptor");
+        throw std::runtime_error("kevent: EVFILT_READ on a kqueue descriptor");
     }
     const bool socket = GuestSockets::IsOpen(descriptor);
     std::int64_t data = 0;
     bool eof = false;
     const bool pipe = !socket && change.filter == EVFILT_READ && GuestSockets::PipeReadState(descriptor, &data, &eof);
     if (!socket && !pipe) {
-        NotImplemented_nid_no_patch(change.filter == EVFILT_READ ? "kevent: EVFILT_READ on a descriptor that is neither a socket nor the read end of a pipe" : "kevent: EVFILT_WRITE on a non-socket descriptor");
+        throw std::runtime_error(change.filter == EVFILT_READ ? "kevent: EVFILT_READ on a descriptor that is neither a socket nor the read end of a pipe" : "kevent: EVFILT_WRITE on a non-socket descriptor");
     }
     const auto lowWater = DescriptorLowWater(change);
     if ((flags & EV_CLEAR) != 0) {
-        NotImplemented_nid_no_patch(pipe ? "kevent: EV_CLEAR on a pipe" : "kevent: EV_CLEAR on a socket");
+        throw std::runtime_error(pipe ? "kevent: EV_CLEAR on a pipe" : "kevent: EV_CLEAR on a socket");
     }
     auto event = EqueueDescriptorEvent(descriptor, change.filter, flags, change.udata);
     event.lowWater = lowWater;
@@ -229,7 +229,7 @@ void TouchUserKnote(KernelEqueueEvent& event, KernelEvent& change) {
 
 int ModifyKnote(const KernelEqueueRef& queue, KernelEvent& change) {
     if (change.filter == EVFILT_TIMER) {
-        NotImplemented_nid_no_patch("kevent: changing an existing EVFILT_TIMER");
+        throw std::runtime_error("kevent: changing an existing EVFILT_TIMER");
     }
     const bool descriptor = change.filter == EVFILT_READ || change.filter == EVFILT_WRITE;
     const auto lowWater = descriptor ? DescriptorLowWater(change) : 0;
@@ -267,7 +267,7 @@ int Register(const KernelEqueueRef& queue, int kqueueDescriptor, KernelEvent& ch
         return GUEST_EINVAL;
     }
     if (change.filter != EVFILT_READ && change.filter != EVFILT_WRITE && change.filter != EVFILT_VNODE && change.filter != EVFILT_TIMER && change.filter != EVFILT_USER) {
-        NotImplemented_nid_no_patch(("kevent: filter " + std::to_string(change.filter)).c_str());
+        throw std::runtime_error("kevent: filter " + std::to_string(change.filter));
     }
     if (change.filter == EVFILT_READ || change.filter == EVFILT_WRITE || change.filter == EVFILT_VNODE) {
         if (const int error = DescriptorFilterError(kqueueDescriptor, change.ident)) {

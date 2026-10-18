@@ -1,6 +1,7 @@
 #include <cstdint>
 #include <cstddef>
 #include <cstring>
+#include <stdexcept>
 #include "SceTypes.hpp"
 #include "../include/ThreadLifecycle.hpp"
 #include "../include/Cancel.hpp"
@@ -68,12 +69,12 @@ int APS5_VABI cpuset_getaffinity_nid_postfix(int level, int which, std::int64_t 
     } else if (which == WhichProcess) {
         if (id != -1 && id != getpid_nid_postfix()) return fail(GuestEsrch);
     } else if (which >= 3 && which <= 6) {
-        NotImplemented_nid_no_patch("cpuset_getaffinity other than the calling thread or process");
+        throw std::runtime_error("cpuset_getaffinity other than the calling thread or process");
     } else {
         return fail(GuestEinval);
     }
     if (level < 1 || level > 3) return fail(GuestEinval);
-    if (level != LevelWhich) NotImplemented_nid_no_patch("cpuset_getaffinity other than the calling thread or process");
+    if (level != LevelWhich) throw std::runtime_error("cpuset_getaffinity other than the calling thread or process");
     if (which == WhichProcess) affinity = LiveGuestThreadsAffinity();
     std::memset(mask, 0, size);
     std::memcpy(mask, &affinity, sizeof(affinity));
@@ -100,12 +101,12 @@ int APS5_VABI cpuset_setaffinity_nid_postfix(int level, int which, std::int64_t 
     } else if (which == WhichProcess) {
         if (id != -1 && id != getpid_nid_postfix()) return fail(GuestEsrch);
     } else if (which >= 3 && which <= 6) {
-        NotImplemented_nid_no_patch("cpuset_setaffinity other than the calling thread or process");
+        throw std::runtime_error("cpuset_setaffinity other than the calling thread or process");
     } else {
         return fail(GuestEinval);
     }
     if (level < 1 || level > 3) return fail(GuestEinval);
-    if (level != LevelWhich) NotImplemented_nid_no_patch("cpuset_setaffinity other than the calling thread or process");
+    if (level != LevelWhich) throw std::runtime_error("cpuset_setaffinity other than the calling thread or process");
     KernelCpumask requested = 0;
     std::memcpy(&requested, bytes, sizeof(requested));
     const KernelCpumask affinity = requested & sceKernelGetAvailableCpumask();
@@ -135,17 +136,17 @@ int APS5_VABI rtprio_thread_nid_postfix(int function, int lwpid, GuestRtPrio* pr
     auto* self = scePthreadSelf();
     if (lwpid != 0 && static_cast<std::int64_t>(lwpid) != static_cast<std::int64_t>(self->tid)) {
         if (!LiveGuestThreadExists(lwpid)) return fail(GuestEsrch);
-        NotImplemented_nid_no_patch("rtprio_thread: a thread other than the calling one");
+        throw std::runtime_error("rtprio_thread: a thread other than the calling one");
     }
     const int policy = self->schedPolicy.load(std::memory_order_relaxed);
-    if (policy == 1 || policy == 3) NotImplemented_nid_no_patch("rtprio_thread: a guest thread's real-time class");
+    if (policy == 1 || policy == 3) throw std::runtime_error("rtprio_thread: a guest thread's real-time class");
     if (function == Lookup) {
         priority->type = Normal;
         priority->prio = 0;
         return 0;
     }
     if (priority->type == Normal && priority->prio == 0) return 0;
-    NotImplemented_nid_no_patch("rtprio_thread: a real-time priority change");
+    throw std::runtime_error("rtprio_thread: a real-time priority change");
 }
 
 int APS5_VABI pthread_setconcurrency_nid_postfix(int newLevel) {

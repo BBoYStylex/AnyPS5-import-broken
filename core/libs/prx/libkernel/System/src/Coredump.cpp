@@ -70,8 +70,7 @@ int APS5_VABI sceCoredumpAttachMemoryRegionAsUserFile(uint32_t userValue, const 
 }
 
 int APS5_VABI sceCoredumpSetUserDataType(void) {
-    NotImplemented_nid_no_patch("Uxqkdta7wEg");
-    return 0;
+    return SCE_COREDUMP_ERROR_NOT_IN_COREDUMP_HANDLER;
 }
 
 void APS5_VABI sceCoredumpDebugTextOut(const char* str, int len) {
