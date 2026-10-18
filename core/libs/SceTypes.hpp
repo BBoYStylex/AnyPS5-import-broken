@@ -923,6 +923,14 @@ struct VoicePortInfo {
     std::uint16_t reserved;
 };
 
+struct VoiceResourceInfo {
+    std::uint16_t max_voice_input_ports;
+    std::uint16_t max_voice_output_ports;
+    std::uint16_t max_device_input_ports;
+    std::uint16_t max_device_output_ports;
+    std::uint16_t max_ports;
+};
+
 struct VoiceStartParam {
     void* container;
     std::uint32_t mem_size;
@@ -1373,10 +1381,6 @@ struct NpUniversalDataSystemMemoryStat {
     std::size_t max_inuse_size;
     std::size_t current_inuse_size;
 };
-
-struct NpUniversalDataSystemEvent {};
-struct NpUniversalDataSystemEventPropertyObject {};
-struct NpUniversalDataSystemEventPropertyArray {};
 
 struct NpUniversalDataSystemStorageStat {
     std::size_t in_events;
@@ -1970,6 +1974,42 @@ struct VideoOutVblankStatus {
     std::uint8_t pad1[6] = {};
 };
 
+struct VideoOutBufferAttribute {
+    std::uint32_t pixel_format;
+    std::uint32_t tiling_mode;
+    std::uint32_t aspect_ratio;
+    std::uint32_t width;
+    std::uint32_t height;
+    std::uint32_t pitch_in_pixel;
+    std::uint32_t option;
+    std::uint32_t reserved0;
+    std::uint64_t reserved1;
+};
+static_assert(sizeof(VideoOutBufferAttribute) == 40);
+
+struct VideoOutFlipStatusPs4 {
+    std::uint64_t count = 0;
+    std::uint64_t processTime = 0;
+    std::uint64_t tsc = 0;
+    std::int64_t flipArg = 0;
+    std::uint64_t submitTsc = 0;
+    std::uint64_t reserved0 = 0;
+    std::int32_t gcQueueNum = 0;
+    std::int32_t flipPendingNum = 0;
+    std::int32_t currentBuffer = 0;
+    std::uint32_t reserved1 = 0;
+};
+static_assert(sizeof(VideoOutFlipStatusPs4) == 64);
+
+struct VideoOutVblankStatusPs4 {
+    std::uint64_t count = 0;
+    std::uint64_t processTime = 0;
+    std::uint64_t tsc = 0;
+    std::uint8_t flags = 0;
+    std::uint8_t pad[7] = {};
+};
+static_assert(sizeof(VideoOutVblankStatusPs4) == 32);
+
 struct VideoOutOutputStatus {
     std::uint32_t resolution = 0;
     std::uint32_t dynamicRange = 0;
@@ -1997,6 +2037,11 @@ struct VideoOutColorSettings {
     float gamma = 1.0f;
     std::uint32_t reserved[3] = {};
 };
+
+struct VideoOutColorSpaceConversionSettings {
+    std::uint32_t internalData[8] = {};
+};
+static_assert(sizeof(VideoOutColorSpaceConversionSettings) == 32);
 
 
 using atexit_func_t = void (*)();

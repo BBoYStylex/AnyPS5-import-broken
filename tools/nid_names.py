@@ -188,8 +188,8 @@ def main(argv=None):
     requested_nids = "--nid" in requested_options
     if requested_nids and requested_options & {"--name", "--symbol"}:
         parser.error("--name/--symbol cannot be combined with --nid")
-    if args.name:
-        rows = [{"name": name, "nid": compute_nid(name)} for name in args.name]
+    if requested_options & {"--name", "--symbol"}:
+        rows = [{"name": name, "nid": compute_nid(name)} for name in (args.name or [])]
         if args.json:
             print(json.dumps({"symbols": rows}, indent=1))
         else:
@@ -242,4 +242,7 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     sys.exit(main())
