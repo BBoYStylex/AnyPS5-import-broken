@@ -84,9 +84,9 @@ std::filesystem::path ShaderCacheDirectory() {
 namespace ShaderRecompiler::ShaderDiskCache {
 
 #if defined(__linux__) && defined(__x86_64__) && defined(__GLIBCXX__)
-static_assert(sizeof(CompiledShaderArtifact) == 240, "CompiledShaderArtifact changed: update the artifact encoder");
+static_assert(sizeof(CompiledShaderArtifact) == 248, "CompiledShaderArtifact changed: update the artifact encoder");
 static_assert(sizeof(ShaderInvocation) == 200, "ShaderInvocation changed: update the invocation encoder");
-static_assert(sizeof(RecompileResult) == 472, "RecompileResult changed: update EncodeResult and DecodeResult");
+static_assert(sizeof(RecompileResult) == 480, "RecompileResult changed: update EncodeResult and DecodeResult");
 static_assert(sizeof(DescriptorBinding) == 592, "DescriptorBinding changed: update the binding encoder");
 static_assert(sizeof(VertexAttribute) == 32, "VertexAttribute changed: update the attribute encoder");
 static_assert(sizeof(VertexInput) == 16, "VertexInput changed: update the vertex input encoder");
@@ -466,6 +466,8 @@ void encodeArtifact(Writer& writer, const CompiledShaderArtifact& result) {
     writer.Value(result.shaderDataDwords);
     writer.Value(result.imageMetadataDword);
     writer.Value(result.runtimeImageCount);
+    writer.Value(result.dispatchGroupInfo);
+    writer.Value(result.dispatchGroupOffsetDword);
     writer.Values(std::span<const std::uint32_t>(result.runtimeImageResources));
     writer.Value(result.registrationModule);
     writer.List(result.vertexInputPatches, [](Writer& out, const VertexInputPatch& patch) {
@@ -513,6 +515,8 @@ void decodeArtifact(Reader& reader, CompiledShaderArtifact& result) {
     reader.Value(result.shaderDataDwords);
     reader.Value(result.imageMetadataDword);
     reader.Value(result.runtimeImageCount);
+    reader.Value(result.dispatchGroupInfo);
+    reader.Value(result.dispatchGroupOffsetDword);
     reader.Values(result.runtimeImageResources);
     reader.Value(result.registrationModule);
     reader.List(result.vertexInputPatches, 20, [](Reader& in, VertexInputPatch& patch) {
@@ -634,6 +638,7 @@ void encodeLayout(Writer& writer, const IrBindingLayout& layout) {
     writer.Value(layout.memoryOffsetDword);
     writer.Value(layout.memoryOffsetCount);
     writer.Value(layout.dispatchThreadLimit);
+    writer.Value(layout.dispatchGroupInfo);
     writer.Value(layout.runtimeImageCount);
     writer.Value(layout.runtimeStateDwords);
     writer.Values(std::span<const std::uint32_t>(layout.userDataRegisters));
@@ -649,6 +654,7 @@ void decodeLayout(Reader& reader, IrBindingLayout& layout) {
     reader.Value(layout.memoryOffsetDword);
     reader.Value(layout.memoryOffsetCount);
     reader.Value(layout.dispatchThreadLimit);
+    reader.Value(layout.dispatchGroupInfo);
     reader.Value(layout.runtimeImageCount);
     reader.Value(layout.runtimeStateDwords);
     reader.Values(layout.userDataRegisters);

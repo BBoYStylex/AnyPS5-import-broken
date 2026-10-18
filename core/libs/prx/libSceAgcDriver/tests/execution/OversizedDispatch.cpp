@@ -145,30 +145,6 @@ void CheckLdsSplitThrows(AgcDriver::VulkanDevice& device) {
     Require(threw, "oversized dispatch: a Y count over the limit with device-memory LDS did not throw");
 }
 
-void CheckNvidiaSplitThrows(AgcDriver::VulkanDevice& device) {
-    const GuestBlock guest(Threads);
-    const auto address = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(guest.Data()));
-    const std::vector<std::uint32_t> userData{
-        static_cast<std::uint32_t>(address), static_cast<std::uint32_t>((address >> 32u) & 0xffffu) | (4u << 16u),
-        Threads, 0x00014004u, Pattern[0], Pattern[1], Pattern[2], Pattern[3], Threads, Period};
-    const std::span<const std::uint32_t> code(Code);
-    const std::array<ShaderRecompiler::MemoryRegion, 1> memory{{{reinterpret_cast<std::uintptr_t>(code.data()), std::as_bytes(code)}}};
-    const ShaderRecompiler::ShaderComputeStageInfo compute{{Threads, 1, 1}, 0, {true, false, false}, false, 1};
-    ShaderRecompiler::RecompileRequest request{
-        {ShaderRecompiler::ShaderStage::Compute, reinterpret_cast<std::uintptr_t>(code.data()), code, 0, {}},
-        {64, 0, userData, compute, std::nullopt, std::nullopt, memory},
-        device.Target(), {0, 0, 0, 128}, std::nullopt, false};
-    const auto result = ShaderRecompiler::Recompile(request);
-    bool threw = false;
-    try {
-        device.Dispatch(result, 1, device.WorkGroupCountLimit()[1] + 1u, 1, {}, reinterpret_cast<std::uintptr_t>(code.data()));
-    } catch (const std::runtime_error&) {
-        threw = true;
-    }
-    device.WaitIdle();
-    Require(threw, "oversized dispatch: NVIDIA did not throw for a count over the workgroup limit");
-}
-
 }
 
 int main() {
@@ -176,9 +152,7 @@ int main() {
         const auto device = OpenVulkanTestDevice();
         if (!device) return VulkanTestSkipped;
         CheckLdsSplitThrows(*device);
-        if (device->VendorId() == 0x10de) {
-            CheckNvidiaSplitThrows(*device);
-        } else if (device->WorkGroupCountLimit()[0] < Groups) {
+        if (device->WorkGroupCountLimit()[0] < Groups) {
             CheckSplitCoverage(*device);
         } else {
             std::printf("oversized dispatch split: skipped, the device reports a %u workgroup limit, which never splits a %ux1x1 dispatch\n", device->WorkGroupCountLimit()[0], Groups);

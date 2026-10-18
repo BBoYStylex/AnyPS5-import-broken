@@ -4622,6 +4622,12 @@ void VulkanDevice::recordDispatch(RecordedDispatch& record) {
     }
     const auto gpuTiming = recorder.BeginGpuTiming(record.programAddress != 0 ? record.programAddress : record.shader->program->variantId);
     if (state->checkpointMarker != nullptr) state->checkpointMarker(commands, reinterpret_cast<const void*>(static_cast<std::uintptr_t>(record.programAddress)));
+    const auto updateGroupOffset = [&](const std::array<std::uint32_t, 3>& offset) {
+        if (!record.shader->program->dispatchGroupInfo) return;
+        Graphics::RecordMemoryBarrier(context, commands, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT | VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_HOST_WRITE_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
+        resources.UpdateDispatchGroupOffset(commands, *record.shader, offset);
+        Graphics::RecordMemoryBarrier(context, commands, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
+    };
     if (argumentImport != nullptr) {
         context.Resolved(&Graphics::DeviceFunctions::cmdDispatchIndirect, "vkCmdDispatchIndirect")(commands, argumentImport->buffer, arguments - argumentImport->base);
     } else {
@@ -4634,19 +4640,14 @@ void VulkanDevice::recordDispatch(RecordedDispatch& record) {
                 std::snprintf(text, sizeof(text), "Vulkan dispatch: workgroup count %ux%ux%u exceeds device limits %ux%ux%u and a split aliases the device-memory LDS slots, whose base is computed from gl_NumWorkGroups of a single chunk", record.x, record.y, record.z, limit[0], limit[1], limit[2]);
                 throw std::runtime_error(text);
             }
-            if (state->properties.vendorID == 0x10de) {
-                char text[192];
-                std::snprintf(text, sizeof(text), "Vulkan dispatch: workgroup count %ux%ux%u exceeds device limits %ux%ux%u and NVIDIA drops workgroups of a vkCmdDispatchBase split", record.x, record.y, record.z, limit[0], limit[1], limit[2]);
-                throw std::runtime_error(text);
-            }
-            const auto dispatchBase = context.Function<PFN_vkCmdDispatchBase>("vkCmdDispatchBase");
             bool firstChunk = true;
             for (std::uint32_t zBase = 0; zBase < record.z; zBase += limit[2]) {
                 for (std::uint32_t yBase = 0; yBase < record.y; yBase += limit[1]) {
                     for (std::uint32_t xBase = 0; xBase < record.x; xBase += limit[0]) {
                         if (!firstChunk) Graphics::RecordMemoryBarrier(context, commands, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
                         firstChunk = false;
-                        dispatchBase(commands, xBase, yBase, zBase, std::min(limit[0], record.x - xBase), std::min(limit[1], record.y - yBase), std::min(limit[2], record.z - zBase));
+                        updateGroupOffset({xBase, yBase, zBase});
+                        context.Resolved(&Graphics::DeviceFunctions::cmdDispatch, "vkCmdDispatch")(commands, std::min(limit[0], record.x - xBase), std::min(limit[1], record.y - yBase), std::min(limit[2], record.z - zBase));
                     }
                 }
             }
