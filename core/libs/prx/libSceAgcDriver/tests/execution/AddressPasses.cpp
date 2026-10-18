@@ -2,6 +2,7 @@
 #include "prx/libSceAgcDriver/Execution/include/Driver/Driver.hpp"
 #include "prx/libSceAgcDriver/Execution/include/GuestMemory.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Draw.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/GuestBufferMemory.hpp"
 #include "prx/libSceAgcDriver/Submit/include/Dcb.hpp"
 #include "prx/libc/include/GuestAllocations.hpp"
 #include "prx/libc/include/GuestArena.hpp"
@@ -298,6 +299,7 @@ int main(int argc, char** argv) {
             const auto device = OpenVulkanTestDevice();
             if (!device) return VulkanTestSkipped;
         }
+        AgcDriver::Graphics::SetHostImportDeferredSettles(false);
         Register(VertexHeader, VertexCodeUser8.data(), sizeof(VertexCodeUser8), 2);
         Register(ReadHeader, PixelRead.data(), sizeof(PixelRead), 1);
         Register(StoreHeader, PixelStore.data(), sizeof(PixelStore), 1);
