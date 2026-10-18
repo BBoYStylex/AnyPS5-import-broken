@@ -327,14 +327,13 @@ FileStream* APS5_VABI fopen_nid_postfix(const char* filename, const char* mode) 
 
 int APS5_VABI fopen_s_nid_postfix(FileStream** result, const char* filename, const char* mode) {
     constexpr int GuestEinval = 22;
-    constexpr int GuestEnoent = 2;
     if (!result) {
-        SonyInvokeConstraintHandler("fopen_s", result, GuestEinval);
+        SonyInvokeConstraintHandler_nid_no_patch("fopen_s", result, GuestEinval);
         return GuestEinval;
     }
     *result = nullptr;
     if (!filename || !mode) {
-        SonyInvokeConstraintHandler("fopen_s", result, GuestEinval);
+        SonyInvokeConstraintHandler_nid_no_patch("fopen_s", result, GuestEinval);
         return GuestEinval;
     }
     *result = fopen_nid_postfix(filename, mode);

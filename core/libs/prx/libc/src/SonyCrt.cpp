@@ -21,20 +21,20 @@ void SonyDefaultConstraintHandler(const char* message, void* pointer, int error)
     std::abort();
 }
 
-void SonyIgnoreHandlerS(const char* message, void* pointer, int error) {
+extern "C" void SonyIgnoreHandlerS_nid_no_patch(const char* message, void* pointer, int error) {
     (void)message;
     (void)pointer;
     (void)error;
 }
 
-void* SonySetConstraintHandlerS(void* handler) {
+extern "C" void* SonySetConstraintHandlerS_nid_no_patch(void* handler) {
     std::lock_guard<std::mutex> lock(SonyConstraintMutex());
     void* previous = reinterpret_cast<void*>(SonyConstraintHandlerSlot());
     SonyConstraintHandlerSlot() = handler ? reinterpret_cast<SonyConstraintHandler>(handler) : SonyDefaultConstraintHandler;
     return previous;
 }
 
-void SonyInvokeConstraintHandler(const char* message, void* pointer, int error) {
+extern "C" void SonyInvokeConstraintHandler_nid_no_patch(const char* message, void* pointer, int error) {
     SonyConstraintHandler handler = nullptr;
     {
         std::lock_guard<std::mutex> lock(SonyConstraintMutex());
@@ -105,7 +105,7 @@ SonyLconvCompact& SonyCompactStorage() {
     return value;
 }
 
-SonyLconv* SonyLocaleconv(void) {
+extern "C" SonyLconv* SonyLocaleconv_nid_no_patch(void) {
     return &SonyAmprStorage();
 }
 

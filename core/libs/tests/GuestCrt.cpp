@@ -103,7 +103,7 @@ int main(int argc, char** argv) {
     Require(std::strcmp(static_cast<SonyLconvCompact*>(compactEx)->decimal_point, ".") == 0);
     void* amprEx = SonyLocaleconvEx(SonyLconvVariant::Ampr48);
     Require(amprEx == amprBase);
-    Require(SonyLocaleconv() == locale);
+    Require(SonyLocaleconv_nid_no_patch() == locale);
 
     Require(__udivti3_nid_postfix(100, 3) == 33);
     Require(SonyUdivti3(100, 3) == 33);

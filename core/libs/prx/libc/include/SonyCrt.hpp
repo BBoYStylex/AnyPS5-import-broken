@@ -27,10 +27,17 @@ enum class SonyLconvVariant { Ampr48, Compact0 };
 // The handler slot and the lconv tables have a single definition in libc
 // (SonyCrt.cpp). libSceAmpr links libc, so both modules observe the same
 // state instead of per-TU copies.
+//
+// The entry points libSceAmpr calls across the prx boundary use the same
+// `extern "C" ..._nid_no_patch` mechanism as the other shared libc helpers
+// (e.g. AddPathProvider_nid_no_patch): the NID patcher leaves those names
+// verbatim, so the patched libSceAmpr.prx resolves them from libc.prx. A
+// plain C++ name would be NID-hashed in libc's exports while Ampr still
+// imports the mangled name, breaking the patched deploy.
 std::mutex& SonyConstraintMutex();
 SonyConstraintHandler& SonyConstraintHandlerSlot();
 void SonyDefaultConstraintHandler(const char* message, void* pointer, int error);
-void SonyInvokeConstraintHandler(const char* message, void* pointer, int error);
+extern "C" void SonyInvokeConstraintHandler_nid_no_patch(const char* message, void* pointer, int error);
 void* SonyLconvFor(SonyLconvVariant variant);
 void* SonyLocaleconvEx(SonyLconvVariant variant);
 
@@ -76,12 +83,12 @@ inline int SonyAsctimeS(char* buffer, std::size_t size, const GuestTm* time) {
     return SonyFormatAsctime(buffer, size, *time);
 }
 
-void SonyIgnoreHandlerS(const char* message, void* pointer, int error);
-void* SonySetConstraintHandlerS(void* handler);
+extern "C" void SonyIgnoreHandlerS_nid_no_patch(const char* message, void* pointer, int error);
+extern "C" void* SonySetConstraintHandlerS_nid_no_patch(void* handler);
 
 inline int SonyWcscpyS(std::uint16_t* dest, std::size_t size, const std::uint16_t* src) {
     if (!dest || !src || size == 0) {
-        SonyInvokeConstraintHandler("wcscpy_s", dest, EINVAL);
+        SonyInvokeConstraintHandler_nid_no_patch("wcscpy_s", dest, EINVAL);
         return EINVAL;
     }
     std::size_t i = 0;
@@ -91,7 +98,7 @@ inline int SonyWcscpyS(std::uint16_t* dest, std::size_t size, const std::uint16_
     }
     dest[i] = 0;
     if (src[i] != 0) {
-        SonyInvokeConstraintHandler("wcscpy_s", dest, ERANGE);
+        SonyInvokeConstraintHandler_nid_no_patch("wcscpy_s", dest, ERANGE);
         return ERANGE;
     }
     return 0;
@@ -112,7 +119,7 @@ inline std::size_t SonyMbstowcs(std::uint16_t* dest, const char* src, std::size_
 
 // Fixed C-locale table defined once in SonyCrt.cpp so libc and libSceAmpr
 // return the same object.
-SonyLconv* SonyLocaleconv(void);
+extern "C" SonyLconv* SonyLocaleconv_nid_no_patch(void);
 
 inline int SonyFpclassifyd(double value) {
     if (std::isnan(value)) return 2;
