@@ -51,7 +51,7 @@ void RejectGuestWideScan(const char* format) {
         if (*format == '%') { ++format; continue; }
         while (*format && std::strchr("-+ #0'0123456789.*$", *format)) ++format;
         if (*format == 'S' || *format == 'C' || (*format == 'l' && format[1] != '\0' && std::strchr("sc[", format[1])))
-            NotImplemented_nid_no_patch("scanf 16-bit wide conversion on Linux");
+            throw std::runtime_error("scanf 16-bit wide conversion on Linux");
         if (*format == '[') {
             ++format;
             if (*format == '^') ++format;
