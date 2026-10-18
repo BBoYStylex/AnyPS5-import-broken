@@ -4,6 +4,8 @@
 #include "prx/libc/include/General.hpp"
 #include "prx/libkernel/KernelErrors.hpp"
 #include "prx/libkernel/Pthread/include/Pthread.hpp"
+#include <vector>
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <atomic>
@@ -12,6 +14,7 @@
 #include <mutex>
 #include <stdexcept>
 #ifdef _WIN32
+#include <string_view>
 #include <windows.h>
 #else
 #include <cerrno>
@@ -249,6 +252,36 @@ bool InWinpthread(DWORD64 rip) {
     return winpthread != nullptr && VirtualQuery(reinterpret_cast<const void*>(rip), &info, sizeof(info)) == sizeof(info) && info.AllocationBase == winpthread;
 }
 
+bool InHostModule(DWORD64 rip) {
+    HMODULE module = nullptr;
+    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, reinterpret_cast<LPCWSTR>(rip), &module) || module == nullptr) return false;
+    if (module == GetModuleHandleW(nullptr)) return false;
+    wchar_t path[MAX_PATH]{};
+    const auto length = GetModuleFileNameW(module, path, MAX_PATH);
+    const std::wstring_view name(path, length);
+    constexpr std::wstring_view guestSuffix = L".guest.prx";
+    return !(name.size() >= guestSuffix.size() && name.substr(name.size() - guestSuffix.size()) == guestSuffix);
+}
+
+bool BlockedInWait(DWORD64 rip) {
+    static const std::vector<DWORD64> waits = [] {
+        std::vector<DWORD64> stubs;
+        const HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+        for (const char* name : {"NtWaitForSingleObject", "NtWaitForMultipleObjects", "NtWaitForAlertByThreadId", "NtDelayExecution", "NtRemoveIoCompletion", "NtRemoveIoCompletionEx", "NtWaitForKeyedEvent", "NtSignalAndWaitForSingleObject", "NtWaitForWorkViaWorkerFactory"}) {
+            if (const auto address = reinterpret_cast<DWORD64>(GetProcAddress(ntdll, name)); address != 0) stubs.push_back(address);
+        }
+        if (const HMODULE win32u = GetModuleHandleW(L"win32u.dll"); win32u != nullptr) {
+            if (const auto address = reinterpret_cast<DWORD64>(GetProcAddress(win32u, "NtUserMsgWaitForMultipleObjectsEx")); address != 0) stubs.push_back(address);
+        }
+        return stubs;
+    }();
+    return std::any_of(waits.begin(), waits.end(), [rip](DWORD64 stub) { return rip - stub < 0x20; });
+}
+
+bool RunningHostCode(DWORD64 rip) {
+    return InHostModule(rip) && !BlockedInWait(rip);
+}
+
 bool RaiseOn(Pthread thread, GuestExceptionHandler handler, int signum) {
     if (thread == scePthreadSelf()) {
         CONTEXT context{};
@@ -281,9 +314,10 @@ bool RaiseOn(Pthread thread, GuestExceptionHandler handler, int signum) {
             queued.release();
             return true;
         }
-        if (!RestoringContext(delivery.context.Rip) && !InWinpthread(delivery.context.Rip)) break;
+        const bool restoring = RestoringContext(delivery.context.Rip) || InWinpthread(delivery.context.Rip);
+        if (!restoring && (!RunningHostCode(delivery.context.Rip) || std::chrono::steady_clock::now() >= retryDeadline)) break;
         ResumeThread(native);
-        if (std::chrono::steady_clock::now() >= retryDeadline) throw std::runtime_error("sceKernelRaiseException: the target thread stayed inside NtContinue or winpthreads for 1 s");
+        if (restoring && std::chrono::steady_clock::now() >= retryDeadline) throw std::runtime_error("sceKernelRaiseException: the target thread stayed inside NtContinue or winpthreads for 1 s");
         SwitchToThread();
     }
     const DWORD64 slot = (delivery.context.Rsp - RedZone - sizeof(Delivery)) & ~static_cast<DWORD64>(15);
