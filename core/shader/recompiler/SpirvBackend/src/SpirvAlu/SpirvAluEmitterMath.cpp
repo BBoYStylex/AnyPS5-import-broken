@@ -918,12 +918,30 @@ std::uint32_t EmitFPMedTri32(SpirvEmitterState& state, std::uint32_t arg0, std::
     return value(Select(state, u32, anyNan, min3, median));
 }
 
+static std::uint32_t RoundedReciprocal(SpirvEmitterState& state, std::uint32_t value) {
+    const auto f32 = TypeF32(state);
+    const auto u32 = TypeU32(state);
+    const auto one = ConstantF32(state, 0x3f800000u);
+    const auto approximate = Binary(state, spv::OpFDiv, f32, one, value);
+    const auto negated = Exact(state, Unary(state, spv::OpFNegate, f32, value));
+    const auto refine = [&](std::uint32_t estimate) {
+        const auto residual = Exact(state, EmitExt(state, f32, GLSLstd450Fma, {negated, estimate, one}));
+        return Exact(state, EmitExt(state, f32, GLSLstd450Fma, {estimate, residual, estimate}));
+    };
+    const auto rounded = refine(refine(approximate));
+    const auto normal = [&](std::uint32_t number) {
+        const auto exponent = Binary(state, spv::OpBitwiseAnd, u32, Unary(state, spv::OpBitcast, u32, number), ConstantU32(state, 0x7f800000u));
+        return Binary(state, spv::OpLogicalAnd, TypeBool(state), Binary(state, spv::OpINotEqual, TypeBool(state), exponent, ConstantU32(state, 0u)), Binary(state, spv::OpINotEqual, TypeBool(state), exponent, ConstantU32(state, 0x7f800000u)));
+    };
+    return Select(state, f32, Binary(state, spv::OpLogicalAnd, TypeBool(state), normal(value), normal(approximate)), rounded, approximate);
+}
+
 std::uint32_t EmitFPRecip32(SpirvEmitterState& state, std::uint32_t arg0) {
-    return Binary(state, spv::OpFDiv, TypeF32(state), ConstantF32(state, 0x3f800000u), arg0);
+    return RoundedReciprocal(state, arg0);
 }
 
 std::uint32_t EmitFPRecipIFlag32(SpirvEmitterState& state, std::uint32_t arg0) {
-    return Binary(state, spv::OpFDiv, TypeF32(state), ConstantF32(state, 0x3f800000u), arg0);
+    return RoundedReciprocal(state, arg0);
 }
 
 std::uint32_t EmitFPRecipSqrt32(SpirvEmitterState& state, std::uint32_t arg0) {
