@@ -776,8 +776,8 @@ private:
         IrValue* bufferHandle = nullptr;
         IrValue* offset = nullptr;
         const bool buffer = handle.Opcode() == IrOpcode::GetBufferResource;
-        if (buffer && !hops.empty()) return false;
-        const bool merged = buffer && pointer->Argument(0)->Resolve()->IsPhi();
+        const bool merged = pointer->Argument(0)->Resolve()->IsPhi();
+        if (!hops.empty() && (buffer || merged)) return false;
         auto* low = merged ? PointerRecordOrigin(pointer->Argument(0)) : pointer->Argument(0)->Resolve();
         if (low == nullptr) return false;
         std::uint32_t first = 0;
@@ -819,6 +819,7 @@ private:
         column.buffer = buffer;
         column.indirectOffset = descriptorOffset;
         column.indirectImmediate = descriptorImmediate;
+        column.pointerKeyed = merged && !buffer;
         column.pointerHops = std::move(hops);
         const auto domain = merged ? std::optional<KeyDomain>{} : MatchKeyDomain(key);
         DescriptorSource columnSource = heapSource;
@@ -835,7 +836,7 @@ private:
             shared.keyDomains.push_back(*domain);
         }
         plan.offset = offset;
-        if (buffer) plan.parentPointer = pointer;
+        if (buffer || merged) plan.parentPointer = pointer;
         return true;
     }
 
