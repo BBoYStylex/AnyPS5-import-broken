@@ -2498,7 +2498,7 @@ bool LabelShaderKey(std::span<const std::uint32_t> key, std::size_t at, std::siz
             labels[at + i] = static_cast<std::uint8_t>(component);
         }
         at += words;
-        for (int flags = 0; flags < 9; ++flags) {
+        for (int flags = 0; flags < 10; ++flags) {
             if (at >= end) return false;
             const auto count = 1 + (static_cast<std::size_t>(key[at]) + 31) / 32;
             if (!label(at, count, Component::Other)) return false;
