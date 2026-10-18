@@ -36,7 +36,7 @@ def dispatch(kind, target):
     raise ValueError(kind)
 
 
-def fixture(kind):
+def fixture(kind, unwind_size=FUNCTION_SIZE):
     image = bytearray(PLT + 0x1000)
     image[:16] = b"\x7fELF\x02\x01\x01" + bytes(9)
     struct.pack_into("<HHIQQQIHHHHHH", image, 16, 3, 62, 1, FUNCTION, 64, 0, 0, 64, 56, 4, 64, 0, 0)
@@ -85,7 +85,7 @@ def fixture(kind):
     struct.pack_into("<I", image, EH_FRAME, len(cie_body))
     image[EH_FRAME + 4:EH_FRAME + 4 + len(cie_body)] = cie_body
     fde = EH_FRAME + 4 + len(cie_body)
-    struct.pack_into("<IIiiB3x", image, fde, 16, fde + 4 - EH_FRAME, FUNCTION - (fde + 8), FUNCTION_SIZE, 0)
+    struct.pack_into("<IIiiB3x", image, fde, 16, fde + 4 - EH_FRAME, FUNCTION - (fde + 8), unwind_size, 0)
     struct.pack_into("<I", image, fde + 20, 0)
     struct.pack_into("<BBBBiIii", image, EH_FRAME_HEADER, 1, 0x1B, 0x03, 0x3B,
                      EH_FRAME - (EH_FRAME_HEADER + 4), 1, FUNCTION - EH_FRAME_HEADER, fde - EH_FRAME_HEADER)
@@ -114,6 +114,7 @@ def main():
         for target in ("windows", "macos"):
             for kind in ("plain", "copy", "r13"):
                 run(relinker, work, kind + "-" + target, fixture(kind), target)
+            run(relinker, work, "trailing-" + target, fixture("plain", FUNCTION_SIZE - 8), target)
             run(relinker, work, "r13-displacement-" + target, fixture("r13-displacement"), target,
                 "Cannot decode instruction")
             run(relinker, work, "not-a-table-" + target, fixture("not-a-table"), target,

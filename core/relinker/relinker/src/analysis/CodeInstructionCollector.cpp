@@ -257,13 +257,21 @@ std::set<Domain::VirtualAddress> CodeInstructionCollector::Collect(const std::ve
     for (const auto& [begin, end] : functions) functionBytes += end - begin;
     std::uint64_t decodedBytes = 0;
     report(1000);
-    for (const auto& [begin, functionEnd] : functions) {
+    for (auto function = functions.begin(); function != functions.end(); ++function) {
+        const auto& [begin, functionEnd] = *function;
         const auto offset = fileOffset(begin, functionEnd - begin);
         auto end = functionEnd;
         if (const auto tables = FindInlineJumpTables(std::span<const std::uint8_t>(bytes.data() + offset, functionEnd - begin), begin)) {
             end = *tables;
             inlineData.emplace(end, functionEnd);
         }
+        auto trailingLimit = functionEnd;
+        for (const auto& header : codeHeaders)
+            if (header.Type == 1 && (header.Flags & 1) != 0 && begin >= header.MappedAddress && begin - header.MappedAddress < header.FileSize)
+                trailingLimit = std::max(functionEnd, header.MappedAddress + header.FileSize);
+        if (std::next(function) != functions.end()) trailingLimit = std::max(functionEnd, std::min(trailingLimit, std::next(function)->first));
+        for (const auto& [tableBegin, tableEnd] : FindTrailingJumpTables(std::span<const std::uint8_t>(bytes.data() + offset, trailingLimit - begin), begin, functionEnd))
+            inlineData.emplace(tableBegin, tableEnd);
         for (auto address = begin; address < end;) {
             Codegen::DecodedInstructionInfo info;
             try {

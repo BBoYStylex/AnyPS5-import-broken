@@ -365,6 +365,9 @@ RelinkResult RelinkerPipeline::Relink() {
 
     if (std::any_of(programHeaders.begin(), programHeaders.end(), [](const ProgramHeader& ph) { return ph.Type == PT_SCE_DYNLIBDATA; })) {
         const auto functions = UnusedNidFilter::ReadExceptionFunctions(raw, programHeaders, {}, {});
+        std::vector<VirtualAddress> functionStarts;
+        for (const auto& function : functions) functionStarts.push_back(function.Begin);
+        std::sort(functionStarts.begin(), functionStarts.end());
         for (auto& [segment, segmentVAddr, segmentFileOffset] : executableSegments) {
             static_cast<void>(segmentFileOffset);
             if (const auto codeEnd = FindSceCodeEnd(segment, segmentVAddr, functions, gotVAddr, dynJmpRelSize))
@@ -374,6 +377,12 @@ RelinkResult RelinkerPipeline::Relink() {
                 const std::span<std::uint8_t> code(segment.data() + (function.Begin - segmentVAddr), function.End - function.Begin);
                 if (const auto tables = FindInlineJumpTables(code, function.Begin))
                     std::fill(code.begin() + static_cast<std::ptrdiff_t>(*tables - function.Begin), code.end(), std::uint8_t{0x90});
+                const auto next = std::upper_bound(functionStarts.begin(), functionStarts.end(), function.Begin);
+                const VirtualAddress segmentEnd = segmentVAddr + segment.size();
+                const VirtualAddress limit = std::max(function.End, next == functionStarts.end() ? segmentEnd : std::min(segmentEnd, *next));
+                const std::span<std::uint8_t> trailing(segment.data() + (function.Begin - segmentVAddr), limit - function.Begin);
+                for (const auto& [tableBegin, tableEnd] : FindTrailingJumpTables(trailing, function.Begin, function.End))
+                    std::fill(trailing.begin() + static_cast<std::ptrdiff_t>(tableBegin - function.Begin), trailing.begin() + static_cast<std::ptrdiff_t>(tableEnd - function.Begin), std::uint8_t{0x90});
             }
         }
     }
