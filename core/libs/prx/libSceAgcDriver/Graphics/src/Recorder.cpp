@@ -29,6 +29,7 @@
 #include <map>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <tuple>
 #include "prx/libc/include/general/AtomicSharedPtr.hpp"
@@ -1981,6 +1982,22 @@ void Recorder::NoteSampledDraw(VkCommandBuffer commands) {
     if (open->sampleActive) open->samplesDrawn = true;
 }
 
+void Recorder::NoteDrawTraceToken(std::uint64_t token) noexcept {
+    if (token == 0 || open == nullptr) return;
+    try {
+        auto inserted = open->drawTraceTokenSet.insert(token);
+        if (!inserted.second) return;
+        try {
+            open->drawTraceTokens.push_back(token);
+        } catch (...) {
+            open->drawTraceTokenSet.erase(inserted.first);
+            throw;
+        }
+    } catch (...) {
+        AgcDriver::CaptureTrace::Log("draw-token-note-failed token=%llu", static_cast<unsigned long long>(token));
+    }
+}
+
 bool Recorder::gpuSampleCounter() {
     if (sampleCounterState != 0) return sampleCounterState > 0;
     sampleCounterState = -1;
@@ -3365,7 +3382,13 @@ void Recorder::Submit() {
     submission.pCommandBuffers = &batch->commands;
     // The timeline reaches this batch's serial when it completes (see WaitSerial).
     const std::uint64_t serial = submissions + 1;
-    CaptureTrace::Log("submit batch=%llu reads=%zu writes=%zu", static_cast<unsigned long long>(serial), batch->reads.size(), batch->writes.size());
+    std::string tokensStr = "[";
+    for (std::size_t i = 0; i < batch->drawTraceTokens.size(); ++i) {
+        if (i > 0) tokensStr += ",";
+        tokensStr += std::to_string(batch->drawTraceTokens[i]);
+    }
+    tokensStr += "]";
+    CaptureTrace::Log("submit batch=%llu tokens=%s", static_cast<unsigned long long>(serial), tokensStr.c_str());
     VkTimelineSemaphoreSubmitInfoKHR timelineInfo{VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO_KHR};
     timelineInfo.signalSemaphoreValueCount = 1;
     timelineInfo.pSignalSemaphoreValues = &serial;
@@ -3384,6 +3407,7 @@ void Recorder::Submit() {
     batch->submitted = true;
     batch->serial = ++submissions;
     batch->submittedAt = std::chrono::steady_clock::now();
+    CaptureTrace::Log("submit-confirmed batch=%llu tokens=%s", static_cast<unsigned long long>(batch->serial), tokensStr.c_str());
     if (DrawProfiled()) {
         const auto us = std::chrono::duration<double, std::micro>(batch->submittedAt - submitStart).count();
         ++submitCount;
@@ -3404,6 +3428,10 @@ void Recorder::Submit() {
 std::uint64_t Recorder::SubmitAndEpoch() {
     Submit();
     return inFlight.empty() ? 0 : submissions;
+}
+
+std::uint64_t Recorder::OpenBatchSerial() {
+    return open != nullptr ? submissions + 1 : 0;
 }
 
 namespace {
