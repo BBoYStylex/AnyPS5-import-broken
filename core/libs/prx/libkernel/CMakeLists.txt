@@ -1423,6 +1423,7 @@ if(BUILD_TESTING)
         set_tests_properties(guest_memory_faultless PROPERTIES
             ENVIRONMENT "APS5_COMPARE_SHARED_WRITES=1;APS5_TEST_SHARED_AVX=1"
             ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:libkernel>")
+        set_tests_properties(guest_memory guest_memory_faultless PROPERTIES RESOURCE_LOCK guest_memory_foreign_prx)
     endif()
     add_test_executable(guest_flexible_memory_budget_tests ${LIBS_INCLUDE_DIR}/tests/GuestFlexibleMemoryBudget.cpp)
     target_include_directories(guest_flexible_memory_budget_tests PRIVATE ${LIBS_INCLUDE_DIR})
