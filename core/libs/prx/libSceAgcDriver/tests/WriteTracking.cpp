@@ -878,6 +878,34 @@ void CheckStoreAcrossImports() {
     Require(!UnchangedSince(base + Block, Block, beforeOwn) && UnchangedSince(base, Block, beforeOwn), "an own store across a watched import and an unwatched one did not stamp exactly the watched block it wrote");
 }
 
+std::vector<std::pair<std::uint64_t, std::size_t>> unwatchCalls;
+
+void RecordUnwatch(std::uint64_t address, std::size_t bytes) {
+    unwatchCalls.emplace_back(address, bytes);
+}
+
+void CheckPartlyWatchedImportSavesFirst() {
+    void* memory = AllocateWatched(3 * Block);
+    const auto base = reinterpret_cast<std::uint64_t>(memory);
+    std::memset(memory, 0x11, 3 * Block);
+    Require(CollectWritesUncached(base, 3 * Block) != 0, "the partly watched import's blocks are not collected");
+    Unwatch(base + Block, Block);
+    Require(!Watched(base + Block, Block) && Watched(base, Block) && Watched(base + 2 * Block, Block), "the middle block did not leave the watch alone");
+    unwatchCalls.clear();
+    SetUnwatchHook(&RecordUnwatch);
+    const bool imported = ImportWatched(base, 3 * Block, [] { return true; });
+    SetUnwatchHook(nullptr);
+    Require(imported, "an import that stays watched over a partly watched range failed");
+    Require(!Watched(base, 3 * Block), "an import over a partly watched range is reported watched");
+    bool first = false;
+    bool last = false;
+    for (const auto& [address, bytes] : unwatchCalls) {
+        first = first || (address <= base && address + bytes > base);
+        last = last || (address <= base + 2 * Block && address + bytes > base + 2 * Block);
+    }
+    Require(first && last, "the watched blocks of a partly watched import left the watch without the unwatch hook seeing them (" + std::to_string(unwatchCalls.size()) + " calls)");
+}
+
 void CheckUnwatchedImport() {
     void* memory = AllocateWatched(3 * Block);
     const auto base = reinterpret_cast<std::uint64_t>(memory);
@@ -1127,6 +1155,7 @@ int main() {
         CheckImportWindowOtherThread();
         CheckStoreAcrossImports();
         CheckUnwatchedImport();
+        CheckPartlyWatchedImportSavesFirst();
         CheckCommittedRanges();
         CheckAdoptLatestEpoch();
     } catch (const std::exception& error) {

@@ -1453,10 +1453,18 @@ void Rewatch(std::span<const std::pair<std::uint64_t, std::uint64_t>> ranges) {
 
 bool ImportWatched(std::uint64_t address, std::size_t bytes, const std::function<bool()>& import, bool staysWatched) {
     if (bytes == 0 || bytes > std::numeric_limits<std::uint64_t>::max() - address) return import();
-    if (!staysWatched) {
+    {
         constexpr std::uint64_t page = 4096;
         const auto first = address & ~(page - 1);
-        beforeUnwatch(first, static_cast<std::size_t>(((address + bytes + page - 1) & ~(page - 1)) - first));
+        const auto length = static_cast<std::size_t>(((address + bytes + page - 1) & ~(page - 1)) - first);
+        bool leaves = !staysWatched;
+        if (!leaves) {
+            auto& tracker = Tracker();
+            const auto lock = lockTracker(tracker);
+            tracker.initialize();
+            leaves = tracker.watched && !tracker.covers(first, length);
+        }
+        if (leaves) beforeUnwatch(first, length);
     }
     auto& tracker = Tracker();
     auto lock = lockTracker(tracker);
