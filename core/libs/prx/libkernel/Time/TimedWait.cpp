@@ -1,4 +1,5 @@
 #include "prx/libkernel/Time/include/TimedWait.hpp"
+#include "prx/libkernel/Time/include/HostSignalDeferral.hpp"
 #include "prx/libkernel/Pthread/include/WindowsThreadLocal.hpp"
 
 #include <cstdlib>
@@ -22,6 +23,8 @@ constexpr std::uint64_t LEAD_NANOS = 500000ULL;
 struct ThreadWaitState {
     std::atomic<int> own{0};
     std::atomic<int>* bound = &own;
+    std::atomic<int> ownDeferrals{0};
+    std::atomic<int>* deferrals = &ownDeferrals;
 };
 ThreadWaitState& WaitState() {
 #ifdef _WIN32
@@ -364,6 +367,31 @@ void Condition::NotifyAll() {
 }
 
 #endif
+
+void BindThreadSignalDeferralState(std::atomic<int>* state) {
+    auto& local = WaitState();
+    auto* destination = state != nullptr ? state : &local.ownDeferrals;
+    if (local.deferrals == destination) return;
+    const auto held = local.deferrals->exchange(0, std::memory_order_seq_cst);
+    destination->fetch_add(held, std::memory_order_seq_cst);
+    local.deferrals = destination;
+}
+
+void BeginSignalDeferral_nid_no_patch() {
+    WaitState().deferrals->fetch_add(1, std::memory_order_seq_cst);
+}
+
+void EndSignalDeferral_nid_no_patch() {
+    WaitState().deferrals->fetch_sub(1, std::memory_order_seq_cst);
+}
+
+extern "C" void KernelBeginHostSignalDeferral_nid_no_patch() {
+    BeginSignalDeferral_nid_no_patch();
+}
+
+extern "C" void KernelEndHostSignalDeferral_nid_no_patch() {
+    EndSignalDeferral_nid_no_patch();
+}
 
 void BindThreadWaitState(std::atomic<int>* state) {
     auto& local = WaitState();
