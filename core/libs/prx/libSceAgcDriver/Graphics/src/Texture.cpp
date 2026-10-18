@@ -443,7 +443,7 @@ Texture::Texture(const Context& context, TextureDetiler& detiler, const GuestTex
         const VkImage uploadImage = image;
         std::shared_ptr<OwnedImage> uploadOwned;
         if (srgbExpand) {
-            auto expanded = CreateExpandImage(context, descriptor, geometry.imageDepth, geometry.imageLayers);
+            auto expanded = ownTextureMemory([&] { return CreateExpandImage(context, descriptor, geometry.imageDepth, geometry.imageLayers); });
             uploadOwned = std::move(owned);
             owned = std::move(expanded.owned);
             image = expanded.image;
