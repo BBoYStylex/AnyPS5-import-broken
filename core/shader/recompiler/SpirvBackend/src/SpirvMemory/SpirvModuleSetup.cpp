@@ -240,7 +240,7 @@ void DefineModule(SpirvEmitterState& state) {
         state.meshGuestFunc = state.module.AllocateId();
         state.module.EmitCapability(spv::CapabilityMeshShadingEXT);
         state.module.EmitExtension("SPV_EXT_mesh_shader");
-        state.module.AddExecutionMode(state.mainFunc, spv::ExecutionModeOutputTrianglesEXT);
+        state.module.AddExecutionMode(state.mainFunc, mesh.outputPrimitiveSize == 2u ? spv::ExecutionModeOutputLinesEXT : spv::ExecutionModeOutputTrianglesEXT);
         state.module.AddExecutionMode(state.mainFunc, spv::ExecutionModeOutputVertices, mesh.maxVertices);
         state.module.AddExecutionMode(state.mainFunc, spv::ExecutionModeOutputPrimitivesEXT, mesh.maxPrimitives);
     }
@@ -264,6 +264,10 @@ void DefineModule(SpirvEmitterState& state) {
     }
     if (state.requirements.sharedInt64Atomics) {
         state.module.EmitCapability(spv::CapabilityInt64);
+    }
+    if (state.requirements.ldsBufferInt64Atomics) {
+        state.module.EmitCapability(spv::CapabilityInt64);
+        state.module.EmitCapability(spv::CapabilityInt64Atomics);
     }
     if (state.requirements.imageInt64Atomics) {
         if (std::find(state.supportedCapabilities.begin(), state.supportedCapabilities.end(), static_cast<std::uint32_t>(spv::CapabilityInt64ImageEXT)) == state.supportedCapabilities.end()) {
@@ -343,6 +347,11 @@ void DefineModule(SpirvEmitterState& state) {
         std::uint32_t localX = workgroup->threadsNum[0] != 0u ? workgroup->threadsNum[0] : derivativeDefault;
         std::uint32_t localY = workgroup->threadsNum[1] != 0u ? workgroup->threadsNum[1] : derivativeDefault;
         std::uint32_t localZ = workgroup->threadsNum[2] != 0u ? workgroup->threadsNum[2] : 1u;
+        if (state.spannedWave) {
+            localX = 64u;
+            localY = 1u;
+            localZ = 1u;
+        }
         if (state.laneCount == 2) {
             localX = ((localX * localY * localZ + 63u) / 64u) * 32u;
             localY = 1u;
