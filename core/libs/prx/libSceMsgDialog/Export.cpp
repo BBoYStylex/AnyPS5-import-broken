@@ -25,6 +25,7 @@ constexpr int kStatusFinished = 3;
 
 constexpr int kErrOk = 0;
 constexpr int kErrNotInitialized = static_cast<int>(0x80B80003u);
+constexpr int kErrAlreadyInitialized = static_cast<int>(0x80B80004u);
 constexpr int kErrNotFinished = static_cast<int>(0x80B80005u);
 constexpr int kErrBusy = static_cast<int>(0x80B80007u);
 constexpr int kErrNotRunning = static_cast<int>(0x80B8000Bu);
@@ -110,7 +111,8 @@ extern "C" {
 
 int APS5_VABI sceMsgDialogInitialize(void) {
  std::lock_guard g(g_lock);
- if (g_status == kStatusNone) g_status = kStatusInitialized;
+ if (g_status != kStatusNone) return kErrAlreadyInitialized;
+ g_status = kStatusInitialized;
  APS5_HIT("MSGDIALOG", "sceMsgDialogInitialize");
  return kErrOk;
 }
