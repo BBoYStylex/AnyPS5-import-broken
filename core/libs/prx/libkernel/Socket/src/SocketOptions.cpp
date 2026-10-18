@@ -63,7 +63,6 @@ std::int64_t TimeoutOf(const GuestTimeval& time) {
     if (time.seconds > INT32_MAX) return LongestTimeout;
     return (time.seconds << 32) + static_cast<std::int64_t>((static_cast<std::uint64_t>(time.microseconds) * ((std::uint64_t{1} << 63) / 500000)) >> 32);
 }
-
 GuestTimeval TimevalOf(std::int64_t timeout) {
     return {timeout >> 32, (1000000 * static_cast<std::int64_t>(static_cast<std::uint32_t>(timeout))) >> 32};
 }
@@ -252,4 +251,3 @@ int GetTcpLevelOption(std::uintptr_t native, bool tcp, int option, void* value, 
 }
 
 }
-
