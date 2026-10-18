@@ -4858,6 +4858,26 @@ void verifyUnnormalizedSamplers() {
     pixel.context.userData = normalizedPixelData;
     const auto pixelNormalized = Recompile(pixel);
     require(proven(pixelNormalized, false) && implicitSamples(pixelNormalized.spirv.Words()) == 1u, "unnormalized samplers: a pixel image_sample through a normalized S# is not an implicit-LOD sample");
+    const std::array<std::uint32_t, 7> pixelOffsetCode{0x7e0202ffu, 0x00000201u, 0xf0c00f08u, 0x00400801u, 0xf800180fu, 0x0b0a0908u, 0xbf810000u};
+    pixel.shader = {ShaderStage::Fragment, 0x50000u, pixelOffsetCode, 0, {}};
+    pixel.context.userData = pixelData;
+    pixel.target.supportedCapabilities = capabilities;
+    pixel.target.nonConstantImageOffsets = true;
+    const auto pixelOffsetUnnormalized = Recompile(pixel);
+    require(proven(pixelOffsetUnnormalized, true), "unnormalized texel offsets: a pixel image_sample_o through an unnormalized S# was not flagged");
+    auditSpirv(pixelOffsetUnnormalized.spirv.Words());
+    require(foldedSamples(pixelOffsetUnnormalized.spirv.Words()), "unnormalized texel offsets: a pixel image_sample_o offset was not added to the base-level coordinates");
+    pixel.context.userData = normalizedPixelData;
+    const auto pixelOffsetNormalized = Recompile(pixel);
+    std::vector<std::uint32_t> implicitMasks;
+    const auto offsetWords = pixelOffsetNormalized.spirv.Words();
+    for (std::size_t cursor = 5; cursor < offsetWords.size();) {
+        const auto count = offsetWords[cursor] >> 16u;
+        require(count != 0 && count <= offsetWords.size() - cursor, "unnormalized texel offsets: truncated SPIR-V instruction");
+        if ((offsetWords[cursor] & 0xffffu) == spv::OpImageSampleImplicitLod && count > 5u) implicitMasks.push_back(offsetWords[cursor + 5]);
+        cursor += count;
+    }
+    require(proven(pixelOffsetNormalized, false) && implicitMasks.size() == 1u && (implicitMasks[0] & (spv::ImageOperandsConstOffsetMask | spv::ImageOperandsOffsetMask)) != 0u, "unnormalized texel offsets: a normalized pixel image_sample_o is not an implicit-LOD sample with its offset");
 }
 
 void verifyUnusedUnnormalizedSampler() {
@@ -5165,6 +5185,102 @@ void verifyBdaReadFallbackFunctions() {
             }
             require(adjacentSpanCalls == 2u, "BDA read functions: five adjacent dwords of one address do not share two span reads");
         }
+    }
+}
+
+void verifyBdaAnchors() {
+    using namespace ShaderRecompiler;
+    const std::array<std::uint32_t, 3> capabilities{spv::CapabilityInt64, spv::CapabilityPhysicalStorageBufferAddresses, spv::CapabilityStorageBuffer8BitAccess};
+    const std::array<std::string_view, 2> extensions{"SPV_KHR_physical_storage_buffer", "SPV_KHR_8bit_storage"};
+    alignas(256) static std::array<std::uint32_t, 32> output{};
+    const auto outputAddress = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(output.data()));
+    const std::array<std::uint32_t, 8> userData{0x10000000u, 0u, 0u, 0u, static_cast<std::uint32_t>(outputAddress), static_cast<std::uint32_t>((outputAddress >> 32u) & 0xffffu), 128u, 0x01016facu};
+    const auto compile = [&](std::uint32_t scalarBase, std::uint32_t stride) {
+        std::vector<std::uint32_t> code{0x7e020200u, 0x7e040201u};
+        for (std::uint32_t load = 0; load < scalarBase; ++load) {
+            code.push_back(0xdc308000u | (stride * load + 4u));
+            code.push_back(((3u + load) << 24u) | 0x00040000u);
+        }
+        code.push_back(0xdc308000u | 4u);
+        code.push_back(((3u + scalarBase) << 24u) | 0x007d0001u);
+        code.push_back(0xbf8c3f70u);
+        for (std::uint32_t load = 1; load <= scalarBase; ++load) code.push_back(0x4a060103u | ((3u + load) << 9u));
+        code.insert(code.end(), {0xe0700000u, 0x80010300u, 0xbf810000u});
+        RecompileRequest request{};
+        request.shader = {ShaderStage::Compute, 0x60000u, code, 0, {}};
+        request.context.waveSize = 32;
+        request.context.userDataBaseRegister = 0;
+        request.context.userData = userData;
+        request.context.compute = ShaderComputeStageInfo{{32u, 1u, 1u}, 0u, {false, false, false}, false, 1u};
+        request.target.vulkanVersion = 0x00401000u;
+        request.target.spirvVersion = 0x00010300u;
+        request.target.subgroupSize = 32;
+        request.target.bdaAbiVersion = BdaAbi::Version;
+        request.target.supportedCapabilities = capabilities;
+        request.target.supportedExtensions = extensions;
+        request.target.fragmentShaderBarycentricEnabled = false;
+        request.layout.pushConstantSizeBytes = 128;
+        request.useCache = false;
+        return Recompile(request).spirv;
+    };
+    for (const std::uint32_t stride : {4u, 32u}) {
+        for (const std::uint32_t loads : {0u, 1u, 2u, 4u}) {
+            const bool anchored = stride == 32u && loads >= 2u;
+            const auto words = compile(loads, stride);
+            std::map<std::uint32_t, std::string> names;
+            std::string function;
+            std::map<std::string, std::size_t> mainCalls;
+            std::size_t anchorFunctions = 0;
+            std::size_t branchesBeforeAnchor = 0;
+            std::size_t directLoads = 0;
+            for (std::size_t cursor = 5; cursor < words.size();) {
+                const auto length = words[cursor] >> 16u;
+                require(length != 0 && length <= words.size() - cursor, "BDA anchors: truncated SPIR-V instruction");
+                const auto op = words[cursor] & 0xffffu;
+                if (op == spv::OpName) names[words[cursor + 1]] = reinterpret_cast<const char*>(&words[cursor + 2]);
+                if (op == spv::OpFunction) {
+                    function = names[words[cursor + 2]];
+                    if (function == "bda_anchor_range") ++anchorFunctions;
+                }
+                if (op == spv::OpFunctionCall && function == "main") {
+                    const auto& callee = names[words[cursor + 3]];
+                    if (callee == "bda_anchor_range") require(mainCalls.empty(), "BDA anchors: the anchor is searched after a read");
+                    ++mainCalls[callee.starts_with("read_bda_span") ? std::string("read_bda_span") : callee];
+                }
+                if (op == spv::OpBranchConditional && function == "main" && mainCalls["bda_anchor_range"] == 0u) ++branchesBeforeAnchor;
+                if (op == spv::OpLoad && function == "main" && length > 4u && words[cursor + 4] == spv::MemoryAccessAlignedMask && words[cursor + 5] == 4u) ++directLoads;
+                cursor += length;
+            }
+            const auto spans = loads == 0u ? 1u : stride == 4u ? 2u : loads + 1u;
+            require(anchorFunctions == (anchored ? 1u : 0u), "BDA anchors: the anchor search is defined without anchored reads, or twice");
+            require(mainCalls["bda_anchor_range"] == (anchored ? 1u : 0u), "BDA anchors: the reads of one user data base do not share one anchor");
+            require(!anchored || branchesBeforeAnchor == 0u, "BDA anchors: the anchor is not searched at the program's entry");
+            require(mainCalls["read_bda_span"] == spans, "BDA anchors: a read lost its lookup path");
+            require(directLoads == (anchored ? loads : 0u), "BDA anchors: an anchored read does not load its dwords directly");
+        }
+    }
+    RecompileRequest plain{};
+    const std::vector<std::uint32_t> endOnly{0xbf810000u};
+    plain.shader = {ShaderStage::Compute, 0x60000u, endOnly, 0, {}};
+    plain.context.waveSize = 32;
+    plain.context.userDataBaseRegister = 0;
+    plain.context.userData = userData;
+    plain.context.compute = ShaderComputeStageInfo{{32u, 1u, 1u}, 0u, {false, false, false}, false, 1u};
+    plain.target.vulkanVersion = 0x00401000u;
+    plain.target.spirvVersion = 0x00010300u;
+    plain.target.subgroupSize = 32;
+    plain.target.bdaAbiVersion = BdaAbi::Version;
+    plain.target.fragmentShaderBarycentricEnabled = false;
+    plain.layout.pushConstantSizeBytes = 128;
+    plain.useCache = false;
+    const auto plainWords = Recompile(plain).spirv;
+    for (std::size_t cursor = 5; cursor < plainWords.size();) {
+        const auto length = plainWords[cursor] >> 16u;
+        require(length != 0 && length <= plainWords.size() - cursor, "BDA anchors: truncated SPIR-V instruction");
+        const auto op = plainWords[cursor] & 0xffffu;
+        require(!(op == spv::OpTypeInt && plainWords[cursor + 2] == 64u), "BDA anchors: a program without anchors declares a 64-bit integer type");
+        require(!(op == spv::OpCapability && plainWords[cursor + 1] == spv::CapabilityInt64), "BDA anchors: a program without anchors requires Int64");
+        cursor += length;
     }
 }
 
@@ -5753,6 +5869,68 @@ void verifyVolumeArrayLoadMode() {
     expectFailure([&] { static_cast<void>(ResourceMaterializer::RuntimeImageMode(store, descriptor, ResourceMaterializer::RuntimeImageModes(store))); }, "incompatible with the static runtime image interface", "2D-array image atomic on a 3D T# was accepted");
 }
 
+void verifyVolumeBiasTableRejection() {
+    using namespace ShaderRecompiler;
+    namespace Abi = ImageTableAbi;
+    ImageResource image{};
+    image.resourceClass = ImageResourceClass::Sampled;
+    image.dimension = RdnaImageDimension::Dim2D;
+    image.singleMipPlaneBiasCompatible = true;
+    const DescriptorValue volume{{0x100u, TableFormat8888UNorm << 20u, 0u, (TableType3D << 28u) | 0xfacu, 0u, 0u, 0u, 0u}, 8u, 0xffu};
+    const auto directModes = ResourceMaterializer::RuntimeImageModes(image);
+    require(directModes[ResourceMaterializer::RuntimeImageMode(image, volume, directModes)].dimension == RdnaImageDimension::Dim3D, "volume bias: a supported direct one-slice volume was rejected");
+    image.table = 0u;
+    image.tableOperation = TableOperation::Supported;
+    ShaderInfo info{};
+    info.images.push_back(image);
+    info.runtimeImageModes.push_back(ResourceMaterializer::RuntimeImageModes(image));
+    ResourceSnapshot snapshot{};
+    snapshot.tables.tables.resize(1u);
+    auto& column = snapshot.tables.tables.front();
+    column.records = 2u;
+    column.keys = 2u;
+    column.codes = {0u, 1u};
+    auto plane = volume;
+    plane.dwords[3] = (TableType2D << 28u) | 0xfacu;
+    for (const auto [word, bits] : {std::pair{4u, 1u}, std::pair{3u, 1u << 12u}, std::pair{3u, 1u << 16u}, std::pair{5u, 1u << 4u}}) {
+        auto invalid = volume;
+        invalid.dwords[word] |= bits;
+        snapshot.tables.words = {plane, invalid};
+        const auto resolved = ResourceMaterializer::ResolveImageTables(info, snapshot);
+        const auto mapStart = resolved.map.at(Abi::TableHeader(0u) + Abi::TableMapStart);
+        const auto good = resolved.map.at(mapStart);
+        const auto bad = resolved.map.at(mapStart + 1u);
+        require(resolved.elements.size() == 1u && (resolved.map.at(good + Abi::ImageRecordFlags) & Abi::PoisonFlag) == 0u, "volume bias: an unsupported table neighbour prevented the valid plane binding");
+        const auto fault = resolved.map.at(bad + Abi::ImageRecordFlags);
+        require((fault & Abi::PoisonFlag) != 0u && resolved.faults == 1u, "volume bias: an unsupported volume was not marked to fault on selection");
+        const auto& poison = resolved.poison.at(fault & ~Abi::PoisonFlag);
+        require(poison.reason == Abi::PoisonReason::Dimension && poison.words == invalid.dwords, "volume bias: the table fault lost its reason or descriptor");
+        image.table = NoTable;
+        const auto match = ResourceMaterializer::TryRuntimeImageMode(image, invalid, directModes);
+        require(!match.mode.has_value() && match.reason == Abi::PoisonReason::Dimension, "volume bias: an unsupported direct descriptor selected a mode");
+        expectFailure([&] { static_cast<void>(ResourceMaterializer::RuntimeImageMode(image, invalid, directModes)); }, "one slice and mip level zero only", "volume bias: direct use of an unsupported descriptor was accepted");
+    }
+}
+
+void verifyDynamicStorageMipChain() {
+    using namespace ShaderRecompiler;
+    ImageResource image{};
+    image.resourceClass = ImageResourceClass::Storage;
+    image.numericClass = IrTextureNumericClass::Float;
+    image.dimension = RdnaImageDimension::Dim2D;
+    image.mipMode = ImageMipMode::DynamicStorage;
+    image.written = true;
+    image.fmaskCompatible = false;
+    const auto modes = ResourceMaterializer::RuntimeImageModes(image);
+    const DescriptorValue tenLevels{{0x12366e00u, 0xc2400000u, 0x007fc07fu, 0xd1b903acu, 0x17u, 0x00700090u, 0u, 0u}, 8u};
+    const auto selected = ResourceMaterializer::TryRuntimeImageMode(image, tenLevels, modes);
+    require(selected.mode.has_value(), "a dynamic-mip storage image of a 512x512 surface with ten levels was rejected");
+    require(modes[*selected.mode].mipCount >= 10u, "a dynamic-mip storage mode does not hold ten levels");
+    auto allLevels = tenLevels;
+    allLevels.dwords[3] |= 0xf0000u;
+    require(ResourceMaterializer::TryRuntimeImageMode(image, allLevels, modes).mode.has_value(), "a dynamic-mip storage image with sixteen levels was rejected");
+}
+
 void verifySrgbDepthCompareModes() {
     using namespace ShaderRecompiler;
     for (const auto decodeFormats : {0u, 1u, 2u, 3u}) {
@@ -5876,12 +6054,15 @@ int main(int argc, char** argv) {
         verifyWaveUniformValues();
         verifyTwoLaneUniformValues();
         verifyBdaReadFallbackFunctions();
+        verifyBdaAnchors();
         verifyFunctionLdsBound();
         verifyFunctionLdsUpdates();
         verifySrtReadPatching();
         verifyGuardedNullPointers();
         verifyCubeDepthCompareMode();
         verifyVolumeArrayLoadMode();
+        verifyVolumeBiasTableRejection();
+        verifyDynamicStorageMipChain();
         verifySrgbDepthCompareModes();
         verifyQuadMaskNeighbourReads();
         verifyCoherentGds();

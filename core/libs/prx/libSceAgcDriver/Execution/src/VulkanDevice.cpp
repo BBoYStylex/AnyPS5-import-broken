@@ -19,6 +19,7 @@
 #include "prx/libSceAgcDriver/Execution/include/SubgroupClock.hpp"
 #include "prx/libSceAgcDriver/Execution/include/ShaderDeviceProfile.hpp"
 #include "prx/libSceAgcDriver/Execution/include/PresentMode.hpp"
+#include "prx/libSceAgcDriver/Execution/include/PerformanceOverlay.hpp"
 #include "prx/libSceAgcDriver/Execution/include/PresentationPass.hpp"
 #include "prx/libSceAgcDriver/Execution/include/PresentationScaler.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/DepthSurface.hpp"
@@ -118,6 +119,7 @@ void CreateComputePipeline(VkDevice device, PFN_vkCreateComputePipelines create,
     info.layout = layout;
     auto cacheLock = synchronization != nullptr ? synchronization->LockForPipelineUse() : Graphics::PipelineCacheSynchronization::PipelineUseLock{};
     check(create(device, cache, 1, &info, nullptr, pipeline), "vkCreateComputePipelines");
+    PerformanceCounters::CountPipeline();
 }
 
 bool CaptureComputePipeline(std::size_t words) {
@@ -407,6 +409,7 @@ struct VulkanDevice::State {
     VkPhysicalDeviceMeshShaderPropertiesEXT meshLimits{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_PROPERTIES_EXT};
     std::unique_ptr<PresentationScaler> scaler;
     std::unique_ptr<PresentationPass> presentation;
+    std::unique_ptr<PerformanceOverlay> overlay;
     VkFormat surfaceFormat = VK_FORMAT_B8G8R8A8_UNORM;
     VkColorSpaceKHR surfaceColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
     bool swapchainColorSpaces = false;
@@ -766,6 +769,7 @@ struct VulkanDevice::State {
             textureCache.reset();
             detiler.reset();
             colorTransfer.reset();
+            overlay.reset();
             presentation.reset();
             scaler.reset();
             hdrScaler.reset();
@@ -2200,7 +2204,7 @@ int VulkanDevice::WriteLabelOnGpu(std::uint64_t address, std::span<const std::by
     // pair for a whole group of labels recorded back to back (Recorder::RecordStore orders the
     // stores of a run against each other and against the work before and after, the queued DCC
     // key stores included).
-    const auto recordStore = [&] { recorder.RecordStore(import->buffer, address - import->base, bytes, address); };
+    const auto recordStore = [&] { recorder.RecordStore(import->buffer, Graphics::HostImportOffset(*import, address), bytes, address); };
     // Only a write-back that can land over these bytes (a listed copied writer of the range, as
     // FillBuffer tests) puts the label behind the completions; any other pending completion
     // stores elsewhere. Debug aid: APS5_LABEL_GATE_ALL=1 gates on any completion, as before (a
@@ -2401,7 +2405,7 @@ bool VulkanDevice::FillBuffer(std::uint64_t address, std::size_t bytes, std::spa
         Graphics::RecordMemoryBarrier(context, commands, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT | VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_HOST_WRITE_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
         Graphics::Recorder::CountBarriers(CommandClass::Fill);
     }
-    const auto offset = address - import->base;
+    const auto offset = Graphics::HostImportOffset(*import, address);
     if (uniform) {
         ++uniformFills;
         context.Resolved(&Graphics::DeviceFunctions::cmdFillBuffer, "vkCmdFillBuffer")(commands, import->buffer, offset, bytes, pattern[0]);
@@ -2668,7 +2672,7 @@ VulkanDevice::CopyOutcome VulkanDevice::CopyBuffer(std::uint64_t destination, st
         Graphics::Recorder::CountBarriers(CommandClass::Copy);
     }
     const auto gpuTiming = recorder.BeginGpuTiming(programAddress);
-    const VkBufferCopy region{source - sourceImport->base, destination - destinationImport->base, bytes};
+    const VkBufferCopy region{Graphics::HostImportOffset(*sourceImport, source), Graphics::HostImportOffset(*destinationImport, destination), bytes};
     context.Resolved(&Graphics::DeviceFunctions::cmdCopyBuffer, "vkCmdCopyBuffer")(commands, sourceImport->buffer, destinationImport->buffer, 1, &region);
     recorder.EndGpuTiming(gpuTiming, bytes);
     // The copied bytes are visible to everything recorded after and to the host, as after a fill.
@@ -3167,6 +3171,7 @@ bool VulkanDevice::present(std::uint32_t width, std::uint32_t height, bool opaqu
     if (state->presentSlots[state->presentCursor].inFlight) RetirePresents(state->presentSlots.size() - 1);
     auto& slot = state->presentSlots[state->presentCursor];
     require(!slot.inFlight, "presentation slot is still in flight");
+    const bool overlay = PerformanceOverlay::Visible();
     if (display != nullptr && resident == nullptr) {
         static_cast<void>(DisplayBufferSize(*display));
         state->colorTransfer->Upload(display->address, width, height, Graphics::ColorTileMode::RenderTarget, DisplayTexelBytes(display->pixelFormat));
@@ -3258,7 +3263,7 @@ bool VulkanDevice::present(std::uint32_t width, std::uint32_t height, bool opaqu
         }
         if (drawn) {
             state->presentation->Bind(slotIndex, resident->Image(), width, height, display->pixelFormat, whiteNits, residentLayer);
-            state->presentation->RecordPresent(commands, slotIndex, barrier.image, state->surfaceFormat, state->surfaceColorSpace, state->extent, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+            state->presentation->RecordPresent(commands, slotIndex, barrier.image, state->surfaceFormat, state->surfaceColorSpace, state->extent, overlay ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
         } else {
             scaler->RecordLetterbox(commands, width, height, barrier.image, state->extent.width, state->extent.height);
             if (direct) PresentationScaler::RecordBlitFrom(graphicsContext(), commands, resident->Image(), VK_IMAGE_LAYOUT_GENERAL, width, height, residentFilter, barrier.image, state->extent.width, state->extent.height, residentLayer);
@@ -3296,7 +3301,11 @@ bool VulkanDevice::present(std::uint32_t width, std::uint32_t height, bool opaqu
             Graphics::Recorder::CountBarriers(CommandClass::PresentBlit);
         }
     }
-    if (!drawn) {
+    if (overlay) {
+        if (!state->overlay) state->overlay = std::make_unique<PerformanceOverlay>(graphicsContext(), state->presentSlots.size());
+        state->overlay->NotePresent(std::chrono::steady_clock::now(), clearOnly ? VkExtent2D{} : VkExtent2D{width, height});
+        state->overlay->Record(commands, static_cast<std::size_t>(&slot - state->presentSlots.data()), barrier.image, state->surfaceFormat, state->surfaceColorSpace, state->extent, drawn ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+    } else if (!drawn) {
         barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
         barrier.dstAccessMask = 0;
         barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
@@ -4623,7 +4632,7 @@ void VulkanDevice::recordDispatch(RecordedDispatch& record) {
     const auto gpuTiming = recorder.BeginGpuTiming(record.programAddress != 0 ? record.programAddress : record.shader->program->variantId);
     if (state->checkpointMarker != nullptr) state->checkpointMarker(commands, reinterpret_cast<const void*>(static_cast<std::uintptr_t>(record.programAddress)));
     if (argumentImport != nullptr) {
-        context.Resolved(&Graphics::DeviceFunctions::cmdDispatchIndirect, "vkCmdDispatchIndirect")(commands, argumentImport->buffer, arguments - argumentImport->base);
+        context.Resolved(&Graphics::DeviceFunctions::cmdDispatchIndirect, "vkCmdDispatchIndirect")(commands, argumentImport->buffer, Graphics::HostImportOffset(*argumentImport, arguments));
     } else {
         const auto* limit = state->properties.limits.maxComputeWorkGroupCount;
         if (record.x <= limit[0] && record.y <= limit[1] && record.z <= limit[2]) {

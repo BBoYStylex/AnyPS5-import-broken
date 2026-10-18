@@ -83,6 +83,19 @@ add_custom_command(
         VERBATIM
 )
 
+set(agcTextureRepackShaderSource ${CMAKE_CURRENT_SOURCE_DIR}/Graphics/shaders/TextureRepack.comp)
+set(agcTextureRepackShaderSpv ${agcTextureDetileGeneratedDir}/TextureRepack.spv)
+set(agcTextureRepackShaderHeader ${agcTextureDetileGeneratedDir}/TextureRepack_spv.h)
+add_custom_command(
+        OUTPUT "${agcTextureRepackShaderHeader}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${agcTextureDetileGeneratedDir}"
+        COMMAND "$<TARGET_FILE:glslang-standalone>" -V --target-env vulkan1.1 -o "${agcTextureRepackShaderSpv}" "${agcTextureRepackShaderSource}"
+        COMMAND ${CMAKE_COMMAND} -DINPUT=${agcTextureRepackShaderSpv} -DOUTPUT=${agcTextureRepackShaderHeader}
+        -DSYMBOL=TEXTURE_REPACK_SPV -P "${CMAKE_CURRENT_SOURCE_DIR}/embed_spirv.cmake"
+        DEPENDS "${agcTextureRepackShaderSource}" glslang-standalone
+        VERBATIM
+)
+
 set(agcSampleCounterShaderSource ${CMAKE_CURRENT_SOURCE_DIR}/Graphics/shaders/SampleCounter.comp)
 set(agcSampleCounterShaderSpv ${agcTextureDetileGeneratedDir}/SampleCounter.spv)
 set(agcSampleCounterShaderHeader ${agcTextureDetileGeneratedDir}/SampleCounter_spv.h)
@@ -124,6 +137,23 @@ foreach(agcPresentationStage IN ITEMS Vert Frag)
             VERBATIM
     )
     list(APPEND agcPresentationShaderHeaders ${agcPresentationShaderHeader})
+endforeach()
+foreach(agcOverlayStage IN ITEMS Vert Frag)
+    string(TOLOWER "${agcOverlayStage}" agcOverlayExtension)
+    string(TOUPPER "${agcOverlayStage}" agcOverlaySymbol)
+    set(agcOverlayShaderSource ${CMAKE_CURRENT_SOURCE_DIR}/Graphics/shaders/PerformanceOverlay.${agcOverlayExtension})
+    set(agcOverlayShaderSpv ${agcTextureDetileGeneratedDir}/PerformanceOverlay${agcOverlayStage}.spv)
+    set(agcOverlayShaderHeader ${agcTextureDetileGeneratedDir}/PerformanceOverlay${agcOverlayStage}_spv.h)
+    add_custom_command(
+            OUTPUT "${agcOverlayShaderHeader}"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${agcTextureDetileGeneratedDir}"
+            COMMAND "$<TARGET_FILE:glslang-standalone>" -V --target-env vulkan1.1 -o "${agcOverlayShaderSpv}" "${agcOverlayShaderSource}"
+            COMMAND ${CMAKE_COMMAND} -DINPUT=${agcOverlayShaderSpv} -DOUTPUT=${agcOverlayShaderHeader}
+            -DSYMBOL=PERFORMANCE_OVERLAY_${agcOverlaySymbol}_SPV -P "${CMAKE_CURRENT_SOURCE_DIR}/embed_spirv.cmake"
+            DEPENDS "${agcOverlayShaderSource}" glslang-standalone
+            VERBATIM
+    )
+    list(APPEND agcPresentationShaderHeaders ${agcOverlayShaderHeader})
 endforeach()
 
 set(agcDriverSources
@@ -199,6 +229,7 @@ set(agcDriverSources
         ${CMAKE_CURRENT_SOURCE_DIR}/Execution/src/AspectFit.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Execution/src/PresentationScaler.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Execution/src/PresentationPass.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Execution/src/PerformanceOverlay.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Graphics/src/Draw.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Graphics/src/DepthSurface.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Graphics/src/MultisampleTarget.cpp
@@ -234,6 +265,7 @@ set(agcDriverSources
         ${agcCmaskClearShaderHeader}
         ${agcMeshArgumentsShaderHeader}
         ${agcTextureDetileImageShaderHeader}
+        ${agcTextureRepackShaderHeader}
         ${agcSampleCounterShaderHeader}
         ${agcSampleDumpsShaderHeader}
         ${agcPresentationShaderHeaders}
@@ -1164,8 +1196,9 @@ if(BUILD_TESTING)
         add_test(NAME agc_import_settle_first_use COMMAND agc_driver_recorder_tests --settle-first-use-only)
         add_test(NAME agc_import_settle_earlier_import COMMAND agc_driver_recorder_tests --settle-earlier-import-only)
         add_test(NAME agc_import_settle_retire COMMAND agc_driver_recorder_tests --settle-retire-only)
-        set_tests_properties(agc_import_settle_deferred agc_import_settle_deferred_other_family agc_import_settle_first_use agc_import_settle_earlier_import agc_import_settle_retire PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 60)
-        set_tests_properties(agc_import_watch agc_import_watch_other_family agc_import_settle_deferred agc_import_settle_deferred_other_family agc_import_settle_first_use agc_import_settle_earlier_import agc_import_settle_retire PROPERTIES ENVIRONMENT_MODIFICATION
+        add_test(NAME agc_import_settle_storage_image COMMAND agc_driver_recorder_tests --settle-storage-image-only)
+        set_tests_properties(agc_import_settle_deferred agc_import_settle_deferred_other_family agc_import_settle_first_use agc_import_settle_earlier_import agc_import_settle_retire agc_import_settle_storage_image PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 60)
+        set_tests_properties(agc_import_watch agc_import_watch_other_family agc_import_settle_deferred agc_import_settle_deferred_other_family agc_import_settle_first_use agc_import_settle_earlier_import agc_import_settle_retire agc_import_settle_storage_image PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
     endif()
     add_test(NAME agc_unchanged_cpu_stamps COMMAND agc_driver_recorder_tests --unchanged-cpu-stamps-only)
@@ -1398,6 +1431,48 @@ if(BUILD_TESTING)
     set_tests_properties(agc_driver_presentation_pass PROPERTIES ENVIRONMENT "ANYPS5_NO_SHADER_CACHE=1" SKIP_RETURN_CODE 77 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
     if(WIN32)
         set_tests_properties(agc_driver_presentation_pass PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+    endif()
+endif()
+
+add_test_executable(agc_performance_overlay_statistics_tests EXCLUDE_FROM_ALL
+        tests/PerformanceOverlayStatistics.cpp
+)
+target_include_directories(agc_performance_overlay_statistics_tests PRIVATE
+        ${LIBS_INCLUDE_DIR}
+        ${CMAKE_SOURCE_DIR}/core/shader/recompiler
+        ${ANYPS5_VULKAN_HEADERS_INCLUDE_DIR}
+)
+target_link_libraries(agc_performance_overlay_statistics_tests PRIVATE
+        libSceAgcDriver
+        libc
+)
+set_target_properties(agc_performance_overlay_statistics_tests PROPERTIES CXX_EXTENSIONS OFF)
+configure_windows_unwind(agc_performance_overlay_statistics_tests)
+
+add_test_executable(agc_performance_overlay_tests EXCLUDE_FROM_ALL
+        tests/PerformanceOverlay.cpp
+)
+target_include_directories(agc_performance_overlay_tests PRIVATE
+        ${LIBS_INCLUDE_DIR}
+        ${CMAKE_SOURCE_DIR}/core/shader/recompiler
+        ${ANYPS5_VULKAN_HEADERS_INCLUDE_DIR}
+)
+target_link_libraries(agc_performance_overlay_tests PRIVATE
+        libSceAgcDriver
+        SDL2-static
+        libc
+)
+set_target_properties(agc_performance_overlay_tests PROPERTIES CXX_EXTENSIONS OFF)
+configure_windows_unwind(agc_performance_overlay_tests)
+
+if(BUILD_TESTING)
+    set_target_properties(agc_performance_overlay_statistics_tests agc_performance_overlay_tests PROPERTIES EXCLUDE_FROM_ALL OFF)
+    add_test(NAME agc_performance_overlay_statistics COMMAND agc_performance_overlay_statistics_tests)
+    add_test(NAME agc_performance_overlay COMMAND agc_performance_overlay_tests)
+    set_tests_properties(agc_performance_overlay PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 30)
+    if(WIN32)
+        set_tests_properties(agc_performance_overlay_statistics agc_performance_overlay PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
     endif()
 endif()

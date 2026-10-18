@@ -8,7 +8,7 @@ The online converter can save Linux output as an uncompressed folder in supporte
 
 ## Input and conversion
 
-Use a clean ELF executable. Place its bundled ELF modules in `sce_module/`, `sce_modules/`, or `prx/` beside the input executable, or under the parent directory selected with `--sce-module-path <path>`. The option accepts absolute paths and paths relative to the current working directory; do not include the `sce_module` directory itself. Only files directly inside the module directories are processed. SELF/fSELF containers are skipped with a warning; unwrap them before relinking if they need to be included. `tools/unwrap_self.py <input.self> <output.elf>` does that for a decrypted container: it places the segments at the offsets of the SELF segment records and restores `p_offset % p_align == p_vaddr % p_align`, and it refuses a container whose load segments all look encrypted. The command-line relinker skips an ELF module as a backup copy, with a message, when its file name extends the name of another ELF module in the same directory and both have the same SONAME, such as a dumper's `libX.prx.esbak` or `libX.prxbak` beside an ELF `libX.prx`; a single backup beside a SELF container is still relinked. `prx/` can coexist with either `sce_module/` or `sce_modules/`. Both `sce_module/` and `sce_modules/` present, or all three absent, is an error.
+Use a clean ELF executable. Place its bundled ELF modules in `sce_module/`, `sce_modules/`, or `prx/` beside the input executable, or under the parent directory selected with `--sce-module-path <path>`. The option accepts absolute paths and paths relative to the current working directory; do not include the `sce_module` directory itself. Only files directly inside the module directories are processed. SELF/fSELF containers are skipped with a warning; unwrap them before relinking if they need to be included. `tools/unwrap_self.py <input.self> <output.elf>` does that for a decrypted container: it places the segments at the offsets of the SELF segment records and restores `p_offset % p_align == p_vaddr % p_align`, and it refuses a container whose load segments all look encrypted. The command-line relinker skips an ELF module as a backup copy, with a message, when its file name extends the name of another ELF module in the same directory and both have the same SONAME, such as a dumper's `libX.prx.esbak` or `libX.prxbak` beside an ELF `libX.prx`; a single backup beside a SELF container is still relinked. `prx/` can coexist with either `sce_module/` or `sce_modules/`. Both `sce_module/` and `sce_modules/` present is an error. All three absent is an error unless an explicit `--module-dir` is supplied.
 
 ```text
 source/
@@ -20,6 +20,8 @@ source/
 ```text
 relinker [options] <input.elf> <output>
 ```
+
+An explicit `--module-dir` also works when the module parent has no `sce_module`, `sce_modules` or `prx` directory. For a homebrew bundle with shared libraries beside its executable, use `--module-dir .`; no empty standard directory is required. Without an explicit module directory, the standard-directory requirement remains.
 
 Linux output:
 
@@ -115,7 +117,7 @@ On Windows, a self-built `libs/` also needs `libgcc_s_seh-1.dll`, `libstdc++-6.d
 
 On Windows, direct memory (`sceKernelAllocateDirectMemory`, up to 13824 MiB per title) is committed when the title maps it, not when the title allocates it or first uses its pages. The system commit limit (installed memory plus page file size, the second value of Committed in Task Manager) must cover the mapped direct memory together with all other committed memory. Otherwise `sceKernelMapDirectMemory` throws `replace guest placeholder with resident direct memory` with the Windows error (`commit direct memory pages` when a page is mapped at a second address, `keep unmapped direct memory` when it is unmapped); enlarge the page file or close other applications.
 
-On Linux, when the Vulkan driver imports dma-buf memory (not the NVIDIA proprietary driver), shared direct memory is imported through `/dev/udmabuf`, and the user who runs the game needs read-write access to it. Many distributions create it as `root:kvm` with mode `0660`: add the user to the `kvm` group and log in again (an ACL such as `setfacl -m u:$USER:rw /dev/udmabuf` lasts until the next reboot). Without access, startup prints `[gpu] open /dev/udmabuf: Permission denied`, these ranges are copied instead of imported, and GPU stores to them through FLAT/GLOBAL addresses fail with `BDA access failed`. A range larger than 64 MiB is imported as one sparse buffer over 64 MiB udmabuf buffers when the device binds sparse memory (RADV, ANV). Without sparse binding, or when the range does not start on the device's sparse block size in the backing file, ranges above udmabuf's `size_limit_mb` (64 MiB by default) are copied as well.
+On Linux, when the Vulkan driver imports dma-buf memory (not the NVIDIA proprietary driver), shared direct memory is imported through `/dev/udmabuf`, and the user who runs the game needs read-write access to it. Many distributions create it as `root:kvm` with mode `0660`: add the user to the `kvm` group and log in again (an ACL such as `setfacl -m u:$USER:rw /dev/udmabuf` lasts until the next reboot). Without access, startup prints `[gpu] open /dev/udmabuf: Permission denied`, these ranges are copied instead of imported, and GPU stores to them through FLAT/GLOBAL addresses fail with `BDA access failed`. A range larger than 64 MiB is imported as one sparse buffer over 64 MiB udmabuf buffers when the device binds sparse memory (RADV, ANV). Without sparse binding, or when the device's sparse block size is larger than 64 KiB, ranges above udmabuf's `size_limit_mb` (64 MiB by default) are copied as well.
 
 Linux:
 
@@ -233,6 +235,27 @@ most called traced imports (1 calls in total):
 ```
 
 Limits are listed in the [libc](../dev/debt/libc.md) and [relinker](../dev/debt/relinker.md) technical debt.
+
+### Performance overlay
+
+F10 shows or hides a performance overlay over the presented image; `ANYPS5_OVERLAY=1` shows it from the first frame. `ANYPS5_OVERLAY_POS` puts it in a corner of the window: `tl` (top left, the default), `tr`, `bl` or `br`. For either variable an empty value is the same as an unset one, and any other value stops the game at its first frame with an error that names the variable. The key can be moved with `TogglePerformanceOverlay` in the [input mapping](INPUT_MAPPING.md). The text scales with the window height, at a whole multiple of its 5x7 pixel font; on an HDR10 swapchain the overlay is drawn at 203 nits.
+
+| Line | Meaning |
+|------|---------|
+| `PROFILED` | The first line while `APS5_PROFILE_GPU=1` or `APS5_PROFILE_DRAW=1` is set. Those switches add timestamp queries to every batch and timers to every packet, so the numbers of such a run aren't comparable with an unprofiled one. |
+| `FPS` | Frames presented per second, over the last second. When the last second holds fewer than two presents (below 1 fps), the rate of the last frame instead, 1000 divided by its time in ms: a frame every 2 s shows `0.50`. Every present counts, including frames a title presents cleared, for example while it loads. |
+| `FRAME` | Time between the last two presented frames, in ms. |
+| graph | The last 120 frame times, the newest on the right. The full height is the longest of them or twice their average, whichever is larger. |
+| `MIN/AVG/MAX` | The shortest, average and longest of the 120 frame times, in ms. |
+| `GPU` | GPU time per frame over the last second, or of the last frame below 1 fps, in ms: the span of each recorded batch from its first to its last command, from the timestamp queries of `APS5_PROFILE_GPU=1`. Shown only with that variable. Batches are counted when they complete, so the line trails a sudden change by up to a second, or by a frame below 1 fps. Batches that overlap on different queues each count in full, so the line can exceed `FRAME`. |
+| `DRIVER` | CPU time per frame over the last second, or of the last frame below 1 fps, in ms, that the packet workers spent in dispatch and draw packets (the `dispatch` and `draw` time of the `[gpu] worker` line of `APS5_PROFILE_DRAW=1`). Shown only with that variable. Every worker's time counts in full, so with several workers busy at once the line can exceed `FRAME`. |
+| `DRAWS` | Draw packets per frame over the last second, or of the last frame below 1 fps, then dispatch packets per frame (`DISPATCH`), as the packet workers execute them; packets that predication skips are not counted. Shown once the title has submitted either. |
+| `SHADERS` | Pipelines created in the last second, or during the last frame below 1 fps, then since the start (`TOTAL`): a graphics pipeline for each draw state the pipeline cache had not seen and a compute pipeline for each new dispatch shader. A rise while the game stutters points at pipeline compilation. Shown once a pipeline was created. |
+| `VRAM` | Usage and budget of the GPU's largest device-local memory heap from `VK_EXT_memory_budget`, read once a second. Not shown when the driver lacks the extension. |
+| `RAM` | The process's private memory, read once a second: `PrivateUsage` of `GetProcessMemoryInfo` on Windows, `RssAnon` plus `VmSwap` of `/proc/self/status` on Linux. The title's direct memory is shared memory on both systems and is not included. |
+| `RES` | The display buffer's size, then the window's swapchain size, for example `RES: 1920X1080 / 2560X1440`. Not shown for frames without a display buffer. |
+
+Times are shown with one decimal below 100 and as whole numbers above; anything above 9999 shows as 9999, so `FRAME` and `MIN/AVG/MAX` read 9999 for frames of 10 s or more. `FPS` has the same format, with two decimals below 1. Counts are whole numbers, in thousands (`12K`) from 10000 and in millions (`3M`) from a million. Memory is in GB of 2^30 bytes. While the overlay is hidden the presentation records nothing for it and the presented image is unchanged; while it is shown, one small render pass draws it over each presented frame. Each draw and dispatch packet and each pipeline creation is counted also while the overlay is hidden, with one increment of a counter that belongs to the packet worker or, for pipelines, a shared one; the memory and the counters are read only while the overlay is shown.
 
 ### Windows crash diagnostics
 

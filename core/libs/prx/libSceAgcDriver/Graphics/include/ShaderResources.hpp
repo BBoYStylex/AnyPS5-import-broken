@@ -34,6 +34,7 @@ std::uint64_t TextureCacheBudget(const VkPhysicalDeviceMemoryProperties& memory)
 std::uint64_t StorageTextureBudget(const VkPhysicalDeviceMemoryProperties& memory, const VkPhysicalDeviceMemoryBudgetPropertiesEXT* reported, std::uint64_t sampledBytes, std::uint64_t storageBytes);
 std::uint64_t SampledTextureBudget(const VkPhysicalDeviceMemoryProperties& memory, const VkPhysicalDeviceMemoryBudgetPropertiesEXT* reported, std::uint64_t textureBytes);
 bool SampledBudgetReportDue(std::uint64_t reported, std::uint64_t budget, std::chrono::steady_clock::duration sinceReport);
+std::optional<std::uint32_t> LargestDeviceLocalHeap(const VkPhysicalDeviceMemoryProperties& memory);
 std::uint64_t StorageTextureCacheBudget(const Context& context);
 struct TextureCacheUse {
     std::size_t sampledEntries = 0;
@@ -216,6 +217,7 @@ public:
     std::vector<std::pair<std::uint64_t, std::uint64_t>> DeviceReads() const { return guestMemory.DeviceReads(); }
     bool ReadsImage(const StorageTexture* image) const;
     bool HasCachedStorageImages() const;
+    bool HoldsReleasedTexture() const;
     std::uint32_t TableElements() const { return tableElements[0] + tableElements[1]; }
     const std::vector<std::uint32_t>& LayoutKey() const { return layoutKey; }
     const std::vector<std::uint32_t>& FragmentLayoutKey() const { return fragmentLayoutKey; }
@@ -665,6 +667,7 @@ public:
 private:
     void erase(const Key& key);
     void noteMiss(const Key& key);
+    void dropReleasedTextures(std::vector<std::shared_ptr<ShaderResources>>* evicted);
     void noteEvicted(const Key& key);
     void noteReturn(const Key& key);
     void noteUse(const Key& key);
