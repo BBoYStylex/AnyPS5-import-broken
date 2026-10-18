@@ -62,7 +62,7 @@ VkComponentSwizzle ComponentSwizzleFor(std::uint8_t dstSel) {
 }
 
 VkComponentMapping ViewComponents(const GuestTextureResource& resource) {
-    if (IsConvertedTextureFormat(resource.format)) return {VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_G, VK_COMPONENT_SWIZZLE_B, VK_COMPONENT_SWIZZLE_A};
+    if (IsConvertedTextureFormat(resource.format) && !IsRepackedTextureFormat(resource.format)) return {VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_G, VK_COMPONENT_SWIZZLE_B, VK_COMPONENT_SWIZZLE_A};
     const auto channel = [&](std::uint8_t dstSel) { return TextureComponentChannel(resource.format, ComponentSwizzleFor(dstSel)); };
     return {channel(resource.dstSelX), channel(resource.dstSelY), channel(resource.dstSelZ), channel(resource.dstSelW)};
 }
@@ -607,10 +607,11 @@ std::shared_ptr<Texture> cachedTexture(const Context& context, std::span<const s
         return depth;
     }
     const auto depthBitsWidth = words.size() >= 4 ? ShaderRecompiler::DepthBitsTextureWidth(words[1], words[3]) : 0u;
-    if (depthBitsWidth == 32u) {
-        char text[160];
-        std::snprintf(text, sizeof(text), "AGC graphics: 32-bit integer read of the depth-layout texture 0x%llx, which is no depth surface drawn with, is not implemented", static_cast<unsigned long long>(resource.baseAddress));
-        throw std::runtime_error(text);
+    constexpr auto float32 = static_cast<std::uint32_t>(ShaderRecompiler::IrBufferFormat::Format32Float);
+    if (depthBitsWidth == 32u && resource.format != float32) {
+        auto bits = resource;
+        bits.format = float32;
+        return cachedTexture(context, words, bits, components, guestBytes, depthCompare);
     }
     constexpr auto unorm16 = static_cast<std::uint32_t>(ShaderRecompiler::IrBufferFormat::Format16UNorm);
     if (depthBitsWidth == 16u && resource.format != unorm16) {
@@ -637,7 +638,8 @@ std::shared_ptr<Texture> cachedTexture(const Context& context, std::span<const s
     const bool depthCopy = depthCompare && guestBytes >= DepthCopyMinBytes() && Texture::DepthCopyFormat(ResolveTextureFormat(resource.format)) != VK_FORMAT_UNDEFINED && resource.dimension != TextureDimension::k3D;
     auto source = StorageTexture::FindPending(address, guestBytes);
     const bool blockCopy = source != nullptr && !depthCompare && Texture::CanBlockCopyFrom(*source, resource);
-    if (source != nullptr && !blockCopy && (depthCompare ? !depthCopy || !Texture::CanDepthCopyFrom(*source, resource) : !Texture::CanCopyFrom(*source, resource))) source.reset();
+    const bool repackCopy = source != nullptr && !depthCompare && Texture::CanRepackCopyFrom(*source, resource);
+    if (source != nullptr && !blockCopy && !repackCopy && (depthCompare ? !depthCopy || !Texture::CanDepthCopyFrom(*source, resource) : !Texture::CanCopyFrom(*source, resource))) source.reset();
     if (source != nullptr && MetadataMoved(*source, resource)) source.reset();
     std::optional<DccKeys> keys;
     bool clearThroughKeys = false;
@@ -681,6 +683,7 @@ std::shared_ptr<Texture> cachedTexture(const Context& context, std::span<const s
         // The lookup's Refresh may have flushed another image's results over the memory (which
         // marks the keys uncompressed): a surface that stays a snapshot re-reads them behind that
         // flush, as it does behind its own. APS5_NO_KEYS_RESCAN=1 keeps the keys scanned above.
+        if (source != nullptr && IsRepackedTextureFormat(resource.format) && !Texture::CanRepackCopyFrom(*source, resource)) source.reset();
         static const bool rescan = std::getenv("APS5_NO_KEYS_RESCAN") == nullptr;
         if (rescan && source == nullptr) keys.reset();
     }
@@ -720,6 +723,11 @@ std::shared_ptr<Texture> cachedTexture(const Context& context, std::span<const s
         }
         if (source != nullptr && blockCopy) {
             auto texture = std::make_shared<Texture>(context, source, resource, components, Texture::BlockCopyTag{});
+            texture->RefreshDepthCopy();
+            return texture;
+        }
+        if (source != nullptr && IsRepackedTextureFormat(resource.format)) {
+            auto texture = std::make_shared<Texture>(context, source, resource, components, Texture::RepackCopyTag{});
             texture->RefreshDepthCopy();
             return texture;
         }
@@ -801,6 +809,9 @@ std::shared_ptr<Texture> cachedTexture(const Context& context, std::span<const s
             entry.texture->RefreshDepthCopy();
         } else if (blockCopy) {
             entry.texture = std::make_shared<Texture>(context, source, resource, components, Texture::BlockCopyTag{});
+            entry.texture->RefreshDepthCopy();
+        } else if (IsRepackedTextureFormat(resource.format)) {
+            entry.texture = std::make_shared<Texture>(context, source, resource, components, Texture::RepackCopyTag{});
             entry.texture->RefreshDepthCopy();
         } else {
             entry.texture = std::make_shared<Texture>(context, source, resource, components);
@@ -3850,7 +3861,7 @@ DescriptorCache::Stats DescriptorCache::Counters() const {
 }
 
 std::uint64_t ShaderResources::GuestBufferBytes(const Context& context, std::span<const std::uint32_t> words) {
-    const ShaderRecompiler::ShaderBufferResource descriptor{{words[0], words[1], words[2], words[3]}};
+    const ShaderRecompiler::ShaderBufferResource descriptor{{words[0], words[1] & ~0x40000000u, words[2], words[3]}};
     const auto address = descriptor.Base48();
     auto byteSize = descriptor.GetSize();
     if (byteSize > context.limits.maxStorageBufferRange) {
@@ -3877,8 +3888,7 @@ std::uint64_t ShaderResources::guestBufferBytes(std::span<const std::uint32_t> w
 
 std::size_t ShaderResources::addGuestBuffer(std::span<const std::uint32_t> words, const ColorTarget* target, std::uint64_t indexAddress, std::size_t indexBytes, bool written, bool atomic, bool read) {
     Require(words.size() == 4, "buffer descriptor must contain four DWORDs");
-    Require((words[1] & 0x40000000u) == 0, "buffer descriptor has reserved bits set");
-    const ShaderRecompiler::ShaderBufferResource descriptor{{words[0], words[1], words[2], words[3]}};
+    const ShaderRecompiler::ShaderBufferResource descriptor{{words[0], words[1] & ~0x40000000u, words[2], words[3]}};
     Require(descriptor.Type() == 0u, "buffer descriptor uses an unsupported type");
     const auto address = descriptor.Base48();
     const auto byteSize = guestBufferBytes(words);
