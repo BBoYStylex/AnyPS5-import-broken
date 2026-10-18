@@ -1,3 +1,4 @@
+#include "prx/libkernel/Time/include/HostSignalDeferral.hpp"
 #include "prx/libc/include/general/LogMacros.hpp"
 #include "ControlFlow/GraphBuilder.hpp"
 #include "prx/libSceAgcDriver/Execution/include/PerformanceTimer.hpp"
@@ -294,16 +295,24 @@ std::mutex ShaderPreparationTransaction::State::writers;
 thread_local ShaderPreparationTransaction::State* ShaderPreparationTransaction::State::active = nullptr;
 
 ShaderPreparationTransaction::ShaderPreparationTransaction() {
-    if (State::active == nullptr) {
-        state = std::make_unique<State>();
-        State::active = state.get();
+    TimedWait::KernelBeginHostSignalDeferral_nid_no_patch();
+    try {
+        if (State::active == nullptr) {
+            state = std::make_unique<State>();
+            State::active = state.get();
+        }
+        root = State::active;
+    } catch (...) {
+        TimedWait::KernelEndHostSignalDeferral_nid_no_patch();
+        throw;
     }
-    root = State::active;
 }
 
 ShaderPreparationTransaction::~ShaderPreparationTransaction() {
     if (!committed) root->failed = true;
     if (state != nullptr) State::active = nullptr;
+    state.reset();
+    TimedWait::KernelEndHostSignalDeferral_nid_no_patch();
 }
 
 PreparedShaderState& ShaderPreparationTransaction::Edit(const ShaderSnapshot& snapshot) {

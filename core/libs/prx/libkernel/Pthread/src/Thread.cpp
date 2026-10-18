@@ -600,6 +600,7 @@ static void RunThread(std::unique_ptr<ThreadArgs> args) {
     PthreadPrivate* self = args->self;
     BindHostCpuClock(self);
     TimedWait::BindThreadWaitState(&self->waitCount);
+    TimedWait::BindThreadSignalDeferralState(&self->hostSignalDeferrals);
     CurrentGuestState().current = self;
     RegisterStack(self);
 #ifndef _WIN32
@@ -944,6 +945,7 @@ Pthread APS5_VABI scePthreadSelf() {
         adopted->_detached = true;
         adopted->references.store(1, std::memory_order_relaxed);
         TimedWait::BindThreadWaitState(&adopted->waitCount);
+        TimedWait::BindThreadSignalDeferralState(&adopted->hostSignalDeferrals);
         SetStackFromHost(adopted.get());
         CurrentGuestState().current = adopted.release();
     }

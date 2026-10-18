@@ -307,7 +307,8 @@ bool RaiseOn(Pthread thread, GuestExceptionHandler handler, int signum) {
             ResumeThread(native);
             throw std::runtime_error("sceKernelRaiseException: cannot read the target thread context");
         }
-        if (thread->waitCount.load(std::memory_order_seq_cst) > 0) {
+        const bool holdingHostLock = thread->hostSignalDeferrals.load(std::memory_order_seq_cst) > 0;
+        if (!holdingHostLock && thread->waitCount.load(std::memory_order_seq_cst) > 0) {
             const bool accepted = QueueUserAPC(WaitingEntry, native, reinterpret_cast<ULONG_PTR>(queued.get())) != 0;
             ResumeThread(native);
             if (!accepted) throw std::runtime_error("sceKernelRaiseException: cannot queue delivery to the waiting thread");
@@ -315,9 +316,9 @@ bool RaiseOn(Pthread thread, GuestExceptionHandler handler, int signum) {
             return true;
         }
         const bool restoring = RestoringContext(delivery.context.Rip) || InWinpthread(delivery.context.Rip);
-        if (!restoring && (!RunningHostCode(delivery.context.Rip) || std::chrono::steady_clock::now() >= retryDeadline)) break;
+        if (!holdingHostLock && !restoring && (!RunningHostCode(delivery.context.Rip) || std::chrono::steady_clock::now() >= retryDeadline)) break;
         ResumeThread(native);
-        if (restoring && std::chrono::steady_clock::now() >= retryDeadline) throw std::runtime_error("sceKernelRaiseException: the target thread stayed inside NtContinue or winpthreads for 1 s");
+        if ((holdingHostLock || restoring) && std::chrono::steady_clock::now() >= retryDeadline) throw std::runtime_error("sceKernelRaiseException: the target thread stayed inside NtContinue, winpthreads or an internal host lock for 1 s");
         SwitchToThread();
     }
     const DWORD64 slot = (delivery.context.Rsp - RedZone - sizeof(Delivery)) & ~static_cast<DWORD64>(15);

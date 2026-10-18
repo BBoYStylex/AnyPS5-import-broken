@@ -125,6 +125,7 @@ struct PthreadPrivate {
     void* stackAddress = nullptr;
     std::size_t stackSize = 0;
     std::atomic<int> waitCount{0};
+    std::atomic<int> hostSignalDeferrals{0};
     std::atomic<KernelCpumask> affinity{DEFAULT_THREAD_AFFINITY};
     std::atomic<int> priority{DEFAULT_THREAD_PRIORITY};
     int scope = GUEST_SCOPE_SYSTEM;
