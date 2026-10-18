@@ -230,15 +230,11 @@ std::size_t X64InstructionDecoder::Decode(const std::uint8_t* data, std::size_t 
         }
     } else {
         if (opcode == TwoByteExtrqInsertqImm8Imm8) {
-            if (!operandSizeOverride && !repnePrefix) {
-                throw CodegenException("Unsupported 0F 78 opcode without SSE4A prefix");
-            }
             hasModRm = true;
-            immediateSize = ImmSize16;
-        } else if (opcode == TwoByteExtrqInsertqModRm) {
-            if (!operandSizeOverride && !repnePrefix) {
-                throw CodegenException("Unsupported 0F 79 opcode without SSE4A prefix");
+            if (operandSizeOverride || repnePrefix) {
+                immediateSize = ImmSize16;
             }
+        } else if (opcode == TwoByteExtrqInsertqModRm) {
             hasModRm = true;
         } else if (opcode >= TwoByteJccRel32Min && opcode <= TwoByteJccRel32Max) {
             immediateSize = operandImmediateSize;
