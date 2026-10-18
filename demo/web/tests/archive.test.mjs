@@ -139,8 +139,23 @@ assert(bundleNames.has(`02-second/${bundleInput.outputName}`));
 assert(bundleNames.has("02-second/libs/system.prx"));
 assert(bundleNames.has("02-second/app0/content/resource.bin"));
 await bundleReader.close();
-await bundleArchive.close();
 console.log("Multiple app packages append under separate roots in a single ZIP");
+
+const macBundleInput = await bundleArchive.conversionInput("macos", true, () => {});
+const macBundleConversion = native.Convert(macBundleInput, () => {});
+assert.equal(macBundleConversion.ok, true, macBundleConversion.error);
+const macBundleWriter = new ZipWriter(new BlobWriter("application/zip"), { zip64: true, level: 9, useWebWorkers: false, useCompressionStream: false });
+await packageArchive(bundleArchive, macBundleConversion, macBundleInput.outputName, null, null, () => {}, false, { prefix: "01-first/", writer: macBundleWriter });
+await packageArchive(bundleArchive, macBundleConversion, macBundleInput.outputName, null, null, () => {}, false, { prefix: "02-second/", writer: macBundleWriter });
+const macBundleReader = new ZipReader(new BlobReader(await macBundleWriter.close()));
+const macBundleNames = new Set((await macBundleReader.getEntries()).map(entry => entry.filename));
+assert(macBundleNames.has(`01-first/${macBundleInput.outputName}`));
+assert(macBundleNames.has(`02-second/${macBundleInput.outputName}`));
+assert(macBundleNames.has("01-first/app0/content/resource.bin"));
+assert(![...macBundleNames].some(name => name.includes("/libs/")));
+await macBundleReader.close();
+await bundleArchive.close();
+console.log("macOS app packages append without unpublished system libraries");
 
 for (const [entries, error] of [
   [[["one", executable], ["two", executable]], /exactly one/u],
