@@ -397,7 +397,7 @@ ShaderRecompiler::RecompileResult Compile(AgcDriver::VulkanDevice& device, const
     const auto binding = std::find_if(result.bindings.begin(), result.bindings.end(), [](const auto& candidate) {
         return candidate.role == ShaderRecompiler::DescriptorRole::ImageTable;
     });
-    Require(binding != result.bindings.end() && binding->guestDescriptor.size() == Records * 8, "tracked pending: all48 descriptors were not materialized");
+    Require(binding != result.bindings.end() && binding->guestDescriptor.size() == Records * 8, "tracked pending: all 48 descriptors were not materialized");
     for (unsigned record = 0; record < Records; ++record) for (unsigned word = 0; word < 8; ++word)
         Require(binding->guestDescriptor[record * 8 + word] == table.Table()[record * (Stride / 4) + 4 + word], "tracked pending: descriptor word changed");
     return result;
