@@ -2366,7 +2366,7 @@ void StorageTexture::upload(const std::vector<bool>* layers) {
         if (profile) LookupOutcomes::Add(LookupOutcomes::UploadDirect, start);
         return;
     }
-    layerOriginal.assign(trackedLayers, true);
+    layerOriginal.assign(trackedLayers, !GuestMemory::Watched(descriptor.baseAddress, static_cast<std::size_t>(guestBytes)));
     cancelStoredSaves();
     forgetBorrowed(0, trackedLayers);
     stampLayers(false);
