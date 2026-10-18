@@ -40,6 +40,9 @@ struct Module {
     void* native = nullptr;
     bool owned = true;
     bool global = false;
+#ifdef __APPLE__
+    const void* image = nullptr;
+#endif
 #ifdef _WIN32
     std::uintptr_t globalOrder = 0;
 #endif
@@ -89,7 +92,17 @@ bool FromGuestModule(void* address) {
 
 void* DefaultScopeSymbol(const char* symbolName) {
     auto* result = ::dlsym(RTLD_DEFAULT, symbolName);
-    return FromGuestModule(result) ? result : nullptr;
+    if (!FromGuestModule(result)) return nullptr;
+#ifdef __APPLE__
+    Dl_info info{};
+    if (::dladdr(result, &info) && info.dli_fbase != nullptr) {
+        std::lock_guard lock(modulesMutex);
+        for (const auto& [key, module] : modules) {
+            if (!module->global && module->image == info.dli_fbase) return nullptr;
+        }
+    }
+#endif
+    return result;
 }
 #endif
 
@@ -190,10 +203,24 @@ void* APS5_VABI dlopen_nid_postfix(const char* path, int flags) {
         }
 #else
         const auto resolved = path ? RelinkedModulePath_nid_no_patch(ResolvePath_nid_no_patch(path)).string() : std::string{};
+#ifdef __APPLE__
+        const int nativeFlags = ((flags & 3) == 1 ? RTLD_LAZY : RTLD_NOW) | RTLD_GLOBAL;
+#else
         const int nativeFlags = ((flags & 3) == 1 ? RTLD_LAZY : RTLD_NOW) |
             ((flags & 0x100) ? RTLD_GLOBAL : RTLD_LOCAL);
+#endif
         module->native = ::dlopen(path ? resolved.c_str() : nullptr, nativeFlags);
         if (!module->native) { Error(::dlerror()); return nullptr; }
+#ifdef __APPLE__
+        if (path && !module->global) {
+            for (std::uint32_t index = 0; index < _dyld_image_count() && module->image == nullptr; ++index) {
+                void* loaded = ::dlopen(_dyld_get_image_name(index), RTLD_LAZY | RTLD_NOLOAD);
+                if (loaded == nullptr) continue;
+                if (loaded == module->native) module->image = _dyld_get_image_header(index);
+                ::dlclose(loaded);
+            }
+        }
+#endif
 #endif
         std::lock_guard lock(modulesMutex);
         const auto handle = nextHandle++;
