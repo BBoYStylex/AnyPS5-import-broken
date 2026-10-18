@@ -1,3 +1,4 @@
+#include "prx/libSceAgcDriver/Execution/include/ProfileOutput.hpp"
 #include "prx/libSceAgcDriver/Execution/include/PerformanceTimer.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver/Driver.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver/Queues/Submission.hpp"
@@ -9,7 +10,6 @@
 #include "prx/libSceAgcDriver/Execution/include/SubmissionCapture.hpp"
 #include "prx/libSceAgcDriver/Execution/include/ThreadPriority.hpp"
 #include "prx/libSceAgcDriver/Eq/include/Event.hpp"
-#include "prx/libSceAgcDriver/Execution/include/ProfileOutput.hpp"
 #include "ThreadOwned.hpp"
 #include "prx/libc/include/HostThreadLocal.hpp"
 #include <bit>
@@ -21,23 +21,6 @@
 namespace AgcDriver::DriverDetail {
 
 namespace {
-
-std::uint64_t captureTime() {
-    return static_cast<std::uint64_t>(std::llround(TraceMs() * 1000.0));
-}
-
-void writeCaptured(Driver& driver, SubmissionCapture& capture, const CapturedSubmission& captured) {
-    try {
-        capture.Write(captured);
-    } catch (...) {
-        driver.ReportFailure(std::current_exception());
-        throw;
-    }
-}
-
-bool EopRelease(std::span<const std::uint32_t> words) {
-    return words.size() >= 8 && (words[0] >> 30u) == 3u && Pm4::PacketWords(words[0]) == 8u && ((words[0] >> 8u) & 0xffu) == 0x49u && ((words[2] >> 24u) & 7u) == 2u;
-}
 
 bool& submitsQueue0() {
     struct SubmitsQueue0Storage {};
@@ -87,6 +70,23 @@ bool progressEligible(const Submission& submission) {
         at += count;
     }
     return terminalRelease;
+}
+
+std::uint64_t captureTime() {
+    return static_cast<std::uint64_t>(std::llround(TraceMs() * 1000.0));
+}
+
+void writeCaptured(Driver& driver, SubmissionCapture& capture, const CapturedSubmission& captured) {
+    try {
+        capture.Write(captured);
+    } catch (...) {
+        driver.ReportFailure(std::current_exception());
+        throw;
+    }
+}
+
+bool EopRelease(std::span<const std::uint32_t> words) {
+    return words.size() >= 8 && (words[0] >> 30u) == 3u && Pm4::PacketWords(words[0]) == 8u && ((words[0] >> 8u) & 0xffu) == 0x49u && ((words[2] >> 24u) & 7u) == 2u;
 }
 
 }
