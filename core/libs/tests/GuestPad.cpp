@@ -351,7 +351,8 @@ int main() {
     Require(scePadSetVibrationTriggerEffectWeakWhileEmbeddedMicInUse(true) == 0);
     Require(scePadSetAngularVelocityDeadbandState(handle, false) == 0);
     Require(scePadSetAngularVelocityDeadbandState(handle + 1, false) == PAD_ERROR_INVALID_HANDLE);
-    Require(scePadSetAngularVelocityDeadbandState(handle + 1, true) == PAD_ERROR_INVALID_HANDLE);
     Require(scePadSetAngularVelocityBiasCorrectionState(handle, false) == PAD_OK);
+    Require(scePadSetAngularVelocityBiasCorrectionState(handle, true) == PAD_OK);
     Require(scePadSetAngularVelocityBiasCorrectionState(handle + 1, false) == PAD_ERROR_INVALID_HANDLE);
+    Require(scePadSetAngularVelocityBiasCorrectionState(handle + 1, true) == PAD_ERROR_INVALID_HANDLE);
 }

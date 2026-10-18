@@ -33,6 +33,7 @@ namespace {
     float biasIntegral[3] = {0.0f, 0.0f, 0.0f};
     bool tiltCorrection = true;
     bool angularVelocityDeadband = false;
+    bool angularVelocityBiasCorrection = true;
     constexpr float kAngularVelocityDeadband = 0.017453292f;
     std::uint8_t nextTouchId = 0;
     bool prevTouchActive[2] = {false, false};
@@ -57,12 +58,14 @@ namespace {
             const float ez = ax * vy - ay * vx;
             constexpr float kp = 1.5f;
             constexpr float ki = 0.02f;
-            biasIntegral[0] += ki * ex * dt;
-            biasIntegral[1] += ki * ey * dt;
-            biasIntegral[2] += ki * ez * dt;
-            gx += kp * ex + biasIntegral[0];
-            gy += kp * ey + biasIntegral[1];
-            gz += kp * ez + biasIntegral[2];
+            if (angularVelocityBiasCorrection) {
+                biasIntegral[0] += ki * ex * dt;
+                biasIntegral[1] += ki * ey * dt;
+                biasIntegral[2] += ki * ez * dt;
+            }
+            gx += kp * ex + (angularVelocityBiasCorrection ? biasIntegral[0] : 0.0f);
+            gy += kp * ey + (angularVelocityBiasCorrection ? biasIntegral[1] : 0.0f);
+            gz += kp * ez + (angularVelocityBiasCorrection ? biasIntegral[2] : 0.0f);
         }
         const float hx = 0.5f * gx * dt, hy = 0.5f * gy * dt, hz = 0.5f * gz * dt;
         const Quat q = orientation;
@@ -340,6 +343,14 @@ void Pad::SetTiltCorrection(bool enabled) {
 void Pad::SetAngularVelocityDeadband(bool enabled) {
     std::lock_guard lock(stateMutex);
     angularVelocityDeadband = enabled;
+}
+
+void Pad::SetAngularVelocityBiasCorrection(bool enabled) {
+    std::lock_guard lock(stateMutex);
+    angularVelocityBiasCorrection = enabled;
+    if (!enabled) {
+        biasIntegral[0] = biasIntegral[1] = biasIntegral[2] = 0.0f;
+    }
 }
 
 void Pad::SetMotionEnabled(bool enabled) {
