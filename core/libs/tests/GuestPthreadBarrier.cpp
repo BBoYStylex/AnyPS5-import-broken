@@ -31,6 +31,7 @@ struct Context {
     GuestBarrier* barrier = nullptr;
     std::atomic<int> serial{0};
     std::atomic<int> released{0};
+    std::atomic<int> destroyed{0};
 };
 
 static void* APS5_VABI Waiter(void* arg) {
@@ -46,6 +47,18 @@ static void* APS5_VABI DestroyingWaiter(void* arg) {
     auto& context = *static_cast<Context*>(arg);
     if (pthread_barrier_wait_nid_postfix(&context.barrier) == BARRIER_SERIAL_THREAD)
         context.serial = pthread_barrier_destroy_nid_postfix(&context.barrier) == 0 && context.barrier == nullptr ? 1 : -1;
+    return nullptr;
+}
+
+static void* APS5_VABI NonSerialDestroyingWaiter(void* arg) {
+    auto& context = *static_cast<Context*>(arg);
+    const int result = pthread_barrier_wait_nid_postfix(&context.barrier);
+    if (result == 0) {
+        if (context.released.fetch_add(1) == 0)
+            context.destroyed = pthread_barrier_destroy_nid_postfix(&context.barrier) == 0 && context.barrier == nullptr ? 1 : -1;
+    } else if (result == BARRIER_SERIAL_THREAD) {
+        ++context.serial;
+    }
     return nullptr;
 }
 
@@ -116,6 +129,15 @@ int main() {
         for (auto& thread : threads) Require(scePthreadCreate(&thread, nullptr, DestroyingWaiter, &destroyed, nullptr) == 0);
         for (auto& thread : threads) Require(scePthreadJoin(thread, nullptr) == 0);
         Require(destroyed.serial == 1);
+    }
+
+    for (int round = 0; round < 50; ++round) {
+        Context nonSerialDestroyed;
+        Require(pthread_barrier_init_nid_postfix(&nonSerialDestroyed.barrier, nullptr, WAITERS) == 0);
+        std::array<Pthread, WAITERS> threads{};
+        for (auto& thread : threads) Require(scePthreadCreate(&thread, nullptr, NonSerialDestroyingWaiter, &nonSerialDestroyed, nullptr) == 0);
+        for (auto& thread : threads) Require(scePthreadJoin(thread, nullptr) == 0);
+        Require(nonSerialDestroyed.serial == 1 && nonSerialDestroyed.released == static_cast<int>(WAITERS) - 1 && nonSerialDestroyed.destroyed == 1 && nonSerialDestroyed.barrier == nullptr);
     }
 
     GuestBarrier* single = nullptr;

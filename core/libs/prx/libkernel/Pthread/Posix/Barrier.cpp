@@ -9,10 +9,11 @@
 struct PthreadBarrierPrivate {
     std::mutex mutex;
     std::condition_variable changed;
-    unsigned count;
+    unsigned count = 0;
     unsigned arrived = 0;
     unsigned active = 0;
     std::uint64_t generation = 0;
+    bool destroying = false;
 };
 
 namespace {
@@ -59,8 +60,8 @@ int APS5_VABI pthread_barrierattr_setpshared_nid_postfix(PthreadBarrierattrPriva
 }
 
 int APS5_VABI pthread_barrier_init_nid_postfix(PthreadBarrierPrivate** barrier, PthreadBarrierattrPrivate* const* attr, unsigned count) {
-    (void)attr;
     if (!barrier || count == 0) return 22;
+    if (attr && *attr && (*attr)->pshared != PROCESS_PRIVATE) return 22;
     try {
         auto* value = new PthreadBarrierPrivate;
         value->count = count;
@@ -75,17 +76,20 @@ int APS5_VABI pthread_barrier_wait_nid_postfix(PthreadBarrierPrivate** barrier) 
     if (!barrier || !*barrier) return 22;
     auto& value = **barrier;
     std::unique_lock lock(value.mutex);
+    if (value.destroying) return 22;
     const auto generation = value.generation;
     ++value.active;
     if (++value.arrived == value.count) {
         value.arrived = 0;
         ++value.generation;
         value.changed.notify_all();
-        --value.active;
+        if (--value.active == 0) value.changed.notify_all();
+        lock.unlock();
         return -1;
     }
     value.changed.wait(lock, [&] { return value.generation != generation; });
     if (--value.active == 0) value.changed.notify_all();
+    lock.unlock();
     return 0;
 }
 
@@ -94,11 +98,12 @@ int APS5_VABI pthread_barrier_destroy_nid_postfix(PthreadBarrierPrivate** barrie
     auto* value = *barrier;
     {
         std::unique_lock lock(value->mutex);
-        if (value->arrived != 0) return 16;
+        if (value->destroying || value->arrived != 0) return 16;
+        value->destroying = true;
         value->changed.wait(lock, [&] { return value->active == 0; });
+        *barrier = nullptr;
     }
     delete value;
-    *barrier = nullptr;
     return 0;
 }
 
