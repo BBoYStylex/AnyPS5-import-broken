@@ -30,6 +30,10 @@ struct Args {
     std::string inputPath;
     std::string outputPath;
     std::string sceModulePath;
+    std::string patchesPath;
+    bool noPatches = false;
+    std::string verifyPatchesPath;
+    bool verifyOutput = false;
     std::string runPath = "$ORIGIN/libs";
     std::string iconPath;
     std::set<std::string> excludedSceModules;
