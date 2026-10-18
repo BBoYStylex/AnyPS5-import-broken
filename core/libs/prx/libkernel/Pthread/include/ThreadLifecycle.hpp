@@ -2,6 +2,19 @@
 #define CORE_LIBS_PRX_LIBKERNEL_PTHREAD_THREADLIFECYCLE_HPP
 
 #include "SceTypes.hpp"
+#include <atomic>
+#include <stdexcept>
+
+namespace ThreadLifecycleDetail {
+template <typename Callback>
+void RegisterThreadDtors(std::atomic<Callback>& registered, Callback callback) {
+    if (!callback)
+        throw std::runtime_error("Thread destructor callback is null");
+    Callback expected = nullptr;
+    if (!registered.compare_exchange_strong(expected, callback) && expected != callback)
+        throw std::runtime_error("Thread destructor callback is already registered");
+}
+}
 
 class ThreadLifecycle {
 public:

@@ -498,11 +498,7 @@ static std::size_t HostStackReserve() {
 #endif
 
 void ThreadLifecycle::SetThreadDtors(thread_dtors_func_t callback) {
-    if (!callback)
-        throw std::runtime_error("Thread destructor callback is null");
-    thread_dtors_func_t expected = nullptr;
-    if (!threadDtors.compare_exchange_strong(expected, callback))
-        throw std::runtime_error("Thread destructor callback is already registered");
+    ThreadLifecycleDetail::RegisterThreadDtors(threadDtors, callback);
 }
 
 void ThreadLifecycle::SetThreadAtexitCount(get_thread_atexit_count_func_t callback) {
