@@ -15,6 +15,11 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#ifdef __APPLE__
+#include "prx/libc/include/exceptions/Runtime.hpp"
+#include <string>
+#include <typeinfo>
+#endif
 #elif defined(_WIN32)
 #include "prx/libc/include/WindowsDescriptor.hpp"
 #include "prx/libkernel/File/include/DirectoryDescriptor.hpp"
@@ -30,6 +35,10 @@ extern "C" int APS5_VABI sceKernelVirtualQuery(const void* addr, int flags, Virt
 extern "C" std::int64_t APS5_VABI sceKernelPread(int descriptor, void* buffer, std::size_t length, std::int64_t offset);
 extern "C" int APS5_VABI munmap_nid_postfix(void* address, std::size_t length) noexcept;
 extern "C" int APS5_VABI mprotect_nid_postfix(void* address, std::size_t length, int protection) noexcept;
+#ifdef __APPLE__
+extern "C" LibcException::Header* APS5_VABI __cxa_init_primary_exception_nid_postfix(void* object, std::type_info* type, void (*destructor)(void*));
+extern "C" [[noreturn]] void APS5_VABI __cxa_call_terminate_nid_postfix(void* exception);
+#endif
 
 namespace {
 // FreeBSD/PS5 ABI values, independent of the host's errno and mmap constants.
@@ -190,7 +199,19 @@ void* APS5_VABI mmap_nid_postfix(void* address, std::size_t length, int protecti
         (mappingFlags & ~(GuestShared | GuestPrivate | GuestMapFixed | GuestMapNoOverwrite | GuestMapNoCoalesce)) != 0)
         return failed(GuestNotSupported);
     if (descriptor < 0) return failed(GuestBadDescriptor);
+#ifdef __APPLE__
+    // On Linux the refusal is thrown through the guest runtime, and leaving this noexcept function calls the guest's
+    // terminate handler with it current. Host libc++abi cannot unwind a guest exception, so do that step directly.
+    if (File::IsArchivedFile(descriptor)) {
+        void* object = __cxa_allocate_exception_nid_postfix(sizeof(std::runtime_error));
+        new (object) std::runtime_error("mmap on a file read from app0.zar, fd=" + std::to_string(descriptor) + " not implemented");
+        auto* header = __cxa_init_primary_exception_nid_postfix(object, const_cast<std::type_info*>(&typeid(std::runtime_error)),
+                                                                [](void* thrown) { static_cast<std::runtime_error*>(thrown)->~runtime_error(); });
+        __cxa_call_terminate_nid_postfix(&header->unwind);
+    }
+#else
     File::RefuseArchivedFile(descriptor, "mmap");
+#endif
     if (offset < 0 || (static_cast<std::uint64_t>(offset) & (PS5_PAGE_SIZE - 1)) != 0 ||
         rounded > static_cast<std::size_t>(std::numeric_limits<std::int64_t>::max()) ||
         static_cast<std::uint64_t>(offset) > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()) - rounded)
