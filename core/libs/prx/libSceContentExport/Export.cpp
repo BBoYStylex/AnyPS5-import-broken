@@ -41,18 +41,15 @@ int APS5_VABI sceContentExportFinish(std::int32_t expId) {
 }
 
 int APS5_VABI sceContentExportFromData(void) {
- NotImplemented_nid_no_patch(__func__);
- return 0;
+    throw std::runtime_error("sceContentExportFromData: the host has no media library to export into");
 }
 
 int APS5_VABI sceContentExportFromFile(void) {
- NotImplemented_nid_no_patch(__func__);
- return 0;
+    throw std::runtime_error("sceContentExportFromFile: the host has no media library to export into");
 }
 
 int APS5_VABI sceContentExportFromFileWithThumbnail(void) {
- NotImplemented_nid_no_patch(__func__);
- return 0;
+    throw std::runtime_error("sceContentExportFromFileWithThumbnail: the host has no media library to export into");
 }
 
 int APS5_VABI sceContentExportStart(void) {
