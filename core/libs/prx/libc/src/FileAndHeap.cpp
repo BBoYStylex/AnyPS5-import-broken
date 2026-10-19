@@ -523,6 +523,9 @@ int APS5_VABI fflush_nid_postfix(FileStream* stream) {
     if (stream && stream->IsRandomDevice()) return 0;
 #ifdef __linux__
     if (native && !__fwriting(native)) return 0;
+#elif defined(__APPLE__)
+    // Darwin's fflush drops buffered input and ungetc pushback of a reading stream; __SWR marks one that is writing.
+    if (native && (native->_flags & __SWR) == 0) return 0;
 #endif
     const int result = std::fflush(native);
     if (stream) stream->SyncStatus();
