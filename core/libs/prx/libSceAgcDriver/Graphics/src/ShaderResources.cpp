@@ -5463,11 +5463,11 @@ void ShaderResources::MarkGpuWrites(Recorder& recorder) {
 }
 
 void ShaderResources::CheckFaults() const {
-    if (bda && faultChecks) bda->CheckFault();
+    if (bda) bda->CheckFault();
 }
 
 void ShaderResources::WriteBackBuffers() {
-    if (bda && faultChecks) bda->CheckFault();
+    if (bda) bda->CheckFault();
     if (SkipWriteBack()) return;
     guestMemory.WriteBack();
 }
