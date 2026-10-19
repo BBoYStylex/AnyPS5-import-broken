@@ -783,6 +783,16 @@ std::int64_t ListenQueueLength(NativeSocket socket) {
 #endif
     return 1;
 }
+#ifdef _WIN32
+short StreamPairEndOfFile(Socket& socket, short requested) {
+    bool sendShut;
+    {
+        std::lock_guard lock(socket.modeMutex);
+        sendShut = socket.sendShut;
+    }
+    return static_cast<short>((requested & GuestPollReadable) | (sendShut || socket.peer.expired() ? GuestPollHangUp : 0));
+}
+#endif
 }
 
 bool GuestSockets::Ready(int descriptor, bool write, std::int64_t* data, bool* eof) {
@@ -1566,6 +1576,9 @@ int APS5_VABI poll_nid_postfix(GuestPollDescriptor* descriptors, std::uint32_t c
     std::vector<NativePollDescriptor> native;
     std::vector<std::uint32_t> owners;
     std::vector<std::uint32_t> pipes;
+#ifdef _WIN32
+    std::vector<Socket*> streamPairs;
+#endif
     int ready = 0;
     for (std::uint32_t i = 0; i < count; ++i) {
         auto& entry = descriptors[i];
@@ -1575,8 +1588,10 @@ int APS5_VABI poll_nid_postfix(GuestPollDescriptor* descriptors, std::uint32_t c
             throw std::runtime_error("poll: unsupported event flags " + std::to_string(entry.events));
         std::shared_ptr<void> owner;
         std::uintptr_t value = 0;
+        Socket* streamPair = nullptr;
         if (auto socket = Find(entry.descriptor)) {
             value = static_cast<std::uintptr_t>(socket->value);
+            if (socket->family == GuestUnix && socket->type == 1) streamPair = socket.get();
             owner = std::move(socket);
         } else if (!KernelFindSocketNative_nid_no_patch(entry.descriptor, &owner, &value)) {
             if (!DescriptorIsOpen_nid_no_patch(entry.descriptor)) {
@@ -1617,6 +1632,11 @@ int APS5_VABI poll_nid_postfix(GuestPollDescriptor* descriptors, std::uint32_t c
         native.push_back(request);
         owners.push_back(i);
         held.push_back(std::move(owner));
+#ifdef _WIN32
+        streamPairs.push_back(streamPair);
+#else
+        (void)streamPair;
+#endif
     }
 #ifndef _WIN32
     const std::size_t socketCount = native.size();
@@ -1645,6 +1665,10 @@ int APS5_VABI poll_nid_postfix(GuestPollDescriptor* descriptors, std::uint32_t c
         if (pipe && (entry.revents & GuestPollError)) entry.revents = static_cast<short>((entry.revents & ~GuestPollError) | GuestPollHangUp);
         if (pipe && (entry.revents & GuestPollHangUp))
             entry.revents = static_cast<short>((entry.revents & ~GuestPollWritable) | (entry.events & GuestPollReadable));
+#ifdef _WIN32
+        if (!pipe && streamPairs[i] && (native[i].revents & POLLHUP))
+            entry.revents = static_cast<short>((entry.revents & ~GuestPollHangUp) | StreamPairEndOfFile(*streamPairs[i], entry.events));
+#endif
         if (entry.revents) ++ready;
     };
 #ifdef _WIN32

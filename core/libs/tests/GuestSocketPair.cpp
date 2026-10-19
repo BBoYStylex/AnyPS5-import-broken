@@ -75,6 +75,16 @@ static bool Readable(int descriptor, short accepted = In) {
     return poll_nid_postfix(&waited, 1, 2000) == 1 && (waited.revents & accepted) != 0;
 }
 
+static void RequirePolled(int descriptor, short expected) {
+    PollDescriptor waited{descriptor, In, 0};
+    const int ready = poll_nid_postfix(&waited, 1, 2000);
+    if (ready != 1 || waited.revents != expected) {
+        std::fprintf(stderr, "poll for POLLIN on descriptor %d returned %d with revents 0x%x, expected 1 with 0x%x\n",
+            descriptor, ready, static_cast<unsigned>(waited.revents), static_cast<unsigned>(expected));
+        std::abort();
+    }
+}
+
 static bool Exchange(int from, int to, const char* text) {
     char received[32]{};
     const auto length = static_cast<std::uint64_t>(std::strlen(text) + 1);
@@ -207,12 +217,14 @@ int main(int argc, char** argv) {
     Require(recv_nid_postfix(pair[1], received, sizeof(received), 0) == -1 && *__error_nid_postfix() == 35);
 
     Require(shutdown_nid_postfix(pair[0], 1) == 0);
-    Require(Readable(pair[1], In | Hup) && recv_nid_postfix(pair[1], received, sizeof(received), 0) == 0);
+    RequirePolled(pair[1], In);
+    Require(recv_nid_postfix(pair[1], received, sizeof(received), 0) == 0);
     Require(Exchange(pair[1], pair[0], "still open"));
     Require(Unnamed(pair[0], getpeername_nid_postfix) && Unnamed(pair[1], getpeername_nid_postfix));
     Require(close_nid_postfix(pair[0]) == 0);
     Require(NotConnected(pair[1]) && Unnamed(pair[1], getsockname_nid_postfix));
-    Require(Readable(pair[1], In | Hup) && recv_nid_postfix(pair[1], received, sizeof(received), 0) == 0);
+    RequirePolled(pair[1], In | Hup);
+    Require(recv_nid_postfix(pair[1], received, sizeof(received), 0) == 0);
 #ifndef _WIN32
     Require(send_nid_postfix(pair[1], ping, sizeof(ping), NoSignal) == -1 && *__error_nid_postfix() == 32);
 #endif
