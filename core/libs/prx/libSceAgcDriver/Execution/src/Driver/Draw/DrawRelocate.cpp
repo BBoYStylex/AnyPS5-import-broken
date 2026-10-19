@@ -3,6 +3,7 @@
 #include "prx/libSceAgcDriver/Execution/include/Driver/Diagnostics.hpp"
 #include "prx/libSceAgcDriver/Execution/include/GuestMemory.hpp"
 #include "prx/libSceAgcDriver/Execution/include/ProfileOutput.hpp"
+#include "prx/libSceAgcDriver/Execution/include/ShaderMemory.hpp"
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -56,7 +57,7 @@ std::uint64_t Driver::relocatedContentKey(const RelocatableUserWord& word, std::
     return hash;
 }
 
-void Driver::tagVariantRuns(DispatchVariant& variant, std::span<const ShaderRecompiler::MemoryRegion> regions, const ShaderRecompiler::SrtUserDataUse& use, bool eligible, std::uint32_t hiddenWords) {
+void Driver::tagVariantRuns(DispatchVariant& variant, std::span<const ShaderRecompiler::MemoryRegion> regions, const ShaderRecompiler::SrtUserDataUse& use, bool eligible, std::uint32_t hiddenWords, std::span<const std::shared_ptr<const ShaderRecompiler::SrtGuestWords>> supplied) {
     std::uint64_t relocatable = eligible && drawRelocationEnabled() ? use.asBase & ~use.asValue : 0;
     if (hiddenWords != 0) relocatable &= hiddenWords >= 64 ? 0 : ~((std::uint64_t {1} << hiddenWords) - 1);
     std::vector<std::pair<std::uint64_t, std::int32_t>> reads;
@@ -79,16 +80,19 @@ void Driver::tagVariantRuns(DispatchVariant& variant, std::span<const ShaderReco
         }
     }
     variant.relocatableWords = relocatable;
-    for (const auto& region : regions) {
+    for (std::size_t index = 0; index < regions.size(); ++index) {
+        const auto& region = regions[index];
         const auto count = region.bytes.size() / sizeof(std::uint32_t);
         const auto offset = variant.words.size();
         variant.words.resize(offset + count);
         std::memcpy(variant.words.data() + offset, region.bytes.data(), count * sizeof(std::uint32_t));
         if (relocatable == 0) {
+            AppendSharedWords(variant.shared, variant.runs.size(), offset, region.bytes, supplied);
             variant.runs.emplace_back(region.guestAddress, region.guestAddress + region.bytes.size());
             continue;
         }
         ForEachRelocationRun(region.guestAddress, count, reads, relocatable, [&](std::size_t first, std::size_t last, std::int8_t origin) {
+            AppendSharedWords(variant.shared, variant.runs.size(), offset + first, region.bytes.subspan(first * sizeof(std::uint32_t), (last - first) * sizeof(std::uint32_t)), supplied);
             variant.runs.emplace_back(region.guestAddress + first * sizeof(std::uint32_t), region.guestAddress + last * sizeof(std::uint32_t));
             variant.runBases.push_back(origin);
         });
