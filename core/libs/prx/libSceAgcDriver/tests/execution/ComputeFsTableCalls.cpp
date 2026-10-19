@@ -3,6 +3,9 @@
 #include "prx/libSceAgcDriver/Graphics/include/Draw.hpp"
 #include "SceShaders.hpp"
 #include "VulkanTestDevice.hpp"
+#ifdef __APPLE__
+#include "prx/libSceAgcDriver/Execution/include/Driver/DriverMemory.hpp"
+#endif
 #include <array>
 #include <cstdint>
 #include <cstring>
@@ -19,7 +22,12 @@ using AgcDriver::Graphics::Require;
 constexpr std::uint32_t Threads = 64;
 constexpr std::uint32_t Untouched = 0xcafebabeu;
 constexpr std::uint32_t Marker = 0x55u;
+#ifdef __APPLE__
+// The caller below still builds the console address; the driver moves it with its block (DriverMemory.hpp).
+constexpr std::uint64_t FsTable = AgcDriver::DriverDetail::RetargetPs5DriverMemory(0xfe0040000ull);
+#else
 constexpr std::uint64_t FsTable = 0xfe0040000ull;
+#endif
 
 alignas(256) constexpr std::array<std::uint32_t, 32> Caller{
     0x34040082u, 0x7e0202ffu, 0x00000055u, 0xbeea03ffu, 0xe0040000u, 0xbeeb038fu, 0xf4080235u, 0xfa000000u, 0xbf8cc07fu, 0xf4240384u,

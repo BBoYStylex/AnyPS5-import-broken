@@ -1459,6 +1459,9 @@ std::vector<TableCall> FindTableCalls(const RdnaProgram& program, const SwappcIn
         if (table.op != RdnaOpcode::SLoadDwordx4 || !isScalar(table.destination, descriptor) || pointer == NoScalarRegister || pointer % 2u != 0u || table.source1.kind != RdnaOperandKind::Null ||
             table.memoryOffset >= 0x100000u || (table.memoryOffset & 3u) != 0u) continue;
         std::optional<std::uint64_t> constantPointer;
+#ifdef __APPLE__
+        std::uint32_t lowWriterProgramCounter = 0, highWriterProgramCounter = 0;
+#endif
         if (!(userData(pointer) && userData(pointer + 1u) && unchangedUntil(program, pointer, descriptorLoad, swappc.waveSize) && unchangedUntil(program, pointer + 1u, descriptorLoad, swappc.waveSize))) {
             std::uint32_t lowWriter = 0, highWriter = 0, low = 0, high = 0;
             if (!findLastWriter(program, descriptorLoad, {pointer}, lowWriter, swappc.waveSize, reader) || !findLastWriter(program, descriptorLoad, {pointer + 1u}, highWriter, swappc.waveSize, reader) ||
@@ -1468,6 +1471,10 @@ std::vector<TableCall> FindTableCalls(const RdnaProgram& program, const SwappcIn
             if (lowMove.op != RdnaOpcode::SMovB32 || highMove.op != RdnaOpcode::SMovB32 || !isScalar(lowMove.destination, pointer) || !isScalar(highMove.destination, pointer + 1u) ||
                 !isImmediate(lowMove.source0, low) || !isImmediate(highMove.source0, high)) continue;
             constantPointer = static_cast<std::uint64_t>(high) << 32u | low;
+#ifdef __APPLE__
+            lowWriterProgramCounter = lowMove.programCounter;
+            highWriterProgramCounter = highMove.programCounter;
+#endif
         }
         std::uint32_t stride = 0;
         if (load.source1.kind != RdnaOperandKind::Null) {
@@ -1479,6 +1486,10 @@ std::vector<TableCall> FindTableCalls(const RdnaProgram& program, const SwappcIn
             stride = 1u << shift;
         }
         calls.push_back({instruction.programCounter, link, target, constantPointer ? 0u : pointer, table.memoryOffset, load.memoryOffset + lowDword * 4u, stride, constantPointer});
+#ifdef __APPLE__
+        calls.back().pointerLowWriter = lowWriterProgramCounter;
+        calls.back().pointerHighWriter = highWriterProgramCounter;
+#endif
     }
     return calls;
 }

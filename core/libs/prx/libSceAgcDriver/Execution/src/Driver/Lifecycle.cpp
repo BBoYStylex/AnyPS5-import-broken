@@ -31,6 +31,11 @@
 #include <pthread.h>
 #include <sys/mman.h>
 #endif
+#ifdef __APPLE__
+#include "prx/libSceAgcDriver/Execution/include/Driver/DriverMemory.hpp"
+#include <mach/mach.h>
+#include <mach/mach_vm.h>
+#endif
 
 namespace AgcDriver::DriverDetail {
 
@@ -52,9 +57,15 @@ void PrintFailure(std::exception_ptr error) {
     std::fflush(stderr);
 }
 
+#ifdef __APPLE__
+constexpr std::uint64_t DriverMemoryAddress = MacOsDriverMemoryBase;
+constexpr std::size_t DriverMemoryBytes = DriverMemorySpan;
+constexpr std::uint64_t FsTableAddress = RetargetPs5DriverMemory(0xfe0040000ull);
+#else
 constexpr std::uint64_t DriverMemoryAddress = 0xfe0000000ull;
 constexpr std::size_t DriverMemoryBytes = 2u << 20u;
 constexpr std::uint64_t FsTableAddress = 0xfe0040000ull;
+#endif
 constexpr std::uint64_t FsTableSlotBytes = 16u;
 constexpr std::uint64_t FsTableSlots = 6u;
 constexpr std::uint64_t FsRoutineRecords = 8u;
@@ -72,10 +83,20 @@ void MapDriverMemory() {
     mapped = reinterpret_cast<void*>(DriverMemoryAddress);
     GuestArena::GuestArenaCommit_nid_postfix(mapped, DriverMemoryBytes, PAGE_READWRITE, DriverMemoryBytes);
 #elif defined(__APPLE__)
-    // macOS has no MAP_FIXED_NOREPLACE; a hint the kernel honours exactly gives the same guarantee.
-    mapped = mmap(reinterpret_cast<void*>(DriverMemoryAddress), DriverMemoryBytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    // The block is in the guest arena's system-reserved range. When the arena holds it as an inaccessible
+    // reservation, only that reservation is replaced; otherwise the range must be free, and a hint the kernel honours
+    // exactly stands in for MAP_FIXED_NOREPLACE, which macOS lacks.
+    mach_vm_address_t region = DriverMemoryAddress;
+    mach_vm_size_t regionBytes = 0;
+    vm_region_basic_info_data_64_t info{};
+    mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+    mach_port_t object = MACH_PORT_NULL;
+    const bool reservation = mach_vm_region(mach_task_self(), &region, &regionBytes, VM_REGION_BASIC_INFO_64, reinterpret_cast<vm_region_info_t>(&info), &count, &object) == KERN_SUCCESS &&
+        region <= DriverMemoryAddress && DriverMemoryAddress + DriverMemoryBytes <= region + regionBytes && info.protection == VM_PROT_NONE &&
+        (info.max_protection & (VM_PROT_READ | VM_PROT_WRITE)) == (VM_PROT_READ | VM_PROT_WRITE);
+    mapped = mmap(reinterpret_cast<void*>(DriverMemoryAddress), DriverMemoryBytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | (reservation ? MAP_FIXED : 0), -1, 0);
     if (mapped == MAP_FAILED) throw std::system_error(errno, std::generic_category(), "map the AGC driver memory");
-    if (reinterpret_cast<std::uint64_t>(mapped) != DriverMemoryAddress) munmap(mapped, DriverMemoryBytes);
+    if (!reservation && reinterpret_cast<std::uint64_t>(mapped) != DriverMemoryAddress) munmap(mapped, DriverMemoryBytes);
 #else
     mapped = mmap(reinterpret_cast<void*>(DriverMemoryAddress), DriverMemoryBytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
     if (mapped == MAP_FAILED) throw std::system_error(errno, std::generic_category(), "map the AGC driver memory");

@@ -2,6 +2,9 @@
 #include "ControlFlow/GraphBuilder.hpp"
 #include "prx/libSceAgcDriver/Execution/include/PerformanceTimer.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver/Driver.hpp"
+#ifdef __APPLE__
+#include "prx/libSceAgcDriver/Execution/include/Driver/DriverMemory.hpp"
+#endif
 #include "prx/libSceAgcDriver/Execution/include/Driver/Shaders/ShaderRegistry.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver/Diagnostics.hpp"
 #include "prx/libSceAgcDriver/Execution/include/GuestMemory.hpp"
@@ -682,6 +685,22 @@ std::vector<ShaderRecompiler::TableCallee> ReadTableCallees(const ShaderRecompil
     for (const auto target : targets) callees.push_back({target, ReadUserDataCallee(target, call.linkRegister)});
     return callees;
 }
+#ifdef __APPLE__
+
+// Rewrites one s_mov_b32 that builds half of a driver-block pointer: its literal word, or its inline integer.
+void RetargetPointerMove(std::vector<std::uint32_t>& code, std::uint32_t programCounter, std::uint32_t value) {
+    const auto word = programCounter / 4u;
+    if (word >= code.size()) throw std::logic_error("a retargeted driver-memory pointer move is outside the linked code");
+    const auto source = code[word] & 0xffu;
+    if (source == 0xffu && word + 1u < code.size()) {
+        code[word + 1u] = value;
+    } else if (source >= 0x80u && source <= 0xc0u && value <= 64u) {
+        code[word] = (code[word] & ~0xffu) | (0x80u + value);
+    } else {
+        throw std::runtime_error("a driver-memory pointer move at program counter " + hexText(programCounter) + " cannot hold its macOS address " + hexText(value));
+    }
+}
+#endif
 
 ShaderRecompiler::LinkedCalls LinkUserDataCallees(const ShaderRecompiler::RecompileRequest& request) {
     if (request.shader.stage != ShaderRecompiler::ShaderStage::Compute) return {};
@@ -690,7 +709,22 @@ ShaderRecompiler::LinkedCalls LinkUserDataCallees(const ShaderRecompiler::Recomp
     const auto program = ShaderRecompiler::RdnaInstructionDecoder{}.Decode(code);
     const ShaderRecompiler::SwappcInfo swappc{false, request.context.userDataBaseRegister, static_cast<std::uint32_t>(request.context.userData.size()), request.context.waveSize};
     const auto calls = ShaderRecompiler::FindUserDataCalls(program, swappc);
+#ifdef __APPLE__
+    // The driver block is not at its console address on macOS (DriverMemory.hpp): a table pointer the shader builds
+    // inside it is moved, both for the callee lookup here and in the code the GPU runs.
+    auto tableCalls = ShaderRecompiler::FindTableCalls(program, swappc);
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> pointerMoves;
+    for (auto& call : tableCalls) {
+        if (!call.constantPointer) continue;
+        const auto moved = RetargetPs5DriverMemory(*call.constantPointer);
+        if (moved == *call.constantPointer) continue;
+        if (static_cast<std::uint32_t>(moved) != static_cast<std::uint32_t>(*call.constantPointer)) pointerMoves.push_back({call.pointerLowWriter, static_cast<std::uint32_t>(moved)});
+        pointerMoves.push_back({call.pointerHighWriter, static_cast<std::uint32_t>(moved >> 32u)});
+        call.constantPointer = moved;
+    }
+#else
     const auto tableCalls = ShaderRecompiler::FindTableCalls(program, swappc);
+#endif
     if (calls.empty() && tableCalls.empty()) return {};
     std::vector<std::vector<std::uint32_t>> callees;
     for (const auto& call : calls) {
@@ -711,7 +745,13 @@ ShaderRecompiler::LinkedCalls LinkUserDataCallees(const ShaderRecompiler::Recomp
             throw std::runtime_error("AGC driver: compute shader " + hexText(request.shader.codeAddress) + " calls a target loaded from a table at program counter " + hexText(call.programCounter) + ", but " + error.what());
         }
     }
+#ifdef __APPLE__
+    auto linked = ShaderRecompiler::LinkCalls(program, calls, callees, tableCalls, tableCallees);
+    for (const auto& [programCounter, value] : pointerMoves) RetargetPointerMove(linked.code, programCounter, value);
+    return linked;
+#else
     return ShaderRecompiler::LinkCalls(program, calls, callees, tableCalls, tableCallees);
+#endif
 }
 
 }
