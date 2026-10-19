@@ -95,6 +95,18 @@ bool descriptorIsCube(const DescriptorValue& descriptor) {
     return rawImageType(descriptor) == ImageType::Cube;
 }
 
+RdnaImageDimension gcnDescriptorDimension(const DescriptorValue& descriptor) {
+    switch (rawImageType(descriptor)) {
+        case ImageType::Color1D: return RdnaImageDimension::Dim1D;
+        case ImageType::Color1DArray: return RdnaImageDimension::Dim1DArray;
+        case ImageType::Color3D: return RdnaImageDimension::Dim3D;
+        case ImageType::Cube: case ImageType::Color2DArray: return RdnaImageDimension::Dim2DArray;
+        case ImageType::Color2DMsaa: return RdnaImageDimension::Dim2DMsaa;
+        case ImageType::Color2DMsaaArray: return RdnaImageDimension::Dim2DMsaaArray;
+        default: return RdnaImageDimension::Dim2D;
+    }
+}
+
 RdnaImageDimension descriptorDimension(const DescriptorValue& descriptor, RdnaImageDimension requested) {
     const bool wantArray = requested == RdnaImageDimension::Dim1DArray || requested == RdnaImageDimension::Dim2DArray || requested == RdnaImageDimension::Dim2DMsaaArray;
     switch (rawImageType(descriptor)) {
@@ -201,16 +213,13 @@ ImageDecode inspectImageDescriptor(const DescriptorValue& descriptor, const Imag
     if (!validImageDescriptor(descriptor, base.r128)) {
         return rejectImage(invalidImageReason(descriptor), "image descriptor is invalid");
     }
-    decoded.dimension = descriptorDimension(descriptor, base.dimension);
+    decoded.dimension = GcnGuestShaders() ? gcnDescriptorDimension(descriptor) : descriptorDimension(descriptor, base.dimension);
     if (base.depthCompare) {
         if (decoded.dimension == RdnaImageDimension::Dim1D) {
             decoded.dimension = RdnaImageDimension::Dim2D;
         } else if (decoded.dimension == RdnaImageDimension::Dim1DArray) {
             decoded.dimension = RdnaImageDimension::Dim2DArray;
         }
-    }
-    if (GcnGuestShaders() && imageCoordinates(decoded.dimension) != imageCoordinates(base.dimension)) {
-        throw std::runtime_error("GCN image instruction on a descriptor of type " + std::to_string(static_cast<std::uint32_t>(rawImageType(descriptor))) + " needs a different address count than its inferred dimension; not implemented");
     }
     decoded.cube = descriptorIsCube(descriptor);
     const auto format = rawImageFormat(descriptor);
@@ -1864,6 +1873,25 @@ std::vector<ImageResource> ResourceMaterializer::RuntimeImageModes(const ImageRe
         mode.shaderSwizzle = ShaderImageIdentitySwizzle;
         if (conversion == IrBufferFormat::Format11_11_10UNorm || conversion == IrBufferFormat::Format10_11_11Float) mode.shaderSwizzle = 0x2acu;
         modes.push_back(mode);
+        if (GcnGuestShaders()) {
+            if (depth || conversion != IrBufferFormat::Invalid || packed != IrBufferFormat::Invalid || image.byElements != 0u) return;
+            for (const auto dimension : {RdnaImageDimension::Dim1D, RdnaImageDimension::Dim1DArray, RdnaImageDimension::Dim2D, RdnaImageDimension::Dim2DArray, RdnaImageDimension::Dim3D}) {
+                if (dimension == mode.dimension) continue;
+                const bool line = dimension == RdnaImageDimension::Dim1D || dimension == RdnaImageDimension::Dim1DArray;
+                if (dimension == RdnaImageDimension::Dim3D && image.depthCompare) continue;
+                if ((line || dimension == RdnaImageDimension::Dim3D) && image.gathered) continue;
+                auto other = mode;
+                other.dimension = dimension;
+                modes.push_back(other);
+            }
+            if (!storage) {
+                auto cube = mode;
+                cube.dimension = RdnaImageDimension::Dim2DArray;
+                cube.cube = true;
+                modes.push_back(cube);
+            }
+            return;
+        }
         const bool volumeLoad = (image.dimension == RdnaImageDimension::Dim2D || image.dimension == RdnaImageDimension::Dim2DArray) && image.fmaskCompatible;
         const bool volumeStore = image.dimension == RdnaImageDimension::Dim2DArray && storage && image.written && !image.read && !image.atomic && image.mipMode != ImageMipMode::DynamicStorage;
         const bool volumePlaneBias = image.dimension == RdnaImageDimension::Dim2D && image.singleMipPlaneBiasCompatible && !storage && image.table == NoTable && conversion == IrBufferFormat::Invalid;
