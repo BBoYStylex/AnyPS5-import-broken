@@ -369,14 +369,14 @@ int APS5_VABI wait_nid_postfix(int* status) {
 int APS5_VABI execvp_nid_postfix(const char* file, char* const* arguments) {
     (void)file;
     (void)arguments;
-    NotImplemented_nid_no_patch("execvp: executable replacement");
+    throw std::runtime_error("execvp: executable replacement not implemented");
     return -1;
 }
 
 int APS5_VABI execv_nid_postfix(const char* path, char* const* arguments) {
     (void)path;
     (void)arguments;
-    NotImplemented_nid_no_patch("execv: executable replacement");
+    throw std::runtime_error("execv: executable replacement not implemented");
     return -1;
 }
 
@@ -384,7 +384,7 @@ int APS5_VABI execve_nid_postfix(const char* path, char* const* arguments, char*
     (void)path;
     (void)arguments;
     (void)environment;
-    NotImplemented_nid_no_patch("execve: executable replacement");
+    throw std::runtime_error("execve: executable replacement not implemented");
     return -1;
 }
 
@@ -475,7 +475,7 @@ int APS5_VABI sysarch(int operation, void* parameters) {
     constexpr int setGsBase = 131;
     constexpr std::uint64_t userAddressEnd = 0x0000800000000000ull;
     if (operation != getFsBase && operation != getGsBase && operation != setGsBase)
-        NotImplemented_nid_no_patch(("sysarch: operation " + std::to_string(operation)).c_str());
+        throw std::runtime_error("sysarch: operation " + std::to_string(operation) + " not implemented");
 #if defined(__linux__) && defined(__x86_64__)
     if (parameters == nullptr) {
         *__error_nid_postfix() = guestFault;
@@ -497,7 +497,7 @@ int APS5_VABI sysarch(int operation, void* parameters) {
     return 0;
 #else
     static_cast<void>(parameters);
-    NotImplemented_nid_no_patch("sysarch: segment bases on this host");
+    throw std::runtime_error("sysarch: segment bases on this host not implemented");
     return 0;
 #endif
 }
