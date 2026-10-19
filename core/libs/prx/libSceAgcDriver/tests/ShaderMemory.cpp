@@ -2853,7 +2853,7 @@ void verifyImageTableBitScanHeap() {
         const bool sentinelInRange = addend != 0u;
         require(snapshot.keys == 32u && snapshot.records == 32u && snapshot.outside == sentinelInRange, "image table bit-scan heap: the -1 key expects a fault despite landing past the V#, or lost its in-range fault");
         require(compiled.result->imageTableFaults == (sentinelInRange ? 1u : 0u), "image table bit-scan heap: the -1 key changed the required fault readbacks");
-        require(std::all_of(snapshot.codes.begin(), snapshot.codes.end(), [&](std::uint32_t code) { return compiled.capture->snapshot.tables.words.at(code).dwords == words; }), "image table bit-scan heap: an in-range record was not preserved");
+        require(std::all_of(snapshot.codes.begin(), snapshot.codes.end(), [&](std::uint32_t code) { return snapshot.words.at(code).dwords == words; }), "image table bit-scan heap: an in-range record was not preserved");
     }
 }
 
@@ -3118,7 +3118,7 @@ void verifyPointerImageTable() {
         require(maskedSnapshot.keys == bound + 1u && maskedSnapshot.records == bound + 1u && !maskedSnapshot.outside, "pointer image table: a masked bit-count key snapshots other records than it can select");
         const std::vector<std::pair<std::uint64_t, std::uint64_t>> maskedReads{{base + Palette, (bound + 1u) * 32u}};
         require(maskedSnapshot.readRanges == maskedReads && maskedTable.result->imageTableReadRanges.size() == 1u && maskedTable.result->imageTableReadRanges[0] == maskedReads, "pointer image table: a masked bit-count key read outside its bounded records");
-        const auto& selectedWords = maskedTable.capture->snapshot.tables.words.at(maskedSnapshot.codes.at(selected));
+        const auto& selectedWords = maskedSnapshot.words.at(maskedSnapshot.codes.at(selected));
         require(selectedWords.dwords[0] == root[(Palette + selected * 32u) / 4u] && selectedWords.dwords[1] == root[(Palette + selected * 32u) / 4u + 1u], "pointer image table: a masked bit-count key resolved another record");
     }
 
@@ -3136,7 +3136,7 @@ void verifyPointerImageTable() {
         const auto maskedTable = CompileTable(maskedScan);
         const auto& maskedSnapshot = maskedTable.capture->snapshot.tables.tables.at(0);
         require(maskedSnapshot.keys == selected + 1u && maskedSnapshot.records == selected + 1u && !maskedSnapshot.outside, "pointer image table: the record selected by a masked -1 key is outside its snapshot");
-        const auto& maskedWords = maskedTable.capture->snapshot.tables.words.at(maskedSnapshot.codes.at(selected));
+        const auto& maskedWords = maskedSnapshot.words.at(maskedSnapshot.codes.at(selected));
         require(maskedWords.dwords[0] == root[(Palette + selected * 32u) / 4u] && maskedWords.dwords[1] == root[(Palette + selected * 32u) / 4u + 1u], "pointer image table: a masked -1 key resolved another T#");
         const auto maskedCodes = TableCodes(TableMap(*maskedTable.result), 0);
         require((maskedCodes.at(selected) & Abi::PoisonFlag) == 0u && (TableMap(*maskedTable.result).at(maskedCodes.at(selected) + Abi::ImageRecordFlags) & Abi::PoisonFlag) == 0u, "pointer image table: the valid record selected by a masked -1 key was poisoned");
