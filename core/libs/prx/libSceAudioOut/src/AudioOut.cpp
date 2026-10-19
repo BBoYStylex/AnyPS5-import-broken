@@ -316,12 +316,6 @@ static std::vector<float> prepareVibration(const Port& port, const void* data) {
     return pad;
 }
 
-static void sleepUs(std::unique_lock<std::mutex>& lock, std::uint64_t us) {
-    lock.unlock();
-    PreciseSleepUs(us);
-    lock.lock();
-}
-
 static void queueAudio(Port& port, const void* data, std::unique_lock<std::mutex>& lock) {
     if (data == nullptr) {
         if (!port.deviceStarted && SDL_GetQueuedAudioSize(port.device) != 0) {
