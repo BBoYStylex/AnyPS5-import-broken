@@ -497,12 +497,25 @@ int native_message_flags(int flags) {
     return native;
 }
 
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__APPLE__)
+#ifdef __APPLE__
+// Like Winsock, macOS neither wakes a receive blocked on an unbound datagram socket when it is shut down nor fails
+// that receive, so the same wait for a local address applies. An unbound socket reports port 0 instead of failing.
+bool has_local_address(NativeSocket native) {
+    sockaddr_storage local{};
+    NativeLength local_length = sizeof(local);
+    if (::getsockname(native, reinterpret_cast<sockaddr*>(&local), &local_length) != 0) return true;
+    if (local.ss_family == AF_INET) return reinterpret_cast<const sockaddr_in&>(local).sin_port != 0;
+    if (local.ss_family == AF_INET6) return reinterpret_cast<const sockaddr_in6&>(local).sin6_port != 0;
+    return true;
+}
+#else
 bool has_local_address(NativeSocket native) {
     sockaddr_storage local{};
     NativeLength local_length = sizeof(local);
     return ::getsockname(native, reinterpret_cast<sockaddr*>(&local), &local_length) == 0 || WSAGetLastError() != WSAEINVAL;
 }
+#endif
 
 void note_local_address(int s, const Sock& socket) {
     if (socket.type == NET_SOCK_STREAM || socket.bound || !has_local_address(socket.native->value)) return;
@@ -519,10 +532,17 @@ int wait_for_datagram(const Sock& socket, std::chrono::steady_clock::time_point 
     const auto now = std::chrono::steady_clock::now();
     if (now >= deadline) return NET_EAGAIN;
     const auto remaining = std::chrono::ceil<std::chrono::milliseconds>(deadline - now).count();
+#ifdef __APPLE__
+    pollfd descriptor{};
+    descriptor.fd = socket.native->value;
+    descriptor.events = POLLIN;
+    return ::poll(&descriptor, 1, static_cast<int>(std::min<long long>(remaining, INT_MAX))) == 0 ? NET_EAGAIN : 0;
+#else
     WSAPOLLFD descriptor{};
     descriptor.fd = socket.native->value;
     descriptor.events = POLLRDNORM;
     return WSAPoll(&descriptor, 1, static_cast<INT>(std::min<long long>(remaining, INT_MAX))) == 0 ? NET_EAGAIN : 0;
+#endif
 }
 
 int wait_for_local_address(int s, const Sock& socket, bool empty) {
@@ -960,7 +980,7 @@ int APS5_VABI sceNetConnect(int s, const void* addr, uint32_t addrlen) {
 #endif
     if (native.ss_family != (socket.family == NET_AF_INET ? AF_INET : AF_INET6)) return fail(NET_EAFNOSUPPORT);
     if (::connect(socket.native->value, reinterpret_cast<const sockaddr*>(&native), native_length) == 0) {
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__APPLE__)
         note_local_address(s, socket);
 #endif
         return 0;
@@ -982,7 +1002,7 @@ int64_t APS5_VABI sceNetRecv(int s, void* buf, size_t len, int flags) {
         if (it == g_socks.end()) return fail(NET_EBADF);
         socket = it->second;
     }
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__APPLE__)
     if (const int wait = wait_for_local_address(s, socket, len == 0)) return wait == RECEIVE_NOTHING ? 0 : fail(wait);
 #endif
     const GuestArena::HostWrite destination(len == 0 ? nullptr : buf, len);
@@ -1009,7 +1029,7 @@ int64_t APS5_VABI sceNetRecvfrom(int s, void* buf, size_t len, int flags, void* 
     }
     const GuestArena::HostWrite lengthOutput(from == nullptr ? nullptr : fromlen, from == nullptr ? 0 : sizeof(*fromlen));
     if (!lengthOutput.Open()) return fail(NET_EFAULT);
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__APPLE__)
     if (const int wait = wait_for_local_address(s, socket, len == 0)) {
         if (wait != RECEIVE_NOTHING) return fail(wait);
         if (from) *fromlen = 0;
@@ -1074,7 +1094,7 @@ int64_t APS5_VABI sceNetSendto(int s, const void* buf, size_t len, int flags, co
             reinterpret_cast<const sockaddr*>(&destination), destination_length);
     }
     if (result < 0) return fail(native_error());
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__APPLE__)
     note_local_address(s, socket);
 #endif
     return result;
@@ -1118,7 +1138,7 @@ int64_t APS5_VABI sceNetRecvmsg(int s, NetMsghdr* msg, int flags) {
         if (!destinations.emplace_back(entry.base, static_cast<std::size_t>(entry.length)).Open()) return fail(NET_EFAULT);
     }
     const bool datagram = socket.type != NET_SOCK_STREAM;
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__APPLE__)
     if (const int wait = wait_for_local_address(s, socket, total == 0)) {
         if (wait != RECEIVE_NOTHING) return fail(wait);
         msg->flags = 0;
@@ -1634,6 +1654,11 @@ int lookup_host(int rid, const char* hostname, const char* func, int family, std
     }
     for (const addrinfo* entry = results; entry != nullptr; entry = entry->ai_next) {
         if (entry->ai_family != family) continue;
+#ifdef __APPLE__
+        // macOS answers an AF_INET6 lookup of an IPv4 literal with its IPv4-mapped form; FreeBSD and glibc, without
+        // AI_V4MAPPED, find no IPv6 address.
+        if (family == AF_INET6 && IN6_IS_ADDR_V4MAPPED(&reinterpret_cast<const sockaddr_in6*>(entry->ai_addr)->sin6_addr)) continue;
+#endif
         std::array<std::uint8_t, 16> address{};
         if (family == AF_INET6) std::memcpy(address.data(), &reinterpret_cast<const sockaddr_in6*>(entry->ai_addr)->sin6_addr, 16);
         else std::memcpy(address.data(), &reinterpret_cast<const sockaddr_in*>(entry->ai_addr)->sin_addr, 4);
