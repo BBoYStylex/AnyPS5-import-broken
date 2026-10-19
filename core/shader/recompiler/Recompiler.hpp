@@ -3,6 +3,7 @@
 
 #include "RuntimeAbi.hpp"
 #include "PipelineSpecialization.hpp"
+#include "StaticBufferDescriptorAbi.hpp"
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -457,6 +458,7 @@ struct DescriptorBinding {
     std::vector<std::uint32_t> imageSamplers;
     std::vector<bool> bufferRead;
     std::vector<std::uint32_t> bufferExtent;
+    std::vector<StaticBufferDescriptorStatus> bufferDescriptorStatus;
 };
 
 struct ImageTableEntryPoison {
@@ -638,6 +640,7 @@ struct CompiledShaderArtifact {
     BarycentricEmulation barycentricEmulation;
     std::vector<std::uint32_t> stencilReferences;
     bool stencilReplaySafe = false;
+    bool deferredTypeFaultsOnly = false;
     std::uint32_t stencilReferenceDword = 0xffffffffu;
     std::uint64_t variantId = 0;
 };

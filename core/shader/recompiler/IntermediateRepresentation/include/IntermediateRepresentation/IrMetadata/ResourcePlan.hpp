@@ -8,6 +8,7 @@
 #include "IntermediateRepresentation/IrMetadata/ResourceInfo.hpp"
 #include "IntermediateRepresentation/IrMetadata/ShaderInfo.hpp"
 #include "IntermediateRepresentation/IrMetadata/ShaderStage.hpp"
+#include "StaticBufferDescriptorAbi.hpp"
 #include <array>
 #include <atomic>
 #include <cstdint>
@@ -126,6 +127,7 @@ struct ImageTableSnapshot {
 
 struct ResourceSnapshot {
     std::vector<DescriptorValue> buffers;
+    std::vector<StaticBufferDescriptorStatus> bufferDescriptorStatus;
     std::vector<DescriptorValue> images;
     std::vector<DescriptorValue> samplers;
     std::vector<std::uint32_t> flattenedSrt;
