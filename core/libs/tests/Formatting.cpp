@@ -218,7 +218,6 @@ __attribute__((noinline)) static void APS5_VABI RunChecks() {
     Require(std::strcmp(buffer, expected) == 0);
     char pointers[128];
     const auto address = [](std::uintptr_t value) { return reinterpret_cast<void*>(value); };
-<<<<<<< HEAD
     Require(snprintf_nid_postfix(pointers, sizeof(pointers), "%p|%p|%p", address(0), address(0x1234), address(0xdeadbeef12)) == 17 &&
         std::strcmp(pointers, "0|1234|deadbeef12") == 0);
     Require(snprintf_nid_postfix(pointers, sizeof(pointers), "[%p][%5p][%-5p][%05p][%.8p][%10.6p][%.0p]",
@@ -235,18 +234,6 @@ __attribute__((noinline)) static void APS5_VABI RunChecks() {
     Require(snprintf_nid_postfix(pointers, 6, "%p", address(0xabcdef)) == 6 && std::strcmp(pointers, "abcde") == 0);
     Require(snprintf_nid_postfix(pointers, sizeof(pointers), "%p", address(0xffffffffffffffffull)) == 16 &&
         std::strcmp(pointers, "ffffffffffffffff") == 0);
-=======
-    Require(snprintf_nid_postfix(pointers, sizeof(pointers), "%p|%p|%p", address(0), address(0x1234), address(0xdeadbeef12)) == 23 &&
-        std::strcmp(pointers, "0x0|0x1234|0xdeadbeef12") == 0);
-    Require(snprintf_nid_postfix(pointers, sizeof(pointers), "[%8p][%-8p][%08p][%.6p][%10.4p][%.0p]",
-        address(0x1a), address(0x1a), address(0x1a), address(0x1a), address(0x1a), address(0)) == 56 &&
-        std::strcmp(pointers, "[    0x1a][0x1a    ][0x00001a][0x00001a][    0x001a][0x]") == 0);
-    Require(snprintf_nid_postfix(pointers, sizeof(pointers), "[%+p][% p][%#p][%*p][%-*p]", address(0x1a), address(0x1a),
-        address(0x1a), 6, address(0xf), -6, address(0xf)) == 34 &&
-        std::strcmp(pointers, "[0x1a][0x1a][0x1a][   0xf][0xf   ]") == 0);
-    Require(snprintf_nid_postfix(pointers, 6, "%p", address(0xabcdef)) == 8 && std::strcmp(pointers, "0xabc") == 0);
-#endif
->>>>>>> 5a3fd9f2ca (fix(libc): print the FreeBSD printf extensions and stray percent signs on Windows)
     snprintf_nid_postfix(buffer, sizeof(buffer), "%.*s", -1, "unlimited");
     Require(std::strcmp(buffer, "unlimited") == 0);
     buffer[5] = '!';
