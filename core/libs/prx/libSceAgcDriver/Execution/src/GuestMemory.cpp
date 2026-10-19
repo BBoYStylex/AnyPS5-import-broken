@@ -599,7 +599,14 @@ bool describePages(std::uintptr_t address, std::size_t bytes, Emit&& emit) {
         const auto next = std::min(end, regionEnd);
         if (!emit(PageRun{cursor, next, readable, writable})) return true;
         cursor = next;
-#elif defined(__APPLE__)
+#else
+        const auto generation = GuestAllocations::GuestAllocationsGeneration_nid_postfix();
+        const auto access = pages.accessSerial.load(std::memory_order_acquire);
+        const auto recordRun = [&](std::uintptr_t next, bool readable, bool writable) {
+            constexpr auto mask = static_cast<std::uintptr_t>(PageBytes - 1);
+            pages.record(cursor & ~mask, (next + mask) & ~mask, readable, writable, generation, access);
+        };
+#ifdef __APPLE__
         auto regionBase = static_cast<mach_vm_address_t>(cursor);
         mach_vm_size_t regionSize = 0;
         vm_region_basic_info_data_64_t info{};
@@ -613,6 +620,7 @@ bool describePages(std::uintptr_t address, std::size_t bytes, Emit&& emit) {
         if (result != KERN_SUCCESS || regionSize == 0) return false;
         if (regionBase > cursor) {
             const auto gapEnd = std::min<std::uintptr_t>(end, regionBase);
+            recordRun(gapEnd, false, false);
             if (!emit(PageRun{cursor, gapEnd, false, false})) return true;
             cursor = gapEnd;
             continue;
@@ -626,15 +634,10 @@ bool describePages(std::uintptr_t address, std::size_t bytes, Emit&& emit) {
             readable = (logical & PROT_READ) != 0;
             writable = readable && (logical & PROT_WRITE) != 0;
         }
+        recordRun(next, readable, writable);
         if (!emit(PageRun{cursor, next, readable, writable})) return true;
         cursor = next;
 #else
-        const auto generation = GuestAllocations::GuestAllocationsGeneration_nid_postfix();
-        const auto access = pages.accessSerial.load(std::memory_order_acquire);
-        const auto recordRun = [&](std::uintptr_t next, bool readable, bool writable) {
-            constexpr auto mask = static_cast<std::uintptr_t>(PageBytes - 1);
-            pages.record(cursor & ~mask, (next + mask) & ~mask, readable, writable, generation, access);
-        };
         if (const int fd = HostMapping::QueryFd(); fd >= 0) {
             procmap_query query{};
             query.size = sizeof(query);
@@ -696,6 +699,7 @@ bool describePages(std::uintptr_t address, std::size_t bytes, Emit&& emit) {
             static_cast<void>(emit(PageRun{cursor, end, false, false}));
             return true;
         }
+#endif
 #endif
     }
     return true;
