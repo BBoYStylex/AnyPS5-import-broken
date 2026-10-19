@@ -252,6 +252,26 @@ void gcnTilingTests() {
         array.mipCount = 1u;
         array.lastLevel = 0u;
         Require(!DescribeSurface(array).levelMajor, "a single-level PS4 array is slice-major");
+        auto volume = array;
+        volume.dimension = TextureDimension::k3D;
+        volume.depthOrLastArray = 3u;
+        volume.mipCount = 3u;
+        volume.lastLevel = 2u;
+        const auto volumeGeometry = DescribeSurface(volume);
+        Require(volumeGeometry.levelMajor && volumeGeometry.layers == 4u && volumeGeometry.imageDepth == 4u && volumeGeometry.imageLayers == 1u, "a PS4 volume is not one image of four slices");
+        Require(volumeGeometry.mips[1].tiledOffset == 4096u && volumeGeometry.mips[2].tiledOffset == 4608u && volumeGeometry.guestBytes == 4864u, "PS4 volume levels do not halve their slices");
+        Require(volumeGeometry.GuestOffset(1u, volumeGeometry.mips[1]) == 4352u, "PS4 slice of a volume level is misplaced");
+        Require(volumeGeometry.HasLayer(1u, 1u) && !volumeGeometry.HasLayer(1u, 2u) && volumeGeometry.HasLayer(2u, 0u) && !volumeGeometry.HasLayer(2u, 1u), "PS4 volume levels keep slices they do not have");
+        volume.mipCount = 1u;
+        volume.lastLevel = 0u;
+        const auto singleLevel = DescribeSurface(volume);
+        Require(!singleLevel.levelMajor && singleLevel.guestBytes == 4096u && singleLevel.layerBytes == 1024u && singleLevel.imageDepth == 4u, "a single-level PS4 volume is not four slices of one level");
+        volume.depthOrLastArray = 5u;
+        volume.mipCount = 2u;
+        volume.lastLevel = 1u;
+        Require(DescribeSurface(volume).guestBytes == 1024u * 6u + 256u * 3u, "a PS4 volume level does not keep half the slices of the level before");
+        volume.gcnPow2Pad = true;
+        Require(DescribeSurface(volume).guestBytes == 1024u * 6u + 256u * 4u, "a pow2-padded PS4 volume level does not round its slices up to a power of two");
     }
     {
         const auto mips = ComputeGcnMipLayout(TextureTileMode::kGcnDepth2D64, 20u, 2048u, 1152u, 2048u, false, 1u);
