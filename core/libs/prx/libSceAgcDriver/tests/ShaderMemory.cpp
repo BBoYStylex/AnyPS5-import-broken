@@ -4785,7 +4785,7 @@ void verifyPixelRequestSerialization() {
     minimal.context.pixel->layerExported = true;
     minimal.context.pixel->ditheredAlphaToCoverage = true;
     const auto encoded = serializer.Serialize(minimal);
-    require(requestPrefix(encoded, 8u) == "NVNQQSYAAAA=", "new requests did not use serialization version 38");
+    require(requestPrefix(encoded, 8u) == "NVNQQScAAAA=", "new requests did not use serialization version 39");
     auto withBarycentric = minimal;
     withBarycentric.target.fragmentBarycentricBuiltins = true;
     require(serializer.Deserialize(serializer.Serialize(withBarycentric)).request.target.fragmentBarycentricBuiltins && !serializer.Deserialize(encoded).request.target.fragmentBarycentricBuiltins, "barycentric built-ins were lost in serialization");
@@ -4906,7 +4906,7 @@ void verifyPixelRequestSerialization() {
     for (std::size_t bytes = 0; bytes < 45u; ++bytes) {
         expectFailure([&] { static_cast<void>(serializer.Deserialize(requestPrefix(encoded, mappingOffset + bytes))); }, "truncated data", "a truncated pixel mapping, packing, dual-source, alpha-to-coverage, stencil reference export flag, primitive class, layer export, dither or front-face flag, quad pixel mask or quad sample mask was accepted");
     }
-    for (const auto unsupported : {"NVNQQQAAAAA=", "NVNQQScAAAA="}) {
+    for (const auto unsupported : {"NVNQQQAAAAA=", "NVNQQSgAAAA="}) {
         expectFailure([&] { static_cast<void>(serializer.Deserialize(unsupported)); }, "serialization version", "an unsupported request version was accepted");
     }
     static constexpr std::string_view version18Request{
@@ -5043,7 +5043,7 @@ void verifyVertexInfoVersion19() {
     require(allBitsOffset == flagOffset + 2u, "the front-face all-bits flag does not follow the dithered coverage flag");
     require(blendOffset == allBitsOffset + 18u, "the reversed-order blend code is not serialized after the front-face all-bits flag, quad pixel mask and quad sample masks");
     constexpr std::size_t sampleMaskBytes = 16u;
-    constexpr std::size_t iterationBytes = 34u;
+    constexpr std::size_t iterationBytes = 35u;
     auto maskedPixel = pixel;
     maskedPixel.context.pixel->quadPixelMask = 0x2u;
     const auto maskedBytes = decodeBase64(serializer.Serialize(maskedPixel));
@@ -5075,6 +5075,27 @@ void verifyVertexInfoVersion19() {
     auto version29 = sampledBytes;
     version29.resize(version29.size() - 5u);
     version29.erase(version29.begin() + static_cast<std::ptrdiff_t>(maskOffset + 1u + sampleMaskBytes), version29.begin() + static_cast<std::ptrdiff_t>(maskOffset + 1u + sampleMaskBytes + 4u + iterationBytes));
+    auto version36 = sampledBytes;
+    version36.resize(version36.size() - 2u);
+    version36.erase(version36.begin() + static_cast<std::ptrdiff_t>(maskOffset + 1u + sampleMaskBytes + 4u + iterationBytes - 1u));
+    version36[4] = 36u;
+    const auto replay36 = serializer.Deserialize(encodeBase64(version36));
+    require(replay36.request.context.pixel.has_value() && !replay36.request.context.pixel->stencilOperationValueExport && decodeBase64(serializer.Serialize(replay36.request)) == sampledBytes, "a version 36 request read a stencil operation value export or misread the fields after the sample locations");
+    auto stencilPixel = sampledPixel;
+    stencilPixel.context.pixel->stencilOperationValueExport = true;
+    auto version37 = decodeBase64(serializer.Serialize(stencilPixel));
+    version37.resize(version37.size() - 2u);
+    version37[4] = 37u;
+    const auto replay37 = serializer.Deserialize(encodeBase64(version37));
+    require(replay37.request.context.pixel.has_value() && replay37.request.context.pixel->stencilOperationValueExport && !replay37.request.target.fragmentBarycentricBuiltins && !replay37.request.target.fusedExactArithmetic, "a version 37 stencil export request was not preserved");
+    auto legacy38 = sampledPixel;
+    legacy38.target.fragmentBarycentricBuiltins = true;
+    legacy38.target.fusedExactArithmetic = true;
+    auto version38 = decodeBase64(serializer.Serialize(legacy38));
+    version38.erase(version38.begin() + static_cast<std::ptrdiff_t>(maskOffset + 1u + sampleMaskBytes + 4u + iterationBytes - 1u));
+    version38[4] = 38u;
+    const auto replay38 = serializer.Deserialize(encodeBase64(version38));
+    require(replay38.request.context.pixel.has_value() && !replay38.request.context.pixel->stencilOperationValueExport && replay38.request.target.fragmentBarycentricBuiltins && replay38.request.target.fusedExactArithmetic, "a version 38 macOS request lost its target flags");
     version29[4] = 29u;
     const auto replay29 = serializer.Deserialize(encodeBase64(version29));
     require(replay29.request.context.pixel.has_value() && replay29.request.context.pixel->quadSampleMask == std::array<std::uint16_t, 4>{0x1u, 0x2u, 0x4u, 0x8u} && replay29.request.context.pixel->reversedBlend == 0u && decodeBase64(serializer.Serialize(replay29.request)) == sampledBytes, "a version 29 request read a reversed-order blend code or misread the fields after the quad sample masks");
