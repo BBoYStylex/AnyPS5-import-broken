@@ -272,7 +272,7 @@ int APS5_VABI wcsrtombs_s_nid_postfix(std::size_t* result, char* destination, st
 int APS5_VABI _Cnd_init_nid_postfix(void** handle);
 int SignalCondition_nid_no_patch(void** handle);
 [[noreturn]] void ThrowCppError_nid_no_patch(int code);
-[[noreturn]] void APS5_VABI _ZSt14_Throw_C_errori_nid_postfix(int code);
+void APS5_VABI _ZSt14_Throw_C_errori_nid_postfix(int code);
 }
 
 static void RequireThrd(int result) {
