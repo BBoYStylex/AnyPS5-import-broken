@@ -70,6 +70,10 @@ static int RenamePath_nid_no_patch(const std::filesystem::path& source, const st
         error.clear();
         sameFile = fs::equivalent(source, destination, error);
         if (error == std::errc::no_such_file_or_directory) error.clear();
+#ifdef __APPLE__
+        // libc++ reports not_supported, not ENOENT, when a path does not resolve (e.g. a dangling symlink); it cannot be the same file.
+        if (error == std::errc::not_supported) error.clear();
+#endif
         if (error) return FilesystemError(error);
         if (!sameFile && sourceIsDirectory && !destinationIsDirectory) return GuestEnotdir;
         if (!sameFile && !sourceIsDirectory && destinationIsDirectory) return GuestEisdir;
