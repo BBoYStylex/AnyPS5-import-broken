@@ -98,6 +98,16 @@ int ConnectError() {
 #endif
     return NativeError();
 }
+#ifdef __APPLE__
+// macOS FIONREAD on a datagram socket counts the queued address records too (35 for one 19-byte datagram);
+// SO_NREAD gives the next datagram's data size, as the console and Linux report.
+void QueuedDatagramBytes(NativeSocket native, int type, int& count) {
+    if (type != 2) return;
+    int next = 0;
+    socklen_t length = sizeof(next);
+    if (getsockopt(native, SOL_SOCKET, SO_NREAD, &next, &length) == 0) count = next;
+}
+#endif
 int SendError(int type) {
 #ifdef _WIN32
     if (type == 2 && WSAGetLastError() == WSAENOTCONN) return 39;
@@ -747,7 +757,14 @@ int GuestSockets::Stat(int descriptor, FileStat* status) {
     if (ioctlsocket(socket->value, FIONREAD, &count) == 0) available = static_cast<std::int64_t>(count);
 #else
     int count = 0;
+#ifdef __APPLE__
+    if (::ioctl(socket->value, FIONREAD, &count) == 0) {
+        QueuedDatagramBytes(socket->value, socket->type, count);
+        available = count;
+    }
+#else
     if (::ioctl(socket->value, FIONREAD, &count) == 0) available = count;
+#endif
 #endif
     int sendBuffer = 0;
     socklen_t length = sizeof(sendBuffer);
@@ -821,7 +838,14 @@ bool GuestSockets::Ready(int descriptor, bool write, std::int64_t* data, bool* e
         if (ioctlsocket(socket->value, FIONREAD, &available) == 0) *data = static_cast<std::int64_t>(available);
 #else
         int available = 0;
+#ifdef __APPLE__
+        if (::ioctl(socket->value, FIONREAD, &available) == 0) {
+            QueuedDatagramBytes(socket->value, socket->type, available);
+            *data = available;
+        }
+#else
         if (::ioctl(socket->value, FIONREAD, &available) == 0) *data = available;
+#endif
 #endif
     }
     return true;
@@ -1239,6 +1263,9 @@ int APS5_VABI ioctl_nid_postfix(int descriptor, std::uint64_t request, void* arg
 #else
     int nativeValue = static_cast<int>(value);
     const auto result = ::ioctl(socket->value, request == 0x8004667e ? FIONBIO : FIONREAD, &nativeValue);
+#ifdef __APPLE__
+    if (result == 0 && request == 0x4004667f) QueuedDatagramBytes(socket->value, socket->type, nativeValue);
+#endif
     value = static_cast<unsigned long>(nativeValue);
 #endif
     if (result) return Fail(NativeError());
@@ -1268,6 +1295,31 @@ std::int64_t APS5_VABI sendto_nid_postfix(int descriptor, const void* buffer, st
         if (native.ss_family != (socket->family == 2 ? AF_INET : AF_INET6)) return Fail(47);
         result = static_cast<int>(::sendto(socket->value, static_cast<const char*>(buffer), static_cast<int>(length), SocketSendFlags(*socket, flags),
             reinterpret_cast<sockaddr*>(&native), size));
+#ifdef __APPLE__
+        // macOS refuses an address on a connected datagram socket (EISCONN), which the console accepts; when the
+        // address is the connected peer, the datagram goes to the same place without it.
+        if (result < 0 && errno == EISCONN) {
+            sockaddr_storage peer{};
+            socklen_t peerSize = sizeof(peer);
+            bool samePeer = ::getpeername(socket->value, reinterpret_cast<sockaddr*>(&peer), &peerSize) == 0 && peer.ss_family == native.ss_family;
+            if (samePeer && native.ss_family == AF_INET) {
+                const auto& to = reinterpret_cast<const sockaddr_in&>(native);
+                const auto& connected = reinterpret_cast<const sockaddr_in&>(peer);
+                samePeer = to.sin_port == connected.sin_port && to.sin_addr.s_addr == connected.sin_addr.s_addr;
+            } else if (samePeer && native.ss_family == AF_INET6) {
+                const auto& to = reinterpret_cast<const sockaddr_in6&>(native);
+                const auto& connected = reinterpret_cast<const sockaddr_in6&>(peer);
+                samePeer = to.sin6_port == connected.sin6_port && std::memcmp(&to.sin6_addr, &connected.sin6_addr, sizeof(to.sin6_addr)) == 0;
+            } else {
+                samePeer = false;
+            }
+            if (samePeer) {
+                result = static_cast<int>(::send(socket->value, static_cast<const char*>(buffer), static_cast<int>(length), SocketSendFlags(*socket, flags)));
+            } else {
+                errno = EISCONN;
+            }
+        }
+#endif
     }
     return result < 0 ? Fail(SendError(socket->type)) : result;
 }
