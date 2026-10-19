@@ -111,6 +111,9 @@ void QueuedDatagramBytes(NativeSocket native, int type, int& count) {
 int SendError(int type) {
 #ifdef _WIN32
     if (type == 2 && WSAGetLastError() == WSAENOTCONN) return 39;
+#elif defined(__APPLE__)
+    // After the peer closes, macOS can fail the next stream send with ECONNRESET where FreeBSD reports EPIPE.
+    if (type == 1 && errno == ECONNRESET) return 32;
 #else
     static_cast<void>(type);
 #endif
