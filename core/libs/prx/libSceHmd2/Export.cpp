@@ -246,7 +246,8 @@ std::int32_t APS5_VABI sceHmd2ReprojectionSetTiming(std::int32_t timing) {
 }
 
 int APS5_VABI sceHmd2ReprojectionTerminate() {
-    NotImplemented_nid_no_patch(__func__);
+    std::lock_guard lock(reprojectionMutex);
+    reprojectionState = nullptr;
     return 0;
 }
 

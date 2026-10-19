@@ -142,6 +142,14 @@ void TestReprojection() {
     const Hmd2::SizeAlign cleared = sceHmd2ReprojectionQueryBufferSizeAlign();
     Require(cleared.size == Hmd2::ReprojectionBufferSize && cleared.align == Hmd2::ReprojectionBufferAlign,
             "clearing the positional setting did not restore the work-size answer");
+    Require(sceHmd2ReprojectionTerminate() == 0, "terminate did not succeed");
+    Require(sceHmd2ReprojectionSetTiming(3000) == Hmd2::ReprojectionNotInitialized,
+            "setting the timing after terminate");
+    Require(sceHmd2ReprojectionEnableVrMode(Hmd2::OutputMode89_91Hz) == Hmd2::ReprojectionNotInitialized,
+            "enabling VR mode after terminate");
+    Require(sceHmd2ReprojectionInitialize(&initParam) == 0, "re-initialization after terminate");
+    Require(state->outputMode == 0 && state->timingUs == Hmd2::ReprojectionTimingDefault,
+            "the re-initialized state carries the default timing");
 }
 
 }

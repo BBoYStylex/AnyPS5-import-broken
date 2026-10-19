@@ -119,6 +119,7 @@ Hmd2::SizeAlign APS5_VABI sceHmd2ReprojectionQueryBufferSizeAlign();
 std::int32_t APS5_VABI sceHmd2ReprojectionSetAllowPositionalReprojection(std::int32_t mode, std::uint64_t param, std::int32_t flags);
 std::int32_t APS5_VABI sceHmd2ReprojectionSetTiming(std::int32_t timing);
 std::int32_t APS5_VABI sceHmd2ReprojectionEnableVrMode(std::uint64_t outputMode);
+std::int32_t APS5_VABI sceHmd2ReprojectionTerminate();
 }
 
 #endif
