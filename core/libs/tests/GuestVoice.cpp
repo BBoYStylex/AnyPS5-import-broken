@@ -66,7 +66,7 @@ int main() {
     Require(resourceInfo.max_ports == 64);
     Require(sceVoiceEnableChat() == 0);
     Require(sceVoiceDisableChat() == 0);
-    const auto input = CreatePort(2, 0.5f);
+    const auto input = CreatePort(1, 0.5f);
     const auto output = CreatePort(3, 0.25f);
     Require(sceVoiceConnectIPortToOPort(input, output) == 0);
     Require(sceVoiceSetMuteFlag(output, true) == 0);

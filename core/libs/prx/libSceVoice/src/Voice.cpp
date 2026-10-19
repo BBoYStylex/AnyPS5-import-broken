@@ -52,6 +52,7 @@ struct Port {
 std::mutex g_lock;
 bool g_initialised = false;
 bool g_started = false;
+bool g_chatEnabled = false;
 std::map<std::uint32_t, Port> g_ports;
 std::uint32_t g_nextPort = 1;
 
@@ -94,6 +95,7 @@ int APS5_VABI sceVoiceInit(VoiceInitParam* param, std::int32_t version) {
     std::lock_guard lock(g_lock);
     g_initialised = true;
     g_started = false;
+    g_chatEnabled = false;
     g_ports.clear();
     g_nextPort = 1;
     return 0;
@@ -104,7 +106,22 @@ int APS5_VABI sceVoiceEnd_nid_postfix() {
     if (!g_initialised) return SCE_VOICE_ERROR_NOT_INIT;
     g_initialised = false;
     g_started = false;
+    g_chatEnabled = false;
     g_ports.clear();
+    return 0;
+}
+
+int APS5_VABI sceVoiceEnableChat() {
+    std::lock_guard lock(g_lock);
+    if (!g_initialised) throw std::logic_error("sceVoiceEnableChat: library not initialized");
+    g_chatEnabled = true;
+    return 0;
+}
+
+int APS5_VABI sceVoiceDisableChat() {
+    std::lock_guard lock(g_lock);
+    if (!g_initialised) throw std::logic_error("sceVoiceDisableChat: library not initialized");
+    g_chatEnabled = false;
     return 0;
 }
 
