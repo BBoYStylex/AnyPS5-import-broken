@@ -5,6 +5,8 @@
 #include <cstdint>
 #include <cstddef>
 #include <cstring>
+#include <stdexcept>
+#include <string>
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
 
@@ -57,7 +59,7 @@ uint32_t* APS5_VABI sceAgcDcbSetWorkloadsActive(CommandBuffer* buf, uint32_t str
 
 uint32_t* APS5_VABI sceAgcDcbSetWorkloadStreamInactive(CommandBuffer* buf, uint32_t streamId) {
  if (buf == nullptr || !AgcDriverWorkloadStreamRegistered_nid_postfix(streamId)) return nullptr;
- NotImplemented_nid_no_patch(__func__);
+ throw std::runtime_error(std::string(__func__) + ": active workload stream");
  return nullptr;
 }
 

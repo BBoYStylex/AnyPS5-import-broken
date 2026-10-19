@@ -14,7 +14,6 @@ extern "C" {
 
 // unknown signature
 void* APS5_VABI sceAgcDcbAtomicGds_0900(void) {
- NotImplemented_nid_no_patch(__func__);
  return nullptr;
 }
 
