@@ -1666,6 +1666,45 @@ int APS5_VABI poll_nid_postfix(GuestPollDescriptor* descriptors, std::uint32_t c
             return ready;
         }
     }
+#elif defined(__APPLE__)
+    // macOS poll() neither reports POLLPRI for pending TCP urgent data nor wakes for it. SIOCATMARK reports it without
+    // consuming it (a MSG_OOB | MSG_PEEK on macOS uses the urgent byte up, so the guest's recv(MSG_OOB) would fail),
+    // but only once the urgent byte is the next one to read. While a socket waits for it, the wait is cut into short
+    // slices and re-checked.
+    const auto urgentPending = [&](std::size_t i) {
+        int atMark = 0;
+        return (native[i].events & POLLPRI) && ::ioctl(native[i].fd, SIOCATMARK, &atMark) == 0 && atMark != 0;
+    };
+    bool watchesUrgent = false;
+    for (std::size_t i = 0; i < socketCount; ++i)
+        if (native[i].events & POLLPRI) watchesUrgent = true;
+    const int wait = ready ? 0 : timeout;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(wait < 0 ? 0 : wait);
+    for (;;) {
+        bool urgent = false;
+        for (std::size_t i = 0; i < socketCount; ++i)
+            if (urgentPending(i)) urgent = true;
+        int slice = wait;
+        if (urgent) {
+            slice = 0;
+        } else if (watchesUrgent && wait != 0) {
+            const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now()).count();
+            slice = wait < 0 ? 10 : static_cast<int>(std::clamp<long long>(left, 0, 10));
+        }
+        for (auto& request : native) request.revents = 0;
+        const int result = ::poll(native.data(), static_cast<nfds_t>(native.size()), slice);
+        if (result < 0) return Fail(NativeError());
+        for (std::size_t i = 0; i < socketCount; ++i) {
+            if (urgentPending(i)) {
+                native[i].revents = static_cast<short>(native[i].revents | POLLPRI);
+                urgent = true;
+            }
+        }
+        if (result > 0 || urgent || !watchesUrgent || wait == 0) break;
+        if (wait > 0 && std::chrono::steady_clock::now() >= deadline) break;
+    }
+    for (std::size_t i = 0; i < native.size(); ++i) collect(i, i >= socketCount);
+    return ready;
 #else
     const int wait = ready ? 0 : timeout;
     const int result = ::poll(native.data(), static_cast<nfds_t>(native.size()), wait);
