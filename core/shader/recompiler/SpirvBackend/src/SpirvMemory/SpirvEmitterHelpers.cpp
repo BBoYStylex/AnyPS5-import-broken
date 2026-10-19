@@ -490,6 +490,7 @@ void DefineDescriptors(SpirvEmitterState& state) {
             break;
         case DescriptorBindingKind::BdaPagetable:
             state.bdaPagetableVariable = Define(StorageBufferBlockType(state), "bda_pagetable");
+            state.module.AddAnnotation(spv::OpDecorate, state.bdaPagetableVariable, spv::DecorationNonWritable);
             break;
         case DescriptorBindingKind::FaultBuffer:
             state.faultBufferVariable = Define(StorageBufferBlockType(state), "fault_buffer");
@@ -499,6 +500,7 @@ void DefineDescriptors(SpirvEmitterState& state) {
             break;
         case DescriptorBindingKind::FlattenedSrt:
             state.flattenedSrtVariable = Define(StorageBufferBlockType(state), "flattened_srt");
+            state.module.AddAnnotation(spv::OpDecorate, state.flattenedSrtVariable, spv::DecorationNonWritable);
             break;
         case DescriptorBindingKind::Samplers:
             state.samplerVariable = Define(ArrayType(state.module.Type(spv::OpTypeSampler)), "samplers", spv::StorageClassUniformConstant);
@@ -531,6 +533,7 @@ void DefineDescriptors(SpirvEmitterState& state) {
             break;
         case DescriptorBindingKind::ImageTableMap:
             state.tableMapVariable = Define(StorageBufferBlockType(state), "table_map");
+            state.module.AddAnnotation(spv::OpDecorate, state.tableMapVariable, spv::DecorationNonWritable);
             break;
         default: {
             if (ImageBindingResourceClass(binding.kind) == ImageResourceClass::None) {
