@@ -300,6 +300,7 @@ struct VulkanDevice::State {
     bool fragmentShaderBarycentric = false;
     bool shaderTerminateInvocation = false;
     bool fragmentBarycentricBuiltins = false;
+    bool fusedExactArithmetic = false;
     bool geometryShader = false;
     bool sampleRateShading = false;
     bool storageImageMultisample = false;
@@ -1178,6 +1179,7 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window, bool compileOnly) :
         state->InstanceFunction<PFN_vkGetPhysicalDeviceProperties2>("vkGetPhysicalDeviceProperties2")(selected, &driverProperties);
         state->driverInfo = std::string(driver.driverName) + " " + driver.driverInfo;
         state->individuallyFreeDescriptorSets = driver.driverID == VK_DRIVER_ID_MESA_LLVMPIPE;
+        state->fusedExactArithmetic = driver.driverID == VK_DRIVER_ID_MOLTENVK;
     }
     auto byteFeatures = QueryBdaByteFeatures(selected, state->InstanceFunction<PFN_vkGetPhysicalDeviceFeatures2>("vkGetPhysicalDeviceFeatures2"), availableExtensions);
     auto bdaFeatures = QueryBdaFeatures(selected, state->InstanceFunction<PFN_vkGetPhysicalDeviceFeatures2>("vkGetPhysicalDeviceFeatures2"), availableExtensions);
@@ -3600,6 +3602,7 @@ ShaderRecompiler::SpirvTarget VulkanDevice::buildTarget() const {
     target.float16DenormPreserve = state->float16DenormPreserve;
     target.spannedWaves = state->spannedWaves;
     target.depthRangeRemap = !state->depthRangeUnrestricted;
+    target.fusedExactArithmetic = state->fusedExactArithmetic;
     target.fixedPushSlots = state->graphicsPipelineLibrary;
     target.registrationModules = state->graphicsPipelineLibrary;
     target.robustBufferAccess2 = state->robustBufferAccess2;
