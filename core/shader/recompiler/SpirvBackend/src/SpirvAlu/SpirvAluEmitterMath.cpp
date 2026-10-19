@@ -928,7 +928,14 @@ static std::uint32_t RoundedReciprocal(SpirvEmitterState& state, std::uint32_t v
         const auto residual = Exact(state, EmitExt(state, f32, GLSLstd450Fma, {negated, estimate, one}));
         return Exact(state, EmitExt(state, f32, GLSLstd450Fma, {estimate, residual, estimate}));
     };
-    const auto rounded = refine(refine(approximate));
+    const auto estimate = refine(approximate);
+    const auto residual = Exact(state, EmitExt(state, f32, GLSLstd450Fma, {negated, estimate, one}));
+    const auto bits = Unary(state, spv::OpBitcast, u32, estimate);
+    const auto low = Binary(state, spv::OpFOrdGreaterThan, TypeBool(state), residual, ConstantF32(state, 0u));
+    const auto neighbour = Unary(state, spv::OpBitcast, f32, Select(state, u32, low, Binary(state, spv::OpIAdd, u32, bits, ConstantU32(state, 1u)), Binary(state, spv::OpISub, u32, bits, ConstantU32(state, 1u))));
+    const auto neighbourResidual = Exact(state, EmitExt(state, f32, GLSLstd450Fma, {negated, neighbour, one}));
+    const auto closer = Binary(state, spv::OpFOrdLessThan, TypeBool(state), EmitFAbsValue(state, neighbourResidual), EmitFAbsValue(state, residual));
+    const auto rounded = Select(state, f32, closer, neighbour, estimate);
     const auto normal = [&](std::uint32_t number) {
         const auto exponent = Binary(state, spv::OpBitwiseAnd, u32, Unary(state, spv::OpBitcast, u32, number), ConstantU32(state, 0x7f800000u));
         return Binary(state, spv::OpLogicalAnd, TypeBool(state), Binary(state, spv::OpINotEqual, TypeBool(state), exponent, ConstantU32(state, 0u)), Binary(state, spv::OpINotEqual, TypeBool(state), exponent, ConstantU32(state, 0x7f800000u)));

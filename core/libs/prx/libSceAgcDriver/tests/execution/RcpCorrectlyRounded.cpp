@@ -18,7 +18,8 @@ using AgcDriver::Graphics::Require;
 using ShaderRecompiler::ShaderStage;
 
 constexpr std::uint32_t Threads = 32;
-constexpr std::uint32_t Batches = 256;
+constexpr std::uint32_t Random = 8192;
+constexpr std::uint32_t Batches = (Random + 512u) / Threads;
 alignas(256) std::array<std::uint32_t, Threads> Input{};
 alignas(256) std::array<std::uint32_t, Threads> Output{};
 
@@ -39,6 +40,10 @@ std::string Hex(std::uint32_t value) {
 }
 
 std::uint32_t Sample(std::uint32_t index) {
+    if (index >= Random) {
+        const auto extra = index - Random;
+        return ((extra / 250u) & 1u) << 31u | (2u + extra % 250u) << 23u | 0x7fffffu;
+    }
     auto state = (index + 1u) * 0x9e3779b9u;
     state ^= state >> 15u;
     state *= 0x2c1b3c6du;
