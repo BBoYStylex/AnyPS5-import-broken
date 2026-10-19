@@ -109,6 +109,7 @@ struct ImageTableColumnSnapshot {
     std::uint32_t keys = 0;
     std::uint32_t fault = 0;
     bool outside = false;
+    bool sharedMode = false;
     SharedValues<std::uint32_t> codes;
     SharedValues<DescriptorValue> words;
     SharedValues<std::pair<std::uint64_t, std::uint64_t>> readRanges;
