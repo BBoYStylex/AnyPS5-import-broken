@@ -19,6 +19,7 @@
 #include <array>
 #include <bit>
 #include <chrono>
+#include <condition_variable>
 #include <cmath>
 #include <cstdio>
 #include <cstdint>
@@ -1488,6 +1489,7 @@ struct PendingWrites {
     PendingList textures;
     // Images taken out of `textures` by a FlushPending still storing them (see adjacentPendingUnchanged).
     std::vector<StorageTexture*> flushing;
+    std::condition_variable_any flushingChanged;
 };
 
 PendingWrites& Pending() {
@@ -3641,32 +3643,44 @@ bool StorageTexture::FlushPending(std::uint64_t address, std::size_t bytes, cons
     // The images stay alive across the scan: their last owner may be a batch's kept list, which
     // another thread releases outside the GPU mutex once the batch completed.
     std::vector<std::shared_ptr<StorageTexture>> flush;
-    {
-        auto& pending = Pending();
-        std::lock_guard lock(pending.mutex);
-        const auto* exempt = refreshing;
-        for (auto it = pending.textures.MayOverlap(address, bytes) ? pending.textures.begin() : pending.textures.end(); it != pending.textures.end();) {
-            auto* texture = *it;
-            if (texture != except && texture != exempt && texture->overlaps(address, bytes)) {
-                if (!texture->pendingUnitInside(address, bytes)) {
-                    pretestSkipped.fetch_add(1, std::memory_order_relaxed);
+    bool waitForFlush = false;
+    for (;;) {
+        {
+            auto& pending = Pending();
+            std::lock_guard lock(pending.mutex);
+            const auto* exempt = refreshing;
+            for (auto it = pending.textures.MayOverlap(address, bytes) ? pending.textures.begin() : pending.textures.end(); it != pending.textures.end();) {
+                auto* texture = *it;
+                if (texture != except && texture != exempt && texture->overlaps(address, bytes)) {
+                    if (!texture->pendingUnitInside(address, bytes)) {
+                        pretestSkipped.fetch_add(1, std::memory_order_relaxed);
+                        ++it;
+                        continue;
+                    }
+                    texture->dirty = false;
+                    if (const auto skips = texture->hookSkips.exchange(0, std::memory_order_relaxed); skips != 0 && texture->skippedResultsInside(address, bytes)) {
+                        flushedAfterSkip.fetch_add(1, std::memory_order_relaxed);
+                        if (PublishReasonFor(reason) == PublishReason::Hook && texture->hookSkipSite.load(std::memory_order_relaxed) == static_cast<std::uint8_t>(GuestMemory::CurrentReadSite())) flushedAfterSkipSameSite.fetch_add(1, std::memory_order_relaxed);
+                    }
+                    if (auto alive = texture->weak_from_this().lock()) flush.push_back(std::move(alive));
+                    it = pending.textures.erase(it);
+                } else {
                     ++it;
-                    continue;
                 }
-                texture->dirty = false;
-                if (const auto skips = texture->hookSkips.exchange(0, std::memory_order_relaxed); skips != 0 && texture->skippedResultsInside(address, bytes)) {
-                    flushedAfterSkip.fetch_add(1, std::memory_order_relaxed);
-                    if (PublishReasonFor(reason) == PublishReason::Hook && texture->hookSkipSite.load(std::memory_order_relaxed) == static_cast<std::uint8_t>(GuestMemory::CurrentReadSite())) flushedAfterSkipSameSite.fetch_add(1, std::memory_order_relaxed);
-                }
-                if (auto alive = texture->weak_from_this().lock()) flush.push_back(std::move(alive));
-                it = pending.textures.erase(it);
-            } else {
-                ++it;
+            }
+            for (const auto& texture : flush) pending.flushing.push_back(texture.get());
+            if (!flush.empty()) BumpPendingSerial();
+            if (flush.empty() && !GuestMemory::GpuMutex().HeldByThisThread()) {
+                waitForFlush = std::any_of(pending.flushing.begin(), pending.flushing.end(), [&](const auto* texture) { return texture->overlaps(address, bytes); });
             }
         }
-        // Still pending for the adjacency rule of writeBack until each one is stored.
-        for (const auto& texture : flush) pending.flushing.push_back(texture.get());
-        if (!flush.empty()) BumpPendingSerial();
+        if (!flush.empty() || !waitForFlush) break;
+        auto& pending = Pending();
+        std::unique_lock lock(pending.mutex);
+        pending.flushingChanged.wait(lock, [&] {
+            return std::none_of(pending.flushing.begin(), pending.flushing.end(), [&](const auto* texture) { return texture->overlaps(address, bytes); });
+        });
+        waitForFlush = false;
     }
     if (flush.empty()) {
         // Units shadowed over the range (another image's results retiled into the import's unit
@@ -3679,9 +3693,12 @@ bool StorageTexture::FlushPending(std::uint64_t address, std::size_t bytes, cons
         const std::vector<std::shared_ptr<StorageTexture>>& flush;
         ~Unregister() {
             auto& pending = Pending();
-            std::lock_guard lock(pending.mutex);
-            for (const auto& texture : flush) std::erase(pending.flushing, texture.get());
-            BumpPendingSerial();
+            {
+                std::lock_guard lock(pending.mutex);
+                for (const auto& texture : flush) std::erase(pending.flushing, texture.get());
+                BumpPendingSerial();
+            }
+            pending.flushingChanged.notify_all();
         }
     } unregister{flush};
     // Debug aid: APS5_TRACE_FLUSH names what forces pending results to guest memory.
