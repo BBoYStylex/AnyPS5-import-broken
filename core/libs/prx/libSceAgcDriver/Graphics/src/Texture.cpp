@@ -1441,7 +1441,7 @@ public:
         return !textures.empty() && Overlaps(ranges, address, bytes);
     }
     bool SurelyClear(std::uint64_t address, std::size_t bytes) const {
-        const auto current = published.load(std::memory_order_acquire);
+        const auto current = LoadPublished();
         return current != nullptr && current->version == changes.load(std::memory_order_acquire) && !Overlaps(current->ranges, address, bytes);
     }
 
@@ -1474,14 +1474,25 @@ private:
         }
         ranges.resize(merged);
         indexed = version;
-        published.store(std::make_shared<const Snapshot>(Snapshot{version, ranges}), std::memory_order_release);
+        StorePublished(std::make_shared<const Snapshot>(Snapshot{version, ranges}));
     }
+#ifdef __cpp_lib_atomic_shared_ptr
+    std::shared_ptr<const Snapshot> LoadPublished() const { return published.load(std::memory_order_acquire); }
+    void StorePublished(std::shared_ptr<const Snapshot> snapshot) { published.store(std::move(snapshot), std::memory_order_release); }
+#else
+    std::shared_ptr<const Snapshot> LoadPublished() const { return std::atomic_load_explicit(&published, std::memory_order_acquire); }
+    void StorePublished(std::shared_ptr<const Snapshot> snapshot) { std::atomic_store_explicit(&published, std::move(snapshot), std::memory_order_release); }
+#endif
     std::vector<StorageTexture*> textures;
     Ranges ranges;
     std::uint64_t version = 0;
     std::uint64_t indexed = ~std::uint64_t{0};
     std::atomic<std::uint64_t> changes{0};
+#ifdef __cpp_lib_atomic_shared_ptr
     std::atomic<std::shared_ptr<const Snapshot>> published;
+#else
+    std::shared_ptr<const Snapshot> published;
+#endif
 };
 
 // Storage images whose results have not reached guest memory yet.
