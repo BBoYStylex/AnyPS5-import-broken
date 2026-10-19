@@ -87,6 +87,28 @@ void SopkComparesAndAdd() {
     Check(Decode(cmpkLe).op == RdnaOpcode::SCmpLeU32, "s_cmpk_le_u32 did not decode as its RDNA opcode");
 }
 
+constexpr std::uint32_t Smrd(std::uint32_t opcode, bool immediate, std::uint32_t offset) {
+    return (0x18u << 27u) | (opcode << 22u) | (8u << 15u) | (2u << 9u) | (immediate ? 1u << 8u : 0u) | offset;
+}
+
+void SmrdLiteralOffset() {
+    const std::array<std::uint32_t, 2> literal{Smrd(10u, false, 0xffu), 0x40u};
+    const auto instruction = Decode(literal);
+    Check(instruction.op == RdnaOpcode::SBufferLoadDwordx4, "s_buffer_load_dwordx4 with a literal offset did not decode as its RDNA opcode");
+    Check(instruction.wordCount == 2u, "a GCN SMRD with a literal offset is not two words");
+    Check(instruction.memoryOffset == 0x100, "an SMRD literal offset is not counted in dwords");
+    Check(instruction.source1.kind == RdnaOperandKind::Null, "an SMRD literal offset added an SGPR offset");
+    const std::array<std::uint32_t, 1> immediate{Smrd(10u, true, 0x10u)};
+    const auto immediateInstruction = Decode(immediate);
+    Check(immediateInstruction.wordCount == 1u && immediateInstruction.memoryOffset == 0x40, "an SMRD immediate offset changed");
+    const std::array<std::uint32_t, 2> largest{Smrd(10u, false, 0xffu), 0x3ffffu};
+    Check(Decode(largest).memoryOffset == 0xffffc, "the largest SMRD literal offset RDNA encodes was refused");
+    const std::array<std::uint32_t, 2> beyond{Smrd(10u, false, 0xffu), 0x40000u};
+    Check(Throws(beyond), "an SMRD literal offset past the RDNA offset range was accepted");
+    const std::array<std::uint32_t, 1> truncated{Smrd(10u, false, 0xffu)};
+    Check(Throws(truncated), "an SMRD literal offset past the end of the code was accepted");
+}
+
 }
 
 int main() {
@@ -95,6 +117,7 @@ int main() {
         MtbufKeepsItsFormat();
         RsqClampIsTagged();
         SopkComparesAndAdd();
+        SmrdLiteralOffset();
     } catch (const std::exception& error) {
         std::fprintf(stderr, "%s\n", error.what());
         return 1;
