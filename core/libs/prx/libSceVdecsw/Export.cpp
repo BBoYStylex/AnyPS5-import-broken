@@ -397,8 +397,7 @@ int APS5_VABI sceVdecswGetAvcPictureInfo(const OutputInfo* output, AvcPictureInf
 int APS5_VABI sceVdecswGetHevcPictureInfo(const OutputInfo* output, void* picture) {
     (void)output;
     (void)picture;
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    throw std::runtime_error("sceVdecswGetHevcPictureInfo: HEVC picture info is not supported");
 }
 
 int APS5_VABI sceVdecswFinalizeDecodeSequence(std::uint64_t handle) {
