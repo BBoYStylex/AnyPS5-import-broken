@@ -24,6 +24,7 @@
 #include <dlfcn.h>
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
+#include <mach-o/getsect.h>
 #include <mach-o/loader.h>
 #else
 #include <link.h>
@@ -78,7 +79,7 @@ std::uint64_t PageSpan(std::uint64_t address, std::uint64_t size) {
 
 #if defined(__APPLE__)
 // The macOS relinker emits guest ELF segments as __ELF<n> Mach-O segments; system libraries are plain dylibs.
-// There are no ELF program headers, so TLS, eh_frame and DT_INIT/DT_FINI are not reported on macOS.
+// There are no ELF program headers, so TLS, eh_frame_hdr and DT_INIT/DT_FINI are not reported on macOS.
 struct MachImage {
     const mach_header_64* header;
     std::uintptr_t slide;
@@ -175,6 +176,12 @@ bool Fill(std::uintptr_t address, TInfo& info) {
     if constexpr (Extended<TInfo>) {
         info.id = ModuleIdForImage_nid_no_patch(ImageHandle(*image));
         info.ref_count = 1;
+        // ld64 has no eh_frame_hdr; the frames are the __TEXT,__eh_frame section, which carries no terminator.
+        unsigned long size = 0;
+        if (const auto* frames = getsectiondata(image->header, SEG_TEXT, "__eh_frame", &size); frames && size != 0) {
+            info.eh_frame_addr = reinterpret_cast<std::uintptr_t>(frames);
+            info.eh_frame_size = ToU32(size, "eh_frame size");
+        }
     }
     return true;
 }
