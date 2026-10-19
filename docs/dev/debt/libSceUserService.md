@@ -538,3 +538,4 @@
 - [sceUserServiceGetGlsCameraEffect](../../../core/libs/prx/libSceUserService/Export.cpp) (libSceUserService) - unknown signature
 - [sceUserServiceGetPbtcSundayHoursEnd](../../../core/libs/prx/libSceUserService/Export.cpp) (libSceUserService) - unknown signature
 - [sceUserServiceGetIsSpartacusEnabled](../../../core/libs/prx/libSceUserService/Export.cpp) (libSceUserService) - unknown signature
+- [sceUserServiceGetAccessibilityKeyremapEnable, sceUserServiceGetAccessibilityZoom](../../../core/libs/prx/libSceUserService/Export.cpp) (libSceUserService) - declared without parameters as throwing stubs calling `NotImplemented_nid_no_patch`. Their signatures and values remain unverified on hardware
