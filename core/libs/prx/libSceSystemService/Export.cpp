@@ -397,6 +397,16 @@ int APS5_VABI sceSystemServiceShowControllerSettings(int user_id) {
     return SYSTEM_SERVICE_OK;
 }
 
+int APS5_VABI sceSystemServiceAddLocalProcessForPsmKit(const char*, const char* const*, const void*) {
+ NotImplemented_nid_no_patch(__func__);
+ return 0;
+}
+
+int APS5_VABI sceSystemServiceKillLocalProcessForPsmKit(int) {
+ NotImplemented_nid_no_patch(__func__);
+ return 0;
+}
+
 // No system music player runs beside the game, so there is nothing to pause or resume.
 int APS5_VABI sceSystemServiceReenableMusicPlayer(void) {
     return SYSTEM_SERVICE_OK;
