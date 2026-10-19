@@ -19,6 +19,8 @@
 #include <dlfcn.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#elif defined(__APPLE__)
+#include "prx/libc/include/specifics/linux/ElfTypes.hpp"
 #endif
 
 extern "C" {
@@ -50,6 +52,9 @@ alignas(16) std::array<std::byte, 0x38> libc{};
 alignas(16) std::array<std::byte, 0x78> replacement{};
 #ifdef _WIN32
 [[gnu::section(".proctst"), gnu::used]] alignas(4) std::uint32_t processParameterMetadata[2]{};
+#elif defined(__APPLE__)
+// The relinker's per-image metadata that macOS dl_iterate_phdr reads; filled in by installProcessParameters.
+[[gnu::section("__APS5DATA,__meta"), gnu::used]] alignas(8) std::array<std::byte, 0x60 + 2 * sizeof(Elf64_Phdr)> processMetadata{};
 #endif
 std::size_t lastSize = 0;
 std::size_t lastAlignment = 0;
@@ -114,6 +119,24 @@ void installProcessParameters() {
         return 1;
     }, &installed);
     require(installed);
+#elif defined(__APPLE__)
+    // Version 2 metadata with load bias 0, then a PT_LOAD and a process-parameter header covering the parameters.
+    const std::uint64_t version = 2;
+    const std::uint64_t loadBias = 0;
+    const std::uint64_t count = 2;
+    std::memcpy(processMetadata.data(), &version, sizeof(version));
+    std::memcpy(processMetadata.data() + 0x08, &loadBias, sizeof(loadBias));
+    std::memcpy(processMetadata.data() + 0x58, &count, sizeof(count));
+    Elf64_Phdr headers[2]{};
+    headers[0].p_type = PT_LOAD;
+    headers[1].p_type = 0x61000001;
+    for (auto& header : headers) {
+        header.p_vaddr = reinterpret_cast<std::uintptr_t>(process.data());
+        header.p_paddr = header.p_vaddr;
+        header.p_filesz = process.size();
+        header.p_memsz = process.size();
+    }
+    std::memcpy(processMetadata.data() + 0x60, headers, sizeof(headers));
 #endif
 }
 
