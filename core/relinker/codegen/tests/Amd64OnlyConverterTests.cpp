@@ -1424,7 +1424,100 @@ bool sameLane(const float expected, const float actual) {
     return a == b;
 }
 
+inline std::uint32_t readMxcsr() {
+    std::uint32_t value = 0;
+    asm volatile("stmxcsr %0" : "=m"(value) :: "memory");
+    return value;
+}
+inline void writeMxcsr(std::uint32_t value) {
+    asm volatile("ldmxcsr %0" :: "m"(value) : "memory");
+}
+struct MxcsrGuard {
+    std::uint32_t saved;
+    MxcsrGuard() : saved(readMxcsr()) {}
+    ~MxcsrGuard() { writeMxcsr(saved); }
+};
+struct ReciprocalCsrRun {
+    std::array<std::uint64_t, 2> out;
+    std::uint32_t csr;
+};
+ReciprocalCsrRun runReciprocalCsrStub(const Bytes& site, const std::uint64_t (&destination)[2], const std::uint64_t (&source)[2], std::uint32_t preset) {
+    writeMxcsr(preset);
+    const auto out = runRegisterFormStub(site, destination, source);
+    const std::uint32_t observed = readMxcsr();
+    return {out, observed};
+}
+void reciprocalMxcsrPreservation() {
+    MxcsrGuard guard;
+    const std::uint32_t laneBits[4] = {0x00000000u, 0x80000000u, 0x40400000u, 0xbf800000u};
+    std::uint64_t source[2] = {};
+    std::uint64_t destination[2] = {0x1111111111111111ull, 0x2222222222222222ull};
+    std::memcpy(source, laneBits, sizeof(source));
+    for (const bool squareRoot : {true, false}) {
+        const std::uint8_t opcode = squareRoot ? 0x52 : 0x53;
+        for (const bool vex : {false, true}) {
+            const Bytes site = vex ? Bytes{0xC5, 0xF8, opcode, 0xD5} : Bytes{0x0F, opcode, 0xD5};
+            const auto run = runReciprocalCsrStub(site, destination, source, 0x1f80u);
+            require(run.csr == 0x1f80u, "Packed reciprocal stub did not preserve MXCSR");
+        }
+    }
+    for (const std::uint32_t preset : {0x1fbfu, 0x1f95u}) {
+        const auto run = runReciprocalCsrStub(Bytes{0x0F, 0x53, 0xD5}, destination, source, preset);
+        require(run.csr == preset, "Packed reciprocal stub did not preserve MXCSR");
+    }
+    for (const bool squareRoot : {false, true}) {
+        const std::uint8_t opcode = squareRoot ? 0x52 : 0x53;
+        const Bytes site = {0xC5, 0xF8, opcode, 0xD5};
+        const auto nearest = runReciprocalCsrStub(site, destination, source, 0x1f80u);
+        for (const std::uint32_t preset : {0x1f80u, 0x3f80u, 0x5f80u, 0x7f80u}) {
+            const auto run = runReciprocalCsrStub(site, destination, source, preset);
+            require(run.csr == preset, "Packed reciprocal stub did not preserve MXCSR");
+            require(run.out == nearest.out, "Packed reciprocal result depends on guest rounding mode");
+        }
+    }
+    for (const std::uint32_t preset : {0x1f80u, 0x1fc0u, 0x9f80u, 0x9fc0u}) {
+        const auto legacy = runReciprocalCsrStub(Bytes{0x0F, 0x52, 0xD5}, destination, source, preset);
+        require(legacy.csr == preset, "Packed reciprocal stub did not preserve MXCSR");
+        const auto vex = runReciprocalCsrStub(Bytes{0xC5, 0xF8, 0x53, 0xD5}, destination, source, preset);
+        require(vex.csr == preset, "Packed reciprocal stub did not preserve MXCSR");
+    }
+    for (const bool squareRoot : {false, true}) for (const bool vex : {false, true}) {
+        const std::uint8_t opcode = squareRoot ? 0x52 : 0x53;
+        const Bytes site = vex ? Bytes{0xC5, 0xF8, opcode, 0xD5} : Bytes{0x0F, opcode, 0xD5};
+        for (const std::uint32_t preset : {0x1d80u, 0u}) {
+            const auto run = runReciprocalCsrStub(site, destination, source, preset);
+            require(run.csr == preset, "Packed reciprocal stub did not preserve MXCSR");
+        }
+    }
+    {
+        const std::uint32_t zeroBits[4] = {0x00000000u, 0x80000000u, 0x00000000u, 0x80000000u};
+        std::uint64_t zeroSrc[2] = {};
+        std::memcpy(zeroSrc, zeroBits, sizeof(zeroSrc));
+        for (const bool squareRoot : {true, false}) {
+            const std::uint8_t opcode = squareRoot ? 0x52 : 0x53;
+            const auto run = runReciprocalCsrStub(Bytes{0x0F, opcode, 0xD5}, destination, zeroSrc, 0x1f80u);
+            require(run.csr == 0x1f80u, "Packed reciprocal stub did not preserve MXCSR");
+            std::uint32_t outBits[4] = {};
+            std::memcpy(outBits, run.out.data(), sizeof(outBits));
+            require(outBits[0] == 0x7f800000u && outBits[1] == 0xff800000u, "Packed reciprocal stub lost the sign of zero");
+        }
+    }
+    {
+        const std::uint32_t edgeBits[4] = {0x007fffffu, 0x7fc00001u, 0x7f7fffffu, 0x3f800000u};
+        std::uint64_t edgeSrc[2] = {};
+        std::memcpy(edgeSrc, edgeBits, sizeof(edgeSrc));
+        const auto run = runReciprocalCsrStub(Bytes{0x0F, 0x53, 0xD5}, destination, edgeSrc, 0x1f80u);
+        require(run.csr == 0x1f80u, "Packed reciprocal stub did not preserve MXCSR");
+        std::uint32_t outBits[4] = {};
+        std::memcpy(outBits, run.out.data(), sizeof(outBits));
+        require(outBits[0] == 0x7f800000u, "Subnormal reciprocal source was not treated as zero");
+        require((outBits[1] & 0x7f800000u) == 0x7f800000u && (outBits[1] & 0x007fffffu) != 0u, "Packed reciprocal stub did not propagate NaN");
+        require(outBits[2] == 0u, "Tiny reciprocal output was not flushed to zero");
+        require(outBits[3] == 0x3f800000u, "Reciprocal of 1.0 must be exactly 1.0");
+    }
+}
 void reciprocalExecution() {
+    reciprocalMxcsrPreservation();
     const float inputs[][4] = {
         {1.0f, 4.0f, 0.25f, 2.0f},
         {0.0f, -0.0f, INFINITY, -1.0f},

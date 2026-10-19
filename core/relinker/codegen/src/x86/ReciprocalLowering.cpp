@@ -42,6 +42,7 @@ void ReciprocalLowering::EmitOutOfLine(StubBodyBuilder& body, const ReciprocalOp
     const auto scratch = _scratch(operands);
     const auto dst = operands.Destination;
     body.Spill(scratch);
+    body.Raw(std::array<std::uint8_t, 22>{0x48, 0x8D, 0x64, 0x24, 0xF0, 0x0F, 0xAE, 0x1C, 0x24, 0xC7, 0x44, 0x24, 0x04, 0xC0, 0x9F, 0x00, 0x00, 0x0F, 0xAE, 0x54, 0x24, 0x04});
     if (operands.Operation == ReciprocalOperation::ReciprocalSquareRoot) {
         body.SsePlain({0x0F, kSqrtps}, scratch, operands.Source);
         body.RipOperand({0x0F, kMovaps}, dst, _ones());
@@ -56,6 +57,7 @@ void ReciprocalLowering::EmitOutOfLine(StubBodyBuilder& body, const ReciprocalOp
         else
             body.SsePlain({0x0F, kMovaps}, dst, scratch);
     }
+    body.Raw(std::array<std::uint8_t, 9>{0x0F, 0xAE, 0x14, 0x24, 0x48, 0x8D, 0x64, 0x24, 0x10});
     body.Restore(scratch);
 }
 
