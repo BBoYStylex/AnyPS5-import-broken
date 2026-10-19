@@ -206,6 +206,7 @@ struct SpirvEmitterState {
     std::uint32_t pixelValidMaskVariable = 0;
     std::uint32_t quadPixelUncovered = 0;
     std::uint32_t sampleMaskInputVariable = 0;
+    std::uint32_t sampleMaskInputCopy = 0;
     std::uint32_t ownSampleIdVariable = 0;
     std::uint32_t quadSampleCoverage = 0;
     std::uint32_t subgroupLocalInvocationIdVariable = 0;
@@ -220,6 +221,7 @@ struct SpirvEmitterState {
     std::uint32_t depthVariable = 0;
     std::uint32_t sampleMaskVariable = 0;
     std::uint32_t stencilRefVariable = 0;
+    std::uint32_t stencilRefOutput = 0;
     bool stencilReplay = false;
     std::vector<SpirvInputBinding> inputs;
     std::vector<SpirvOutputBinding> outputs;
