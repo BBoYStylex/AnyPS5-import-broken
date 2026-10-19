@@ -24,8 +24,8 @@ alignas(256) constexpr std::array<std::uint32_t, 16> VertexCode{
 alignas(256) constexpr std::array<std::uint32_t, 16> PixelCode{
     0x7e020280u, 0xe0301000u, 0x80000201u, 0xbf8c3f70u, 0x7e000280u, 0x7e0602f2u, 0xf800180fu, 0x03010002u, 0xbf810000u,
 };
-alignas(256) constexpr std::array<std::uint32_t, 10> InactivePixelCode{
-    0xbe8c0080u, 0xbf850002u, 0xe0301000u, 0x80000201u, 0xbf8c3f70u, 0x7e000280u, 0x7e0602f2u, 0xf800180fu, 0x03010002u, 0xbf810000u,
+alignas(256) constexpr std::array<std::uint32_t, 9> InactivePixelCode{
+    0xbefe0480u, 0xe0301000u, 0x80000201u, 0xbf8c3f70u, 0x7e000280u, 0x7e0602f2u, 0xf800180fu, 0x03010002u, 0xbf810000u,
 };
 
 void Append(std::vector<std::uint32_t>& commands, std::uint32_t opcode, std::initializer_list<std::uint32_t> payload) {
