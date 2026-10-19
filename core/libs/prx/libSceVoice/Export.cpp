@@ -35,6 +35,7 @@ struct Port {
     std::int32_t type;
     float volume;
     std::uint32_t bitrate;
+    std::uint32_t pcm_capacity;
     bool muted = false;
     std::deque<VoicePacket> packets;
 };
@@ -66,9 +67,15 @@ Port& RequirePort(Voice& voice, std::uint32_t id, const char* function) {
 
 bool IsInput(std::int32_t type) { return type == PortInDevice || type == PortInPcm || type == PortInVoice; }
 
+bool IsWritable(std::int32_t type) { return type == PortInPcm || type == PortInVoice; }
+
 std::uint32_t FrameBytes(std::uint32_t bitrate) {
     if (bitrate == 0) return 0;
     return static_cast<std::uint32_t>((static_cast<std::uint64_t>(bitrate) * VoiceFrameMs + 7999u) / 8000u);
+}
+
+std::size_t PcmCapacity(const Port& port) {
+    return port.pcm_capacity != 0 ? port.pcm_capacity : PcmFallbackFrameBytes * PortQueueFrames;
 }
 
 std::size_t QueueFrameBytes(const Port& port) {
@@ -143,7 +150,7 @@ int APS5_VABI sceVoiceCreatePort(uint32_t* port_id, const VoicePortParam* param)
     if (!voice.initialized) Fail(__func__, "library not initialized");
     const bool voicePort = param->port_type == PortInVoice || param->port_type == PortOutVoice;
     const auto id = voice.nextId++;
-    voice.ports.emplace(id, Port{param->port_type, param->volume, voicePort ? static_cast<std::uint32_t>(param->voice.bitrate) : 0u});
+    voice.ports.emplace(id, Port{param->port_type, param->volume, voicePort ? static_cast<std::uint32_t>(param->voice.bitrate) : 0u, param->port_type == PortInPcm ? param->pcmaudio.buffer_size : 0u});
     *port_id = id;
     return 0;
 }
@@ -235,15 +242,21 @@ int APS5_VABI sceVoiceReadFromOPort(uint32_t output_port_id, void* data, uint32_
 
 int APS5_VABI sceVoiceWriteToIPort(uint32_t input_port_id, const void* data, uint32_t* size, int16_t frame_gaps) {
     if (data == nullptr || size == nullptr) APS5_INVALID_ARG_EX;
-    if (frame_gaps < 0) Fail(__func__, "negative frame gaps " + std::to_string(frame_gaps));
     auto& voice = State();
     std::lock_guard lock(voice.mutex);
     auto& port = RequirePort(voice, input_port_id, __func__);
-    if (!IsInput(port.type)) Fail(__func__, "port is not an input port");
+    if (!IsWritable(port.type)) Fail(__func__, "port is not an input port");
     const auto bytes = *size;
     *size = 0;
     if (bytes == 0) return 0;
-    const auto frames = 1u + static_cast<std::uint32_t>(frame_gaps);
+    if (port.type == PortInPcm) {
+        if (QueuedBytes(port) + bytes > PcmCapacity(port)) return 0;
+        const auto* source = static_cast<const std::uint8_t*>(data);
+        port.packets.push_back(VoicePacket{std::vector<std::uint8_t>(source, source + bytes), 0});
+        *size = bytes;
+        return 0;
+    }
+    const auto frames = frame_gaps >= 0 ? 1u + static_cast<std::uint32_t>(frame_gaps) : 1u;
     if (QueuedFrames(port) + frames > PortQueueFrames) return 0;
     if (QueuedBytes(port) + bytes > QueueFrameBytes(port) * PortQueueFrames) return 0;
     const auto* source = static_cast<const std::uint8_t*>(data);

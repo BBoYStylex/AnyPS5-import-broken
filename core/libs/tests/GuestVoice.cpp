@@ -33,11 +33,12 @@ void RequireThrows(TFunction function) {
     std::abort();
 }
 
-std::uint32_t CreatePort(std::int32_t type, float volume) {
+std::uint32_t CreatePort(std::int32_t type, float volume, std::uint32_t pcm_capacity = 0) {
     VoicePortParam param{};
     param.port_type = type;
     param.volume = volume;
     if (type == 2 || type == 4) param.voice.bitrate = 16000;
+    if (type == 1) param.pcmaudio.buffer_size = pcm_capacity;
     std::uint32_t id = 0;
     Require(sceVoiceCreatePort(&id, &param) == 0);
     return id;
@@ -87,22 +88,31 @@ int main() {
     Require(sceVoiceWriteToIPort(input, frame, &accepted, 0) == 0 && accepted == sizeof(frame));
     RequireThrows([&] { sceVoiceWriteToIPort(input, nullptr, &accepted, 0); });
     RequireThrows([&] { sceVoiceWriteToIPort(input, frame, nullptr, 0); });
-    RequireThrows([&] { sceVoiceWriteToIPort(input, frame, &accepted, -1); });
+    accepted = sizeof(frame);
+    Require(sceVoiceWriteToIPort(input, frame, &accepted, -1) == 0 && accepted == sizeof(frame));
+    Require(sceVoiceResetPort(input) == 0);
     RequireThrows([&] { sceVoiceWriteToIPort(output, frame, &accepted, 0); });
     RequireThrows([&] { sceVoiceWriteToIPort(input + 1, frame, &accepted, 0); });
     Require(sceVoiceResetPort(input) == 0);
+    const auto device = CreatePort(0, 1.0f);
+    accepted = sizeof(frame);
+    RequireThrows([&] { sceVoiceWriteToIPort(device, frame, &accepted, 0); });
+    Require(sceVoiceDeletePort(device) == 0);
 
-    const auto pcm = CreatePort(1, 1.0f);
-    const std::vector<std::uint8_t> pcmFrame(3840);
-    for (int packet = 0; packet < 5; ++packet) {
-        accepted = 3840;
-        Require(sceVoiceWriteToIPort(pcm, pcmFrame.data(), &accepted, 0) == 0 && accepted == 3840);
-    }
-    accepted = 3840;
-    Require(sceVoiceWriteToIPort(pcm, pcmFrame.data(), &accepted, 0) == 0 && accepted == 0);
+    const auto pcm = CreatePort(1, 1.0f, 64000);
+    std::vector<std::uint8_t> pcmBlock(64000);
+    accepted = 64000;
+    Require(sceVoiceWriteToIPort(pcm, pcmBlock.data(), &accepted, 0) == 0 && accepted == 64000);
+    accepted = 1;
+    Require(sceVoiceWriteToIPort(pcm, pcmBlock.data(), &accepted, 0) == 0 && accepted == 0);
+    accepted = 1;
+    Require(sceVoiceWriteToIPort(pcm, pcmBlock.data(), &accepted, 4) == 0 && accepted == 0);
     Require(sceVoiceResetPort(pcm) == 0);
-    const std::vector<std::uint8_t> oversize(19201);
-    accepted = 19201;
+    accepted = 1;
+    Require(sceVoiceWriteToIPort(pcm, pcmBlock.data(), &accepted, 4) == 0 && accepted == 1);
+    Require(sceVoiceResetPort(pcm) == 0);
+    const std::vector<std::uint8_t> oversize(64001);
+    accepted = 64001;
     Require(sceVoiceWriteToIPort(pcm, oversize.data(), &accepted, 0) == 0 && accepted == 0);
     Require(sceVoiceDeletePort(pcm) == 0);
 
