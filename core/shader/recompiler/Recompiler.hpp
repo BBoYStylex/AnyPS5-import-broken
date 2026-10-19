@@ -299,6 +299,7 @@ struct SpirvTarget {
     bool waveLdsMemoryBarriers = false;
     bool float32DenormPreserve = false;
     bool fusedExactArithmetic = false;
+    bool largePixelFunctionLdsBuffer = false;
 };
 
 struct BindingLayout {
