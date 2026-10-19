@@ -39,12 +39,15 @@ target_sources(libc PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src/Multibyte.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/RuneLocale.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/StringExtensions.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/VectorAlgorithms.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/Math.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/Random.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/FloatBuiltins.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/HostEntropy.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/Backtrace.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/DinkumwareAtomics.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/Time.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/AtomicBuiltins.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/FileAndHeap.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/HostErrno.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/FileLock.cpp
@@ -231,6 +234,15 @@ if(BUILD_TESTING)
         set_tests_properties(guest_wide_strings PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
     endif()
+    add_test_executable(guest_atomic_builtins_tests ${LIBS_INCLUDE_DIR}/tests/GuestAtomicBuiltins.cpp)
+    target_include_directories(guest_atomic_builtins_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_atomic_builtins_tests PRIVATE libc)
+    configure_windows_unwind(guest_atomic_builtins_tests)
+    add_test(NAME guest_atomic_builtins COMMAND guest_atomic_builtins_tests)
+    if(WIN32)
+        set_tests_properties(guest_atomic_builtins PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+    endif()
     add_test_executable(guest_wide_conversion_tests ${LIBS_INCLUDE_DIR}/tests/GuestWideConversion.cpp)
     target_include_directories(guest_wide_conversion_tests PRIVATE ${LIBS_INCLUDE_DIR})
     target_link_libraries(guest_wide_conversion_tests PRIVATE libc)
@@ -391,6 +403,15 @@ if(BUILD_TESTING)
         set_tests_properties(guest_environment PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
     endif()
+    add_test_executable(guest_dinkumware_atomics_tests ${LIBS_INCLUDE_DIR}/tests/GuestDinkumwareAtomics.cpp)
+    target_include_directories(guest_dinkumware_atomics_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_dinkumware_atomics_tests PRIVATE libc)
+    configure_windows_unwind(guest_dinkumware_atomics_tests)
+    add_test(NAME guest_dinkumware_atomics COMMAND guest_dinkumware_atomics_tests)
+    if(WIN32)
+        set_tests_properties(guest_dinkumware_atomics PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+    endif()
     add_test_executable(guest_hostname_tests ${LIBS_INCLUDE_DIR}/tests/GuestHostname.cpp)
     target_include_directories(guest_hostname_tests PRIVATE ${LIBS_INCLUDE_DIR})
     target_link_libraries(guest_hostname_tests PRIVATE libc)
@@ -399,6 +420,15 @@ if(BUILD_TESTING)
     set_tests_properties(guest_hostname PROPERTIES TIMEOUT 20)
     if(WIN32)
         set_tests_properties(guest_hostname PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+    endif()
+    add_test_executable(guest_vector_algorithms_tests ${LIBS_INCLUDE_DIR}/tests/GuestVectorAlgorithms.cpp)
+    target_include_directories(guest_vector_algorithms_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_vector_algorithms_tests PRIVATE libc)
+    configure_windows_unwind(guest_vector_algorithms_tests)
+    add_test(NAME guest_vector_algorithms COMMAND guest_vector_algorithms_tests)
+    if(WIN32)
+        set_tests_properties(guest_vector_algorithms PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
     endif()
     add_test_executable(guest_memrchr_tests ${LIBS_INCLUDE_DIR}/tests/GuestMemrchr.cpp)
