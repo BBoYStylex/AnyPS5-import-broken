@@ -1662,6 +1662,7 @@ IrResourcePlan handBuiltPlan() {
     table.tableColumn->selected = true;
     table.tableColumn->selection = 2u;
     table.tableColumn->pointerHops = {PointerHop{0u, 0x10u}, PointerHop{8u, 0x20u}};
+    table.tableColumn->allOnesKey = true;
     DescriptorSource heap;
     heap.dwordCount = 4u;
     heap.dwords[1] = &readConst(6);
@@ -1746,7 +1747,7 @@ bool samePlan(const IrResourcePlan& left, const IrResourcePlan& right) {
     for (std::size_t index = 0; index < left.descriptorSources.size(); ++index) {
         const auto& a = left.descriptorSources[index];
         const auto& b = right.descriptorSources[index];
-        if (a.dwordCount != b.dwordCount || a.tableColumn != b.tableColumn || (a.tableColumn.has_value() && (a.tableColumn->keyDomains != b.tableColumn->keyDomains || a.tableColumn->unkeyed != b.tableColumn->unkeyed || a.tableColumn->maxKey != b.tableColumn->maxKey))) return false;
+        if (a.dwordCount != b.dwordCount || a.tableColumn != b.tableColumn || (a.tableColumn.has_value() && (a.tableColumn->keyDomains != b.tableColumn->keyDomains || a.tableColumn->unkeyed != b.tableColumn->unkeyed || a.tableColumn->maxKey != b.tableColumn->maxKey || a.tableColumn->allOnesKey != b.tableColumn->allOnesKey))) return false;
         for (std::size_t dword = 0; dword < a.dwords.size(); ++dword) {
             if (!sameValue(a.dwords[dword], b.dwords[dword])) return false;
         }

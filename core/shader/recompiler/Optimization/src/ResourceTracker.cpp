@@ -88,6 +88,172 @@ std::uint32_t possibleU32Bits(const IrValue* value) {
     }
 }
 
+struct KeyBound {
+    std::uint32_t max = std::numeric_limits<std::uint32_t>::max();
+    bool allOnes = false;
+};
+
+class KeyRange {
+public:
+    KeyBound Of(const IrValue* value) {
+        return Bound(value, depthLimit);
+    }
+
+private:
+    static constexpr std::uint32_t depthLimit = 8u;
+    static constexpr std::uint32_t any = std::numeric_limits<std::uint32_t>::max();
+
+    static KeyBound make(std::uint64_t max, bool allOnes) {
+        return max >= any ? KeyBound{} : KeyBound{static_cast<std::uint32_t>(max), allOnes};
+    }
+
+    static std::uint32_t top(const KeyBound& bound) {
+        return bound.allOnes ? any : bound.max;
+    }
+
+    static std::uint32_t smear(std::uint32_t value) {
+        return value == 0u ? 0u : any >> std::countl_zero(value);
+    }
+
+    static KeyBound join(const KeyBound& left, const KeyBound& right) {
+        return make(std::max(left.max, right.max), left.allOnes || right.allOnes);
+    }
+
+    static bool immediate(const IrValue* value, std::uint32_t& result) {
+        value = value->Resolve();
+        if (!value->HasImmediate() || value->Type() != IrType::U32) {
+            return false;
+        }
+        result = value->ImmediateU32();
+        return true;
+    }
+
+    KeyBound Bound(const IrValue* value, std::uint32_t depth) {
+        value = value->Resolve();
+        if (value->Type() != IrType::U32) {
+            return {};
+        }
+        if (value->HasImmediate()) {
+            const auto constant = value->ImmediateU32();
+            return constant == any ? KeyBound{0u, true} : KeyBound{constant, false};
+        }
+        if (depth == 0u) {
+            return {};
+        }
+        if (const auto found = m_bounds.find(value); found != m_bounds.end()) {
+            return found->second;
+        }
+        m_bounds.emplace(value, KeyBound{});
+        const auto bound = Compute(*value, depth - 1u);
+        m_bounds[value] = bound;
+        return bound;
+    }
+
+    KeyBound Compute(const IrValue& value, std::uint32_t depth) {
+        const auto argument = [&](std::uint32_t index) { return Bound(value.Argument(index), depth); };
+        std::uint32_t first = 0;
+        switch (value.Opcode()) {
+            case IrOpcode::FindILsb32:
+            case IrOpcode::FindUMsb32:
+                return {31u, true};
+            case IrOpcode::FindUMsb64:
+                return {63u, true};
+            case IrOpcode::BitCount32:
+                return {32u, false};
+            case IrOpcode::BitCount64:
+                return {64u, false};
+            case IrOpcode::BitwiseAnd32:
+            case IrOpcode::UMin32:
+                return make(std::min(top(argument(0)), top(argument(1))), false);
+            case IrOpcode::BitwiseOr32: {
+                const auto left = argument(0);
+                const auto right = argument(1);
+                return make(smear(left.max | right.max), left.allOnes || right.allOnes);
+            }
+            case IrOpcode::ShiftRightLogical32:
+                if (!immediate(value.Argument(1), first) || first >= 32u) {
+                    return {};
+                }
+                return make(top(argument(0)) >> first, false);
+            case IrOpcode::ShiftLeftLogical32: {
+                if (!immediate(value.Argument(1), first) || first >= 32u) {
+                    return {};
+                }
+                const auto source = argument(0);
+                return source.allOnes ? KeyBound{} : make(static_cast<std::uint64_t>(source.max) << first, false);
+            }
+            case IrOpcode::IAdd32: {
+                const auto left = argument(0);
+                const auto right = argument(1);
+                if (left.allOnes && immediate(value.Argument(1), first) && first != 0u) {
+                    return make(static_cast<std::uint64_t>(left.max) + first, false);
+                }
+                if (right.allOnes && immediate(value.Argument(0), first) && first != 0u) {
+                    return make(static_cast<std::uint64_t>(right.max) + first, false);
+                }
+                if (left.allOnes || right.allOnes) {
+                    return {};
+                }
+                return make(static_cast<std::uint64_t>(left.max) + right.max, false);
+            }
+            case IrOpcode::IMul32: {
+                KeyBound source;
+                if (immediate(value.Argument(1), first)) {
+                    source = argument(0);
+                } else if (immediate(value.Argument(0), first)) {
+                    source = argument(1);
+                } else {
+                    return {};
+                }
+                return source.allOnes ? KeyBound{} : make(static_cast<std::uint64_t>(source.max) * first, false);
+            }
+            case IrOpcode::ISub32: {
+                if (!immediate(value.Argument(0), first)) {
+                    return {};
+                }
+                const auto subtrahend = argument(1);
+                if (subtrahend.max > first) {
+                    return {};
+                }
+                return make(static_cast<std::uint64_t>(first) + (subtrahend.allOnes ? 1u : 0u), false);
+            }
+            case IrOpcode::SelectU32:
+                return join(argument(1), argument(2));
+            case IrOpcode::Phi: {
+                KeyBound bound{0u, false};
+                for (std::uint32_t index = 0; index < value.ArgumentCount(); index++) {
+                    bound = join(bound, argument(index));
+                }
+                return bound;
+            }
+            default:
+                return {};
+        }
+    }
+
+    std::unordered_map<const IrValue*, KeyBound> m_bounds;
+};
+
+void boundTableKey(TableColumn& column, const IrValue* key) {
+    const auto bits = possibleU32Bits(key);
+    const auto range = KeyRange{}.Of(key);
+    column.maxKey = std::min(bits, range.max);
+    column.allOnesKey = range.allOnes && bits == std::numeric_limits<std::uint32_t>::max();
+}
+
+void boundMaskedTableKey(TableColumn& column, const IrValue* key, std::uint32_t recordMask) {
+    const auto bits = possibleU32Bits(key);
+    const auto range = KeyRange{}.Of(key);
+    const bool allOnes = range.allOnes && bits == std::numeric_limits<std::uint32_t>::max();
+    column.maxKey = allOnes ? recordMask : std::min({bits, range.max, recordMask});
+    column.allOnesKey = false;
+}
+
+void mergeTableKey(TableColumn& shared, const TableColumn& column) {
+    shared.maxKey = std::max(shared.maxKey, column.maxKey);
+    shared.allOnesKey = shared.maxKey != std::numeric_limits<std::uint32_t>::max() && (shared.allOnesKey || column.allOnesKey);
+}
+
 std::uint32_t byteExtent(const MemoryInfo& memory) {
     const auto bytes = std::max((memory.dataBits + 7u) / 8u, 1u);
     const auto count = std::max(memory.dataDwords, 1u);
@@ -482,7 +648,7 @@ private:
         return matched && stride >= 4u && stride % 4u == 0u && key->Type() == IrType::U32;
     }
 
-    static bool MatchMaskedOffset(IrValue* value, IrValue*& key, std::uint32_t& stride) {
+    static bool MatchMaskedOffset(IrValue* value, IrValue*& key, std::uint32_t& stride, std::uint32_t& recordMask) {
         value = value->Resolve();
         if (value->Opcode() != IrOpcode::BitwiseAnd32 || value->ArgumentCount() != 2u) {
             return false;
@@ -496,7 +662,11 @@ private:
         } else {
             return false;
         }
-        return MatchScale(scaled, key, stride) && std::has_single_bit(stride) && stride >= 4u && (mask & ~(stride - 1u)) != 0u && key->Type() == IrType::U32;
+        if (!MatchScale(scaled, key, stride) || !std::has_single_bit(stride) || stride < 4u || (mask & ~(stride - 1u)) == 0u || key->Type() != IrType::U32) {
+            return false;
+        }
+        recordMask = mask >> std::countr_zero(stride);
+        return true;
     }
 
     static bool ReadsThroughDescriptor(const IrValue* value) {
@@ -635,12 +805,13 @@ private:
         std::uint32_t stride = 0;
         std::uint32_t addend = 0;
         bool masked = false;
+        std::uint32_t recordMask = 0;
         std::uint32_t descriptorOffset = 0;
         if (address && immediateU32(offset, descriptorOffset)) {
             return TryMakeIndirectColumn(handle, *heapHandle, sampler, words, descriptorOffset, first, plan);
         }
         if (!MatchAffineOffset(offset, key, stride, addend)) {
-            if (!MatchMaskedOffset(offset, key, stride)) {
+            if (!MatchMaskedOffset(offset, key, stride, recordMask)) {
                 return false;
             }
             masked = true;
@@ -656,7 +827,11 @@ private:
         column.addend = addend;
         column.offset = first;
         column.dwordCount = words;
-        column.maxKey = possibleU32Bits(key);
+        if (masked) {
+            boundMaskedTableKey(column, key, recordMask);
+        } else {
+            boundTableKey(column, key);
+        }
         column.sampler = sampler;
         column.address = address;
         column.foldedAddend = folded ? baseAddend : 0u;
@@ -680,7 +855,7 @@ private:
         plan.source = InternSource(columnSource);
         plan.keyDomain = domain;
         auto& shared = *m_sources[plan.source].tableColumn;
-        shared.maxKey = std::max(shared.maxKey, column.maxKey);
+        mergeTableKey(shared, column);
         if (!domain.has_value()) {
             shared.unkeyed = true;
             shared.keyDomains.clear();
@@ -759,7 +934,7 @@ private:
         column.addend = addend;
         column.offset = first;
         column.dwordCount = words;
-        column.maxKey = possibleU32Bits(key);
+        boundTableKey(column, key);
         column.sampler = sampler;
         column.indirect = true;
         column.indirectOffset = descriptorOffset;
@@ -772,7 +947,7 @@ private:
         plan.source = InternSource(columnSource);
         plan.keyDomain = domain;
         auto& shared = *m_sources[plan.source].tableColumn;
-        shared.maxKey = std::max(shared.maxKey, column.maxKey);
+        mergeTableKey(shared, column);
         if (!domain.has_value()) {
             shared.unkeyed = true;
             shared.keyDomains.clear();

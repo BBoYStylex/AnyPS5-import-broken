@@ -438,7 +438,8 @@ void traceTable(const IrResourcePlan& plan, std::uint32_t table, const TableColu
     auto& last = seen[{plan.shaderHash, table}];
     if (last == trace) return;
     last = trace;
-    std::fprintf(stderr, "[image-table] shader 0x%llx table %u (%s): base 0x%llx size 0x%llx stride 0x%x addend 0x%x offset 0x%x dwords %u, %u records, %u keys%s, %u structural poison\n", static_cast<unsigned long long>(plan.shaderHash), table, column.sampler ? "sampler" : "image", static_cast<unsigned long long>(trace.base), static_cast<unsigned long long>(trace.size), column.stride, column.addend, column.offset, column.dwordCount, trace.records, trace.keys, trace.narrowed ? " (narrowed)" : "", trace.poison);
+    const auto bound = column.maxKey == std::numeric_limits<std::uint32_t>::max() ? std::string("no key bound") : "key bound 0x" + hexText(column.maxKey) + (column.allOnesKey ? " or 0xffffffff" : "");
+    std::fprintf(stderr, "[image-table] shader 0x%llx table %u (%s): base 0x%llx size 0x%llx stride 0x%x addend 0x%x offset 0x%x dwords %u, %s, %u records, %u keys%s, %u structural poison\n", static_cast<unsigned long long>(plan.shaderHash), table, column.sampler ? "sampler" : "image", static_cast<unsigned long long>(trace.base), static_cast<unsigned long long>(trace.size), column.stride, column.addend, column.offset, column.dwordCount, bound.c_str(), trace.records, trace.keys, trace.narrowed ? " (narrowed)" : "", trace.poison);
 }
 
 bool TableSnapshotReuse() {
@@ -927,7 +928,7 @@ private:
         }
         records.records = std::min(records.records, ImageTableAbi::KeyRecords(column.maxKey, column.stride));
         records.keys = std::min(records.records, ImageTableAbi::MaxKeys);
-        records.outside = records.keys < records.records;
+        records.outside = records.keys < records.records || (column.allOnesKey && (column.address || ImageTableAbi::ScalarBufferDword(0u - column.stride + column.addend, column.offset, records.size).has_value()));
         if (!column.keyDomains.empty() && records.keys != 0u) {
             Narrow(column, records);
         }

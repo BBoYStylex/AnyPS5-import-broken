@@ -2814,7 +2814,7 @@ void verifyImageTableMaskedOffset() {
     heap[1] = TableT(textures[1].bytes.data(), TableFormat32UInt, TableType2D);
     heap[3] = heap[0];
     guest.materials = {{{0u, 0x101u, 0u, 0u}, {0u, 0u, 0u, 0u}, {0u, 0x203u, 0u, 0u}}};
-    FillTableSrt(guest, heap.data(), 32u, 4u);
+    FillTableSrt(guest, heap.data(), 32u, static_cast<std::uint32_t>(heap.size()));
     std::vector<std::uint32_t> code(TableMaterialCode);
     const auto shift = std::find(code.begin(), code.end(), 0x8f108510u);
     require(shift != code.end(), "image table masked offset: the program has no s_lshl_b32");
@@ -2825,6 +2825,7 @@ void verifyImageTableMaskedOffset() {
     require(plan->info.images.size() == 1u && plan->info.images[0].table == 0u && plan->info.images[0].tableOperation == TableOperation::Supported, "image table masked offset: the T# was not planned as a table");
     const auto& column = plan->descriptorSources.at(plan->info.images[0].source).tableColumn;
     require(column.has_value() && column->stride == 32u && column->addend == 0u && column->offset == 0u && column->dwordCount == 8u, "image table masked offset: the column is wrong");
+    require(column->maxKey == 3u && !column->allOnesKey, "image table masked offset: the record mask did not bound the loaded key");
     require(column->keyDomains.empty() && column->unkeyed, "image table masked offset: the masked key was narrowed by its unmasked value");
     const auto compiled = CompileTable(request);
     const auto& snapshot = compiled.capture->snapshot.tables.tables.at(0);
@@ -2832,6 +2833,36 @@ void verifyImageTableMaskedOffset() {
     require(snapshot.records == 4u && snapshot.keys == 4u && snapshot.codes.size() == 4u && std::none_of(snapshot.codes.begin(), snapshot.codes.end(), [&](std::uint32_t entry) { return entry == outside; }), "image table masked offset: a record was left outside the domain");
     const auto codes = TableCodes(TableMap(*compiled.result), 0);
     require(codes.size() == 4u && codes[0] == codes[3] && codes[2] == Abi::NullCode && codes[1] != codes[0] && (codes[1] & Abi::PoisonFlag) == 0u, "image table masked offset: the whole table map is wrong");
+}
+
+void verifyImageTableBitScanHeap() {
+    using namespace ShaderRecompiler;
+    static TableTexture texture;
+    alignas(4096) static TableGuest guest;
+    const auto words = TableT(texture.bytes.data(), TableFormat8888UNorm, TableType2D);
+    std::fill(guest.heap.begin(), guest.heap.end(), words);
+    FillTableSrt(guest, guest.heap.data(), 32u, static_cast<std::uint32_t>(guest.heap.size()));
+    const auto userData = TableUserData(guest);
+    for (const auto addend : {0u, 32u}) {
+        auto code = TableWholeCode;
+        const auto shift = std::find(code.begin(), code.end(), 0x8f108510u);
+        require(shift != code.end(), "image table bit-scan heap: the program has no key shift");
+        code.insert(shift, 0xbe901310u);
+        if (addend != 0u) {
+            const auto load = std::find(code.begin(), code.end(), 0xf42c0502u);
+            code.insert(load, 0x8110a010u);
+        }
+        const auto request = TableRequest(code, userData);
+        const auto plan = GetResourcePlan(request);
+        const auto& column = *plan->descriptorSources.at(plan->info.images.at(0).source).tableColumn;
+        require(!column.address && column.maxKey == 31u && column.allOnesKey && column.stride == 32u && column.addend == addend && column.unkeyed, "image table bit-scan heap: the column lost its bit-scan bound or affine offset");
+        const auto compiled = CompileTable(request);
+        const auto& snapshot = compiled.capture->snapshot.tables.tables.at(0);
+        const bool sentinelInRange = addend != 0u;
+        require(snapshot.keys == 32u && snapshot.records == 32u && snapshot.outside == sentinelInRange, "image table bit-scan heap: the -1 key expects a fault despite landing past the V#, or lost its in-range fault");
+        require(compiled.result->imageTableFaults == (sentinelInRange ? 1u : 0u), "image table bit-scan heap: the -1 key changed the required fault readbacks");
+        require(std::all_of(snapshot.codes.begin(), snapshot.codes.end(), [&](std::uint32_t code) { return snapshot.words.at(code).dwords == words; }), "image table bit-scan heap: an in-range record was not preserved");
+    }
 }
 
 void verifyImageTableRegistration() {
@@ -3043,6 +3074,162 @@ void verifyPointerImageTable() {
     const std::vector<std::pair<std::uint64_t, std::uint64_t>> narrowReads{{base + Palette, 32u}, {base + Palette + 2u * 32u, 32u}, {base + Palette + 255u * 32u, 32u}, {base + Palette + 0x102u * 32u, 32u}};
     require(narrowSnapshot.readRanges == narrowReads && narrowTable.result->imageTableReadRanges.size() == 1u && narrowTable.result->imageTableReadRanges[0] == narrowReads, "pointer image table: consumed ranges include skipped keys or the key-domain buffer");
     keys = {};
+
+    auto bitScanCode = wideCode;
+    bitScanCode.erase(bitScanCode.begin() + 4, bitScanCode.begin() + 6);
+    bitScanCode.insert(bitScanCode.begin() + 4, {0x7e240500u, 0xbeeb1312u, 0x8f12856bu});
+    const auto bitScan = request(bitScanCode, 0x37000u);
+    const auto bitScanPlan = GetResourcePlan(bitScan);
+    const auto& bitScanColumn = *bitScanPlan->descriptorSources.at(bitScanPlan->info.images.at(0).source).tableColumn;
+    require(bitScanColumn.maxKey == 31u && bitScanColumn.allOnesKey && bitScanColumn.keyDomains.empty() && bitScanColumn.unkeyed, "pointer image table: an s_ff1 key is not bounded to 0-31 or -1");
+    constexpr std::uint32_t scanned = 32;
+    const auto bitScanTable = CompileTable(bitScan);
+    const auto& bitScanSnapshot = bitScanTable.capture->snapshot.tables.tables.at(0);
+    require(bitScanSnapshot.keys == scanned && bitScanSnapshot.records == scanned && bitScanSnapshot.outside && bitScanTable.result->imageTableFaults != 0u, "pointer image table: an s_ff1 key did not snapshot 32 records with a fault check for the -1 key");
+    require(std::equal(bitScanSnapshot.codes.begin(), bitScanSnapshot.codes.end(), snapshot.codes.begin()), "pointer image table: an s_ff1 key resolved other records");
+    const std::vector<std::pair<std::uint64_t, std::uint64_t>> scannedReads{{base + Palette, scanned * 32u}};
+    require(bitScanSnapshot.readRanges == scannedReads && bitScanTable.result->imageTableReadRanges.size() == 1u && bitScanTable.result->imageTableReadRanges[0] == scannedReads, "pointer image table: an s_ff1 key read records past 31");
+    require(!TableTouched(bitScanTable.regions, root + (Palette + scanned * 32u) / 4u, Committed - Palette - scanned * 32u), "pointer image table: an s_ff1 key captured records past 31");
+
+    for (const auto mask : {0x3e0u, 0x1fe0u, 0x5a0u}) {
+        for (const bool narrowed : {false, true}) {
+            auto keyedMaskCode = wideCode;
+            keyedMaskCode.insert(keyedMaskCode.begin() + 6, {0x8712ff12u, mask});
+            if (narrowed) keyedMaskCode.insert(keyedMaskCode.begin() + 5, {0x8711ff11u, 7u});
+            const auto selected = mask / 32u;
+            const auto bound = narrowed ? 7u : selected;
+            const auto keyedMask = request(keyedMaskCode, 0x3a000u + mask + (narrowed ? 0x100u : 0u));
+            const auto keyedPlan = GetResourcePlan(keyedMask);
+            const auto& keyedColumn = *keyedPlan->descriptorSources.at(keyedPlan->info.images.at(0).source).tableColumn;
+            require(keyedColumn.maxKey == bound && !keyedColumn.allOnesKey && keyedColumn.unkeyed, "pointer image table: a masked offset with a lane key is not bounded by its record mask");
+            const auto keyedTable = CompileTable(keyedMask);
+            const auto& keyedSnapshot = keyedTable.capture->snapshot.tables.tables.at(0);
+            require(keyedSnapshot.keys == bound + 1u && keyedSnapshot.records == bound + 1u && !keyedSnapshot.outside, "pointer image table: a masked offset with a lane key snapshots other records than it can select");
+            const std::vector<std::pair<std::uint64_t, std::uint64_t>> keyedReads{{base + Palette, (bound + 1u) * 32u}};
+            require(keyedSnapshot.readRanges == keyedReads && keyedTable.result->imageTableReadRanges.size() == 1u && keyedTable.result->imageTableReadRanges[0] == keyedReads, "pointer image table: a masked offset with a lane key consumed other records than it can select");
+            require(!TableTouched(keyedTable.regions, root + (Palette + (bound + 1u) * 32u) / 4u, Committed - Palette - (bound + 1u) * 32u), "pointer image table: a masked offset with a lane key captured records past its mask");
+        }
+    }
+
+    for (const auto mask : {0x1fe0u, 0x3e0u}) {
+        auto maskedCountCode = wideCode;
+        maskedCountCode.erase(maskedCountCode.begin() + 4, maskedCountCode.begin() + 6);
+        maskedCountCode.insert(maskedCountCode.begin() + 4, {0x7e240500u, 0xbeeb0f12u, 0x8f12856bu, 0x8712ff12u, mask});
+        const auto bound = std::min(32u, mask / 32u);
+        const auto selected = 32u & (mask / 32u);
+        const auto maskedCount = request(maskedCountCode, 0x3d000u + mask);
+        const auto maskedPlan = GetResourcePlan(maskedCount);
+        const auto& maskedColumn = *maskedPlan->descriptorSources.at(maskedPlan->info.images.at(0).source).tableColumn;
+        require(maskedColumn.maxKey == bound && !maskedColumn.allOnesKey && maskedColumn.unkeyed, "pointer image table: a masked bit-count key did not use the smaller range and record-mask bound");
+        const auto maskedTable = CompileTable(maskedCount);
+        const auto& maskedSnapshot = maskedTable.capture->snapshot.tables.tables.at(0);
+        require(maskedSnapshot.keys == bound + 1u && maskedSnapshot.records == bound + 1u && !maskedSnapshot.outside, "pointer image table: a masked bit-count key snapshots other records than it can select");
+        const std::vector<std::pair<std::uint64_t, std::uint64_t>> maskedReads{{base + Palette, (bound + 1u) * 32u}};
+        require(maskedSnapshot.readRanges == maskedReads && maskedTable.result->imageTableReadRanges.size() == 1u && maskedTable.result->imageTableReadRanges[0] == maskedReads, "pointer image table: a masked bit-count key read outside its bounded records");
+        const auto& selectedWords = maskedSnapshot.words.at(maskedSnapshot.codes.at(selected));
+        require(selectedWords.dwords[0] == root[(Palette + selected * 32u) / 4u] && selectedWords.dwords[1] == root[(Palette + selected * 32u) / 4u + 1u], "pointer image table: a masked bit-count key resolved another record");
+    }
+
+    for (const auto mask : {0x3e0u, 0x1fe0u, 0xffe0u, 0x5a0u}) {
+        auto maskedScanCode = bitScanCode;
+        maskedScanCode.insert(maskedScanCode.begin() + 7, {0x8712ff12u, mask});
+        const auto selected = mask / 32u;
+        std::array<std::uint32_t, 8> original{};
+        std::copy_n(root + (Palette + selected * 32u) / 4u, original.size(), original.begin());
+        entry(selected, TableT(textures[1].bytes.data(), TableFormat32UInt, TableType2D));
+        const auto maskedScan = request(maskedScanCode, 0x38000u + mask);
+        const auto maskedPlan = GetResourcePlan(maskedScan);
+        const auto& maskedColumn = *maskedPlan->descriptorSources.at(maskedPlan->info.images.at(0).source).tableColumn;
+        require(maskedColumn.maxKey == selected && !maskedColumn.allOnesKey && maskedColumn.unkeyed, "pointer image table: a masked -1 key did not bound its selected record");
+        const auto maskedTable = CompileTable(maskedScan);
+        const auto& maskedSnapshot = maskedTable.capture->snapshot.tables.tables.at(0);
+        require(maskedSnapshot.keys == selected + 1u && maskedSnapshot.records == selected + 1u && !maskedSnapshot.outside, "pointer image table: the record selected by a masked -1 key is outside its snapshot");
+        const auto& maskedWords = maskedSnapshot.words.at(maskedSnapshot.codes.at(selected));
+        require(maskedWords.dwords[0] == root[(Palette + selected * 32u) / 4u] && maskedWords.dwords[1] == root[(Palette + selected * 32u) / 4u + 1u], "pointer image table: a masked -1 key resolved another T#");
+        const auto maskedCodes = TableCodes(TableMap(*maskedTable.result), 0);
+        require((maskedCodes.at(selected) & Abi::PoisonFlag) == 0u && (TableMap(*maskedTable.result).at(maskedCodes.at(selected) + Abi::ImageRecordFlags) & Abi::PoisonFlag) == 0u, "pointer image table: the valid record selected by a masked -1 key was poisoned");
+        entry(selected, original);
+    }
+
+    std::uint64_t keyAddress = 0x38000u;
+    const auto keyRequest = [&](const std::vector<std::uint32_t>& code) {
+        auto made = request(code, keyAddress);
+        keyAddress += 0x1000u;
+        return made;
+    };
+    const auto keyedCode = [](std::initializer_list<std::uint32_t> key) {
+        std::vector<std::uint32_t> code{0xf4080700u, 0xfa000010u, 0xf4080800u, 0xfa000020u, 0x7e240500u, 0xbe930712u};
+        code.insert(code.end(), key);
+        code.insert(code.end(), {0x8f128511u, 0xf40c0900u, 0x24000040u, 0xf09c0f08u, 0x01090000u, 0xe0700000u, 0x80070000u, 0xbf810000u});
+        return code;
+    };
+    struct KeyCase {
+        const char* name;
+        std::vector<std::uint32_t> code;
+        std::uint32_t maxKey;
+        bool allOnes;
+    };
+    const std::vector<KeyCase> keyCases{
+        {"s_ff1_i32_b32", keyedCode({0xbe911312u}), 31u, true},
+        {"s_flbit_i32_b32", keyedCode({0xbe911512u}), 32u, true},
+        {"s_ff1_i32_b64", keyedCode({0xbe911412u}), 63u, true},
+        {"s_flbit_i32_b64", keyedCode({0xbe911612u}), 64u, true},
+        {"s_bcnt1_i32_b32", keyedCode({0xbe910f12u}), 32u, false},
+        {"s_bcnt1_i32_b64", keyedCode({0xbe911012u}), 64u, false},
+        {"s_add_i32 of s_ff1_i32_b32 and 1", keyedCode({0xbe911312u, 0x81118111u}), 32u, false},
+        {"s_and_b32 with a bit count", keyedCode({0xbe940f12u, 0x87111413u}), 32u, false},
+        {"s_min_u32 with a bit count", keyedCode({0xbe940f12u, 0x83911413u}), 32u, false},
+        {"s_or_b32 of a bit count and a bit scan", keyedCode({0xbe940f12u, 0xbe951313u, 0x88111514u}), 63u, true},
+        {"s_lshr_b32 by 24", keyedCode({0x90119812u}), 0xffu, false},
+        {"s_lshl_b32 of a bit count by 1", keyedCode({0xbe940f12u, 0x8f118114u}), 64u, false},
+        {"s_mul_i32 of a bit count by 3", keyedCode({0xbe940f12u, 0x93118314u}), 96u, false},
+        {"s_sub_i32 of a bit count from 40", keyedCode({0xbe940f12u, 0x819114a8u}), 40u, false},
+        {"s_cselect_b32 of a bit count and a bit scan", keyedCode({0xbe940f12u, 0xbe951313u, 0xbf068013u, 0x85111514u}), 32u, true},
+        {"a bit count or a bit scan joined after a branch", keyedCode({0xbe910f12u, 0xbf068013u, 0xbf850001u, 0xbe911312u}), 32u, true},
+        {"s_lshl_b32 of s_ff1_i32_b32 by 1", keyedCode({0xbe911312u, 0x8f118111u}), 0xfffffffeu, false},
+        {"s_sub_i32 of a bit count from 31", keyedCode({0xbe940f12u, 0x8191149fu}), 0xffffffffu, false},
+        {"s_lshr_b32 of s_ff1_i32_b32 by 1", keyedCode({0xbe911312u, 0x90118111u}), 0x7fffffffu, false},
+        {"s_mul_i32 of s_ff1_i32_b32 by 3", keyedCode({0xbe911312u, 0x93118311u}), 0xffffffffu, false},
+        {"s_add_i32 of two bit counts", keyedCode({0xbe940f12u, 0xbe950f13u, 0x81111514u}), 64u, false},
+        {"s_bcnt0_i32_b64", keyedCode({0xbe910e12u}), 64u, false},
+        {"s_add_i32 of 1 and s_ff1_i32_b32", keyedCode({0xbe911312u, 0x81111181u}), 32u, false},
+        {"s_mul_i32 of 3 and a bit count", keyedCode({0xbe940f12u, 0x93111483u}), 96u, false},
+        {"a loop counter", keyedCode({0xbe910380u, 0x81118111u, 0xbf071211u, 0xbf85fffdu}), 0xffffffffu, false},
+    };
+    for (const auto& keyCase : keyCases) {
+        const auto keyPlan = GetResourcePlan(keyRequest(keyCase.code));
+        require(keyPlan->info.images.size() == 1u && keyPlan->info.images[0].table == 0u, (std::string("table key bound: the T# keyed by ") + keyCase.name + " was not planned as a table").c_str());
+        const auto& keyColumn = *keyPlan->descriptorSources.at(keyPlan->info.images[0].source).tableColumn;
+        const auto bound = std::string("table key bound: a key from ") + keyCase.name + " is bounded by " + std::to_string(keyColumn.maxKey) + (keyColumn.allOnesKey ? " or -1" : "") + ", expected " + std::to_string(keyCase.maxKey) + (keyCase.allOnes ? " or -1" : "");
+        require(keyColumn.maxKey == keyCase.maxKey && keyColumn.allOnesKey == keyCase.allOnes && keyColumn.unkeyed, bound.c_str());
+    }
+    const std::vector<std::uint32_t> sharedCode{0xf4080700u, 0xfa000010u, 0xf4080800u, 0xfa000020u, 0x7e240500u, 0xbe930712u, 0xbe911312u, 0x8f128511u,
+        0xf40c0900u, 0x24000040u, 0xf09c0f08u, 0x01090000u, 0xe0700000u, 0x80070000u, 0xbe910f13u, 0x8f128511u, 0xf40c0900u, 0x24000040u, 0xf09c0f08u,
+        0x01090000u, 0xe0700000u, 0x80070000u, 0xbf810000u};
+    const auto sharedPlan = GetResourcePlan(keyRequest(sharedCode));
+    require(!sharedPlan->info.images.empty() && std::all_of(sharedPlan->info.images.begin(), sharedPlan->info.images.end(), [&](const ImageResource& image) { return image.table == 0u && image.source == sharedPlan->info.images[0].source; }), "table key bound: two accesses of one table do not share its column");
+    const auto& sharedColumn = *sharedPlan->descriptorSources.at(sharedPlan->info.images[0].source).tableColumn;
+    require(sharedColumn.maxKey == 32u && sharedColumn.allOnesKey && sharedColumn.unkeyed, "table key bound: a column read with a bit scan key and a bit count key lost the -1 key or the larger bound");
+    const auto sharedKeyedColumn = [&](std::initializer_list<std::uint32_t> first, std::initializer_list<std::uint32_t> second) {
+        auto code = keyedCode(first);
+        code.pop_back();
+        code.insert(code.end(), second);
+        code.insert(code.end(), {0x8f128511u, 0xf40c0900u, 0x24000040u, 0xf09c0f08u, 0x01090000u, 0xe0700000u, 0x80070000u, 0xbf810000u});
+        const auto pairPlan = GetResourcePlan(keyRequest(code));
+        require(!pairPlan->info.images.empty() && std::all_of(pairPlan->info.images.begin(), pairPlan->info.images.end(), [&](const ImageResource& image) { return image.table == 0u && image.source == pairPlan->info.images[0].source; }), "table key bound: two accesses of one table do not share its column");
+        return *pairPlan->descriptorSources.at(pairPlan->info.images[0].source).tableColumn;
+    };
+    const auto countThenScan = sharedKeyedColumn({0xbe910f12u}, {0xbe911313u});
+    require(countThenScan.maxKey == 32u && countThenScan.allOnesKey && countThenScan.unkeyed, "table key bound: a column read with a bit count key and then a bit scan key lost the -1 key or the larger bound");
+    const auto scanThenLane = sharedKeyedColumn({0xbe911312u}, {0x7e220500u});
+    require(scanThenLane.maxKey == 0xffffffffu && !scanThenLane.allOnesKey && scanThenLane.unkeyed, "table key bound: a column read with a bit scan key and then a lane key kept a bound or the -1 key");
+    const auto laneThenScan = sharedKeyedColumn({0x7e220500u}, {0xbe911313u});
+    require(laneThenScan.maxKey == 0xffffffffu && !laneThenScan.allOnesKey && laneThenScan.unkeyed, "table key bound: a column read with a lane key and then a bit scan key kept a bound or the -1 key");
+    const auto countCode = keyedCode({0xbe910f12u});
+    const auto counted = CompileTable(keyRequest(countCode));
+    const auto& countedSnapshot = counted.capture->snapshot.tables.tables.at(0);
+    require(countedSnapshot.keys == 33u && countedSnapshot.records == 33u && !countedSnapshot.outside && std::equal(countedSnapshot.codes.begin(), countedSnapshot.codes.end(), snapshot.codes.begin()), "table key bound: a bit count key did not snapshot exactly records 0-32");
+    require(bitScanTable.result->imageTableFaults == counted.result->imageTableFaults + 1u, "table key bound: the -1 key of an s_ff1 table does not add a fault check");
 #ifdef _WIN32
     VirtualFree(block, 0, MEM_RELEASE);
 #else
@@ -7213,6 +7400,7 @@ int main(int argc, char** argv) {
             verifyImageTableBulkKeyScan();
             verifyImageTableSrtKey();
             verifyImageTableMaskedOffset();
+            verifyImageTableBitScanHeap();
             verifyImageTableKeyUnion();
             verifyImageTableLateKey();
             verifyImageTableUnkeyedAccess();
@@ -7283,6 +7471,7 @@ int main(int argc, char** argv) {
         verifySrtTape();
         verifyImageTableKeys();
         verifyImageTables();
+        verifyImageTableBitScanHeap();
         verifyImageTableRegistration();
         verifyScalarAddressRule();
         verifyPointerImageTable();
