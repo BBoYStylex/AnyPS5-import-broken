@@ -624,6 +624,12 @@ struct Audio3dOpenParameters {
     std::uint32_t num_beds;
 };
 
+struct Audio3dPosition {
+    float x;
+    float y;
+    float z;
+};
+
 struct Audio3dAttribute {
     std::uint32_t attribute_id;
     std::uint32_t pad;
