@@ -896,8 +896,7 @@ int APS5_VABI sceSaveDataDirNameSearch2(const SaveDataDirNameSearchCond* cond, S
 }
 
 int APS5_VABI sceSaveDataPrepareForTransferring() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    throw std::runtime_error("sceSaveDataPrepareForTransferring: unknown transferring parameters");
 }
 
 }
