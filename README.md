@@ -28,6 +28,13 @@ The [shader recompiler](core/shader/recompiler/Recompiler.cpp) successfully prod
 
 Per-game progress (stage reached, open blockers, libraries and GPU coverage) is tracked on the [blocker map](https://alxcbtw.github.io/anyps5-roadmap/), a community project built from public GitHub data ([source](https://github.com/AlxcBTW/anyps5-roadmap)). Test reports go in the [Game bring-up](https://github.com/boykopovar/AnyPS5/discussions/categories/game-bring-up) discussions, one thread per title.
 
+## Build prerequisites
+
+- **Windows toolchain**: MinGW-w64 GCC 15.2.0 (WinLibs UCRT POSIX SEH). Visual Studio Build Tools / MSVC (`cl.exe`) are not supported due to DWARF unwinding requirements. If Visual Studio Build Tools is installed, configure CMake explicitly with `-G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++` and ensure `mingw64/bin` is in `PATH`.
+- **CMake**: 3.22.1 or newer.
+- **Python**: 3.9 or newer (required for tests).
+- See [Build instructions](docs/dev/BUILD.md) for full setup instructions and environment variable details (`PATH`, `SSL_CERT_FILE`, `TEMP`/`TMP`).
+
 ## Input mapping
 
 SDL-mapped game controllers are supported, including analog sticks and triggers. Keyboard and mouse controls can be configured with an `anyps5-input.ini` file. See [input mapping](docs/user/INPUT_MAPPING.md) for the supported devices and configuration format.
