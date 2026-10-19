@@ -7,6 +7,7 @@
 #include "prx/libSceAgcDriver/Execution/include/Driver/Synchronization/DeferredLabels.hpp"
 #include "prx/libSceAgcDriver/Execution/include/CaptureTrace.hpp"
 #include "prx/libSceAgcDriver/Execution/include/GuestMemory.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/GuestBufferMemory.hpp"
 #include "prx/libSceAgcDriver/Execution/include/PerformanceOverlay.hpp"
 #include "prx/libSceAgcDriver/Execution/include/PerformanceTimer.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Pm4.hpp"
@@ -350,9 +351,11 @@ void Driver::execute(const Submission& submission) {
                     const auto queueId = submission.queue;
                     flipInterruptDeferred = localDevice->AfterRecordedWork([this, queueId] { deliverFlipEopInterrupt(queueId); }, false);
                 }
+                if (localDevice != nullptr) Graphics::RetireIdleImports(localDevice->graphicsContext());
             }
             if (!flipInterruptDeferred) deliverFlipEopInterrupt(submission.queue);
             ++flipsCounted;
+            GuestMemory::BumpFrameSerial();
             if (batchesAtFlip != 0) flipSerial = batchesAtFlip;
             flipBatchesUnsignaled += unsignaledAtFlip;
 
