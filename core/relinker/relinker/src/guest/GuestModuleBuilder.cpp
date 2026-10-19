@@ -1,5 +1,6 @@
 #include <relinker/guest/GuestImage.hpp>
 #include <relinker/analysis/SceCodeExtent.hpp>
+#include <relinker/analysis/MonoAotRanges.hpp>
 #include <relinker/analysis/UnusedNidFilter/EhFrameReader.hpp>
 #include <elfpatcher/general/GuestModuleWriter.hpp>
 #include <codegen/IAmd64OnlyConverter.hpp>
@@ -344,11 +345,17 @@ std::vector<GuestArtifact> GuestModuleBuilder::Build(const std::filesystem::path
         if (!image.PatchedRanges.empty()) GamePatch::CheckOverlaps(Io::Utf8Path(image.SourcePath), image.PatchedRanges, {.RelaData = image.Dynamic.RelaData, .RelaPltData = image.Dynamic.RelaPltData});
         const bool sceImage = std::any_of(image.Headers.begin(), image.Headers.end(), [](const Domain::ProgramHeader& header) { return header.Type == 0x61000000; });
         const auto unwindFunctions = sceImage ? UnusedNidFilter::ReadExceptionFunctions(image.Bytes, image.Headers, {}, {}) : std::vector<UnusedNidFilter::StrictCodeRegion>{};
+        std::map<Domain::VirtualAddress, Domain::VirtualAddress> relativeTargets;
+        for (std::size_t offset = 0; offset + 24 <= image.Dynamic.RelaData.size(); offset += 24)
+            if (static_cast<std::uint32_t>(Io::ReadU64(image.Dynamic.RelaData, offset + 8)) == 8)
+                relativeTargets.emplace(Io::ReadU64(image.Dynamic.RelaData, offset), Io::ReadU64(image.Dynamic.RelaData, offset + 16));
+        const auto monoAotData = MonoAotDataRanges(image.Bytes, image.Headers, relativeTargets);
         for (const auto& header : codeHeaders) {
             std::vector<std::uint8_t> code(image.Bytes.begin() + header.Offset, image.Bytes.begin() + header.Offset + header.FileSize);
             if (sceImage)
                 if (const auto end = FindSceCodeEnd(code, header.MappedAddress, unwindFunctions, image.Got, image.Dynamic.RelaPltData.size()))
                     code.resize(*end - header.MappedAddress);
+            FillDataRanges(code, header.MappedAddress, monoAotData);
             for (const auto offset : syscallScanner.ScanCodeSectionForSyscalls(code, header.MappedAddress, code.size(), Io::Utf8Path(image.SourcePath))) {
                 if (offset > code.size() || code.size() - offset < 2u)
                     throw Domain::RelinkerException("Syscall trap patch exceeds guest executable segment", header.MappedAddress + offset);

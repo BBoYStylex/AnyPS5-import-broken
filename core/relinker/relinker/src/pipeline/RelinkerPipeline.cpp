@@ -4,6 +4,7 @@
 #include <relinker/analysis/UnusedNidFilter/EhFrameReader.hpp>
 #include <relinker/analysis/SceCodeExtent.hpp>
 #include <relinker/analysis/RelativeJumpTables.hpp>
+#include <relinker/analysis/MonoAotRanges.hpp>
 #include <algorithm>
 #include <sstream>
 
@@ -326,6 +327,7 @@ RelinkResult RelinkerPipeline::Relink() {
         return definedTlsSymbolValue(symIdx, pos).has_value();
     };
 
+    std::map<VirtualAddress, VirtualAddress> relativeTargets;
     auto extractRela = [&](const FileByteOffset relaOff, const ByteCount relaSize) {
         for (ByteCount off = 0; relaSize >= relaEntSize && off <= relaSize - relaEntSize; off += relaEntSize) {
             const FileByteOffset pos = relaEntryPos(relaOff, off);
@@ -345,6 +347,7 @@ RelinkResult RelinkerPipeline::Relink() {
             if (relType == 8) {
                 if (symIdx != 0 && !isZeroSectionSymbol(symIdx))
                     throw RelinkerException("RELATIVE relocation has a nonzero symbol index", pos);
+                relativeTargets.emplace(rOffset, static_cast<VirtualAddress>(rAddend));
                 continue;
             }
 
@@ -385,12 +388,14 @@ RelinkResult RelinkerPipeline::Relink() {
         }
     }
 
+    const auto monoAotData = MonoAotDataRanges(raw, programHeaders, relativeTargets);
     std::vector<std::vector<std::uint8_t>> scanSegments;
     for (const auto& [segment, segmentVAddr, segmentFileOffset] : executableSegments) {
         static_cast<void>(segmentFileOffset);
         auto& scanSegment = scanSegments.emplace_back(segment);
         for (const auto& table : FindRelativeJumpTables(segment, segmentVAddr, unwindRanges))
             std::fill(scanSegment.begin() + static_cast<std::ptrdiff_t>(table.Begin - segmentVAddr), scanSegment.begin() + static_cast<std::ptrdiff_t>(table.End - segmentVAddr), std::uint8_t{0x90});
+        FillDataRanges(scanSegment, segmentVAddr, monoAotData);
     }
 
     std::vector<RelinkPatch> syscallPatches;

@@ -3,6 +3,7 @@
 #include <relinker/analysis/UnusedNidFilter/EhFrameReader.hpp>
 #include <relinker/analysis/SceCodeExtent.hpp>
 #include <relinker/analysis/RelativeJumpTables.hpp>
+#include <relinker/analysis/MonoAotRanges.hpp>
 #include <codegen/x86/X64InstructionDecoder.hpp>
 #include <codegen/CodegenException.hpp>
 #include <io/BufferUtils.hpp>
@@ -264,6 +265,7 @@ std::set<Domain::VirtualAddress> CodeInstructionCollector::Collect(const std::ve
                 end = std::min(end, table.Begin);
             }
         }
+        for (const auto& [begin, end] : MonoAotDataRanges(bytes, headers, pointers.Values)) tables.emplace(begin, end);
         std::erase_if(roots, inTable);
     }
     if (roots.empty()) throw Domain::RelinkerException("Code analysis: no code entry points");

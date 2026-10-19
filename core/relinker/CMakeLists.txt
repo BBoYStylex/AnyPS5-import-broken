@@ -58,6 +58,7 @@ add_library(relinker_core STATIC
         ${CMAKE_CURRENT_SOURCE_DIR}/relinker/src/analysis/CodeInstructionCollector.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/relinker/src/analysis/SceCodeExtent.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/relinker/src/analysis/RelativeJumpTables.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/relinker/src/analysis/MonoAotRanges.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/relinker/src/analysis/UnusedNidFilter.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/relinker/src/analysis/UnusedNidFilter/StrictNidFilter.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/relinker/src/analysis/UnusedNidFilter/StrictReachability.cpp
@@ -737,6 +738,17 @@ if(BUILD_TESTING)
     )
     add_test(NAME control_flow_graph COMMAND control_flow_graph_tests)
     set_tests_properties(control_flow_graph PROPERTIES TIMEOUT 20)
+
+    add_test_executable(mono_aot_ranges_tests
+        ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/MonoAotRangesTests.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/relinker/src/analysis/MonoAotRanges.cpp
+    )
+    target_include_directories(mono_aot_ranges_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/domain/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/relinker/include
+    )
+    add_test(NAME mono_aot_ranges COMMAND mono_aot_ranges_tests)
+    set_tests_properties(mono_aot_ranges PROPERTIES TIMEOUT 20)
 
     add_test_executable(strict_nid_filter_tests
         ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/StrictNidFilterTests.cpp
