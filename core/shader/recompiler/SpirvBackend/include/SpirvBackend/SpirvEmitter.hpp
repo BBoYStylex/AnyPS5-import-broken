@@ -43,6 +43,7 @@ struct SpirvTargetOptions {
 
 struct SpirvEmitInfo {
     bool fullSubgroups = false;
+    bool functionLdsBuffer = false;
 };
 
 struct SpannedWaveUnsupported : std::runtime_error {
