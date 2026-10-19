@@ -10,7 +10,7 @@
 #include "ImageTableAbi.hpp"
 #include "Recompiler.hpp"
 #include "RuntimeAbi.hpp"
-#include "SrgbFormats.hpp"
+#include "RdnaDecoder/RdnaDescriptorFormat.hpp"
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
