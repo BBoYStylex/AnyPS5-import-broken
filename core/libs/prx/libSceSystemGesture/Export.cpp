@@ -76,7 +76,6 @@ int APS5_VABI sceSystemGestureGetPrimitiveTouchEventByPrimitiveID(int32_t gestur
  (void)gesture_handle;
  (void)primitiveId;
  (void)event;
- NotImplemented_nid_no_patch(__func__);
  return 0;
 }
 
@@ -98,7 +97,6 @@ int APS5_VABI sceSystemGestureGetTouchEventByEventID(int32_t gesture_handle, con
  (void)recognizer;
  (void)eventId;
  (void)event;
- NotImplemented_nid_no_patch(__func__);
  return 0;
 }
 

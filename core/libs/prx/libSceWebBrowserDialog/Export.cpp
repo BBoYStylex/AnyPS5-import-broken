@@ -68,7 +68,6 @@ int APS5_VABI sceWebBrowserDialogUpdateStatus(void) {
 
 
 int APS5_VABI sceWebBrowserDialogSetCookie(void) {
-    NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
@@ -82,7 +81,6 @@ int APS5_VABI sceWebBrowserDialogOpenForPredeterminedContent(const void* param) 
 }
 
 int APS5_VABI sceWebBrowserDialogResetCookie() {
-    NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 

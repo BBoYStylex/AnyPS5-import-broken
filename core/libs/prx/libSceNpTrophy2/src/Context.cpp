@@ -84,7 +84,6 @@ int APS5_VABI sceNpTrophy2GetRewardIcon(int context, int handle, int reward_id, 
     (void)reward_id;
     (void)buffer;
     (void)size;
-    NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 

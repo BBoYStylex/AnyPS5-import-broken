@@ -131,7 +131,7 @@ std::int64_t ReadNativeLink(const std::filesystem::path& native, char* buffer, s
     if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
         std::string target;
         if (!File::WindowsSymbolicLink::Read(native, target, "readlink") && !File::WindowsSymbolicLink::ReadJunction(native, target, "readlink")) {
-            NotImplemented_nid_no_patch("readlink of a Windows reparse point other than a symbolic link");
+            throw std::runtime_error("readlink of a Windows reparse point other than a symbolic link not implemented");
             return -1;
         }
         return CopyLinkTarget(target, buffer, size);
@@ -240,7 +240,7 @@ int RenamePath(const std::filesystem::path& source, const std::filesystem::path&
 extern "C" {
 
 int APS5_VABI fork_nid_postfix(void) {
-    NotImplemented_nid_no_patch("fork: child processes");
+    throw std::runtime_error("fork: child processes not implemented");
     return -1;
 }
 
@@ -372,7 +372,7 @@ int APS5_VABI symlink_nid_postfix(const char* target, const char* created) {
     if (target == nullptr || created == nullptr) return static_cast<int>(Fail(GuestEfault));
     if (*target == '\0' || *created == '\0') return static_cast<int>(Fail(GuestEnoent));
     if (*target == '/') {
-        NotImplemented_nid_no_patch("symlink: absolute targets");
+        throw std::runtime_error("symlink: absolute targets not implemented");
         return -1;
     }
     std::filesystem::path native;

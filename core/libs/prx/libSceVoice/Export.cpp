@@ -206,7 +206,6 @@ int APS5_VABI sceVoiceWriteToIPort(uint32_t input_port_id, const void* data, uin
     (void)data;
     (void)size;
     (void)frame_gaps;
-    NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
@@ -239,7 +238,6 @@ int APS5_VABI sceVoiceGetResourceInfo(VoiceResourceInfo* info) {
 }
 
 int APS5_VABI sceVoiceEnableChat(void) {
-    NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
@@ -251,7 +249,6 @@ int APS5_VABI sceVoiceResetPort(uint32_t port_id) {
 }
 
 int APS5_VABI sceVoiceDisableChat(void) {
-    NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 

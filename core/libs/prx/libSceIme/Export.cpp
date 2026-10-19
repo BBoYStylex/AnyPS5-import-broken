@@ -297,8 +297,8 @@ int APS5_VABI sceImeOpen_nid_postfix(const Param* param, const ExtendedParam* ex
     std::lock_guard lock(g_imeMutex);
     if (g_session) return ErrorBusy;
     if (const int error = ValidateOpen(param, extended)) return error;
-    if (param->filter) NotImplemented_nid_no_patch("sceImeOpen: text filter");
-    if (extended && extended->ext_keyboard_filter) NotImplemented_nid_no_patch("sceImeOpen: external keyboard filter");
+    if (param->filter) throw std::runtime_error("sceImeOpen: text filter not implemented");
+    if (extended && extended->ext_keyboard_filter) throw std::runtime_error("sceImeOpen: external keyboard filter not implemented");
     Session session;
     session.param = *param;
     session.text.assign(param->input_text_buffer, TextLength(param->input_text_buffer, param->max_text_length));

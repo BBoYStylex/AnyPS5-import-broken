@@ -132,7 +132,6 @@ int APS5_VABI sceVoiceQoSDisconnect(int32_t connectionId) {
 }
 
 int APS5_VABI sceVoiceQoSSetConnectionAttribute() {
- NotImplemented_nid_no_patch(__func__);
  return 0;
 }
 
@@ -145,17 +144,14 @@ int APS5_VABI sceVoiceQoSSetRemoteEndpointAttribute(int32_t remoteId, int32_t at
 }
 
 int APS5_VABI sceVoiceQoSReadPacket() {
- NotImplemented_nid_no_patch(__func__);
  return 0;
 }
 
 int APS5_VABI sceVoiceQoSWritePacket() {
- NotImplemented_nid_no_patch(__func__);
  return 0;
 }
 
 int APS5_VABI sceVoiceQoSGetLocalEndpointAttribute() {
-    NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 

@@ -177,7 +177,6 @@ int APS5_VABI sceNpPollAsync(int req_id, int* result) {
 void APS5_VABI sceNpRegisterGamePresenceCallback(void* callback, void* userdata) {
  (void)callback;
  (void)userdata;
- NotImplemented_nid_no_patch(__func__);
 }
 
 int APS5_VABI sceNpRegisterNpReachabilityStateCallback(void* callback, void* userdata) {
@@ -219,7 +218,6 @@ int APS5_VABI sceNpRegisterStateCallback(NpStateCallback callback, void* userdat
 
 int APS5_VABI sceNpSetContentRestriction(const NpContentRestriction* restriction) {
  (void)restriction;
- NotImplemented_nid_no_patch(__func__);
  return 0;
 }
 
@@ -299,7 +297,6 @@ int APS5_VABI sceNpGetUserIdByAccountId(uint64_t account_id, int* user_id) {
 
 int APS5_VABI sceNpGetSandboxInfo(void* sandbox_info) {
     (void)sandbox_info;
-    NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
@@ -307,13 +304,11 @@ APS5_EXPORT("8weiQyIdI3A", sceNpUnknown_8weiQyIdI3A);
 int APS5_VABI sceNpUnknown_8weiQyIdI3A(int userId, void* buffer) {
     (void)userId;
     (void)buffer;
-    NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
 APS5_EXPORT("WxLcN76q19o", sceNpUnknown_WxLcN76q19o);
 int APS5_VABI sceNpUnknown_WxLcN76q19o(void) {
-    NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
