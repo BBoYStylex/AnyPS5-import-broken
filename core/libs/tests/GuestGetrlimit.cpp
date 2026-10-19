@@ -79,12 +79,8 @@ static void RequireDescriptorsEndAt(const ResourceLimit& limit) {
 }
 #endif
 
-static void CheckOpenFileLimit() {
-    const ResourceLimit limit = GuestLimit(GUEST_RLIMIT_NOFILE);
-    Require(limit.rlim_cur == limit.rlim_max);
 #ifdef _WIN32
-    Require(limit.rlim_cur == 8192);
-    RequireDescriptorsEndAt(limit);
+static void RequireStreamsOpen() {
     const auto path = (std::filesystem::temp_directory_path() / ("aps5-open-streams-" + std::to_string(GetCurrentProcessId()))).string();
     std::vector<void*> streams;
     for (int index = 0; index < 1024; ++index) {
@@ -94,6 +90,16 @@ static void CheckOpenFileLimit() {
     }
     for (void* stream : streams) Require(fclose_nid_postfix(stream) == 0);
     std::filesystem::remove(path);
+}
+#endif
+
+static void CheckOpenFileLimit() {
+    const ResourceLimit limit = GuestLimit(GUEST_RLIMIT_NOFILE);
+    Require(limit.rlim_cur == limit.rlim_max);
+#ifdef _WIN32
+    Require(limit.rlim_cur == 8192);
+    RequireDescriptorsEndAt(limit);
+    RequireStreamsOpen();
 #else
     rlimit host{};
     Require(getrlimit(RLIMIT_NOFILE, &host) == 0);
