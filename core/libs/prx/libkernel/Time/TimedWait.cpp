@@ -442,7 +442,14 @@ void SleepNanos(std::uint64_t nanos) {
     struct timespec req{};
     req.tv_sec = static_cast<time_t>(nanos / 1000000000ULL);
     req.tv_nsec = static_cast<long>(nanos % 1000000000ULL);
+#ifdef __APPLE__
+    // Darwin's nanosleep returns 0 after a full sleep but leaves errno at ETIMEDOUT; the guest errno is the host one.
+    const int saved = errno;
     while (nanosleep(&req, &req) == -1 && errno == EINTR) {}
+    errno = saved;
+#else
+    while (nanosleep(&req, &req) == -1 && errno == EINTR) {}
+#endif
 #endif
 }
 
