@@ -138,7 +138,13 @@ extern "C" [[noreturn]] void APS5_VABI EnterGuestMainStack_nid_no_patch(void* ar
     const std::uintptr_t top = arenaBase - GUEST_ARENA_START + GUEST_MAIN_STACK_TOP;
     const std::size_t bytes = GuestMainStackBytes() + GUEST_STACK_GUARD;
     void* mapping = reinterpret_cast<void*>(top - bytes);
-    if (DoMapAnon(&mapping, bytes, 3, GUEST_MAP_FIXED) != 0 || reinterpret_cast<std::uintptr_t>(mapping) + bytes != top)
+    const int mapped = DoMapAnon(&mapping, bytes, 3, GUEST_MAP_FIXED, PS5_PAGE_SIZE, true);
+    if (mapped == SCE_KERNEL_ERROR_ENOMEM) {
+        char message[160];
+        std::snprintf(message, sizeof(message), "EnterGuestMainStack: the guest main stack [%#zx, %#zx) overlaps a guest mapping", static_cast<std::size_t>(top - bytes), static_cast<std::size_t>(top));
+        throw std::runtime_error(message);
+    }
+    if (mapped != 0 || reinterpret_cast<std::uintptr_t>(mapping) + bytes != top)
         throw std::runtime_error("EnterGuestMainStack: cannot map the guest main stack");
     if (DoMprotect(mapping, GUEST_STACK_GUARD, 0) != 0) throw std::runtime_error("EnterGuestMainStack: cannot protect the guest main stack guard");
     guestMainStackHigh.store(top, std::memory_order_release);

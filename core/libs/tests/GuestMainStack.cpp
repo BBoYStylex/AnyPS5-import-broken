@@ -3,12 +3,16 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <stdexcept>
+#include <string>
 
 extern "C" {
 [[noreturn]] void APS5_VABI EnterGuestMainStack_nid_no_patch(void* arguments, void (*entry)(void*));
 int APS5_VABI scePthreadCreate(Pthread* thread, const PthreadAttr* attr, PthreadEntry entry, void* arg, const char* name);
 int APS5_VABI scePthreadJoin(Pthread thread, void** retval);
 int APS5_VABI sceKernelIsStack(void* addr, void** start, void** end);
+int APS5_VABI sceKernelMapFlexibleMemory(void** addr, std::size_t len, int prot, int flags);
+int APS5_VABI sceKernelMunmap(void* addr, std::size_t len);
 }
 
 #ifdef ANYPS5_ENABLE_ASAN
@@ -19,6 +23,7 @@ static constexpr std::uintptr_t GuestArenaOffset = 0;
 static constexpr std::uintptr_t ConsoleMainStackTop = 0x00000007EEFFC000ull + GuestArenaOffset;
 static constexpr std::uintptr_t SmallestStack = 0x100000;
 static int marker = 0;
+static bool expectRefusal = false;
 
 #define Require(value) do { if (!(value)) { std::fprintf(stderr, "GuestMainStack failed at line %d\n", __LINE__); std::_Exit(1); } } while (false)
 
@@ -57,6 +62,7 @@ static void* APS5_VABI Worker(void* arg) {
 }
 
 static void APS5_VABI Entry(void* arguments) {
+    Require(!expectRefusal);
     Require(arguments == &marker);
     int local = 0;
     const auto address = reinterpret_cast<std::uintptr_t>(&local);
@@ -80,6 +86,29 @@ static void APS5_VABI Entry(void* arguments) {
     std::exit(0);
 }
 
+static void RefusesAnOverlap() {
+    constexpr std::size_t Bytes = 0x4000;
+    constexpr std::uint32_t Pattern = 0xa55a1234u;
+    void* sentinel = reinterpret_cast<void*>(ConsoleMainStackTop - 0x10000);
+    Require(sceKernelMapFlexibleMemory(&sentinel, Bytes, 3, 0x10) == 0);
+    Require(reinterpret_cast<std::uintptr_t>(sentinel) == ConsoleMainStackTop - 0x10000);
+    auto* words = static_cast<std::uint32_t*>(sentinel);
+    for (std::size_t i = 0; i < Bytes / 4; ++i) words[i] = Pattern;
+    bool refused = false;
+    expectRefusal = true;
+    try {
+        EnterGuestMainStack_nid_no_patch(&marker, Entry);
+    } catch (const std::runtime_error& error) {
+        refused = std::string(error.what()).find("overlaps a guest mapping") != std::string::npos;
+    }
+    expectRefusal = false;
+    Require(refused);
+    Require(Permissions(reinterpret_cast<std::uintptr_t>(sentinel)) == 'w');
+    for (std::size_t i = 0; i < Bytes / 4; ++i) Require(words[i] == Pattern);
+    Require(sceKernelMunmap(sentinel, Bytes) == 0);
+}
+
 int main() {
+    RefusesAnOverlap();
     EnterGuestMainStack_nid_no_patch(&marker, Entry);
 }
