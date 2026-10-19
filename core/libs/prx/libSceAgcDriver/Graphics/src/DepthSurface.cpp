@@ -887,8 +887,6 @@ public:
             memory = AllocateImageMemory(context, allocation, requirements.memoryTypeBits, "vkAllocateMemory depth plane copy");
             Check(context.Function<PFN_vkBindImageMemory>("vkBindImageMemory")(context.device, image, memory, 0), "vkBindImageMemory depth plane copy");
             imageBytes = requirements.size;
-            // The views share the image's ownership: the copy can leave the cache while a draw or a
-            // cached resource set still samples it.
             owned = std::make_shared<OwnedImage>(context, image, memory);
         } catch (...) {
             release();
@@ -935,8 +933,6 @@ public:
             held = current;
         }
         if (!copiedLayers.empty() || !uploads.empty()) {
-            // The recorder keeps the staging buffer (and the image) until the copy ran, so a copy
-            // evicted meanwhile, or a staging buffer outgrown, does not free memory in use.
             if (staging == nullptr || stagingBytes > staging->Size()) staging = std::make_shared<DeviceBuffer>(context, stagingBytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
             record(slices, resource, geometry, copiedLayers, uploads, uploadLayers, staging);
         }
@@ -1070,11 +1066,6 @@ std::uint64_t& planeCopyClock() {
     return clock;
 }
 
-// The plane copies were kept until the device went away: every depth surface a scene ever sampled
-// held a full-size copy in device memory (0.4-1.2 GB in RE2 after a level load). Past
-// APS5_DEPTH_PLANE_COPY_MIB (default 256; 0 keeps all) the least recently used copies leave the
-// cache; their views keep the image alive while a draw, a recorded batch or a cached resource set
-// still holds them, and a copy made again refills from the surface.
 void evictPlaneCopies(const std::tuple<VkDevice, std::uint64_t, std::uint32_t, std::uint32_t, VkFormat, std::uint32_t>& keep) {
     static const VkDeviceSize budget = [] {
         const char* text = std::getenv("APS5_DEPTH_PLANE_COPY_MIB");
@@ -1728,6 +1719,10 @@ void ClearDepthSurfaces(VkDevice device) {
     std::erase_if(depthGuards(), [&](const auto& range) { return range.device == device; });
     anyDepthGuard().store(!depthGuards().empty(), std::memory_order_release);
     UpdateResidentImageUnmapObserver_nid_no_patch();
+}
+
+std::size_t DepthPlaneCopyCount() {
+    return planeCopies().size();
 }
 
 std::shared_ptr<Texture> DepthSurfaceTexture(const Context& context, std::span<const std::uint32_t> words, const GuestTextureResource& resource, VkComponentMapping components, VkImageViewType multisampleViewType) {
