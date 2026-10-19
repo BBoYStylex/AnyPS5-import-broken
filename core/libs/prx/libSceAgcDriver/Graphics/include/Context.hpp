@@ -212,11 +212,11 @@ struct Context {
     bool partiallyBound = false;
     bool variableDescriptorCount = false;
     bool sampledImageUpdateAfterBind = false;
-    bool imageTableUpdateAfterBind = false;
-    bool samplerTableUpdateAfterBind = false;
     std::uint32_t imageTableCapacity = 0;
     std::uint32_t samplerTableCapacity = 0;
     bool individuallyFreeDescriptorSets = false;
+    bool imageTableUpdateAfterBind = false;
+    bool samplerTableUpdateAfterBind = false;
     bool geometryShader = false;
     bool sampleRateShading = false;
     bool storageImageMultisample = false;
