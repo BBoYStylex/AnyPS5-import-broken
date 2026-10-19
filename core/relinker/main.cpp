@@ -65,6 +65,7 @@ ConvertedExecutable Convert(const Cli::Args& args, const std::string& inputPath,
     options.WindowsFixedBase = mainExecutable ? args.windowsFixedBase : std::nullopt;
     options.WindowsDiagnostics = args.windowsDiagnostics && mainExecutable;
     options.LinuxFixedBase = args.linuxFixedBase;
+    options.MacosFixedBase = args.macosFixedBase;
     options.ExcludedModules = args.excludedSceModules;
     options.Patches = patches;
     options.TargetName = targetName;
@@ -149,12 +150,11 @@ bool SameOutputDestination(const std::filesystem::path& first, const std::filesy
     if (firstPath == secondPath) return true;
     if (std::filesystem::exists(first) && std::filesystem::exists(second)) return SameOutputFile(first, second);
 #ifdef _WIN32
-    auto firstName = Io::Utf8Path(firstPath.filename());
-    auto secondName = Io::Utf8Path(secondPath.filename());
-    for (auto* name : {&firstName, &secondName})
-        for (auto& character : *name)
-            if (character >= 'A' && character <= 'Z') character = static_cast<char>(character + ('a' - 'A'));
-    if (firstName == secondName && std::filesystem::exists(firstPath.parent_path()) &&
+    const auto firstName = firstPath.filename().native();
+    const auto secondName = secondPath.filename().native();
+    const auto comparison = CompareStringOrdinal(firstName.c_str(), -1, secondName.c_str(), -1, TRUE);
+    if (comparison == 0) throw Domain::RelinkerException("Cannot compare output filenames");
+    if (comparison == CSTR_EQUAL && std::filesystem::exists(firstPath.parent_path()) &&
         std::filesystem::exists(secondPath.parent_path()) && std::filesystem::equivalent(firstPath.parent_path(), secondPath.parent_path())) {
         OutputIdentityDirectory probe(firstPath.parent_path());
         auto alternateName = Io::Utf8Path(probe.GetDirectory().filename());
@@ -278,7 +278,7 @@ int Run(const int argc, char* argv[]) {
         if (!args.toWindows && !args.toMacos && extension == ".exe") std::cerr << "WARNING: Output filename ends with .exe, but --windows was not specified. The output will be a Linux ELF executable.\n";
         Io::FileWriter fileWriter;
 
-        if (std::filesystem::exists(Io::NativePath(args.inputPath)) && std::filesystem::exists(Io::NativePath(args.outputPath)) && std::filesystem::equivalent(Io::NativePath(args.inputPath), Io::NativePath(args.outputPath)))
+        if (std::filesystem::exists(Io::NativePath(args.inputPath)) && std::filesystem::exists(Io::NativePath(args.outputPath)) && SameOutputFile(Io::NativePath(args.inputPath), Io::NativePath(args.outputPath)))
             throw Domain::RelinkerException("Executable output would overwrite the input executable");
         if (Io::NativePath(args.outputPath).filename().empty() || std::filesystem::is_directory(Io::NativePath(args.outputPath)))
             throw Domain::RelinkerException("Executable output is a directory: " + args.outputPath);
@@ -352,10 +352,10 @@ int Run(const int argc, char* argv[]) {
         const auto checkOutputInputs = [&](const std::filesystem::path& path, const char* kind) {
             if (!std::filesystem::exists(path)) return;
             for (const auto& executable : executables)
-                if (std::filesystem::equivalent(Io::NativePath(executable.InputPath), path))
+                if (SameOutputFile(Io::NativePath(executable.InputPath), path))
                     throw Domain::RelinkerException(std::string(kind) + " output would overwrite the input executable: " + Io::Utf8Path(path));
             for (const auto& artifact : guestArtifacts)
-                if (std::filesystem::equivalent(artifact.SourcePath, path))
+                if (SameOutputFile(artifact.SourcePath, path))
                     throw Domain::RelinkerException(std::string(kind) + " output would overwrite an input module: " + Io::Utf8Path(path));
         };
         for (std::size_t index = 1; index < executables.size(); ++index) checkOutputInputs(Io::NativePath(executables[index].OutputPath), "Executable");
@@ -457,7 +457,7 @@ int Run(const int argc, char* argv[]) {
         }
         std::vector<std::string> modulePaths;
         for (const auto& artifact : guestArtifacts) {
-            std::string relative = Io::Utf8Path(artifact.Path.lexically_relative(Io::NativePath(absPath).parent_path() / "app0"));
+            std::string relative = Io::Utf8Path(artifact.Path.lexically_relative(Io::NativePath(absPath).parent_path().lexically_normal() / "app0"));
             std::replace(relative.begin(), relative.end(), '\\', '/');
             modulePaths.push_back(std::move(relative));
         }

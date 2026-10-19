@@ -78,6 +78,9 @@ double APS5_VABI copysign_nid_postfix(double, double);
 float APS5_VABI copysignf_nid_postfix(float, float);
 double APS5_VABI remquo_nid_postfix(double, double, int*);
 float APS5_VABI remquof_nid_postfix(float, float, int*);
+float APS5_VABI fmaf_nid_postfix(float, float, float);
+long double APS5_VABI ceill_nid_postfix(long double);
+long double APS5_VABI floorl_nid_postfix(long double);
 float APS5_VABI tanf_nid_postfix(float);
 int APS5_VABI rand_nid_postfix();
 void APS5_VABI srand_nid_postfix(unsigned int);
@@ -236,6 +239,10 @@ static void CheckExactOperations() {
     Require(fdimf_nid_postfix(4.0f, 1.0f) == 3.0f && fdimf_nid_postfix(1.0f, 4.0f) == 0.0f);
     Require(fdimf_nid_postfix(4.0f, 4.0f) == 0.0f && !std::signbit(fdimf_nid_postfix(1.0f, 4.0f)));
     Require(std::isnan(fdimf_nid_postfix(std::numeric_limits<float>::quiet_NaN(), 1.0f)));
+    Require(fmaf_nid_postfix(2.f, 3.f, 4.f) == 10.f);
+    volatile float tenthFloat = 0.1f;
+    Require(fmaf_nid_postfix(tenthFloat, 10.f, -1.f) != 0.f);
+    Require(std::isnan(fmaf_nid_postfix(INFINITY, 0.f, 1.f)));
 }
 
 static void CheckNearbyint() {
@@ -402,6 +409,10 @@ static void CheckLongDouble() {
     Require(frexpl_nid_postfix(INFINITY, &exponent) == INFINITY && exponent == 77);
     Require(frexpl_nid_postfix(-INFINITY, &exponent) == -INFINITY && exponent == 77);
     Require(std::isnan(frexpl_nid_postfix(NAN, &exponent)) && exponent == 77);
+    Require(ceill_nid_postfix(2.2L) == 3.0L && ceill_nid_postfix(-2.7L) == -2.0L);
+    Require(floorl_nid_postfix(2.7L) == 2.0L && floorl_nid_postfix(-2.2L) == -3.0L);
+    Require(ceill_nid_postfix(2.0L) == 2.0L && floorl_nid_postfix(-2.0L) == -2.0L);
+    Require(std::isnan(ceill_nid_postfix(NAN)) && std::isnan(floorl_nid_postfix(NAN)));
 }
 
 static void CheckNearbyintl() {

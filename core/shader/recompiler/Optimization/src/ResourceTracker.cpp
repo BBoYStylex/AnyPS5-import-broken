@@ -586,7 +586,8 @@ private:
         std::uint32_t first = 0;
         bool address = false;
         for (std::uint32_t dword = 0; dword < words; dword++) {
-            IrValue* read = handle.Argument(dword)->Resolve();
+            IrValue* read = ResolveInvariantPhi(m_program.Resources(), handle.Argument(dword));
+            if (read == nullptr) return false;
             std::uint32_t memoryIndex = 0;
             const MemoryInfo* memory = ScalarReadMemory(*read, memoryIndex);
             const bool addressRead = memory == nullptr && (memory = ScalarAddressMemory(*read, memoryIndex)) != nullptr;
@@ -1799,7 +1800,8 @@ private:
         image.constantSwizzleCompatible = image.constantSwizzleCompatible && (op == IrOpcode::ImageSampleRaw || op == IrOpcode::ImageGatherRaw);
         const bool cubeFaceLoad = op == IrOpcode::ImageRead && !memory.imageHasMip && memory.imageSampleFlags == 0u;
         const bool cubeFaceSample = op == IrOpcode::ImageSampleRaw && (memory.imageSampleFlags == 0u || memory.imageSampleFlags == RdnaImageSampleFlagLevelZero || memory.imageSampleFlags == RdnaImageSampleFlagLod);
-        image.cubeFaceCompatible = image.cubeFaceCompatible && (cubeFaceLoad || cubeFaceSample) && !memory.imagePacked && memory.imageByElements == 0u;
+        const bool cubeFaceStore = op == IrOpcode::ImageWrite && !memory.imageHasMip;
+        image.cubeFaceCompatible = image.cubeFaceCompatible && (cubeFaceLoad || cubeFaceSample || cubeFaceStore) && !memory.imagePacked && memory.imageByElements == 0u;
         const bool flatVolumeLoad = op == IrOpcode::ImageRead && memory.imageSampleFlags == 0u;
         const bool flatVolumeSample = op == IrOpcode::ImageSampleRaw && memory.imageSampleFlags == RdnaImageSampleFlagLevelZero;
         const bool flatVolumeQuery = op == IrOpcode::ImageQueryDimensions;
