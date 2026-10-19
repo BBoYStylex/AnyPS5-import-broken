@@ -9824,6 +9824,7 @@ int main(int argc, char** argv) {
         RunTextureTilingTests();
         RunGuestTextureResourceTests();
         RunDepthSurfaceReuseTests();
+        RunTextureMipChainTests();
         RunGuestSamplerResourceTests();
         mock = MockVulkan{};
         auto textureDetilerContext = mockContext();
