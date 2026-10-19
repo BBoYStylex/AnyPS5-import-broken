@@ -709,6 +709,7 @@ void encodeShaderInfo(Writer& writer, const ShaderInfo& info) {
         out.Value(image.singleMipPlaneBiasCompatible);
         out.Value(image.flatLineCompatible);
         out.Value(image.flatVolumeLineCompatible);
+        out.Value(image.dimensionQueryOnly);
         out.Value(image.foldTexelOffsetsOnly);
         out.Value(image.convertedSamples);
         out.Value(image.byElements);
@@ -812,6 +813,7 @@ void decodeShaderInfo(Reader& reader, ShaderInfo& info) {
         in.Value(image.singleMipPlaneBiasCompatible);
         in.Value(image.flatLineCompatible);
         in.Value(image.flatVolumeLineCompatible);
+        in.Value(image.dimensionQueryOnly);
         in.Value(image.foldTexelOffsetsOnly);
         in.Value(image.convertedSamples);
         in.Value(image.byElements);
