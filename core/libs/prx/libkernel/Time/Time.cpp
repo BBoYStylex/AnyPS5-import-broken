@@ -33,6 +33,10 @@
 #include <dlfcn.h>
 #include <link.h>
 #endif // __linux__
+#ifdef __APPLE__
+#include <mach/mach.h>
+#include <pthread.h>
+#endif
 #endif
 
 extern "C" int* APS5_VABI __error_nid_postfix();
@@ -483,6 +487,21 @@ static int ReadClock(int clockId, KernelTimespec* tp) {
         default:
             throw std::runtime_error(std::string("clock_gettime") + ": unsupported clock_id " + std::to_string(clockId));
     }
+#ifdef __APPLE__
+    // Under Rosetta, clock_gettime(CLOCK_THREAD_CPUTIME_ID) under-counts badly (about 5 ms for 200 ms of CPU); the
+    // Mach thread counter, which the per-thread CPU clocks already read, is right.
+    if (clockId == 14) {
+        thread_basic_info_data_t info{};
+        mach_msg_type_number_t count = THREAD_BASIC_INFO_COUNT;
+        const mach_port_t self = pthread_mach_thread_np(pthread_self());
+        if (thread_info(self, THREAD_BASIC_INFO, reinterpret_cast<thread_info_t>(&info), &count) != KERN_SUCCESS) return -1;
+        const std::uint64_t micros = static_cast<std::uint64_t>(info.user_time.seconds + info.system_time.seconds) * 1000000ULL
+            + static_cast<std::uint64_t>(info.user_time.microseconds + info.system_time.microseconds);
+        tp->tv_sec = static_cast<std::int64_t>(micros / 1000000ULL);
+        tp->tv_nsec = static_cast<std::int64_t>(micros % 1000000ULL * 1000ULL);
+        return 0;
+    }
+#endif
     struct timespec ts{};
     if (clock_gettime(nativeId, &ts) != 0) {
         return -1;
