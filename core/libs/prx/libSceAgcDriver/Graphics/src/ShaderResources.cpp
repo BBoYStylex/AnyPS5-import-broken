@@ -1184,20 +1184,9 @@ std::shared_ptr<StorageTexture> cachedStorageTexture(const Context& context, std
             const auto limits = storageLimits(context);
             const auto budget = limits.budget;
             const auto ceiling = limits.ceiling;
-            std::size_t passed = 0;
-            while (!cache.entries.empty() && cache.bytes + entry.accounted > budget) {
-                const auto back = std::prev(cache.entries.end());
-                const bool over = cache.bytes + entry.accounted > ceiling;
-                const bool keep = back->accounted == 0 || (!over && back->texture.use_count() > 1);
-                if (keep && passed < cache.entries.size()) {
-                    cache.entries.splice(cache.entries.begin(), cache.entries, back);
-                    ++passed;
-                } else if (keep && !over) {
-                    break;
-                } else {
-                    evicted.push_back(evictStorage(cache, back));
-                }
-            }
+            EvictStorageOnBudget(cache.entries, cache.bytes, entry.accounted, budget, ceiling, [&](auto back) {
+                evicted.push_back(evictStorage(cache, back));
+            });
             cache.bytes += entry.accounted;
             texture = entry.texture;
             cache.entries.push_front(std::move(entry));
@@ -1232,6 +1221,11 @@ std::shared_ptr<StorageTexture> cachedStorageTexture(const Context& context, std
 std::uint64_t TextureCacheBudget(const VkPhysicalDeviceMemoryProperties& memory) {
     const auto heap = largestDeviceLocalHeap(memory);
     return std::max<std::uint64_t>(2048ull << 20u, heap ? memory.memoryHeaps[*heap].size / 4u : 0u);
+}
+
+bool KeepStorageOnBudgetEvict(std::uint64_t bytesWithEntry, std::uint64_t ceiling, std::size_t accounted, unsigned useCount) {
+    const bool over = bytesWithEntry > ceiling;
+    return accounted == 0 || (!over && useCount > 1);
 }
 
 std::uint64_t StorageTextureBudget(const VkPhysicalDeviceMemoryProperties& memory, const VkPhysicalDeviceMemoryBudgetPropertiesEXT* reported, std::uint64_t sampledBytes, std::uint64_t storageBytes) {

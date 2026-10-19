@@ -36,6 +36,23 @@ std::uint64_t SampledTextureBudget(const VkPhysicalDeviceMemoryProperties& memor
 bool SampledBudgetReportDue(std::uint64_t reported, std::uint64_t budget, std::chrono::steady_clock::duration sinceReport);
 std::optional<std::uint32_t> LargestDeviceLocalHeap(const VkPhysicalDeviceMemoryProperties& memory);
 std::uint64_t StorageTextureCacheBudget(const Context& context);
+bool KeepStorageOnBudgetEvict(std::uint64_t bytesWithEntry, std::uint64_t ceiling, std::size_t accounted, unsigned useCount);
+template <typename Entries, typename Bytes, typename Evict>
+void EvictStorageOnBudget(Entries& entries, Bytes& currentBytes, std::uint64_t incomingBytes, std::uint64_t budget, std::uint64_t ceiling, Evict&& evict) {
+    std::size_t passed = 0;
+    while (!entries.empty() && currentBytes + incomingBytes > budget) {
+        const auto back = std::prev(entries.end());
+        const bool keep = KeepStorageOnBudgetEvict(currentBytes + incomingBytes, ceiling, back->accounted, back->texture.use_count());
+        if (keep && passed < entries.size()) {
+            entries.splice(entries.begin(), entries, back);
+            ++passed;
+        } else if (keep) {
+            break;
+        } else {
+            evict(back);
+        }
+    }
+}
 struct TextureCacheUse {
     std::size_t sampledEntries = 0;
     std::uint64_t sampledBytes = 0;
