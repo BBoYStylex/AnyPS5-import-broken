@@ -1280,7 +1280,7 @@ void EmitProgram(SpirvEmitterState& state) {
             const auto rasterized = state.module.AllocateId();
             state.module.AddFunction(spv::OpLoad, TypeI32(state), rasterized, pointer);
             auto ownSamples = Unary(state, spv::OpBitcast, TypeU32(state), rasterized);
-            if (pixel.psSampleShading) {
+            if (state.program.Metadata().pixelIteratesSamples) {
                 std::uint32_t sample = 0;
                 if (state.ownSampleIdVariable != 0) {
                     const auto loaded = state.module.AllocateId();
