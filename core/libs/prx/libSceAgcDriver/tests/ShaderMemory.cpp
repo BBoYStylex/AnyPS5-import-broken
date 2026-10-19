@@ -4739,7 +4739,7 @@ void verifyPixelRequestSerialization() {
     minimal.context.pixel->layerExported = true;
     minimal.context.pixel->ditheredAlphaToCoverage = true;
     const auto encoded = serializer.Serialize(minimal);
-    require(requestPrefix(encoded, 8u) == "NVNQQSQAAAA=", "new requests did not use serialization version 36");
+    require(requestPrefix(encoded, 8u) == "NVNQQSUAAAA=", "new requests did not use serialization version 37");
     const std::array<std::uint32_t, 2> fallbacks{0x40u, 0x1ac4u};
     auto withFallbacks = minimal;
     withFallbacks.context.linkedCallFallbacks = fallbacks;
@@ -4857,7 +4857,7 @@ void verifyPixelRequestSerialization() {
     for (std::size_t bytes = 0; bytes < 45u; ++bytes) {
         expectFailure([&] { static_cast<void>(serializer.Deserialize(requestPrefix(encoded, mappingOffset + bytes))); }, "truncated data", "a truncated pixel mapping, packing, dual-source, alpha-to-coverage, stencil reference export flag, primitive class, layer export, dither or front-face flag, quad pixel mask or quad sample mask was accepted");
     }
-    for (const auto unsupported : {"NVNQQQAAAAA=", "NVNQQSUAAAA="}) {
+    for (const auto unsupported : {"NVNQQQAAAAA=", "NVNQQSYAAAA="}) {
         expectFailure([&] { static_cast<void>(serializer.Deserialize(unsupported)); }, "serialization version", "an unsupported request version was accepted");
     }
     static constexpr std::string_view version18Request{
@@ -4996,7 +4996,7 @@ void verifyVertexInfoVersion19() {
     require(allBitsOffset == flagOffset + 2u, "the front-face all-bits flag does not follow the dithered coverage flag");
     require(blendOffset == allBitsOffset + 18u, "the reversed-order blend code is not serialized after the front-face all-bits flag, quad pixel mask and quad sample masks");
     constexpr std::size_t sampleMaskBytes = 16u;
-    constexpr std::size_t iterationBytes = 34u;
+    constexpr std::size_t iterationBytes = 35u;
     auto maskedPixel = pixel;
     maskedPixel.context.pixel->quadPixelMask = 0x2u;
     const auto maskedBytes = decodeBase64(serializer.Serialize(maskedPixel));
@@ -5030,6 +5030,11 @@ void verifyVertexInfoVersion19() {
     version29.pop_back();
     version29.pop_back();
     version29.erase(version29.begin() + static_cast<std::ptrdiff_t>(maskOffset + 1u + sampleMaskBytes), version29.begin() + static_cast<std::ptrdiff_t>(maskOffset + 1u + sampleMaskBytes + 4u + iterationBytes));
+    auto version36 = sampledBytes;
+    version36.erase(version36.begin() + static_cast<std::ptrdiff_t>(maskOffset + 1u + sampleMaskBytes + 4u + iterationBytes - 1u));
+    version36[4] = 36u;
+    const auto replay36 = serializer.Deserialize(encodeBase64(version36));
+    require(replay36.request.context.pixel.has_value() && !replay36.request.context.pixel->stencilOperationValueExport && decodeBase64(serializer.Serialize(replay36.request)) == sampledBytes, "a version 36 request read a stencil operation value export or misread the fields after the sample locations");
     version29[4] = 29u;
     const auto replay29 = serializer.Deserialize(encodeBase64(version29));
     require(replay29.request.context.pixel.has_value() && replay29.request.context.pixel->quadSampleMask == std::array<std::uint16_t, 4>{0x1u, 0x2u, 0x4u, 0x8u} && replay29.request.context.pixel->reversedBlend == 0u && decodeBase64(serializer.Serialize(replay29.request)) == sampledBytes, "a version 29 request read a reversed-order blend code or misread the fields after the quad sample masks");
@@ -7464,6 +7469,20 @@ int main(int argc, char** argv) {
         expectFailure([&] { static_cast<void>(ValidateAndOptimizeSpirv(first.spirv, 0x00400000u, 0x00010600u)); }, "unsupported Vulkan/SPIR-V target", "incompatible target accepted");
         expectFailure([&] { static_cast<void>(ValidateAndOptimizeSpirv(first.spirv, 0x00405000u, 0x00010600u)); }, "unsupported Vulkan target", "unknown Vulkan target accepted");
 #endif
+        const auto readOnly = [&](const char* name) {
+            std::optional<std::uint32_t> id;
+            bool decorated = false;
+            for (std::size_t at = 5; at < first.spirv.size() && (first.spirv[at] >> 16u) != 0u; at += first.spirv[at] >> 16u) {
+                const auto opcode = first.spirv[at] & 0xffffu;
+                if (opcode == spv::OpName && std::strcmp(reinterpret_cast<const char*>(&first.spirv[at + 2u]), name) == 0) id = first.spirv[at + 1u];
+            }
+            for (std::size_t at = 5; id && at < first.spirv.size() && (first.spirv[at] >> 16u) != 0u; at += first.spirv[at] >> 16u) {
+                decorated = decorated || ((first.spirv[at] & 0xffffu) == spv::OpDecorate && first.spirv[at + 1u] == *id && first.spirv[at + 2u] == spv::DecorationNonWritable);
+            }
+            return std::pair{id.has_value(), decorated};
+        };
+        require(readOnly("flattened_srt") == std::pair{true, true}, "the flattened SRT is not decorated NonWritable");
+        for (const auto* table : {"bda_pagetable", "table_map"}) require(!readOnly(table).first || readOnly(table).second, "a read-only BDA page table or image table map is not decorated NonWritable");
         payload = 0x40000000u;
         AgcDriver::ShaderMemory updatedMemory({});
         const auto updatedCapture = updatedMemory.Capture(request);

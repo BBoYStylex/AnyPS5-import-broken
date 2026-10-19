@@ -196,6 +196,10 @@ Windows PowerShell:
 
 A Windows executable started without a standard output or error handle, such as a `--windows-gui` build started from Explorer, writes that output to `anyps5.log` beside it, replacing the previous run's file. Without write access to that directory it runs without the log.
 
+### Display resolution and window size
+
+The game chooses its video-output resolution; AnyPS5 uses that mode for rendering. The display window can be resized or switched to fullscreen, which scales the presented image to fit the window. Changing the window size does not change the game's render resolution. AnyPS5 does not currently provide a global render-resolution override; use a game's own display setting when it offers one.
+
 ### Controller input for test runs
 
 Set `APS5_PAD_INPUT_FILE` to an absolute path before launching the application to enable controller pulses from a local command file. Once the application is reading controller input, send a button with the helper from the repository root:
@@ -214,7 +218,7 @@ Run the helper in a second terminal. Commands are polled at most every 100 ms du
 
 ### System fonts
 
-Games that open the console's system font sets (`sceFontOpenFontSet`) need font files in an `anyps5-fonts/` directory beside the output executable; set `ANYPS5_SYSTEM_FONTS` to use another directory. Files dumped from the console are used under their own names (`SST-Roman.otf`, `SST-Bold.otf`, `SSTJpPro-Regular.otf`, ...). Without them, these openly licensed substitutes are used when present: `NotoSans-{Light,Regular,Medium,Bold}.ttf` and `NotoSans-{LightItalic,Italic,MediumItalic,BoldItalic}.ttf` (Latin and Vietnamese), `NotoSansMono-{Light,Regular,Medium,Bold}.ttf` (typewriter), `NotoSansThai-{Light,Regular,Medium,Bold}.ttf` (Thai) and `NotoSansCJK-{Light,Regular,Medium,Bold}.ttc` (Japanese and Chinese). Without either, opening a system font set fails and the game shows no text in those fonts.
+Games that open the console's system font sets (`sceFontOpenFontSet`) need font files in an `anyps5-fonts/` directory beside the output executable; set `ANYPS5_SYSTEM_FONTS` to use another directory. Files dumped from the console are used under their own names (`SST-Roman.otf`, `SST-Bold.otf`, `SSTJpPro-Regular.otf`, ...). Without them, these openly licensed substitutes are used when present: `NotoSans-{Light,Regular,Medium,Bold}.ttf` and `NotoSans-{LightItalic,Italic,MediumItalic,BoldItalic}.ttf` (Latin and Vietnamese), `NotoSansMono-{Light,Regular,Medium,Bold}.ttf` (typewriter), `NotoSansThai-{Light,Regular,Medium,Bold}.ttf` (Thai) and `NotoSansCJK-{Light,Regular,Medium,Bold}.ttc` (Japanese and Chinese). Without either, opening a system font set fails (the log shows `sceFontOpenFontSet` with `file=(none)`), and what happens next depends on the game: some show no text in those fonts, and others stop at start-up because they assert that the open succeeded. The substitutes come from the [Noto project](https://github.com/notofonts/notofonts.github.io) under the SIL Open Font License (the Noto Sans files are in `fonts/NotoSans/full/ttf`); copy the files named above into `anyps5-fonts/`.
 
 ### Console language
 
