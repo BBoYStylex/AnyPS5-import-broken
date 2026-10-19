@@ -1536,6 +1536,14 @@ int APS5_VABI sceNetInetPton(int af, const char* src, void* dst) {
         return fail(NET_EAFNOSUPPORT);
     }
     const std::string text = af == NET_AF_INET ? std::string(src, std::strcspn(src, " \t\n\v\f\r")) : std::string(src);
+#ifdef __APPLE__
+    // FreeBSD (and glibc) reject a dotted-quad component with a leading zero, such as "01.2.3.4"; macOS accepts it.
+    if (af == NET_AF_INET) {
+        for (std::size_t i = 0; i + 1 < text.size(); ++i) {
+            if (text[i] == '0' && (i == 0 || text[i - 1] == '.') && text[i + 1] >= '0' && text[i + 1] <= '9') return 0;
+        }
+    }
+#endif
     std::array<unsigned char, 16> address{};
 #ifdef _WIN32
     const int converted = InetPtonA(af == NET_AF_INET ? AF_INET : AF_INET6, text.c_str(), address.data());
