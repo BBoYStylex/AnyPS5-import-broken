@@ -1,11 +1,12 @@
+#include <cstdlib>
+#include <optional>
+
 #include "prx/libSceAgcDriver/Execution/include/PerformanceTrace.hpp"
 #include "prx/libSceAgcDriver/Execution/include/TraceFile.hpp"
 #include "zlib.h"
-#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <iterator>
-#include <optional>
 
 namespace {
 
@@ -425,6 +426,7 @@ void AppendLines() {
 
 int main() {
     try {
+        Directory();
         WindowByFrames();
         WindowBySeconds();
         WindowRejects();
@@ -446,7 +448,6 @@ int main() {
         IntervalDroppedThreads();
         GzipFile();
         AppendLines();
-        Directory();
         std::cout << "performance trace tests passed\n";
         return 0;
     } catch (const std::exception& error) {
