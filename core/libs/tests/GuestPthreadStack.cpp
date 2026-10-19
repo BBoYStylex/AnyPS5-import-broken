@@ -40,6 +40,11 @@ static void Require(bool value) { if (!value) std::abort(); }
 static std::uintptr_t Descend(std::uintptr_t floor);
 static std::uintptr_t (*volatile descend)(std::uintptr_t) = Descend;
 
+#ifdef __APPLE__
+// Apple clang inlines the direct call in Worker, moving this 4 KiB frame into Worker's own frame, below the local
+// the stack-size check measures from.
+__attribute__((noinline))
+#endif
 static std::uintptr_t Descend(std::uintptr_t floor) {
     volatile unsigned char frame[FRAME_SIZE];
     frame[0] = 0x5a;
