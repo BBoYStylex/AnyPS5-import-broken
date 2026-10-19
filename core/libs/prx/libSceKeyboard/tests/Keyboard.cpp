@@ -127,7 +127,7 @@ int main() {
     constexpr std::uint32_t shift = KEYBOARD_MOD_LEFT_SHIFT;
     Require(Jis(0, 0x04) == 'a' && Jis(shift, 0x04) == 'A' && Jis(KEYBOARD_MOD_RIGHT_SHIFT, 0x04, KEYBOARD_LED_CAPS_LOCK) == 'a');
     Require(Jis(0, 0x1e) == '1' && Jis(shift, 0x1e) == '!' && Jis(shift, 0x1f) == '"' && Jis(shift, 0x23) == '&');
-    Require(Jis(shift, 0x24) == '\'' && Jis(shift, 0x25) == '(' && Jis(shift, 0x26) == ')' && Jis(0, 0x27) == '0' && Jis(shift, 0x27) == 0);
+    Require(Jis(shift, 0x24) == '\'' && Jis(shift, 0x25) == '(' && Jis(shift, 0x26) == ')' && Jis(0, 0x27) == '0' && Jis(shift, 0x27) == '~');
     Require(Jis(0, 0x28) == '\n' && Jis(0, 0x29) == 0 && Jis(0, 0x2a) == '\b' && Jis(0, 0x2b) == '\t' && Jis(shift, 0x2c) == ' ');
     Require(Jis(0, 0x2d) == '-' && Jis(shift, 0x2d) == '=' && Jis(0, 0x2e) == '^' && Jis(shift, 0x2e) == '~');
     Require(Jis(0, 0x2f) == '@' && Jis(shift, 0x2f) == '`' && Jis(0, 0x30) == '[' && Jis(shift, 0x30) == '{');

@@ -22,7 +22,7 @@ int keyCount = 0;
 constexpr char US_NORMAL[] = "1234567890\n\0\b\t -=[]\\\0;'`,./";
 constexpr char US_SHIFTED[] = "!@#$%^&*()\n\0\b\t _+{}|\0:\"~<>?";
 constexpr char JIS_NORMAL[] = "1234567890\n\0\b\t -^@[]];:\0,./";
-constexpr char JIS_SHIFTED[] = "!\"#$%&'()\0\n\0\b\t =~`{}}+*\0<>?";
+constexpr char JIS_SHIFTED[] = "!\"#$%&'()~\n\0\b\t =~`{}}+*\0<>?";
 constexpr char KEYPAD_DIGITS[] = "1234567890.";
 
 KeyboardData snapshot() {
