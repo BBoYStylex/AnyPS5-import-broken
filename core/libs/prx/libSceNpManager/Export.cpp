@@ -5,6 +5,8 @@
 #include "prx/libSceUserService/UserService.hpp"
 #include <array>
 #include <atomic>
+#include <chrono>
+#include <thread>
 #include <mutex>
 #include <unordered_set>
 
@@ -130,9 +132,10 @@ int APS5_VABI sceNpGetAccountCountryA(int user_id, void* country_code) {
 }
 
 int APS5_VABI sceNpGetAccountIdA(int user_id, uint64_t* account_id) {
-    (void)user_id;
-    (void)account_id;
-    return SCE_NP_ERROR_SIGNED_OUT;
+    if (!account_id) return SCE_NP_ERROR_INVALID_ARGUMENT;
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    *account_id = 0x1000000000000000ull | static_cast<uint32_t>(user_id);
+    return 0;
 }
 
 int APS5_VABI sceNpGetNpId(int user_id, NpId* np_id) {
