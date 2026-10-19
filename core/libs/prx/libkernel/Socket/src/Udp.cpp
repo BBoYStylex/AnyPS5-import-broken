@@ -714,6 +714,15 @@ int NativePair(int type, NativeSocket (&pair)[2]) {
     pair[1] = native[1];
     return 0;
 }
+int QueuedBytes(const Socket& socket, int& count) {
+#ifdef __APPLE__
+    if (socket.type == 2) {
+        socklen_t size = sizeof(count);
+        return ::getsockopt(socket.value, SOL_SOCKET, SO_NREAD, &count, &size);
+    }
+#endif
+    return ::ioctl(socket.value, FIONREAD, &count);
+}
 #endif
 int UnnamedAddress(void* address, std::uint32_t* length) {
     const unsigned char bytes[16] = {16, GuestUnix};
@@ -749,7 +758,7 @@ int GuestSockets::Stat(int descriptor, FileStat* status) {
     if (queried == 0) available = count;
 #else
     int count = 0;
-    if (::ioctl(socket->value, FIONREAD, &count) == 0) available = count;
+    if (QueuedBytes(*socket, count) == 0) available = count;
 #endif
     int sendBuffer = 0;
     socklen_t length = sizeof(sendBuffer);
@@ -791,7 +800,7 @@ bool GuestSockets::Ready(int descriptor, bool write, std::int64_t* data, bool* e
 #elif defined(__APPLE__)
     pollfd entry{socket->value, static_cast<short>(write ? POLLOUT : POLLIN), 0};
     if (::poll(&entry, 1, 0) <= 0) return false;
-    if (!write && (entry.revents & POLLIN)) {
+    if (!write && socket->type == 1 && (entry.revents & POLLIN)) {
         char byte;
         if (::recv(socket->value, &byte, 1, MSG_PEEK | MSG_DONTWAIT) == 0) entry.revents |= POLLHUP;
     }
@@ -823,7 +832,7 @@ bool GuestSockets::Ready(int descriptor, bool write, std::int64_t* data, bool* e
         if (queried == 0) *data = available;
 #else
         int available = 0;
-        if (::ioctl(socket->value, FIONREAD, &available) == 0) *data = available;
+        if (QueuedBytes(*socket, available) == 0) *data = available;
 #endif
     }
     return true;
@@ -1269,14 +1278,7 @@ int APS5_VABI ioctl_nid_postfix(int descriptor, std::uint64_t request, void* arg
     const auto result = ioctlsocket(socket->value, request == 0x8004667e ? FIONBIO : FIONREAD, &value);
 #else
     int nativeValue = static_cast<int>(value);
-#ifdef __APPLE__
-    socklen_t valueSize = sizeof(nativeValue);
-    const auto result = request == 0x4004667f && socket->type == 2
-        ? ::getsockopt(socket->value, SOL_SOCKET, SO_NREAD, &nativeValue, &valueSize)
-        : ::ioctl(socket->value, request == 0x8004667e ? FIONBIO : FIONREAD, &nativeValue);
-#else
-    const auto result = ::ioctl(socket->value, request == 0x8004667e ? FIONBIO : FIONREAD, &nativeValue);
-#endif
+    const auto result = request == 0x8004667e ? ::ioctl(socket->value, FIONBIO, &nativeValue) : QueuedBytes(*socket, nativeValue);
     value = static_cast<unsigned long>(nativeValue);
 #endif
     if (result) return Fail(NativeError());
