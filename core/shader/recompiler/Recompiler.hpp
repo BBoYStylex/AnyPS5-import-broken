@@ -291,6 +291,7 @@ struct SpirvTarget {
     bool fragmentBarycentricBuiltins = false;
     bool robustBufferAccess2 = false;
     bool depthRangeRemap = false;
+    bool float32FlushToZero = false;
 };
 
 struct BindingLayout {

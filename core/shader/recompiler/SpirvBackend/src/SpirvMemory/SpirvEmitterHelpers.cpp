@@ -54,6 +54,21 @@ const ShaderWorkgroupInputInfo* ShaderWorkgroupInput(const SpirvEmitterState& st
     }
 }
 
+std::array<std::uint32_t, 3> WorkgroupLocalSize(const SpirvEmitterState& state, const ShaderWorkgroupInputInfo& workgroup) {
+    const std::uint32_t derivativeDefault = state.requirements.computeDerivatives ? 2u : 1u;
+    std::array<std::uint32_t, 3> size {
+        workgroup.threadsNum[0] != 0u ? workgroup.threadsNum[0] : derivativeDefault,
+        workgroup.threadsNum[1] != 0u ? workgroup.threadsNum[1] : derivativeDefault,
+        workgroup.threadsNum[2] != 0u ? workgroup.threadsNum[2] : 1u};
+    if (state.spannedWave) {
+        size = {64u, 1u, 1u};
+    }
+    if (state.laneCount == 2) {
+        size = {((size[0] * size[1] * size[2] + 63u) / 64u) * 32u, 1u, 1u};
+    }
+    return size;
+}
+
 namespace {
 
 constexpr std::uint32_t NoBuiltIn = std::numeric_limits<std::uint32_t>::max();
@@ -180,6 +195,11 @@ void DefineInputs(SpirvEmitterState& state) {
         })) {
             addBuiltin(StageInputKind::WorkgroupId, 3u, "gl_WorkGroupID");
         }
+    }
+    if (state.requirements.ldsLock && std::none_of(state.inputs.begin(), state.inputs.end(), [](const SpirvInputBinding& input) {
+        return input.kind == StageInputKind::LocalInvocationIndex;
+    })) {
+        state.inputs.push_back(SpirvInputBinding {{StageInputKind::LocalInvocationIndex, 0u, 1u, "gl_LocalInvocationIndex", false}});
     }
     if (LdsInDeviceMemory(state)) {
         if (std::none_of(state.inputs.begin(), state.inputs.end(), [](const SpirvInputBinding& input) {

@@ -386,17 +386,6 @@ static void HostTraffic(std::uint64_t& sent, std::uint64_t& received) {
         received += NetCtlReadByteCounter_nid_no_patch((statistics + "rx_bytes").c_str());
     }
     freeifaddrs(interfaces);
-#elif defined(__APPLE__)
-    ifaddrs* interfaces = nullptr;
-    if (getifaddrs(&interfaces) != 0) throw std::runtime_error("sceNetCtlGetIfStat: the host interface list is unavailable");
-    for (auto* item = interfaces; item; item = item->ifa_next) {
-        if (!item->ifa_addr || item->ifa_addr->sa_family != AF_LINK || !item->ifa_data) continue;
-        if (!(item->ifa_flags & IFF_UP) || (item->ifa_flags & IFF_LOOPBACK)) continue;
-        const auto* counters = static_cast<const if_data*>(item->ifa_data);
-        sent += counters->ifi_obytes;
-        received += counters->ifi_ibytes;
-    }
-    freeifaddrs(interfaces);
 #else
     throw std::runtime_error("sceNetCtlGetIfStat: host interface byte counters are not implemented on this platform");
 #endif
