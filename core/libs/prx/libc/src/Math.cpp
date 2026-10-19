@@ -253,7 +253,12 @@ float APS5_VABI acosf_nid_postfix(float x) {
         return std::bit_cast<float>(0xffc00000u);
     }
     const int saved_errno = errno;
+#ifdef __APPLE__
+    // macOS acosf under Rosetta is not correctly rounded (acosf(0.5f) is one ulp low); the double result rounds right.
+    const float result = static_cast<float>(std::acos(static_cast<double>(x)));
+#else
     const float result = std::acos(x);
+#endif
     errno = saved_errno;
     return result;
 }
