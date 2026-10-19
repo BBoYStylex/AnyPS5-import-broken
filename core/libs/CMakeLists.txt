@@ -53,6 +53,11 @@ function(configure_windows_unwind target)
                 COMMAND "${CMAKE_OBJCOPY}" --rename-section .eh_frame=.ehfram "$<TARGET_FILE:${target}>"
                 VERBATIM
         )
+    elseif(APPLE)
+        # The guest unwinder (prx/libc/src/exception/Unwind.cpp) reads __eh_frame, but Apple clang emits compact
+        # unwind and ld64 keeps only __unwind_info, so a guest throw could not step out of these images' frames.
+        target_compile_options(${target} PRIVATE -femit-dwarf-unwind=always)
+        target_link_options(${target} PRIVATE LINKER:-no_compact_unwind)
     endif()
 endfunction()
 
