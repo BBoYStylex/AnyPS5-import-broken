@@ -131,6 +131,7 @@ Handle Duplicate(HANDLE source, DWORD access) {
         throw std::system_error(GetLastError(), std::system_category(), "LoadExec: creating the converted executable");
     Handle child(process.hProcess, CloseHandle), thread(process.hThread, CloseHandle);
     try {
+        LibcStartExit_nid_postfix();
         LibcRunShutdown_nid_postfix();
         std::fflush(nullptr);
         if (ResumeThread(thread.get()) == static_cast<DWORD>(-1))
@@ -158,6 +159,7 @@ Handle Duplicate(HANDLE source, DWORD access) {
     std::vector<char*> pointers;
     for (const auto& argument : arguments) pointers.push_back(const_cast<char*>(argument.c_str()));
     pointers.push_back(nullptr);
+    LibcStartExit_nid_postfix();
     LibcRunShutdown_nid_postfix();
     std::fflush(nullptr);
     if (const int host = HostStandardError_nid_no_patch(); host >= 0 && dup2(host, 2) != 2)
@@ -186,12 +188,15 @@ Handle Duplicate(HANDLE source, DWORD access) {
     if (posix_spawnattr_init(&attributes) != 0 || posix_spawn_file_actions_init(&actions) != 0 ||
         posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETEXEC | POSIX_SPAWN_CLOEXEC_DEFAULT) != 0)
         throw std::runtime_error("LoadExec: preparing the replacement");
+    LibcStartExit_nid_postfix();
+    LibcRunShutdown_nid_postfix();
+    std::fflush(nullptr);
+    if (const int host = HostStandardError_nid_no_patch(); host >= 0 && dup2(host, 2) != 2)
+        throw std::system_error(errno, std::generic_category(), "LoadExec: giving the host standard error back to descriptor 2");
     for (const int standard : {STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO}) {
         if (fcntl(standard, F_GETFD) != -1 && posix_spawn_file_actions_addinherit_np(&actions, standard) != 0)
             throw std::runtime_error("LoadExec: keeping the standard streams");
     }
-    LibcRunShutdown_nid_postfix();
-    std::fflush(nullptr);
     std::filesystem::current_path(target.parent_path());
     const int error = posix_spawn(nullptr, target.c_str(), &actions, &attributes, pointers.data(), *_NSGetEnviron());
     throw std::system_error(error, std::generic_category(), "LoadExec: replacing the executable");
