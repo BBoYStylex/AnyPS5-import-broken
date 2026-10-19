@@ -5012,6 +5012,73 @@ void ShaderResources::addSamplerTable(const ShaderRecompiler::DescriptorBinding&
     bindings.push_back(std::move(item));
 }
 
+namespace {
+
+constexpr auto NoRepresentative = std::numeric_limits<std::uint32_t>::max();
+
+struct VariantSource {
+    GuestTextureResource resource;
+    std::uint64_t guestBytes;
+    bool firstLayer;
+};
+
+std::vector<std::uint32_t> variantRepresentatives(VkDevice device, const ShaderRecompiler::DescriptorBinding& binding, std::uint64_t elementBase, std::uint64_t capacity) {
+    struct Member {
+        std::uint32_t element;
+        GuestTextureResource resource;
+    };
+    using FamilyKey = std::tuple<std::uint64_t, std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t>;
+    std::map<FamilyKey, std::vector<Member>> families;
+    for (std::uint32_t element = 0; element < binding.count && elementBase + element < capacity; ++element) {
+        if (element < binding.imageWritten.size() && binding.imageWritten[element]) continue;
+        const auto words = std::span<const std::uint32_t>(binding.guestDescriptor).subspan(static_cast<std::size_t>(element) * 8u, 8u);
+        GuestTextureResource resource{};
+        try {
+            if (IsNullTextureResource(words)) continue;
+            resource = DecodeTextureResource(words);
+        } catch (const std::runtime_error&) {
+            continue;
+        }
+        const FamilyKey key{resource.baseAddress, resource.pipeBankXor, resource.format, static_cast<std::uint32_t>(resource.tileMode), static_cast<std::uint32_t>(resource.dimension), resource.mipCount, resource.baseLevel, resource.lastLevel, resource.depthOrLastArray, resource.baseArray};
+        families[key].push_back({element, resource});
+    }
+    std::vector<std::uint32_t> representatives(binding.count, NoRepresentative);
+    for (const auto& [key, members] : families) {
+        const auto& first = members.front().resource;
+        const auto otherExtent = [&](const Member& member) { return member.resource.width != first.width || member.resource.height != first.height; };
+        if (std::none_of(members.begin(), members.end(), otherExtent)) continue;
+        const auto withExtent = [&](std::uint32_t width, std::uint32_t height) {
+            return std::find_if(members.begin(), members.end(), [&](const Member& member) { return member.resource.width == width && member.resource.height == height; });
+        };
+        auto chosen = members.end();
+        if (const auto record = StorageTexture::LastWrite(first.baseAddress); record && record->tileMode == first.tileMode && record->dimension == first.dimension && BytesPerElement(record->format) == BytesPerElement(first.format)) chosen = withExtent(record->width, record->height);
+        if (chosen == members.end()) {
+            if (const auto depth = ActiveDepthExtent(device, first.baseAddress)) chosen = withExtent(depth->width, depth->height);
+        }
+        if (chosen == members.end()) {
+            std::uint64_t chosenBytes = 0;
+            for (auto member = members.begin(); member != members.end(); ++member) {
+                try {
+                    const auto bytes = DescribeSurface(member->resource).guestBytes;
+                    if (bytes <= chosenBytes || !GuestMemory::Accessible(reinterpret_cast<const void*>(member->resource.baseAddress), static_cast<std::size_t>(bytes))) continue;
+                    chosen = member;
+                    chosenBytes = bytes;
+                } catch (const std::runtime_error&) {
+                }
+            }
+            if (chosen == members.end()) continue;
+        }
+        for (const auto& member : members) {
+            if (member.resource.width == chosen->resource.width && member.resource.height == chosen->resource.height) continue;
+            if (binding.imageShapes.at(member.element) != binding.imageShapes.at(chosen->element) || binding.imageDepthCompare.at(member.element) != binding.imageDepthCompare.at(chosen->element)) continue;
+            representatives[member.element] = chosen->element;
+        }
+    }
+    return representatives;
+}
+
+}
+
 void ShaderResources::resolveImageTables() {
     const auto none = [](const std::array<std::size_t, 2>& set) { return set[0] == std::numeric_limits<std::size_t>::max() && set[1] == std::numeric_limits<std::size_t>::max(); };
     if (none(tableBindings) && none(storageTableBindings)) return;
@@ -5101,12 +5168,24 @@ void ShaderResources::resolveImageTables() {
         ReusedTable fresh;
         fresh.bound.assign(binding.count, {});
         bool reusable = state.epoch != 0;
+        const auto representatives = binding.count > 1 ? variantRepresentatives(context.device, binding, table.elementBase, context.imageTableCapacity) : std::vector<std::uint32_t>{};
+        std::vector<bool> representativeNeeded(representatives.size(), false);
+        for (const auto representative : representatives) {
+            if (representative != NoRepresentative) representativeNeeded[representative] = true;
+        }
+        std::unordered_map<std::uint32_t, VariantSource> representativeSources;
+        std::vector<std::uint32_t> substitutes;
         for (std::uint32_t element = 0; element < binding.count; ++element) {
             const auto words = std::span<const std::uint32_t>(binding.guestDescriptor).subspan(static_cast<std::size_t>(element) * 8u, 8u);
             const auto absolute = static_cast<std::uint64_t>(table.elementBase) + element;
             if (absolute >= context.imageTableCapacity) {
                 table.map[faults + element] = rejectTableElement(table, words, capacityMessage());
                 reusable = false;
+                continue;
+            }
+            if (!representatives.empty() && representatives[element] != NoRepresentative) {
+                reusable = false;
+                substitutes.push_back(element);
                 continue;
             }
             GuestTextureResource resource{};
@@ -5196,7 +5275,19 @@ void ShaderResources::resolveImageTables() {
                     fresh.ranges.emplace_back(resource.baseAddress, resource.baseAddress + guestBytes);
                 }
             }
+            if (!representativeNeeded.empty() && representativeNeeded[element]) representativeSources.emplace(element, VariantSource{resource, guestBytes, firstLayer});
             fresh.bound[element] = bind(element, sampledWords, std::move(texture), resource, guestBytes, firstLayer);
+        }
+        for (const auto element : substitutes) {
+            const auto representative = representatives[element];
+            const auto words = std::span<const std::uint32_t>(binding.guestDescriptor).subspan(static_cast<std::size_t>(representative) * 8u, 8u);
+            const auto index = table.elementTextures[representative];
+            const auto source = representativeSources.find(representative);
+            if (index == std::numeric_limits<std::size_t>::max() || source == representativeSources.end()) {
+                table.map[faults + element] = rejectTableElement(table, words, "the dynamic-resolution variant this entry borrows from was rejected");
+                continue;
+            }
+            bind(element, words, textures[index], source->second.resource, source->second.guestBytes, source->second.firstLayer);
         }
         counters.tablesResolved.fetch_add(1, std::memory_order_relaxed);
         if (reusable && CurrentTableState() == state) {
