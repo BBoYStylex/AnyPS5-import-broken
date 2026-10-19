@@ -378,6 +378,19 @@ int APS5_VABI sceKernelVirtualQuery(const void* addr, int flags, VirtualQueryInf
  info->end = info->start + host.RegionSize;
  const bool writable = (host.Protect & (PAGE_READWRITE | PAGE_EXECUTE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_WRITECOPY)) != 0;
  const bool executable = (host.Protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)) != 0;
+ #elif defined(__APPLE__)
+ // macOS has no /proc/self/maps; the Mach region holding the address gives the same extent and permissions.
+ mach_vm_address_t regionStart = address;
+ mach_vm_size_t regionBytes = 0;
+ vm_region_basic_info_data_64_t region{};
+ mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+ mach_port_t object = MACH_PORT_NULL;
+ if (mach_vm_region(mach_task_self(), &regionStart, &regionBytes, VM_REGION_BASIC_INFO_64, reinterpret_cast<vm_region_info_t>(&region), &count, &object) != KERN_SUCCESS
+     || address < regionStart || address >= regionStart + regionBytes || !(region.protection & VM_PROT_READ)) return SCE_KERNEL_ERROR_EACCES;
+ info->start = static_cast<uintptr_t>(regionStart);
+ info->end = static_cast<uintptr_t>(regionStart + regionBytes);
+ const bool writable = (region.protection & VM_PROT_WRITE) != 0;
+ const bool executable = (region.protection & VM_PROT_EXECUTE) != 0;
  #else
  std::ifstream maps("/proc/self/maps");
  std::string line;
