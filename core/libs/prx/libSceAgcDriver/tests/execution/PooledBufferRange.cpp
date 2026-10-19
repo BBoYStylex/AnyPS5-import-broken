@@ -206,6 +206,11 @@ public:
             device.queueCreateInfoCount = 1;
             device.pQueueCreateInfos = &queue;
             device.pEnabledFeatures = &features;
+#ifdef __APPLE__
+            const char* portabilitySubset = "VK_KHR_portability_subset";
+            device.enabledExtensionCount = 1;
+            device.ppEnabledExtensionNames = &portabilitySubset;
+#endif
             Check(function<PFN_vkCreateDevice>("vkCreateDevice")(context.physical, &device, nullptr, &context.device), "vkCreateDevice");
             RealDeviceProc = function<PFN_vkGetDeviceProcAddr>("vkGetDeviceProcAddr");
             RealCreateBuffer = reinterpret_cast<PFN_vkCreateBuffer>(RealDeviceProc(context.device, "vkCreateBuffer"));

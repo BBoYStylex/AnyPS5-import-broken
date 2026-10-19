@@ -156,6 +156,11 @@ public:
             device.pQueueCreateInfos = &queue;
             device.enabledExtensionCount = memoryBudget ? 1 : 0;
             device.ppEnabledExtensionNames = memoryBudget ? &budgetExtension : nullptr;
+#ifdef __APPLE__
+            const std::array<const char*, 2> portabilityExtensions{budgetExtension, "VK_KHR_portability_subset"};
+            device.enabledExtensionCount = memoryBudget ? 2 : 1;
+            device.ppEnabledExtensionNames = portabilityExtensions.data() + (memoryBudget ? 0 : 1);
+#endif
             Check(function<PFN_vkCreateDevice>("vkCreateDevice")(context.physical, &device, nullptr, &context.device), "vkCreateDevice");
             if (memoryBudget) context.memoryProperties2 = function<PFN_vkGetPhysicalDeviceMemoryProperties2>("vkGetPhysicalDeviceMemoryProperties2");
             context.deviceProc = function<PFN_vkGetDeviceProcAddr>("vkGetDeviceProcAddr");
