@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <initializer_list>
 
 struct Iovec {
@@ -171,14 +172,26 @@ static void CheckPassedSockets(const int (&pair)[2]) {
     Require(close_nid_postfix(first[1]) == 0 && close_nid_postfix(second[1]) == 0);
 }
 
+static std::size_t OpenHostDescriptors() {
+    return static_cast<std::size_t>(std::distance(std::filesystem::directory_iterator("/proc/self/fd"), std::filesystem::directory_iterator{}));
+}
+
 static void CheckTruncatedControl(const int (&pair)[2]) {
     int spare[2] = {-1, -1};
     Require(pipe_nid_postfix(spare) == 0);
     std::size_t length = 0;
     auto control = RightsControl({spare[0]}, length);
+    const auto before = OpenHostDescriptors();
     Require(SendWith(pair[0], "cut", control.data(), length) == 3);
     const auto received = ReceiveWith(pair[1], Header);
-    Require(received.bytes == 3 && (received.flags & ControlTruncated) != 0 && received.controlLength == Header);
+    Require(received.bytes == 3 && (received.flags & ControlTruncated) != 0 && received.controlLength == 0);
+    Require(OpenHostDescriptors() == before);
+    std::size_t twoLength = 0;
+    auto two = RightsControl({spare[0], spare[1]}, twoLength);
+    Require(SendWith(pair[0], "two", two.data(), twoLength) == 3);
+    const auto oneRoom = ReceiveWith(pair[1], Header + sizeof(int));
+    Require(oneRoom.bytes == 3 && (oneRoom.flags & ControlTruncated) != 0 && oneRoom.controlLength == 0);
+    Require(OpenHostDescriptors() == before);
     Require(SendWith(pair[0], "none", control.data(), length) == 4);
     const auto plain = ReceiveWith(pair[1], 0);
     Require(plain.bytes == 4 && plain.flags == 0 && plain.controlLength == 0);

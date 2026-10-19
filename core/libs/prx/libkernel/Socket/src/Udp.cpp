@@ -1750,10 +1750,17 @@ std::int64_t APS5_VABI recvmsg_nid_postfix(int descriptor, GuestMsghdr* message,
         std::memcpy(record.data() + 4, &GuestSocketLevel, sizeof(GuestSocketLevel));
         std::memcpy(record.data() + 8, &GuestRights, sizeof(GuestRights));
         std::memcpy(record.data() + GuestControlHeader, passed.data(), bytes);
-        const auto copied = std::min<std::size_t>(record.size(), controlCapacity);
-        if (!WriteGuest(header.control, record.data(), copied)) return Fail(14);
-        header.controlLength = static_cast<std::uint32_t>(copied);
-        if (copied < record.size()) controlTruncated = true;
+        const bool fits = record.size() <= controlCapacity;
+        if (fits && WriteGuest(header.control, record.data(), record.size())) {
+            header.controlLength = static_cast<std::uint32_t>(record.size());
+        } else {
+            for (const int number : passed) {
+                if (GuestSockets::IsOpen(number)) GuestSockets::Close(number);
+                else ::close(number);
+            }
+            if (fits) return Fail(14);
+            controlTruncated = true;
+        }
     }
     if (controlTruncated) header.flags |= GuestControlTruncated;
 #endif
