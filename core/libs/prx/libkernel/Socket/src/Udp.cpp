@@ -723,7 +723,13 @@ int NativePair(int type, NativeSocket (&pair)[2]) {
 }
 #else
 int NativePair(int type, NativeSocket (&pair)[2]) {
+#ifdef __APPLE__
+    // macOS has no AF_UNIX SOCK_SEQPACKET (EPROTONOSUPPORT); a datagram pair keeps the same record boundaries and
+    // MSG_TRUNC reporting for the connected pair.
+    const int nativeType = type == 1 ? SOCK_STREAM : SOCK_DGRAM;
+#else
     const int nativeType = type == 1 ? SOCK_STREAM : type == 2 ? SOCK_DGRAM : SOCK_SEQPACKET;
+#endif
     int native[2];
     if (::socketpair(AF_UNIX, nativeType, 0, native)) return NativeError();
     pair[0] = native[0];
