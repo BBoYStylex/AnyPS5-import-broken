@@ -98,8 +98,15 @@ void KernelEqueuePrivate::WakePollers() {
 
 void KernelEqueuePrivate::WaitForDescriptors(std::unique_lock<std::mutex>& lock, std::uint64_t deadlineNanos) {
     std::vector<GuestSockets::Interest> interests;
+    std::vector<std::shared_ptr<void>> held;
     for (const auto& e : m_events) {
-        if (e.enabled && e.filter.pollFunc != nullptr) {
+        if (!e.enabled || e.filter.pollFunc == nullptr) {
+            continue;
+        }
+        if (e.filter.waitDescriptor >= 0) {
+            interests.push_back({e.filter.waitDescriptor, false});
+            held.push_back(e.filter.owner);
+        } else {
             interests.push_back({static_cast<int>(e.event.ident), e.event.filter == EVFILT_WRITE});
         }
     }
@@ -206,6 +213,16 @@ int KernelEqueuePrivate::GetTriggeredEvents(KernelEvent* ev, int num) {
     TriggerExpiredTimers(MonotonicNs());
     PollEvents();
     return CollectTriggered(ev, num);
+}
+
+bool KernelEqueuePrivate::HasTriggeredEvents() {
+    std::unique_lock lock(m_mutex);
+    if (m_closed) {
+        return false;
+    }
+    TriggerExpiredTimers(MonotonicNs());
+    PollEvents();
+    return std::any_of(m_events.begin(), m_events.end(), [](const KernelEqueueEvent& event) { return event.enabled && event.triggered; });
 }
 
 int KernelEqueuePrivate::WaitForEvents(KernelEvent* ev, int num, uint32_t micros) {
@@ -653,6 +670,9 @@ KernelEqueueEvent EqueueDescriptorEvent(int descriptor, int16_t filter, uint16_t
         std::int64_t data = 0;
         bool eof = false;
         if (!GuestSockets::Ready(static_cast<int>(e->event.ident), e->event.filter == EVFILT_WRITE, &data, &eof)) {
+            return false;
+        }
+        if (!eof && data < e->lowWater && !GuestSockets::Listening(static_cast<int>(e->event.ident))) {
             return false;
         }
         e->event.data = static_cast<intptr_t>(data);

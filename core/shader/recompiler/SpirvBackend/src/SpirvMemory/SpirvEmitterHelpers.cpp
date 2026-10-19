@@ -54,6 +54,21 @@ const ShaderWorkgroupInputInfo* ShaderWorkgroupInput(const SpirvEmitterState& st
     }
 }
 
+std::array<std::uint32_t, 3> WorkgroupLocalSize(const SpirvEmitterState& state, const ShaderWorkgroupInputInfo& workgroup) {
+    const std::uint32_t derivativeDefault = state.requirements.computeDerivatives ? 2u : 1u;
+    std::array<std::uint32_t, 3> size {
+        workgroup.threadsNum[0] != 0u ? workgroup.threadsNum[0] : derivativeDefault,
+        workgroup.threadsNum[1] != 0u ? workgroup.threadsNum[1] : derivativeDefault,
+        workgroup.threadsNum[2] != 0u ? workgroup.threadsNum[2] : 1u};
+    if (state.spannedWave) {
+        size = {64u, 1u, 1u};
+    }
+    if (state.laneCount == 2) {
+        size = {((size[0] * size[1] * size[2] + 63u) / 64u) * 32u, 1u, 1u};
+    }
+    return size;
+}
+
 namespace {
 
 constexpr std::uint32_t NoBuiltIn = std::numeric_limits<std::uint32_t>::max();
@@ -77,6 +92,7 @@ std::uint32_t BuiltInForInput(StageInputKind kind) {
     case StageInputKind::HelperInvocation: return spv::BuiltInHelperInvocation;
     case StageInputKind::Layer: return spv::BuiltInLayer;
     case StageInputKind::SampleId: return spv::BuiltInSampleId;
+    case StageInputKind::SampleMask: return spv::BuiltInSampleMask;
     case StageInputKind::BaryCoordSmooth: return spv::BuiltInBaryCoordKHR;
     case StageInputKind::BaryCoordNoPerspective: return spv::BuiltInBaryCoordNoPerspKHR;
     case StageInputKind::WorkgroupId: return spv::BuiltInWorkgroupId;
@@ -165,7 +181,7 @@ void DefineInputs(SpirvEmitterState& state) {
     for (const auto& input : state.program.Info().inputs) {
         state.inputs.push_back(SpirvInputBinding {input});
     }
-    if (state.laneCount == 2u) {
+    if (state.laneCount == 2u || state.spannedWave) {
         const auto addBuiltin = [&](StageInputKind kind, std::uint32_t components, const char* name) {
             if (std::none_of(state.inputs.begin(), state.inputs.end(), [kind](const SpirvInputBinding& input) {
                 return input.kind == kind;
@@ -179,6 +195,11 @@ void DefineInputs(SpirvEmitterState& state) {
         })) {
             addBuiltin(StageInputKind::WorkgroupId, 3u, "gl_WorkGroupID");
         }
+    }
+    if (state.requirements.ldsLock && std::none_of(state.inputs.begin(), state.inputs.end(), [](const SpirvInputBinding& input) {
+        return input.kind == StageInputKind::LocalInvocationIndex;
+    })) {
+        state.inputs.push_back(SpirvInputBinding {{StageInputKind::LocalInvocationIndex, 0u, 1u, "gl_LocalInvocationIndex", false}});
     }
     if (LdsInDeviceMemory(state)) {
         if (std::none_of(state.inputs.begin(), state.inputs.end(), [](const SpirvInputBinding& input) {
@@ -241,6 +262,9 @@ void DefineInputs(SpirvEmitterState& state) {
         case StageInputKind::HelperInvocation:
             type = TypeBool(state);
             break;
+        case StageInputKind::SampleMask:
+            type = SampleMaskArrayType(state);
+            break;
         case StageInputKind::Parameter:
             if (state.program.Resources().stage == IrShaderStage::Vertex || state.program.Resources().stage == IrShaderStage::Local) {
                 type = VertexParameterScalarType(state, VertexParameterScalarKind(state, input.location));
@@ -258,7 +282,7 @@ void DefineInputs(SpirvEmitterState& state) {
             break;
         }
         input.variableId = DefineInterfaceVariable(state, type, spv::StorageClassInput, input.debugName.c_str());
-        if (input.kind == StageInputKind::Layer || input.kind == StageInputKind::SampleId) {
+        if (input.kind == StageInputKind::Layer || input.kind == StageInputKind::SampleId || input.kind == StageInputKind::SampleMask) {
             state.module.AddAnnotation(spv::OpDecorate, input.variableId, spv::DecorationFlat);
         }
         if (input.kind == StageInputKind::Parameter) {
@@ -293,15 +317,24 @@ void DefineInputs(SpirvEmitterState& state) {
     if (state.requirements.subgroupLocalInvocationId) {
         const auto variable = DefineInterfaceVariable(state, TypeU32(state), spv::StorageClassInput, "gl_SubgroupInvocationID");
         state.subgroupLocalInvocationIdVariable = variable;
+        if (state.spannedWave) {
+            state.subgroupIdVariable = DefineInterfaceVariable(state, TypeU32(state), spv::StorageClassInput, "gl_SubgroupID");
+            state.module.AddAnnotation(spv::OpDecorate, state.subgroupIdVariable, spv::DecorationBuiltIn, spv::BuiltInSubgroupId);
+        }
         state.module.AddAnnotation(spv::OpDecorate, variable, spv::DecorationBuiltIn, spv::BuiltInSubgroupLocalInvocationId);
         if (state.program.Resources().stage == IrShaderStage::Pixel) {
             state.module.AddAnnotation(spv::OpDecorate, variable, spv::DecorationFlat);
         }
     }
     if (state.program.Resources().stage == IrShaderStage::Pixel && state.inputInfo.pixel != nullptr && state.inputInfo.pixel->QuadSampleMaskPartial()) {
-        state.sampleMaskInputVariable = DefineInterfaceVariable(state, SampleMaskArrayType(state), spv::StorageClassInput, "gl_SampleMaskIn");
-        state.module.AddAnnotation(spv::OpDecorate, state.sampleMaskInputVariable, spv::DecorationBuiltIn, spv::BuiltInSampleMask);
-        state.module.AddAnnotation(spv::OpDecorate, state.sampleMaskInputVariable, spv::DecorationFlat);
+        const auto read = std::find_if(state.inputs.begin(), state.inputs.end(), [](const SpirvInputBinding& input) { return input.kind == StageInputKind::SampleMask && input.variableId != 0u; });
+        if (read != state.inputs.end()) {
+            state.sampleMaskInputVariable = read->variableId;
+        } else {
+            state.sampleMaskInputVariable = DefineInterfaceVariable(state, SampleMaskArrayType(state), spv::StorageClassInput, "gl_SampleMaskIn");
+            state.module.AddAnnotation(spv::OpDecorate, state.sampleMaskInputVariable, spv::DecorationBuiltIn, spv::BuiltInSampleMask);
+            state.module.AddAnnotation(spv::OpDecorate, state.sampleMaskInputVariable, spv::DecorationFlat);
+        }
     }
 }
 
@@ -323,17 +356,19 @@ void DefineOutputs(SpirvEmitterState& state) {
         DefineMeshOutputs(state);
         return;
     }
+    const bool depthRemap = state.depthRangeRemap && state.program.Resources().stage == IrShaderStage::Vertex;
+    if (depthRemap) {
+        state.depthRemapClipIndex = clipDistanceCount;
+        clipDistanceCount += 2u;
+    }
     const auto stage = state.program.Resources().stage;
     const bool exportsPosition = std::ranges::any_of(state.outputs, [](const SpirvOutputBinding& output) { return output.kind == StageOutputKind::Position; });
-    if (exportsPosition && (stage == IrShaderStage::Vertex || stage == IrShaderStage::TessellationEvaluation)) {
+    if (exportsPosition && (stage == IrShaderStage::Vertex || stage == IrShaderStage::TessellationEvaluation) && clipDistanceCount + cullDistanceCount < MaxClipDistances) {
         if (std::ranges::find(state.supportedCapabilities, spv::CapabilityClipDistance) == state.supportedCapabilities.end()) {
             FailEmit("clipping a primitive with an all-zero clip position needs shaderClipDistance on the target device");
         }
         state.zeroPositionClipIndex = clipDistanceCount;
         clipDistanceCount += 1u;
-        if (clipDistanceCount > MaxClipDistances) {
-            FailEmit("guest clip distances plus the all-zero clip position distance exceed " + std::to_string(MaxClipDistances) + " clip distances");
-        }
     }
     const auto BuiltIn = [&](std::uint32_t& variable, std::uint32_t type, const char* name, std::uint32_t builtin) {
         if (variable == 0u) {
@@ -342,6 +377,7 @@ void DefineOutputs(SpirvEmitterState& state) {
         }
         return variable;
     };
+    if (depthRemap) BuiltIn(state.clipDistanceVariable, F32ArrayType(state, clipDistanceCount), "gl_ClipDistance", spv::BuiltInClipDistance);
     for (auto& binding : state.outputs) {
         switch (binding.kind) {
         case StageOutputKind::Position:
@@ -375,7 +411,7 @@ void DefineOutputs(SpirvEmitterState& state) {
             break;
         case StageOutputKind::StencilRef:
             if (std::ranges::find(state.supportedCapabilities, static_cast<std::uint32_t>(spv::CapabilityStencilExportEXT)) == state.supportedCapabilities.end()) {
-                const auto values = StencilReferenceValues(state.program);
+                const auto values = StencilReferenceValues(state.program, PixelInfo(state).psStencilOperationValueExport ? 8u : 0u);
                 if (values.empty()) throw std::runtime_error("stencil reference export emulation requires a proven set of at most 16 values");
                 if (!StencilReferenceDefinedForKeptInvocations(state.program)) throw std::runtime_error("stencil reference export emulation requires a stencil export on every kept path");
                 if (PixelInfo(state).psEarlyZ || PixelInfo(state).psOrderedPixelShader || !StencilReplaySafe(state.program)) throw std::runtime_error("stencil reference export emulation requires a replay-safe pixel shader with late tests");
@@ -412,7 +448,7 @@ void DefineOutputs(SpirvEmitterState& state) {
 void DefineDescriptors(SpirvEmitterState& state) {
     const IrBindingLayout& layout = state.program.Metadata().bindings;
     const IrShaderStage stage = state.program.Resources().stage;
-    if (layout.UsesPushData() || state.stencilReplay || stage == IrShaderStage::Mesh || stage == IrShaderStage::TessellationControl) {
+    if (layout.UsesPushData() || state.stencilReplay || stage == IrShaderStage::Mesh || stage == IrShaderStage::TessellationControl || (state.depthRangeRemap && stage == IrShaderStage::Vertex)) {
         const auto type = PushConstantBlockType(state);
         state.pushConstantVariable = state.module.DefineGlobalVariable(TypePointer(state, spv::StorageClassPushConstant, type), spv::StorageClassPushConstant);
         state.module.AddName(type, "BufferResource");
@@ -449,6 +485,7 @@ void DefineDescriptors(SpirvEmitterState& state) {
             break;
         case DescriptorBindingKind::BdaPagetable:
             state.bdaPagetableVariable = Define(StorageBufferBlockType(state), "bda_pagetable");
+            state.module.AddAnnotation(spv::OpDecorate, state.bdaPagetableVariable, spv::DecorationNonWritable);
             break;
         case DescriptorBindingKind::FaultBuffer:
             state.faultBufferVariable = Define(StorageBufferBlockType(state), "fault_buffer");
@@ -458,6 +495,7 @@ void DefineDescriptors(SpirvEmitterState& state) {
             break;
         case DescriptorBindingKind::FlattenedSrt:
             state.flattenedSrtVariable = Define(StorageBufferBlockType(state), "flattened_srt");
+            state.module.AddAnnotation(spv::OpDecorate, state.flattenedSrtVariable, spv::DecorationNonWritable);
             break;
         case DescriptorBindingKind::Samplers:
             state.samplerVariable = Define(ArrayType(state.module.Type(spv::OpTypeSampler)), "samplers", spv::StorageClassUniformConstant);
@@ -467,17 +505,20 @@ void DefineDescriptors(SpirvEmitterState& state) {
             state.module.AddAnnotation(spv::OpDecorate, state.gdsVariable, spv::DecorationCoherent);
             break;
         case DescriptorBindingKind::ImageTable:
+        case DescriptorBindingKind::ImageStorageTable:
             RequireTableIndexing(state);
+            if (binding.kind == DescriptorBindingKind::ImageStorageTable) state.module.EmitCapability(spv::CapabilityStorageImageArrayDynamicIndexing);
             for (std::uint32_t resource = 0; resource < state.program.Info().images.size(); ++resource) {
                 const auto& image = state.program.Info().images[resource];
                 if (image.table == NoTable) continue;
                 for (const auto& mode : state.program.Info().runtimeImageModes.at(resource)) {
                     if (!TableModeEmitted(mode)) continue;
                     const auto kind = DescriptorBindingForImage(mode);
+                    if ((ImageBindingResourceClass(kind) == ImageResourceClass::Storage) != (binding.kind == DescriptorBindingKind::ImageStorageTable)) continue;
                     if (std::any_of(state.tableImageVariables.begin(), state.tableImageVariables.end(), [&](const SpirvTableImageVariable& variable) { return variable.kind == kind; })) continue;
                     const auto name = "table_images_" + std::to_string(static_cast<std::uint32_t>(kind));
                     state.tableImageVariables.push_back({kind, Define(state.module.Type(spv::OpTypeRuntimeArray, ImageType(state, mode)), name.c_str(), spv::StorageClassUniformConstant)});
-                    if (mode.dimension == RdnaImageDimension::Dim1D || mode.dimension == RdnaImageDimension::Dim1DArray) state.module.EmitCapability(spv::CapabilitySampled1D);
+                    if (mode.dimension == RdnaImageDimension::Dim1D || mode.dimension == RdnaImageDimension::Dim1DArray) state.module.EmitCapability(binding.kind == DescriptorBindingKind::ImageStorageTable ? spv::CapabilityImage1D : spv::CapabilitySampled1D);
                 }
             }
             break;
@@ -487,6 +528,7 @@ void DefineDescriptors(SpirvEmitterState& state) {
             break;
         case DescriptorBindingKind::ImageTableMap:
             state.tableMapVariable = Define(StorageBufferBlockType(state), "table_map");
+            state.module.AddAnnotation(spv::OpDecorate, state.tableMapVariable, spv::DecorationNonWritable);
             break;
         default: {
             if (ImageBindingResourceClass(binding.kind) == ImageResourceClass::None) {
@@ -511,6 +553,14 @@ void DefineDescriptors(SpirvEmitterState& state) {
         state.module.AddAnnotation(spv::OpDecorate, state.ldsBufferVariable, spv::DecorationDescriptorSet, WorkgroupMemoryDescriptorSet);
         state.module.AddAnnotation(spv::OpDecorate, state.ldsBufferVariable, spv::DecorationBinding, 0u);
         state.module.AddAnnotation(spv::OpDecorate, state.ldsBufferVariable, spv::DecorationCoherent);
+        if (state.requirements.ldsBufferInt64Atomics) {
+            state.ldsBufferU64Variable = state.module.DefineGlobalVariable(TypePointer(state, spv::StorageClassStorageBuffer, StorageBufferU64BlockType(state)), spv::StorageClassStorageBuffer);
+            state.module.AddName(state.ldsBufferU64Variable, "workgroup_memory_u64");
+            state.module.AddAnnotation(spv::OpDecorate, state.ldsBufferU64Variable, spv::DecorationDescriptorSet, WorkgroupMemoryDescriptorSet);
+            state.module.AddAnnotation(spv::OpDecorate, state.ldsBufferU64Variable, spv::DecorationBinding, 0u);
+            state.module.AddAnnotation(spv::OpDecorate, state.ldsBufferU64Variable, spv::DecorationCoherent);
+            for (const auto variable : {state.ldsBufferVariable, state.ldsBufferU64Variable}) state.module.AddAnnotation(spv::OpDecorate, variable, spv::DecorationAliased);
+        }
     }
 }
 
