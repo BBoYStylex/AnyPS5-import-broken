@@ -10,9 +10,15 @@
 #endif
 #include <windows.h>
 #elif defined(__APPLE__)
+#include <cstdio>
+#include <cstring>
+#include <mach-o/dyld.h>
 #include <mach/mach.h>
 #include <mach/mach_vm.h>
 #include <sys/mman.h>
+#include <sys/resource.h>
+#include <sys/wait.h>
+#include <unistd.h>
 #else
 #include <cstdio>
 #include <cstring>
@@ -348,12 +354,19 @@ static bool OvercommitStrict() {
 }
 
 static bool ChildPasses(const char* mode, bool unlimitedStack) {
+#ifdef __APPLE__
+    char executable[4096]{};
+    std::uint32_t executableSize = sizeof(executable);
+    Require(_NSGetExecutablePath(executable, &executableSize) == 0);
+#else
+    const char* executable = "/proc/self/exe";
+#endif
     const pid_t child = fork();
     Require(child >= 0);
     if (child == 0) {
         rlimit limit{};
         if (unlimitedStack && getrlimit(RLIMIT_STACK, &limit) == 0) limit.rlim_cur = RLIM_INFINITY;
-        if (!unlimitedStack || setrlimit(RLIMIT_STACK, &limit) == 0) execl("/proc/self/exe", "/proc/self/exe", mode, static_cast<char*>(nullptr));
+        if (!unlimitedStack || setrlimit(RLIMIT_STACK, &limit) == 0) execl(executable, executable, mode, static_cast<char*>(nullptr));
         std::_Exit(127);
     }
     int status = 0;

@@ -184,7 +184,19 @@ static int mprotect(void* addr, size_t len, int prot) {
 }
 #endif
 
-#if defined(__linux__)
+#if defined(__linux__) || defined(__APPLE__)
+static void* MapAnonymousExactly(void* address, std::size_t bytes) {
+#ifdef __APPLE__
+    void* mapped = ::mmap(address, bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (mapped == MAP_FAILED || mapped == address) return mapped;
+    ::munmap(mapped, bytes);
+    errno = EEXIST;
+    return MAP_FAILED;
+#else
+    return ::mmap(address, bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE | MAP_NORESERVE, -1, 0);
+#endif
+}
+
 static void MapUnmappedPages(void* addr, size_t len) {
     constexpr std::uintptr_t hostPage = 0x1000;
     auto cursor = reinterpret_cast<std::uintptr_t>(addr);
@@ -199,7 +211,7 @@ static void MapUnmappedPages(void* addr, size_t len) {
             continue;
         }
         void* mapped = MAP_FAILED;
-        while ((mapped = ::mmap(run, bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE | MAP_NORESERVE, -1, 0)) == MAP_FAILED && errno == EEXIST && bytes > hostPage) bytes = half(bytes);
+        while ((mapped = MapAnonymousExactly(run, bytes)) == MAP_FAILED && errno == EEXIST && bytes > hostPage) bytes = half(bytes);
         if (mapped != run) {
             const int error = mapped == MAP_FAILED ? errno : EEXIST;
             if (mapped != MAP_FAILED) ::munmap(mapped, bytes);
