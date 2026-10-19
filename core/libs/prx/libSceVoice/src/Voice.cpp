@@ -315,6 +315,10 @@ int APS5_VABI sceVoiceGetPortAttr(std::uint32_t port_id, std::int32_t attr, void
         if (static_cast<std::size_t>(size) < sizeof(std::uint16_t)) return SCE_VOICE_ERROR_ARGUMENT_INVALID;
         std::memcpy(value, &port->mute, sizeof(std::uint16_t));
         return 0;
+    case 1001:
+        if (size != 1) return SCE_VOICE_ERROR_ARGUMENT_INVALID;
+        std::memset(value, 0, 1);
+        return 0;
     case AttributeBitRate:
         if (static_cast<std::size_t>(size) < sizeof(std::int32_t)) return SCE_VOICE_ERROR_ARGUMENT_INVALID;
         std::memcpy(value, &port->bitrate, sizeof(std::int32_t));
