@@ -1152,7 +1152,7 @@ int DoMapFileBacked_nid_no_patch(void** addr, size_t len, int prot, int flags, i
     RecordProtection(mapped, len, prot);
     Trace("map file %p+0x%zx offset=0x%llx prot=0x%x flags=0x%x", mapped, len, static_cast<unsigned long long>(offset), prot, flags);
     return 0;
-#else
+#elif defined(_WIN32)
     if ((flags & 3) != 1) throw std::system_error(ENOTSUP, std::generic_category(), "map file: a private file mapping is not mapped from the file on Windows");
     if ((prot & PROT_EXEC) != 0) throw std::system_error(ENOTSUP, std::generic_category(), "map file: an executable shared file mapping is not implemented on Windows");
     const HANDLE file = WindowsDescriptorHandle_nid_no_patch(descriptor);
@@ -1194,6 +1194,12 @@ int DoMapFileBacked_nid_no_patch(void** addr, size_t len, int prot, int flags, i
     RecordProtection(mapped, len, prot);
     Trace("map file %p+0x%zx offset=0x%llx prot=0x%x flags=0x%x", mapped, len, static_cast<unsigned long long>(offset), prot, flags);
     return 0;
+#else
+    static_cast<void>(prot);
+    static_cast<void>(flags);
+    static_cast<void>(descriptor);
+    static_cast<void>(offset);
+    throw std::system_error(ENOTSUP, std::generic_category(), "file-backed guest mmap is not supported on this host");
 #endif
 }
 
