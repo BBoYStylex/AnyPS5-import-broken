@@ -1,5 +1,12 @@
 #include <cstdint>
 #include <cstddef>
+#include <cstring>
+#include <map>
+#include <mutex>
+#include <set>
+#include <stdexcept>
+#include <string>
+#include <utility>
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
 
