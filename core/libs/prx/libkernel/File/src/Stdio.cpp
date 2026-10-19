@@ -37,6 +37,10 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#ifdef __APPLE__
+#include <mach/mach.h>
+#include <mach/mach_vm.h>
+#endif
 
 struct KernelIovec {
     void* base;
@@ -1057,6 +1061,26 @@ int APS5_VABI sceKernelGetdents(int fd, char* buf, int nbytes) {
 
 #elif defined(__APPLE__)
 
+static bool MacHostWritable(const void* pointer, std::size_t bytes) {
+    if (bytes == 0) return true;
+    const auto start = reinterpret_cast<std::uintptr_t>(pointer);
+    if (start == 0 || bytes > std::numeric_limits<std::uintptr_t>::max() - start) return false;
+    const auto end = start + bytes;
+    auto cursor = start;
+    while (cursor < end) {
+        mach_vm_address_t region = cursor;
+        mach_vm_size_t size = 0;
+        vm_region_basic_info_data_64_t info{};
+        mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+        mach_port_t object = MACH_PORT_NULL;
+        const auto result = mach_vm_region(mach_task_self(), &region, &size, VM_REGION_BASIC_INFO_64, reinterpret_cast<vm_region_info_t>(&info), &count, &object);
+        if (object != MACH_PORT_NULL) mach_port_deallocate(mach_task_self(), object);
+        if (result != KERN_SUCCESS || region > cursor || size == 0 || size > std::numeric_limits<std::uintptr_t>::max() - region || (info.protection & VM_PROT_WRITE) == 0) return false;
+        cursor = std::min(end, static_cast<std::uintptr_t>(region + size));
+    }
+    return true;
+}
+
 int APS5_VABI sceKernelGetdirentries(int fd, char* buf, int nbytes, int64_t* basep) {
     if (GuestSockets::IsOpen(fd)) return SceErrorFromErrno(GUEST_EINVAL);
     File::RefuseArchivedFile(fd, "getdirentries");
@@ -1069,7 +1093,7 @@ int APS5_VABI sceKernelGetdirentries(int fd, char* buf, int nbytes, int64_t* bas
     if (!S_ISDIR(status.st_mode)) return SceErrorFromErrno(GUEST_EINVAL);
     const GuestArena::HostWrite destination(buf, static_cast<std::size_t>(nbytes));
     const GuestArena::HostWrite baseDestination(basep, basep == nullptr ? 0 : sizeof(*basep));
-    if (!destination.Open() || !baseDestination.Open()) return SceErrorFromErrno(GUEST_EFAULT);
+    if (!destination.Open() || !baseDestination.Open() || !MacHostWritable(buf, static_cast<std::size_t>(nbytes)) || !MacHostWritable(basep, basep == nullptr ? 0 : sizeof(*basep))) return SceErrorFromErrno(GUEST_EFAULT);
     const int savedErrno = errno;
     const off_t base = ::lseek(fd, 0, SEEK_CUR);
     if (base < 0) return SceErrorFromErrno(errno);
