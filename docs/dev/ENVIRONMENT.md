@@ -499,6 +499,13 @@ The code reads environment names through `getenv`, `IsEnvironmentSet`, `kibSetti
 |------|------|--------|---------|-------------|
 | `ANYPS5_LANGUAGE` | integer | `core/libs/prx/libSceSystemService/Export.cpp` | 1 | console language number returned by sceSystemServiceParamGetInt, defaulting to English US |
 
+### libSceUsbStorage
+
+| Name | Kind | Source | Default | Description |
+|------|------|--------|---------|-------------|
+| `APS5_USB_STORAGE_MOUNT_INFO` | string | `core/libs/prx/libSceUsbStorage/Export.cpp` | /proc/self/mountinfo | mount table the service reads a device's mount point from |
+| `APS5_USB_STORAGE_SYS_ROOT` | string | `core/libs/prx/libSceUsbStorage/Export.cpp` | /sys | sysfs root the service finds the USB mass storage devices in |
+
 ### libSceVideoOut
 
 | Name | Kind | Source | Default | Description |
