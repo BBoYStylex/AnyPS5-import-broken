@@ -578,7 +578,7 @@ int main() {
         run.OrderRemap();
         if (context.storageImageMultisample) run.StorageTwin();
         if (!storage) {
-            std::puts("skipped the storage promotion, the device has no shaderStorageImageMultisample");
+            std::puts("storage promotion skipped, the device has no shaderStorageImageMultisample");
             return VulkanTestSkipped;
         }
         std::puts("retired MSAA allocations stay bounded, recorded clears and storage promotions retain their images, sampled aliases release their parents after the last batch, and sample-order targets keep their retired images until their batch completes");
