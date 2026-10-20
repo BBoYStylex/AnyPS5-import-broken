@@ -26,15 +26,6 @@ int APS5_VABI sceAudioInClose(int);
 
 static void Require(bool value) { if (!value) std::abort(); }
 
-template <typename TCall>
-static bool ReportsNotImplemented(const char* name, TCall call) {
-    try {
-        call();
-    } catch (const std::runtime_error& error) {
-        return std::string(error.what()) == std::string(name) + " not implemented";
-    }
-    return false;
-}
 
 template <typename TCall>
 static bool ThrowsRuntimeError(TCall call) {
@@ -87,15 +78,18 @@ void TestValidation() {
         float gain = -2.5f;
         Require(sceAudioInGetGain(badHandle, &gain) == invalidHandle && gain == 1.0f);
         Require(sceAudioInGetRerouteCount(badHandle) == invalidHandle);
+        Require(sceAudioInIsPadEmbeddedMic(badHandle) == invalidHandle);
         Require(ThrowsRuntimeError([badHandle] { sceAudioInGetGain(badHandle, nullptr); }));
     }
     int port = sceAudioInAsyncOpen(user, 0, 0, 384, 48000, 2);
     float gain = 0.0f;
     Require(port > 0 && sceAudioInGetGain(port, &gain) == 0 && gain == 1.0f && sceAudioInGetRerouteCount(port) == 0);
+    Require(sceAudioInIsPadEmbeddedMic(port) == 0);
     Require(ThrowsRuntimeError([port] { sceAudioInGetGain(port, nullptr); }));
     Require(sceAudioInClose(port) == 0);
     gain = 0.25f;
     Require(sceAudioInGetGain(port, &gain) == invalidHandle && gain == 1.0f && sceAudioInGetRerouteCount(port) == invalidHandle);
+    Require(sceAudioInIsPadEmbeddedMic(port) == invalidHandle);
     port = sceAudioInOpen(user, 0, 0, 256, 48000, 0x10);
     gain = -1.0f;
     Require(port > 0 && sceAudioInGetGain(port, &gain) == 0 && gain == 1.0f && sceAudioInGetRerouteCount(port) == 0 && sceAudioInClose(port) == 0);
@@ -105,7 +99,9 @@ void TestValidation() {
     port = sceAudioInAsyncOpen(user, 0, 0, 384, 48000, 0x10);
     gain = 0.5f;
     Require(port > 0 && sceAudioInGetGain(port, &gain) == 0 && gain == 1.0f && sceAudioInGetRerouteCount(port) == 0 && sceAudioInClose(port) == 0);
-    Require(ReportsNotImplemented("sceAudioInIsPadEmbeddedMic", [] { sceAudioInIsPadEmbeddedMic(1); }));
+    const int padPort = sceAudioInOpen(user, 1, 0, 256, 48000, 2);
+    Require(padPort > 0 && sceAudioInIsPadEmbeddedMic(padPort) == 1 && sceAudioInClose(padPort) == 0);
+    Require(sceAudioInIsPadEmbeddedMic(padPort) == invalidHandle);
 }
 
 void InputSound(int handle, std::vector<std::int16_t>& block) {
@@ -168,6 +164,7 @@ void TestNoDevice() {
     const int async = sceAudioInAsyncOpen(user, 1, 0, 256, 16000, 0x11);
     Require(hq > 0 && async > 0 && hq != handle && async != handle && hq != async);
     Require(sceAudioInGetSilentState(hq) == 1 && sceAudioInGetSilentState(async) == 1);
+    Require(sceAudioInIsPadEmbeddedMic(handle) == 0 && sceAudioInIsPadEmbeddedMic(hq) == 0 && sceAudioInIsPadEmbeddedMic(async) == 1);
     std::fill(buffer.begin(), buffer.end(), 0xCC);
     Require(sceAudioInInput(hq, buffer.data()) == 128);
     for (std::size_t i = 0; i < 128 * 4; ++i) Require(buffer[i] == 0);
