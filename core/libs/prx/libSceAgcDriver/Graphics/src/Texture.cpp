@@ -1194,7 +1194,15 @@ VkFormat StorageFormatOrUndefined(const Context& context, VkFormat format) {
         return (properties.optimalTilingFeatures & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT) != 0;
     };
     VkFormat storage = VK_FORMAT_UNDEFINED;
+#ifdef __APPLE__
+    // MoltenVK lists the 8-bit sRGB formats as storage images, but Metal reads such a storage image back without sRGB
+    // decoding; keep sRGB storage in the UNORM form the fallback below uses, so sampled reads decode the stored codes.
+    const bool srgbStorage = format == VK_FORMAT_R8G8B8A8_SRGB || format == VK_FORMAT_B8G8R8A8_SRGB || format == VK_FORMAT_A8B8G8R8_SRGB_PACK32 ||
+                             format == VK_FORMAT_R8_SRGB || format == VK_FORMAT_R8G8_SRGB;
+    if (!srgbStorage && supports(format)) {
+#else
     if (supports(format)) {
+#endif
         storage = format;
     } else {
         VkFormat linear = VK_FORMAT_UNDEFINED;
