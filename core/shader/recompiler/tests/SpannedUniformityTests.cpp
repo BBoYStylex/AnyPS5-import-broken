@@ -153,6 +153,32 @@ Module call(bool perLane) {
     return module;
 }
 
+Module early(bool perLane, spv::Op exit) {
+    Module module;
+    module.function(Main);
+    module.emit(spv::OpLabel, {First});
+    module.lane(First + 1u);
+    module.emit(spv::OpULessThan, {Bool, First + 2u, perLane ? First + 1u : Two, Three});
+    module.emit(spv::OpBranch, {First + 10u});
+    module.emit(spv::OpLabel, {First + 10u});
+    module.emit(spv::OpLoopMerge, {First + 13u, First + 12u, spv::LoopControlMaskNone});
+    module.emit(spv::OpBranch, {First + 11u});
+    module.emit(spv::OpLabel, {First + 11u});
+    module.emit(spv::OpSelectionMerge, {First + 4u, spv::SelectionControlMaskNone});
+    module.emit(spv::OpBranchConditional, {First + 2u, First + 3u, First + 4u});
+    module.emit(spv::OpLabel, {First + 3u});
+    if (exit == spv::OpReturn) module.emit(spv::OpReturn, {});
+    else module.emit(spv::OpBranch, {First + 12u});
+    module.emit(spv::OpLabel, {First + 4u});
+    module.barrier();
+    module.emit(spv::OpBranch, {First + 12u});
+    module.emit(spv::OpLabel, {First + 12u});
+    module.emit(spv::OpBranchConditional, {True, First + 10u, First + 13u});
+    module.emit(spv::OpLabel, {First + 13u});
+    module.end();
+    return module;
+}
+
 Module joined(const std::function<void(Module&)>& condition) {
     Module module;
     module.function(Main);
@@ -185,6 +211,9 @@ int main() {
     expect("a barrier in a loop a lane value leaves", loop(true, false), true);
     expect("a barrier in a uniform loop after a per-lane selection", loop(false, true), false);
     expect("a call reaching a barrier under a lane comparison", call(true), true);
+    expect("a barrier after a per-lane return", early(true, spv::OpReturn), true);
+    expect("a barrier after a per-lane continue", early(true, spv::OpBranch), true);
+    expect("a barrier after a uniform return", early(false, spv::OpReturn), false);
     expect("a call reaching a barrier under a constant comparison", call(false), false);
     expect("a barrier under a phi joining a per-lane selection", joined([](Module& module) {
         laneSplit(module, First + 4u);
@@ -211,6 +240,31 @@ int main() {
         module.emit(spv::OpLoad, {Uint, First + 6u, First + 5u});
         module.emit(spv::OpIEqual, {Bool, First + 8u, First + 6u, Two});
     }), false);
+    expect("a barrier under a workgroup word read at a uniform index after a store", joined([](Module& module) {
+        module.emit(spv::OpAccessChain, {WorkgroupPointer, First + 5u, Exchange, Two});
+        module.emit(spv::OpStore, {First + 5u, Three});
+        module.emit(spv::OpLoad, {Uint, First + 6u, First + 5u});
+        module.emit(spv::OpIEqual, {Bool, First + 8u, First + 6u, Two});
+    }), true);
+    expect("a barrier under a workgroup word read at a uniform index after a store and a barrier", joined([](Module& module) {
+        module.emit(spv::OpAccessChain, {WorkgroupPointer, First + 5u, Exchange, Two});
+        module.emit(spv::OpStore, {First + 5u, Three});
+        module.barrier();
+        module.emit(spv::OpLoad, {Uint, First + 6u, First + 5u});
+        module.emit(spv::OpIEqual, {Bool, First + 8u, First + 6u, Two});
+    }), false);
+    expect("a barrier under a workgroup word read at a uniform index after a store on one path past the barrier", joined([](Module& module) {
+        module.emit(spv::OpAccessChain, {WorkgroupPointer, First + 5u, Exchange, Two});
+        module.barrier();
+        module.emit(spv::OpSelectionMerge, {First + 4u, spv::SelectionControlMaskNone});
+        module.emit(spv::OpBranchConditional, {True, First + 3u, First + 4u});
+        module.emit(spv::OpLabel, {First + 3u});
+        module.emit(spv::OpStore, {First + 5u, Three});
+        module.emit(spv::OpBranch, {First + 4u});
+        module.emit(spv::OpLabel, {First + 4u});
+        module.emit(spv::OpLoad, {Uint, First + 6u, First + 5u});
+        module.emit(spv::OpIEqual, {Bool, First + 8u, First + 6u, Two});
+    }), true);
     expect("a barrier under a workgroup word read at a lane index", joined([](Module& module) {
         module.emit(spv::OpAccessChain, {WorkgroupPointer, First + 5u, Exchange, First + 1u});
         module.emit(spv::OpLoad, {Uint, First + 6u, First + 5u});
