@@ -2274,7 +2274,7 @@ int VulkanDevice::WriteLabelOnGpu(std::uint64_t address, std::span<const std::by
     const bool syncUnimported = queue == 0 && !recorder.SubmitHeld();
     const auto unimported = [&] {
         recorder.Sync();
-        return 1;
+        return 7;
     };
     if (syncUnimported && !Graphics::HostImportCovers(context, address, bytes.size())) return unimported();
     const auto* import = Graphics::HostImportFor(context, address, bytes.size());
