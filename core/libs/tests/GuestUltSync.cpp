@@ -22,10 +22,17 @@ int APS5_VABI sceUltQueueOptParamInitialize(void*, std::uint32_t);
 int APS5_VABI sceUltQueueDataResourcePoolOptParamInitialize(void*, std::uint32_t);
 int APS5_VABI sceUltWaitingQueueResourcePoolOptParamInitialize(void*, std::uint32_t);
 int APS5_VABI sceUltUlthreadOptParamInitialize(void*, std::uint32_t);
+int APS5_VABI _sceUltSemaphoreOptParamInitialize(void*, std::uint32_t);
+int APS5_VABI _sceUltQueueOptParamInitialize(void*, std::uint32_t);
+int APS5_VABI _sceUltQueueDataResourcePoolOptParamInitialize(void*, std::uint32_t);
+int APS5_VABI _sceUltWaitingQueueResourcePoolOptParamInitialize(void*, std::uint32_t);
+int APS5_VABI _sceUltUlthreadOptParamInitialize(void*, std::uint32_t);
 int APS5_VABI _sceUltWaitingQueueResourcePoolCreate(void*, const char*, std::uint32_t, std::uint32_t, void*, const void*, std::uint32_t);
 int APS5_VABI sceUltWaitingQueueResourcePoolDestroy(void*);
 int APS5_VABI sceUltReaderWriterLockOptParamInitialize(void*, std::uint32_t);
+int APS5_VABI _sceUltReaderWriterLockOptParamInitialize(void*, std::uint32_t);
 int APS5_VABI sceUltReaderWriterLockCreate(void*, const char*, void*, const void*, std::uint32_t);
+int APS5_VABI _sceUltReaderWriterLockCreate(void*, const char*, void*, const void*, std::uint32_t);
 int APS5_VABI sceUltReaderWriterLockDestroy(void*);
 int APS5_VABI sceUltReaderWriterLockLockRead(void*);
 int APS5_VABI sceUltReaderWriterLockTryLockRead(void*);
@@ -94,7 +101,9 @@ void MutexTryLock() {
 void OptParams() {
     using Initializer = int (APS5_VABI *)(void*, std::uint32_t);
     for (const Initializer initialize : {sceUltSemaphoreOptParamInitialize, sceUltQueueOptParamInitialize, sceUltQueueDataResourcePoolOptParamInitialize,
-                                         sceUltWaitingQueueResourcePoolOptParamInitialize, sceUltUlthreadOptParamInitialize, sceUltReaderWriterLockOptParamInitialize}) {
+                                         sceUltWaitingQueueResourcePoolOptParamInitialize, sceUltUlthreadOptParamInitialize, sceUltReaderWriterLockOptParamInitialize,
+                                         _sceUltSemaphoreOptParamInitialize, _sceUltQueueOptParamInitialize, _sceUltQueueDataResourcePoolOptParamInitialize,
+                                         _sceUltWaitingQueueResourcePoolOptParamInitialize, _sceUltUlthreadOptParamInitialize, _sceUltReaderWriterLockOptParamInitialize}) {
         std::uint8_t bytes[136];
         std::memset(bytes, 0xa5, sizeof(bytes));
         CHECK(initialize(nullptr, 0) == Null);
@@ -249,6 +258,30 @@ void ReaderWriterFinalize() {
     CHECK(sceUltInitialize() == Ok);
 }
 
+void ReaderWriterUnderscored() {
+    Object pool{};
+    Object rwlock{};
+    std::memset(&rwlock, 0x5a, sizeof(rwlock));
+    std::uint8_t optParam[128];
+    std::uint8_t workArea[2048];
+    CHECK(_sceUltReaderWriterLockOptParamInitialize(optParam, 0) == Ok);
+    CHECK(_sceUltReaderWriterLockCreate(nullptr, "underscored", nullptr, optParam, 0) == Null);
+    CHECK(_sceUltReaderWriterLockCreate(&rwlock, "underscored", &pool, optParam, 0) == Invalid);
+    for (const auto byte : rwlock.bytes) CHECK(byte == 0x5a);
+    CHECK(_sceUltWaitingQueueResourcePoolCreate(&pool, "pool", 2, 2, workArea, nullptr, 0) == Ok);
+    CHECK(_sceUltReaderWriterLockCreate(&rwlock, "underscored", &pool, optParam, 0) == Ok);
+    for (const auto byte : rwlock.bytes) CHECK(byte == 0);
+    CHECK(_sceUltReaderWriterLockCreate(&rwlock, "underscored", &pool, optParam, 0) == State);
+    CHECK(sceUltReaderWriterLockLockRead(&rwlock) == Ok);
+    CHECK(sceUltReaderWriterLockTryLockWrite(&rwlock) == Busy);
+    CHECK(sceUltReaderWriterLockDestroy(&rwlock) == Busy);
+    CHECK(sceUltReaderWriterLockUnlockRead(&rwlock) == Ok);
+    CHECK(sceUltReaderWriterLockLockWrite(&rwlock) == Ok);
+    CHECK(sceUltReaderWriterLockUnlockWrite(&rwlock) == Ok);
+    CHECK(sceUltReaderWriterLockDestroy(&rwlock) == Ok);
+    CHECK(sceUltWaitingQueueResourcePoolDestroy(&pool) == Ok);
+}
+
 struct alignas(8) UlthreadObject {
     std::uint8_t bytes[512];
 };
@@ -310,6 +343,7 @@ int main(int argc, char** argv) {
     else if (std::strcmp(argv[1], "rwlock-writer") == 0) ReaderWriterWriter();
     else if (std::strcmp(argv[1], "rwlock-pool") == 0) ReaderWriterPool();
     else if (std::strcmp(argv[1], "rwlock-finalize") == 0) ReaderWriterFinalize();
+    else if (std::strcmp(argv[1], "rwlock-underscored") == 0) ReaderWriterUnderscored();
     else if (std::strcmp(argv[1], "ulthreads") == 0) Ulthreads();
     else return 2;
     CHECK(sceUltFinalize() == Ok);
