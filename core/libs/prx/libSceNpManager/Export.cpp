@@ -317,23 +317,7 @@ int APS5_VABI sceNpUnknown_WxLcN76q19o(void) {
     return 0;
 }
 
-int APS5_VABI sceNpInGameMessageCreateHandle() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-int APS5_VABI sceNpInGameMessageDeleteHandle() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
 int APS5_VABI sceNpInGameMessageGetMemoryPoolStatistics() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-int APS5_VABI sceNpInGameMessageInitialize() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-int APS5_VABI sceNpInGameMessagePrepare() {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -341,15 +325,7 @@ int APS5_VABI sceNpInGameMessagePrepareA() {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
-int APS5_VABI sceNpInGameMessageSendData() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
 int APS5_VABI sceNpInGameMessageSendDataA() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-int APS5_VABI sceNpInGameMessageTerminate() {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
