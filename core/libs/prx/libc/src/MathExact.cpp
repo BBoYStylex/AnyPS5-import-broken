@@ -129,12 +129,12 @@ short ResultCode(TFloat value) {
 }
 
 template<typename TFloat>
-short ScaleBinary(TFloat* value, long exponent) {
+short ScaleBinary(TFloat* value, std::int64_t exponent) {
     if (std::isnan(*value)) return NotANumber;
     if (std::isinf(*value)) return Infinite;
     if (*value == 0) return Zero;
     ErrnoGuard guard;
-    *value = std::ldexp(*value, static_cast<int>(std::clamp<long>(exponent, -100000, 100000)));
+    *value = std::ldexp(*value, static_cast<int>(std::clamp<std::int64_t>(exponent, -100000, 100000)));
     return ResultCode(*value);
 }
 
@@ -384,10 +384,10 @@ short APS5_VABI _LDint_nid_postfix(long double* value, short scale) {
     return lost != 0 ? Finite : Zero;
 }
 
-short APS5_VABI _Dscale_nid_postfix(double* value, long exponent) { return ScaleBinary(value, exponent); }
-short APS5_VABI _FDscale_nid_postfix(float* value, long exponent) { return ScaleBinary(value, exponent); }
+short APS5_VABI _Dscale_nid_postfix(double* value, std::int64_t exponent) { return ScaleBinary(value, exponent); }
+short APS5_VABI _FDscale_nid_postfix(float* value, std::int64_t exponent) { return ScaleBinary(value, exponent); }
 
-short APS5_VABI _LDscale_nid_postfix(long double* value, long exponent) {
+short APS5_VABI _LDscale_nid_postfix(long double* value, std::int64_t exponent) {
     const ExtendedBits bits = Bits(*value);
     if ((bits.signExponent & 0x7fff) == 0x7fff) return ExtendedNan(bits) ? NotANumber : Infinite;
     if (bits.mantissa == 0) {

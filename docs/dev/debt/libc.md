@@ -51,6 +51,7 @@
 - [__udivti3](../../../core/libs/prx/libc/src/RuntimeSupport.cpp) (libc, re-exported by libSceAmpr) - the hardware traps on a zero divisor; this throws instead
 - [__umodti3](../../../core/libs/prx/libc/src/RuntimeSupport.cpp) (libc) - the hardware traps on a zero divisor; this throws instead
 - [__modti3](../../../core/libs/prx/libc/src/RuntimeSupport.cpp) (libc) - the hardware traps on a zero divisor; this throws instead
+- [_LDnorm](../../../core/libs/prx/libc/src/MathExact.cpp) (libSceLibcInternal, implemented in libc) - a zero significand never returns on the console, where the normalising loop shifts forever; this throws instead
 
 ### Functional
 
