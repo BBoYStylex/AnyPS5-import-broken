@@ -178,6 +178,18 @@ void Directories() {
 
     void* merged = opendir_nid_postfix("/app0");
     Check(merged != nullptr);
+#ifdef _WIN32
+    bool diskIdentityChecked = false;
+    while (auto* entry = readdir_nid_postfix(merged)) {
+        if (std::strcmp(entry->name, "README.txt") != 0) continue;
+        FileStat identity{};
+        Check(sceKernelStat("/app0/README.txt", &identity) == 0);
+        Check(entry->fileNumber != 0 && entry->fileNumber == static_cast<std::uint32_t>(identity.st_ino));
+        diskIdentityChecked = true;
+    }
+    Check(diskIdentityChecked);
+    rewinddir_nid_postfix(merged);
+#endif
     const auto mergedEntries = ReadDirectory(merged);
     Check(mergedEntries.at("eboot.bin") == 8 && mergedEntries.at("README.txt") == 8);
     Check(mergedEntries.at("EmptyArchive") == 4 && mergedEntries.at("Data") == 4);
