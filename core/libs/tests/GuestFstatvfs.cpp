@@ -90,6 +90,8 @@ int main() {
     for (int fd : sockets) Require(close_nid_postfix(fd) == 0);
     RequireFailure(sockets[0], 9);
     RequireFailure(-1, 9);
+    Require(fstatvfs_nid_postfix(-1, nullptr) == -1 && *__error_nid_postfix() == 14);
+    Require(fstatvfs_nid_postfix(pipes[0], nullptr) == -1 && *__error_nid_postfix() == 14);
     Require(close_nid_postfix(file) == 0);
     RemovePathAlias_nid_no_patch("/anyps5-fstatvfs-test");
     Require(std::filesystem::remove(filePath));

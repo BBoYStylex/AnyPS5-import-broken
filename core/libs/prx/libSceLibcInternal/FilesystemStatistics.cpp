@@ -7,14 +7,14 @@ extern "C" int* APS5_VABI __error_nid_postfix();
 
 extern "C" int APS5_VABI fstatvfs_nid_postfix(int descriptor, LibcStatvfs* output) {
     int* const error = __error_nid_postfix();
-    const int saved = *error;
-    KernelStatfs volume{};
-    const int status = _fstatfs_nid_postfix(descriptor, &volume);
-    if (status != 0) return status;
     if (output == nullptr) {
         *error = 14;
         return -1;
     }
+    const int saved = *error;
+    KernelStatfs volume{};
+    const int status = _fstatfs_nid_postfix(descriptor, &volume);
+    if (status != 0) return status;
     const LibcStatvfs result = StatvfsFromStatfs(volume);
     std::memcpy(output, &result, sizeof(result));
     *error = saved;
