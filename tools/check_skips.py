@@ -35,7 +35,12 @@ def skips(path):
         name = case.get("name")
         if not name:
             raise ValueError(f"{path}: skipped testcase has no name")
-        output = ["skipped, " + reason.strip() for reason in (skipped.get("message", ""), skipped.text or "") if reason.strip()]
+        output = [
+            line.strip() if line.strip().lower().startswith("skipped,") else "skipped, " + line.strip()
+            for reason in (skipped.get("message", ""), skipped.text or "")
+            for line in reason.splitlines()
+            if line.strip()
+        ]
         output += [case.findtext(channel) or "" for channel in ("system-out", "system-err")]
         yield name, "\n".join(output)
 

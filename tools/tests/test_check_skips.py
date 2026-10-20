@@ -39,7 +39,9 @@ class CheckSkipsTests(unittest.TestCase):
         reports = (
             f'<skipped/><system-out>skipped, {reason}</system-out>',
             f'<skipped message="{reason}"/>',
+            f'<skipped message="skipped, {reason}"/>',
             f'<skipped>{reason}</skipped>',
+            f'<skipped>skipped, {reason}</skipped>',
             f'<skipped/><system-err>skipped, {reason}</system-err>',
             f'<skipped message="{reason}">\n\n{reason}\n</skipped>'
             f'<system-out>\n\nskipped, {reason}\n\n</system-out>'
@@ -145,12 +147,13 @@ class CheckSkipsTests(unittest.TestCase):
 
     def test_reason_on_its_own_line_inside_skipped_is_expected(self):
         for reason, job in (("the device lacks geometryShader", "linux"), ("no display", "windows")):
-            with self.subTest(job=job), tempfile.TemporaryDirectory() as directory:
-                junit = Path(directory) / "junit.xml"
-                junit.write_text(f'<testsuite><testcase name="gpu"><skipped>\n{reason}\n</skipped></testcase></testsuite>', encoding="utf-8")
-                result = subprocess.run([sys.executable, "-I", str(TOOL), str(junit), "--job", job], capture_output=True, text=True)
-                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-                self.assertIn("all expected", result.stdout)
+            for body in (f"\n{reason}\n", f"setup complete\n{reason}\n"):
+                with self.subTest(job=job, body=body), tempfile.TemporaryDirectory() as directory:
+                    junit = Path(directory) / "junit.xml"
+                    junit.write_text(f'<testsuite><testcase name="gpu"><skipped>{body}</skipped></testcase></testsuite>', encoding="utf-8")
+                    result = subprocess.run([sys.executable, "-I", str(TOOL), str(junit), "--job", job], capture_output=True, text=True)
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertIn("all expected", result.stdout)
 
     def test_no_usable_vulkan_device_is_expected_in_both_jobs(self):
         reason = "no usable Vulkan device: ErrorInitializationFailed"
@@ -179,6 +182,7 @@ class CheckSkipsTests(unittest.TestCase):
         xml = (
             '<testsuite>'
             '<testcase name="normal"><skipped message="device limitation"/></testcase>'
+            '<testcase name="prefixed"><skipped message="skipped, device limitation"/></testcase>'
             '<testcase name="indented"><skipped/><system-out>\n  skipped, host imports are unavailable\n</system-out></testcase>'
             '<testcase name="capitalized"><skipped/><system-err>\n    Skipped, no display\n</system-err></testcase>'
             '</testsuite>'
@@ -189,6 +193,8 @@ class CheckSkipsTests(unittest.TestCase):
             result = subprocess.run([sys.executable, "-I", str(TOOL), str(junit), "--list"], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn("normal: skipped, device limitation", result.stdout)
+            self.assertIn("prefixed: skipped, device limitation", result.stdout)
+            self.assertNotIn("skipped, skipped,", result.stdout)
             self.assertIn("indented: skipped, host imports are unavailable", result.stdout)
             self.assertIn("capitalized: Skipped, no display", result.stdout)
 
