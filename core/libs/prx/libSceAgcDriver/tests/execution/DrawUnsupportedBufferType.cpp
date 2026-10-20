@@ -25,7 +25,7 @@ alignas(256) constexpr std::array<std::uint32_t, 16> PixelCode{
     0x7e020280u, 0xe0301000u, 0x80000201u, 0xbf8c3f70u, 0x7e000280u, 0x7e0602f2u, 0xf800180fu, 0x03010002u, 0xbf810000u,
 };
 alignas(256) constexpr std::array<std::uint32_t, 9> InactivePixelCode{
-    0xbefe0480u, 0xe0301000u, 0x80000201u, 0xbf8c3f70u, 0x7e000280u, 0x7e0602f2u, 0xf800180fu, 0x03010002u, 0xbf810000u,
+    0xbefe0404u, 0xe0301000u, 0x80000201u, 0xbf8c3f70u, 0x7e000280u, 0x7e0602f2u, 0xf800180fu, 0x03010002u, 0xbf810000u,
 };
 
 void Append(std::vector<std::uint32_t>& commands, std::uint32_t opcode, std::initializer_list<std::uint32_t> payload) {
@@ -59,8 +59,9 @@ void Draw(const std::array<std::uint32_t, 4>& descriptor, bool inactive = false)
     };
     const std::vector<std::pair<std::uint32_t, std::uint32_t>> shader{
         {0xc8, static_cast<std::uint32_t>(vertex >> 8u)}, {0xc9, static_cast<std::uint32_t>(vertex >> 40u)}, {0x8b, 0u},
-        {0x008, static_cast<std::uint32_t>(pixel >> 8u)}, {0x009, static_cast<std::uint32_t>(pixel >> 40u)}, {0x00b, 4u << 1u},
+        {0x008, static_cast<std::uint32_t>(pixel >> 8u)}, {0x009, static_cast<std::uint32_t>(pixel >> 40u)}, {0x00b, 6u << 1u},
         {0x00c, descriptor[0]}, {0x00d, descriptor[1]}, {0x00e, descriptor[2]}, {0x00f, descriptor[3]},
+        {0x010, 0}, {0x011, 0},
     };
     std::vector<std::uint32_t> commands;
     Append(commands, 0x79, {0x242, 4});
