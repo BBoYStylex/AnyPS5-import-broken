@@ -69,18 +69,142 @@ std::size_t TablesEnd(std::span<const std::uint8_t> code, std::size_t firstTable
     return table;
 }
 
-bool HasUndecodableBytes(std::span<const std::uint8_t> code, const Codegen::X64InstructionDecoder& decoder) {
-    for (std::size_t position = 0; position < code.size();) {
-        if (OnlyPadding(code, position, decoder)) return false;
+bool IsInvalid64BitSingleByteOpcode(std::uint8_t opcode) {
+    switch (opcode) {
+    case 0x06:
+    case 0x07:
+    case 0x0e:
+    case 0x16:
+    case 0x17:
+    case 0x1e:
+    case 0x1f:
+    case 0x27:
+    case 0x2f:
+    case 0x37:
+    case 0x3f:
+    case 0x60:
+    case 0x61:
+    case 0x82:
+    case 0x9a:
+    case 0xce:
+    case 0xd4:
+    case 0xd5:
+    case 0xd6:
+    case 0xea:
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool IsForbiddenSyscallInstruction(std::span<const std::uint8_t> code, std::size_t pos, const Codegen::DecodedInstructionInfo& info) {
+    const auto opPos = pos + info.OpcodeOffset;
+    if (opPos + 1 >= pos + info.Length || opPos + 1 >= code.size()) return false;
+    const auto b0 = code[opPos];
+    const auto b1 = code[opPos + 1];
+    return (b0 == 0x0f && (b1 == 0x05 || b1 == 0x34 || b1 == 0x07)) || (b0 == 0xcd && b1 == 0x80);
+}
+
+bool IsValid64BitInstruction(std::span<const std::uint8_t> code, std::size_t pos, const Codegen::DecodedInstructionInfo& info, VirtualAddress baseVAddr, VirtualAddress segmentVAddr, VirtualAddress segmentEnd) {
+    if (info.Length == 0 || info.Length > code.size() - pos) return false;
+    if (!info.IsTwoByteOpcode && IsInvalid64BitSingleByteOpcode(info.Opcode)) return false;
+    if (info.HasBranchTarget && !info.HasRipRelativeDisp) {
+        const auto target = static_cast<std::int64_t>(baseVAddr + pos + info.Length) + info.BranchDisp;
+        if (target < static_cast<std::int64_t>(segmentVAddr) || target >= static_cast<std::int64_t>(segmentEnd)) return false;
+    }
+    return true;
+}
+
+bool DecodesAsTrailingCodeBlock(std::span<const std::uint8_t> code, std::size_t from, VirtualAddress baseVAddr, VirtualAddress segmentVAddr, VirtualAddress segmentEnd, const Codegen::X64InstructionDecoder& decoder, bool* outHasSyscall = nullptr) {
+    if (outHasSyscall != nullptr) *outHasSyscall = false;
+    if (from >= code.size() || code[from] == 0x00 || code[from] == 0xcc || code[from] == 0x90) return false;
+    if (OnlyPadding(code, from, decoder)) return false;
+    bool sawNonPadding = false;
+    bool lastWasTerminator = false;
+    for (auto pos = from; pos < code.size();) {
+        if (OnlyPadding(code, pos, decoder)) return sawNonPadding && lastWasTerminator;
+        Codegen::DecodedInstructionInfo info;
         try {
-            const auto info = decoder.DecodeInstruction(code.data() + position, code.size() - position);
-            if (info.Length == 0 || info.Length > code.size() - position) return true;
-            position += info.Length;
+            info = decoder.DecodeInstruction(code.data() + pos, code.size() - pos);
         } catch (const Codegen::CodegenException&) {
-            return true;
+            return false;
+        }
+        if (!IsValid64BitInstruction(code, pos, info, baseVAddr, segmentVAddr, segmentEnd)) return false;
+        const bool isSyscall = IsForbiddenSyscallInstruction(code, pos, info);
+        if (isSyscall && outHasSyscall != nullptr) *outHasSyscall = true;
+        if (!IsNop(code, pos, info.Length) && code[pos] != 0xcc && code[pos] != 0x00) {
+            sawNonPadding = true;
+            lastWasTerminator = info.FlowKind == Codegen::ControlFlowKind::Return
+                || info.FlowKind == Codegen::ControlFlowKind::UnconditionalJump
+                || info.FlowKind == Codegen::ControlFlowKind::IndirectJump
+                || info.FlowKind == Codegen::ControlFlowKind::Trap
+                || isSyscall;
+        }
+        pos += info.Length;
+    }
+    return sawNonPadding && lastWasTerminator;
+}
+
+std::size_t FindEmbeddedDataTableEnd(std::span<const std::uint8_t> code, VirtualAddress tableVAddr, VirtualAddress segmentVAddr, VirtualAddress segmentEnd, const Codegen::X64InstructionDecoder& decoder) {
+    std::optional<std::size_t> firstInvalidPos;
+    for (std::size_t pos = 0; pos < code.size();) {
+        if (OnlyPadding(code, pos, decoder)) break;
+        Codegen::DecodedInstructionInfo info;
+        try {
+            info = decoder.DecodeInstruction(code.data() + pos, code.size() - pos);
+        } catch (const Codegen::CodegenException&) {
+            firstInvalidPos = pos;
+            break;
+        }
+        if (!IsValid64BitInstruction(code, pos, info, tableVAddr, segmentVAddr, segmentEnd)) {
+            firstInvalidPos = pos;
+            break;
+        }
+        if (IsForbiddenSyscallInstruction(code, pos, info) || info.FlowKind != Codegen::ControlFlowKind::Sequential) return 0;
+        pos += info.Length;
+    }
+    if (!firstInvalidPos) return 0;
+    const bool duplicatedEightByteRow = code.size() >= 16 && std::memcmp(code.data(), code.data() + 8, 8) == 0;
+    if (*firstInvalidPos != 0 && (!duplicatedEightByteRow || *firstInvalidPos > 4)) return 0;
+
+    std::optional<std::size_t> firstDecodeFailure;
+    for (std::size_t pos = 0; pos < code.size();) {
+        if (OnlyPadding(code, pos, decoder)) break;
+        try {
+            const auto info = decoder.DecodeInstruction(code.data() + pos, code.size() - pos);
+            if (info.Length == 0 || info.Length > code.size() - pos) {
+                firstDecodeFailure = pos;
+                break;
+            }
+            if (IsForbiddenSyscallInstruction(code, pos, info)) return 0;
+            pos += info.Length;
+        } catch (const Codegen::CodegenException&) {
+            firstDecodeFailure = pos;
+            break;
         }
     }
-    return false;
+    if (!firstDecodeFailure) return 0;
+
+    for (std::size_t pos = *firstDecodeFailure + 1; pos < code.size();) {
+        if (code[pos] != 0xcc && code[pos] != 0x90 && code[pos] != 0x00) {
+            ++pos;
+            continue;
+        }
+        const auto padStart = pos;
+        bool hasZeroPad = false;
+        while (pos < code.size() && (code[pos] == 0xcc || code[pos] == 0x90 || code[pos] == 0x00)) {
+            if (code[pos] == 0x00) hasZeroPad = true;
+            ++pos;
+        }
+        if (pos < code.size() && DecodesAsTrailingCodeBlock(code, pos, tableVAddr, segmentVAddr, segmentEnd, decoder))
+            return hasZeroPad ? pos : padStart;
+    }
+    for (std::size_t pos = *firstDecodeFailure + 1; pos < code.size(); ++pos) {
+        bool hasSyscall = false;
+        if (DecodesAsTrailingCodeBlock(code, pos, tableVAddr, segmentVAddr, segmentEnd, decoder, &hasSyscall) && hasSyscall)
+            return pos;
+    }
+    return code.size();
 }
 
 }
@@ -230,8 +354,9 @@ std::vector<RelativeJumpTable> FindRelativeJumpTables(std::span<const std::uint8
         const auto it = branchTargets.lower_bound(tableVAddr);
         if (it != branchTargets.end() && *it < inspectEnd) continue;
         const auto tableCode = segment.subspan(tableVAddr - segmentVAddr, inspectEnd - tableVAddr);
-        if (!HasUndecodableBytes(tableCode, decoder)) continue;
-        tables.push_back({begin, tableVAddr, inspectEnd});
+        const auto tableSize = FindEmbeddedDataTableEnd(tableCode, tableVAddr, segmentVAddr, segmentEnd, decoder);
+        if (tableSize == 0) continue;
+        tables.push_back({begin, tableVAddr, tableVAddr + tableSize});
     }
     return tables;
 }

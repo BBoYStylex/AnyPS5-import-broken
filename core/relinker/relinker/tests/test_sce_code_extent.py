@@ -26,13 +26,15 @@ LATER_FUNCTION = 0x300
 
 
 def fixture(sce_block=True, plt_push_offset=8, gap=0, interpreter_pointer=False, data_pointer=False, gap_entry=False,
-            plt_at=None, early_function=False, function_tls=False, gap_embedded_data=False):
-    plt = (LATER_FUNCTION + FUNCTION_SIZE + gap if gap_embedded_data else FUNCTION + FUNCTION_SIZE + gap) if plt_at is None else plt_at
+            plt_at=None, early_function=False, function_tls=False, gap_embedded_data=False,
+            gap_data_then_syscall=False, gap_callback_syscall_undecodable=False):
+    has_gap_embedded = gap_embedded_data or gap_data_then_syscall or gap_callback_syscall_undecodable
+    plt = (LATER_FUNCTION + FUNCTION_SIZE + gap if has_gap_embedded else FUNCTION + FUNCTION_SIZE + gap) if plt_at is None else plt_at
     entry = FUNCTION + FUNCTION_SIZE if gap_entry else FUNCTION
     data = plt + 0x20 if plt > FUNCTION else FUNCTION + FUNCTION_SIZE
     functions = [(EARLY_FUNCTION, FUNCTION_SIZE)] if early_function else []
     functions.append((FUNCTION, FUNCTION_SIZE))
-    if gap_embedded_data:
+    if has_gap_embedded:
         functions.append((LATER_FUNCTION, FUNCTION_SIZE))
     interpreter = FUNCTION - len(INTERPRETER)
     image = bytearray(0x1000)
@@ -41,10 +43,10 @@ def fixture(sce_block=True, plt_push_offset=8, gap=0, interpreter_pointer=False,
                      5 if interpreter_pointer else 4, 64, 0, 0)
     tags = [
         (1, 1),
-        (0x61000035, 0x600), (0x61000037, 16),
-        (0x61000039, 0x620), (0x6100003B, 24), (0x6100003F, 48),
-        (0x6100002F, 0x700), (0x61000031, 24 if interpreter_pointer else 0), (0x61000033, 24),
-        (0x61000027, GOT), (0x61000029, 0x720), (0x6100002B, 7), (0x6100002D, 24),
+        (0x61000035 if sce_block else 5, 0x600), (0x61000037 if sce_block else 10, 16),
+        (0x61000039 if sce_block else 6, 0x620), (0x6100003B if sce_block else 11, 24), (0x6100003F, 48),
+        (0x6100002F if sce_block else 7, 0x700), (0x61000031 if sce_block else 8, 24 if interpreter_pointer else 0), (0x61000033 if sce_block else 9, 24),
+        (0x61000027 if sce_block else 3, GOT), (0x61000029 if sce_block else 23, 0x720), (0x6100002B, 7), (0x6100002D if sce_block else 2, 24),
         (0, 0),
     ]
     struct.pack_into("<IIQQQQQQ", image, 64, PT_LOAD, 7, 0, 0, 0, len(image), len(image), 0x1000)
@@ -68,7 +70,7 @@ def fixture(sce_block=True, plt_push_offset=8, gap=0, interpreter_pointer=False,
 
     for begin, size in functions:
         image[begin:begin + size] = b"\xc3" + b"\x90" * (size - 1)
-    last_func = LATER_FUNCTION if gap_embedded_data else FUNCTION
+    last_func = LATER_FUNCTION if has_gap_embedded else FUNCTION
     image[last_func + FUNCTION_SIZE:plt] = b"\x90" * gap
     image[plt:plt + 2] = b"\xff\x35"
     struct.pack_into("<i", image, plt + 2, GOT + plt_push_offset - (plt + 6))
@@ -90,12 +92,21 @@ def fixture(sce_block=True, plt_push_offset=8, gap=0, interpreter_pointer=False,
         image[entry:entry + len(UNSUPPORTED_TLS)] = UNSUPPORTED_TLS
     if function_tls:
         image[FUNCTION:FUNCTION + len(UNSUPPORTED_TLS)] = UNSUPPORTED_TLS
-    if gap_embedded_data:
+    if gap_embedded_data or gap_data_then_syscall or gap_callback_syscall_undecodable:
         table = FUNCTION + FUNCTION_SIZE + 0x10
         image[FUNCTION:FUNCTION + 3] = b"\x48\x8d\x05"
         struct.pack_into("<iB", image, FUNCTION + 3, table - (FUNCTION + 7), 0xC3)
         image[FUNCTION + FUNCTION_SIZE:table] = b"\xcc" * 0x10
-        image[table:LATER_FUNCTION] = b"\x0f\x78\x33\x1e" * ((LATER_FUNCTION - table) // 4)
+        if gap_data_then_syscall:
+            image[table:table + 6] = b"\x0f\x78\x11\x22\x33\x44"
+            image[table + 6:table + 16] = b"\xcc" * 10
+            image[table + 16:table + 24] = b"\xb8\x3b\x00\x00\x00\x0f\x05\xc3"
+            image[table + 24:LATER_FUNCTION] = b"\x90" * (LATER_FUNCTION - (table + 24))
+        elif gap_callback_syscall_undecodable:
+            image[table:table + 14] = b"\xb8\x3b\x00\x00\x00\x0f\x05\x0f\x78\x11\x22\x33\x44\xc3"
+            image[table + 14:LATER_FUNCTION] = b"\x90" * (LATER_FUNCTION - (table + 14))
+        else:
+            image[table:LATER_FUNCTION] = b"\x0f\x78\x33\x1e" * ((LATER_FUNCTION - table) // 4)
         image[data:data + 0x30] = b"\x90" * 0x30
 
     cie = EH_FRAME
@@ -162,6 +173,12 @@ def main():
                 "Unsupported " + ("Windows" if target == "windows" else "macOS") + " guest TLS instruction", target)
             run(relinker, work, "sce-gap-embedded-data-" + target,
                 fixture(sce_block=True, gap_embedded_data=True), target=target)
+            run(relinker, work, "sysv-gap-embedded-data-" + target,
+                fixture(sce_block=False, gap_embedded_data=True), target=target)
+            run(relinker, work, "gap-data-then-syscall-" + target,
+                fixture(sce_block=False, gap_data_then_syscall=True), "Forbidden syscall instruction", target=target)
+            run(relinker, work, "gap-callback-syscall-" + target,
+                fixture(sce_block=False, gap_callback_syscall_undecodable=True), "Forbidden syscall instruction", target=target)
     print("SCE code extent tests passed")
 
 
