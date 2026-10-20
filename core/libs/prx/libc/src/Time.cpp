@@ -522,7 +522,9 @@ extern "C" {
 char* tzname_nid_postfix[2] = {HostZoneNames()[0], HostZoneNames()[1]};
 
 GuestTm* APS5_VABI localtime_s_nid_postfix(const int64_t* timer, GuestTm* result);
+GuestTm* APS5_VABI localtime_r_nid_postfix(const int64_t* timer, GuestTm* result);
 GuestTm* APS5_VABI gmtime_s_nid_postfix(const int64_t* timer, GuestTm* result);
+GuestTm* APS5_VABI gmtime_r_nid_postfix(const int64_t* timer, GuestTm* result);
 std::size_t APS5_VABI wcsrtombs_nid_postfix(char* destination, const std::uint16_t** source, std::size_t capacity, void* state);
 std::size_t APS5_VABI mbsrtowcs_nid_postfix(std::uint16_t* destination, const char** source, std::size_t capacity, void* state);
 int APS5_VABI ___mb_cur_max_nid_postfix();
@@ -620,12 +622,20 @@ GuestTm* APS5_VABI localtime_s_nid_postfix(const int64_t* timer, GuestTm* result
     return result;
 }
 
+GuestTm* APS5_VABI localtime_r_nid_postfix(const int64_t* timer, GuestTm* result) {
+    return localtime_s_nid_postfix(timer, result);
+}
+
 GuestTm* APS5_VABI gmtime_s_nid_postfix(const int64_t* timer, GuestTm* result) {
     if (timer == nullptr || result == nullptr) return nullptr;
     if (!utcCalendarFields(*timer, *result)) return nullptr;
     result->tm_gmtoff = 0;
     result->tm_zone = "UTC";
     return result;
+}
+
+GuestTm* APS5_VABI gmtime_r_nid_postfix(const int64_t* timer, GuestTm* result) {
+    return gmtime_s_nid_postfix(timer, result);
 }
 
 GuestTm* APS5_VABI gmtime_nid_postfix(const int64_t* timer) {

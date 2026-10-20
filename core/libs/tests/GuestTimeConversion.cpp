@@ -20,7 +20,9 @@ GuestTm* APS5_VABI gmtime_nid_postfix(const std::int64_t*);
 GuestTm* APS5_VABI libc_localtime_nid_postfix(const std::int64_t*);
 GuestTm* APS5_VABI localtime_nid_postfix(const std::int64_t*);
 GuestTm* APS5_VABI gmtime_s_nid_postfix(const std::int64_t*, GuestTm*);
+GuestTm* APS5_VABI gmtime_r_nid_postfix(const std::int64_t*, GuestTm*);
 GuestTm* APS5_VABI localtime_s_nid_postfix(const std::int64_t*, GuestTm*);
+GuestTm* APS5_VABI localtime_r_nid_postfix(const std::int64_t*, GuestTm*);
 char* APS5_VABI asctime_nid_postfix(const GuestTm*);
 std::int64_t APS5_VABI mktime_nid_postfix(GuestTm*);
 std::size_t APS5_VABI strftime_nid_postfix(char*, std::size_t, const char*, const GuestTm*);
@@ -498,6 +500,13 @@ int main() {
     char formatted[64]{};
     Require(strftime_nid_postfix(formatted, sizeof(formatted), "%Y-%m-%d %H:%M:%S", &utc) == 19
         && std::strcmp(formatted, "1970-01-01 00:00:00") == 0, "strftime did not read the guest tm");
+
+    GuestTm reentrantUtc{};
+    Require(gmtime_r_nid_postfix(&epoch, &reentrantUtc) == &reentrantUtc && reentrantUtc.tm_year == 70 && reentrantUtc.tm_mday == 1,
+        "gmtime_r epoch conversion failed");
+    GuestTm reentrantLocal{};
+    Require(localtime_r_nid_postfix(&epoch, &reentrantLocal) == &reentrantLocal,
+        "localtime_r epoch conversion failed");
 
     CheckFreeBsdConversions();
     CheckLocalRange();
