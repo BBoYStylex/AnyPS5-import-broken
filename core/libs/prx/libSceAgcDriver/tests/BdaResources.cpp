@@ -1102,7 +1102,17 @@ public:
     static constexpr std::size_t Piece = 65536;
     static constexpr std::size_t Window = std::size_t{8} << 20u;
 
-    explicit PieceWindow(const Context& context, bool views = false) : importing(context) {
+    explicit PieceWindow(const Context& context, bool views = false, bool watched = false) : importing(context) {
+#ifdef _WIN32
+        if (watched) {
+            block = static_cast<std::uint8_t*>(GuestArena::GuestArenaAllocate_nid_postfix(Window, Window));
+            Require(block != nullptr, "cannot allocate the watched import block");
+            GuestArena::GuestArenaCommit_nid_postfix(block, Window, PAGE_READWRITE, Window);
+            arenaBacked = true;
+        }
+#else
+        static_cast<void>(watched);
+#endif
 #ifndef _WIN32
         if (views) {
             reserved = mmap(nullptr, 2 * Window, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
@@ -1136,6 +1146,13 @@ public:
         if (reserved != nullptr) {
             munmap(reserved, 2 * Window);
             close(file);
+            return;
+        }
+#endif
+#ifdef _WIN32
+        if (arenaBacked) {
+            GuestArena::GuestArenaReset_nid_postfix(block, Window);
+            GuestArena::GuestArenaRelease_nid_postfix(block, Window);
             return;
         }
 #endif
@@ -1185,6 +1202,9 @@ public:
 
 private:
     std::uint8_t* block = nullptr;
+#ifdef _WIN32
+    bool arenaBacked = false;
+#endif
     void* reserved = nullptr;
     int file = -1;
     std::vector<std::size_t> registered;
@@ -1219,6 +1239,32 @@ void importBlockBuildTests(const Context& context) {
     window.Add(0, half, false);
     window.Build();
     Require(window.Imports(0, PieceWindow::Window) == 2 && window.Block(0, half) && window.Block(half, half), "a 4 MiB read-only range and 64 writable 64 KiB pieces in one window were not imported as the range and one 4 MiB block: " + blockText(window, 0, PieceWindow::Window));
+}
+
+void importBlockMixedWatchTests(const Context& context) {
+#ifdef _WIN32
+    if (!GuestArena::GuestArenaAvailable_nid_postfix() || !GuestArena::GuestArenaWriteWatched_nid_postfix() || context.hostImportAlignment == 0) {
+        std::cout << "write watching unavailable: mixed import block not tested\n";
+        return;
+    }
+    PieceWindow window(context, false, true);
+    window.AddPieces(0, PieceWindow::Window);
+    const auto decided = PrepareImportWatch(window.importing);
+    struct Restore {
+        const Context& context;
+        ImportWatch watch;
+        ~Restore() { SetImportWatch(context, watch); }
+    } restore{window.importing, decided};
+    SetImportWatch(window.importing, ImportWatch::Watch);
+    AgcDriver::GuestMemory::Unwatch(window.Address(0x110000), 0x40000);
+    AgcDriver::GuestMemory::Unwatch(window.Address(0x270000), 0x40000);
+    const auto target = window.Address(0x2b0000);
+    Require(!AgcDriver::GuestMemory::Watched(window.Address(0x110000), 0x40000) && !AgcDriver::GuestMemory::Watched(window.Address(0x270000), 0x40000) && AgcDriver::GuestMemory::Watched(target, PieceWindow::Piece), "the mixed import fixture did not create the intended watch gaps");
+    Require(HostImportFor(window.importing, target, PieceWindow::Piece) != nullptr, "the watched target beside the unwatched spans was not imported");
+    Require(AgcDriver::GuestMemory::Watched(target, PieceWindow::Piece), "an aligned import through unwatched neighboring spans dropped the target from the write watch");
+#else
+    static_cast<void>(context);
+#endif
 }
 
 void importBlockHoleTests(const Context& context) {
@@ -3352,6 +3398,7 @@ void RunBdaResourceTests(const Context& context, const BdaTestAccess& access) {
     importBlockMapTests(context, true);
 #endif
     importBlockBuildTests(context);
+    importBlockMixedWatchTests(context);
     importBlockHoleTests(context);
     importBlockUnalignedTests(context);
     importBlockFlagTests(context);
