@@ -3,6 +3,7 @@
 #include <codegen/CodegenException.hpp>
 #include <cstring>
 #include <codegen/x86/Amd64OnlySubstitutionTable.hpp>
+#include <codegen/x86/DecodedInstruction.hpp>
 #include <codegen/x86/X64InstructionDecoder.hpp>
 #include <codegen/x86/X64OpcodeConstants.hpp>
 #include <codegen/x86/IAmd64OnlyInstructionMatcher.hpp>
@@ -254,6 +255,15 @@ std::set<std::uint64_t> _collectBranchTargets(
         const auto match = std::lower_bound(matches.begin(), matches.end(), offset, [](const InstructionMatch& item, const std::uint64_t value) { return item.Offset < value; });
         return match != matches.end() && match->Offset == offset;
     };
+    const auto pastPrefixes = [&](const std::uint64_t address) {
+        const auto offset = address - ph.MappedAddress;
+        const auto after = std::upper_bound(matches.begin(), matches.end(), offset, [](const std::uint64_t value, const InstructionMatch& item) { return value < item.Offset; });
+        if (after == matches.begin())
+            return false;
+        const auto& match = *std::prev(after);
+        const auto inside = offset - match.Offset;
+        return inside != 0 && inside < match.Length && inside > DecodedInstruction{seg.data() + match.Offset, match.Length}.OpcodeOffset();
+    };
     const X64InstructionDecoder decoder;
     std::set<std::uint64_t> targets;
     for (const auto& match : matches) {
@@ -261,7 +271,7 @@ std::set<std::uint64_t> _collectBranchTargets(
         const auto next = static_cast<std::int64_t>(ph.MappedAddress + match.Offset + info.Length);
         if (info.HasBranchTarget && !info.HasRipRelativeDisp) {
             const auto target = next + info.BranchDisp;
-            if (target >= 0)
+            if (target >= 0 && !pastPrefixes(static_cast<std::uint64_t>(target)))
                 targets.insert(static_cast<std::uint64_t>(target));
         } else if (info.HasRipRelativeDisp && info.Opcode == kLea) {
             std::int32_t displacement;
@@ -517,6 +527,8 @@ void Amd64OnlyConverter::_convertSegment(
                 fixups.push_back({pending.BodyOffset, static_cast<Domain::VirtualAddress>(address + pending.InstructionEnd + pending.OriginalDisplacement)});
             std::vector<TrampolineIncomingBranch> incoming;
             for (const auto& branch : branches) {
+                if (!branchTargets.contains(branch.Target))
+                    continue;
                 if (branch.Target <= address || branch.Target >= address + siteLength)
                     continue;
                 const auto entry = absorbed.find(branch.Target);

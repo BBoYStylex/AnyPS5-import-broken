@@ -265,7 +265,8 @@ def unwrap(path, output, verbose=False):
         if header["type"] == PT_LOAD or header["size"] == 0:
             continue
         if region_for(header["source"], header["size"]) is None:
-            regions.append({"old": header["source"], "size": header["size"], "vaddr": 0, "align": 1})
+            regions.append({"old": header["source"], "size": header["size"],
+                            "vaddr": header["vaddr"], "align": header["align"]})
 
     regions.sort(key=lambda region: region["old"])
     program_offset = struct.unpack_from("<Q", elf_header, 0x20)[0]
@@ -343,4 +344,6 @@ def main():
 
 
 if __name__ == "__main__":
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
     sys.exit(main())

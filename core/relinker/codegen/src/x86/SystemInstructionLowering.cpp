@@ -11,8 +11,7 @@ namespace {
 using namespace Amd64OnlySubstitutionTable;
 
 constexpr std::uint8_t kPause[] = {0xF3, 0x90};
-constexpr std::uint8_t kMfence[] = {0x0F, 0xAE, 0xF0};
-constexpr std::uint8_t kClc[] = {0xF8};
+constexpr std::uint8_t kStc[] = {0xF9};
 constexpr std::uint8_t kPushFlags[] = {0x9C};
 constexpr std::uint8_t kPopFlags[] = {0x9D};
 constexpr std::uint8_t kPushRax[] = {0x50};
@@ -67,8 +66,7 @@ void _emitRelocated(std::vector<std::uint8_t>& out, const SystemInstruction inst
         _emitClzero(out, true);
         return;
     case SystemInstruction::Mcommit:
-        _append(out, kMfence);
-        _append(out, kClc);
+        _append(out, kStc);
         return;
     }
     throw CodegenException("Unknown AMD-only system instruction");

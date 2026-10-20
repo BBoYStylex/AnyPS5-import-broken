@@ -1,5 +1,6 @@
 import contextlib
 import io
+import os
 import struct
 import subprocess
 import sys
@@ -195,6 +196,31 @@ class UnwrapTest(unittest.TestCase):
                 self.assertEqual((version[2], version[5]), (0, 0))
                 for header in headers:
                     self.assertLessEqual(header[2] + header[5], len(data))
+
+    def test_segments_copied_outside_the_load_segments_keep_their_alignment(self):
+        loads = [(PT_LOAD, 1, 0x1234, 0x0, 0x100, PAGE), (PT_LOAD, 4, 0x1500, 0x1000, 0x88, PAGE)]
+        records = [(0x2804, 0x800, 0x100), (0x102804, 0xA00, 0x88)]
+        payloads = {0x800: pattern(1, 0x100), 0xA00: pattern(9, 0x88)}
+        layouts = (
+            ([(PT_DYNAMIC, 6, 0x1580, 0x1040, 0x10, 8), (SCE_COMMENT, 4, 0x15A0, 0x0, 0x20, 0x10),
+              (PT_NOTE, 4, 0x15C0, 0x0, 0x18, 4), (SCE_VERSION, 4, 0x15D8, 0x0, 0x10, 0x10)],
+             [(0x302804, 0xAA0, 0x20)], {0xAA0: pattern(11, 0x20), 0xAC0: pattern(13, 0x10)},
+             [pattern(9, 0x88)[0x40:0x50], pattern(11, 0x20), b"", pattern(13, 0x10)]),
+            ([(PT_DYNAMIC, 6, 0x1580, 0x1044, 0x10, 8)], [(0x202804, 0xAA0, 0x10)],
+             {0xAA0: pattern(11, 0x10)}, [pattern(11, 0x10)]),
+        )
+        for segments, extra_records, extra_payloads, blocks in layouts:
+            with self.subTest(types=[hex(segment[0]) for segment in segments]):
+                container = build_container(loads + segments, records + extra_records,
+                                            {**payloads, **extra_payloads})
+                result, output = self.convert(container)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                data, headers = read_program_headers(output)
+                for kind, flags, offset, vaddr, _, size, _, align in headers:
+                    if align > 1:
+                        self.assertEqual(offset % align, vaddr % align, hex(kind))
+                self.assertEqual([data[header[2]:header[2] + header[5]] for header in headers],
+                                 [pattern(1, 0x100), pattern(9, 0x88)] + blocks)
 
     def test_declared_offsets_are_used_when_the_container_has_no_records(self):
         segments = [(PT_LOAD, 1, 0x800, 0x0, 0x40, 0x1000), (PT_LOAD, 4, 0x900, 0x1000, 0x40, 0x1000)]
@@ -499,6 +525,19 @@ class UnwrapTest(unittest.TestCase):
         tls = [header for header in headers if header[0] == PT_TLS][0]
         self.assertEqual(tls[5], 0)
         self.assertEqual(tls[2], 0)
+
+    def test_the_report_names_a_non_ascii_output_path_on_a_cp1252_console(self):
+        directory = Path(self.directory) / "\u65e5\u672c"
+        directory.mkdir()
+        source = directory / "input.self"
+        output = directory / "output.elf"
+        source.write_bytes(build_container(default_segments(), default_records(), default_payloads()))
+        env = {**os.environ, "PYTHONIOENCODING": "cp1252", "PYTHONUTF8": "0"}
+        result = subprocess.run([sys.executable, "-X", "utf8=0", str(Path(unwrap_self.__file__)), str(source), str(output)],
+                                env=env, capture_output=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr.decode("utf-8", errors="replace"))
+        self.assertIn(f"wrote {output}", result.stdout.decode("utf-8"))
+        self.assertTrue(output.exists())
 
 
 if __name__ == "__main__":

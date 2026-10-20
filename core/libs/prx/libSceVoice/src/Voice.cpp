@@ -338,4 +338,18 @@ int APS5_VABI sceVoiceResetPort(std::uint32_t port_id) {
     return 0;
 }
 
+int APS5_VABI sceVoicePausePort(std::uint32_t port_id) {
+    std::lock_guard lock(g_lock);
+    if (!g_initialised) throw std::logic_error("sceVoicePausePort: library not initialized");
+    if (find(port_id) == nullptr) throw std::logic_error("sceVoicePausePort: unknown port " + std::to_string(port_id));
+    return 0;
+}
+
+int APS5_VABI sceVoiceResumePort(std::uint32_t port_id) {
+    std::lock_guard lock(g_lock);
+    if (!g_initialised) throw std::logic_error("sceVoiceResumePort: library not initialized");
+    if (find(port_id) == nullptr) throw std::logic_error("sceVoiceResumePort: unknown port " + std::to_string(port_id));
+    return 0;
+}
+
 }

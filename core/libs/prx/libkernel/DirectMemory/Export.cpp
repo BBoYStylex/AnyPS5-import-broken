@@ -95,6 +95,16 @@ void ApplyRangeName(uintptr_t address, VirtualQueryInfo* info) {
  if (next != g_rangeNames.end()) info->end = std::min<uintptr_t>(info->end, next->first);
 }
 
+void ReleaseClaimedDirectMemory(int64_t start, size_t len) {
+ try {
+  UnmapDirectMemoryViews(DirectMemoryViews(start, len));
+ } catch (...) {
+  DirectMemoryAbandonRelease(start, len);
+  throw;
+ }
+ DirectMemoryFinishRelease(start, len);
+}
+
 std::mutex g_prtLock;
 PrtAperture g_prtApertures[PRT_APERTURE_COUNT] = {};
 
@@ -213,7 +223,8 @@ int APS5_VABI sceKernelAvailableDirectMemorySize(int64_t search_start, int64_t s
  if (!phys_addr_out || !size_out) return SCE_KERNEL_ERROR_EINVAL;
  int64_t start = 0;
  size_t size = 0;
- if (!DirectMemoryLargestFree(search_start, search_end, alignment, &start, &size)) { *phys_addr_out = 0; *size_out = 0; return SCE_KERNEL_ERROR_EAGAIN; }
+ const int result = DirectMemoryLargestFree(search_start, search_end, alignment, &start, &size);
+ if (result != 0) { *phys_addr_out = 0; *size_out = 0; return result; }
  *phys_addr_out = start;
  *size_out = size;
  return 0;
@@ -319,17 +330,8 @@ int APS5_VABI sceKernelReleaseDirectMemory(int64_t start, size_t len) {
  if ((static_cast<std::uint64_t>(start) & (PS5_PAGE_SIZE - 1)) != 0 || (len & (PS5_PAGE_SIZE - 1)) != 0 ||
      len > DIRECT_MEMORY_SIZE || static_cast<std::uint64_t>(start) > DIRECT_MEMORY_SIZE - len)
      return SCE_KERNEL_ERROR_EINVAL;
- const auto views = DirectMemoryViews(start, len);
- try {
-  DirectMemoryFree(start, len);
- } catch (const std::invalid_argument& error) {
-  const char* trace = std::getenv("APS5_TRACE_DIRECT_ERRORS");
-  if (trace != nullptr && std::strcmp(trace, "1") == 0) {
-   std::fprintf(stderr, "[memory-error] release direct phys=0x%llx len=0x%zx: %s\n", static_cast<unsigned long long>(start), len, error.what());
-  }
-  return SCE_KERNEL_ERROR_EINVAL;
- }
- UnmapDirectMemoryViews(views);
+ if (!DirectMemoryClaimRelease(start, len, false)) return 0;
+ ReleaseClaimedDirectMemory(start, len);
  return 0;
 }
 
@@ -430,9 +432,8 @@ int APS5_VABI sceKernelVirtualQuery(const void* addr, int flags, VirtualQueryInf
 int APS5_VABI sceKernelCheckedReleaseDirectMemory(int64_t start, size_t len) {
  if (start < 0 || (static_cast<uint64_t>(start) & (PS5_PAGE_SIZE - 1)) != 0 || (len & (PS5_PAGE_SIZE - 1)) != 0) return SCE_KERNEL_ERROR_EINVAL;
  if (len == 0) return 0;
- const auto views = DirectMemoryViews(start, len);
- if (!DirectMemoryCheckedFree(start, len)) return SCE_KERNEL_ERROR_ENOENT;
- UnmapDirectMemoryViews(views);
+ if (!DirectMemoryClaimRelease(start, len, true)) return SCE_KERNEL_ERROR_ENOENT;
+ ReleaseClaimedDirectMemory(start, len);
  return 0;
 }
 
