@@ -12,6 +12,7 @@ public:
     virtual ~IFileReader() = default;
 
     virtual std::vector<std::uint8_t> Read(const std::string& path) = 0;
+    virtual std::vector<std::uint8_t> ReadPrefix(const std::string& path, std::size_t maxBytes) = 0;
 };
 
 }

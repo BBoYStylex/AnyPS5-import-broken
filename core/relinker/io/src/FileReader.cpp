@@ -24,4 +24,19 @@ std::vector<std::uint8_t> FileReader::Read(const std::string& path) {
     return buf;
 }
 
+std::vector<std::uint8_t> FileReader::ReadPrefix(const std::string& path, std::size_t maxBytes) {
+    const auto native = NativePath(path);
+    std::error_code error;
+    if (!std::filesystem::is_regular_file(native, error))
+        throw Domain::RelinkerException("Cannot open file: " + path);
+    std::ifstream f(native, std::ios::binary);
+    if (!f)
+        throw Domain::RelinkerException("Cannot open file: " + path);
+    std::vector<std::uint8_t> buf(maxBytes);
+    f.read(reinterpret_cast<char*>(buf.data()), static_cast<std::streamsize>(maxBytes));
+    const std::streamsize count = f.gcount();
+    buf.resize(static_cast<std::size_t>(count));
+    return buf;
+}
+
 }

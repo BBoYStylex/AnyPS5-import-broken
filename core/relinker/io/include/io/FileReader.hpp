@@ -8,6 +8,7 @@ namespace Io {
 class FileReader : public IFileReader {
 public:
     std::vector<std::uint8_t> Read(const std::string& path) override;
+    std::vector<std::uint8_t> ReadPrefix(const std::string& path, std::size_t maxBytes) override;
 };
 
 }
