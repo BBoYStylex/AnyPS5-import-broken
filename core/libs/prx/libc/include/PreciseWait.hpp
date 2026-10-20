@@ -319,7 +319,8 @@ template <class TClock, class TDuration>
 inline void PreciseSleepUntil(const std::chrono::time_point<TClock, TDuration>& deadline) {
 #ifdef _WIN32
     if constexpr (std::is_same_v<TClock, std::chrono::steady_clock>) {
-        if (PreciseQpcFrequency() == 10000000ULL) [[likely]] {
+        const std::uint64_t freq = PreciseQpcFrequency();
+        if (freq == 10000000ULL) [[likely]] {
             const auto rawDeadline = deadline.time_since_epoch().count();
             if (rawDeadline <= 0) [[unlikely]] {
                 return;
@@ -338,6 +339,16 @@ inline void PreciseSleepUntil(const std::chrono::time_point<TClock, TDuration>& 
             if (nowTicks < targetHns) {
                 PreciseSleepFromCounter(counter, targetHns - nowTicks);
             }
+            return;
+        } else if (freq == 24000000ULL) {
+            const auto rawDeadline = deadline.time_since_epoch().count();
+            if (rawDeadline <= 0) [[unlikely]] {
+                return;
+            }
+            const std::uint64_t targetTicks = PreciseDurationToTicks24MHz(deadline.time_since_epoch());
+            LARGE_INTEGER counter;
+            QueryPerformanceCounter(&counter);
+            PreciseSleepUntilTicks24MHz(counter, targetTicks);
             return;
         }
     }
