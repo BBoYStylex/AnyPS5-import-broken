@@ -1337,9 +1337,8 @@ State DecodeState(const QueueState& queue, bool vertexWorkgroup) {
     } else {
         const auto screenBottomRight = read(cx, 0xd);
         APS5_LOG_OUT_DEBUG("No color target, screen BR register=0x%x", screenBottomRight);
-        result.renderExtent = {screenBottomRight & 0xffffu, screenBottomRight >> 16u};
+        result.renderExtent = {std::max(screenBottomRight & 0xffffu, 1u), std::max(screenBottomRight >> 16u, 1u)};
         APS5_LOG_OUT_DEBUG("Render extent from screen=%ux%u", result.renderExtent.width, result.renderExtent.height);
-        Require(result.renderExtent.width != 0 && result.renderExtent.height != 0, "empty framebuffer extent for a draw without color writes");
     }
     result.quadSampleMask = decodeQuadSampleMask(cx, result.samples);
     result.pixelEarlyZ = !PixelProgramSkipped(queue) && PixelEarlyZ(read(cx, 0x203));
@@ -1659,7 +1658,13 @@ ColorTarget DecodeColorBuffer(const Registers& cx, std::uint32_t slot, bool allo
     }
     if (!volume && lastSlice != slice) {
         const auto exports = find(cx, 0x207);
-        Require(exports == cx.end() || (exports->second & (1u << 18u)) == 0, "layered draws into a color view of several array slices are unsupported");
+        if (exports != cx.end() && (exports->second & (1u << 18u)) != 0) {
+            if (color.arrayLastSlice == 0) {
+                color.arrayLastSlice = lastSlice;
+                color.arraySlice = slice;
+            }
+            color.layers = lastSlice + 1u - slice;
+        }
     }
     color.extent = {((attrib2 >> 14u) & 0x3fffu) + 1u, (attrib2 & 0x3fffu) + 1u};
     color.elementBytes = decoded.elementBytes;

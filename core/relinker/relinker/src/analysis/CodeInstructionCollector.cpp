@@ -198,13 +198,21 @@ std::set<Domain::VirtualAddress> CodeInstructionCollector::Collect(const std::ve
     }
     CodePointers pointers;
     std::set<std::uint64_t> importSlots;
-    const auto readRelocations = [&](std::uint64_t addressTag, std::uint64_t sceAddressTag, std::uint64_t sizeTag, std::uint64_t sceSizeTag) {
+    const auto relocationRange = [&](std::uint64_t addressTag, std::uint64_t sceAddressTag, std::uint64_t sizeTag, std::uint64_t sceSizeTag) -> std::pair<std::uint64_t, std::uint64_t> {
         const auto size = value(sizeTag, sceSizeTag);
-        if (!size) return;
+        if (!size) return {0, 0};
         if (*size % 24 != 0) throw Domain::RelinkerException("Code analysis: invalid relocation table size");
-        if (*size == 0) return;
-        const auto start = table(addressTag, sceAddressTag, *size);
-        for (std::uint64_t offset = start; offset < start + *size; offset += 24) {
+        if (*size == 0) return {0, 0};
+        return {table(addressTag, sceAddressTag, *size), *size};
+    };
+    const auto [relaOffset, relaSize] = relocationRange(7, 0x6100002f, 8, 0x61000031);
+    const auto [pltOffset, pltSize] = relocationRange(23, 0x61000029, 2, 0x6100002d);
+    if (relaSize != 0 && pltSize != 0 && relaOffset < pltOffset + pltSize && pltOffset < relaOffset + relaSize
+        && relaOffset % 24 != pltOffset % 24)
+        throw Domain::RelinkerException("Code analysis: unaligned overlapping relocation tables", pltOffset);
+    const auto readRelocations = [&](std::uint64_t start, std::uint64_t size, bool plt) {
+        for (std::uint64_t offset = start; offset < start + size; offset += 24) {
+            if (!plt && offset >= pltOffset && offset - pltOffset < pltSize) continue;
             const auto slot = Io::ReadU64(bytes, offset);
             const auto info = Io::ReadU64(bytes, offset + 8);
             const auto type = static_cast<std::uint32_t>(info);
@@ -220,9 +228,9 @@ std::set<Domain::VirtualAddress> CodeInstructionCollector::Collect(const std::ve
                 if ((index != 0 && !zeroSectionSymbol && !matchingDefinedSymbol) || !pointers.Values.emplace(slot, addend).second) throw Domain::RelinkerException("Code analysis: invalid relative relocation", slot);
                 addRoot(addend);
             } else if (type == 1 || type == 6 || type == 7) {
-                if (index == 0 || index >= symbolCount) throw Domain::RelinkerException("Code analysis: invalid relocation symbol", slot);
+                if (index != 0 && index >= symbolCount) throw Domain::RelinkerException("Code analysis: invalid relocation symbol", slot);
                 const auto symbol = symbols + index * 24;
-                if (Io::ReadU16(bytes, symbol + 6) == 0) importSlots.insert(slot);
+                if (index == 0 || Io::ReadU16(bytes, symbol + 6) == 0) importSlots.insert(slot);
                 else {
                     const auto target = Io::ReadU64(bytes, symbol + 8) + addend;
                     if (!pointers.Values.emplace(slot, target).second) throw Domain::RelinkerException("Code analysis: duplicate pointer relocation", slot);
@@ -231,8 +239,8 @@ std::set<Domain::VirtualAddress> CodeInstructionCollector::Collect(const std::ve
             }
         }
     };
-    readRelocations(7, 0x6100002f, 8, 0x61000031);
-    readRelocations(23, 0x61000029, 2, 0x6100002d);
+    readRelocations(relaOffset, relaSize, false);
+    readRelocations(pltOffset, pltSize, true);
     for (const auto& [addressTag, sizeTag] : {std::pair{25u, 27u}, std::pair{26u, 28u}, std::pair{32u, 33u}}) {
         const auto address = value(addressTag, 0x60000000 + addressTag);
         const auto size = value(sizeTag, 0x60000000 + sizeTag);
@@ -297,7 +305,7 @@ std::set<Domain::VirtualAddress> CodeInstructionCollector::Collect(const std::ve
             }
             if (info.Length == 0 || info.Length > end - address)
                 throw Domain::RelinkerException("Code analysis: instruction crosses function boundary", address);
-            instructions.insert(address);
+            instructions.emplace_hint(instructions.end(), address);
             addAddressTakenRoot(address, bytes.data() + offset + address - begin, info);
             if (info.HasBranchTarget && !info.HasRipRelativeDisp) {
                 const auto target = address + info.Length + static_cast<std::uint64_t>(info.BranchDisp);
@@ -411,43 +419,49 @@ std::set<Domain::VirtualAddress> CodeInstructionCollector::Collect(const std::ve
     report(8500);
     std::uint64_t checked = 0;
     std::uint64_t previousEnd = 0;
+    const Domain::ProgramHeader* cachedHeader = nullptr;
+    const auto findCodeHeader = [&](std::uint64_t addr) -> const Domain::ProgramHeader* {
+        if (cachedHeader != nullptr && cachedHeader->Type == 1 && (cachedHeader->Flags & 1) != 0 && addr >= cachedHeader->MappedAddress && addr - cachedHeader->MappedAddress < cachedHeader->FileSize)
+            return cachedHeader;
+        for (const auto& header : headers) {
+            if (header.Type == 1 && (header.Flags & 1) != 0 && addr >= header.MappedAddress && addr - header.MappedAddress < header.FileSize) {
+                cachedHeader = &header;
+                return cachedHeader;
+            }
+        }
+        return nullptr;
+    };
     for (const auto address : instructions) {
         if (progress && checked % 4096 == 0) report(8500 + 1499 * checked / instructions.size());
         ++checked;
         if (address < previousEnd) {
             std::uint64_t spanEnd = previousEnd;
             try {
-                for (const auto& header : headers) {
-                    if (header.Type != 1 || (header.Flags & 1) == 0 || address < header.MappedAddress || address - header.MappedAddress >= header.FileSize) continue;
-                    const auto offset = address - header.MappedAddress;
-                    const auto length = decoder.DecodeInstruction(bytes.data() + header.Offset + offset, header.FileSize - offset).Length;
-                    if (length == 0 || length > header.FileSize - offset) break;
-                    spanEnd = std::max(spanEnd, address + length);
-                    break;
+                if (const auto* header = findCodeHeader(address)) {
+                    const auto offset = address - header->MappedAddress;
+                    const auto length = decoder.DecodeInstruction(bytes.data() + header->Offset + offset, header->FileSize - offset).Length;
+                    if (length != 0 && length <= header->FileSize - offset)
+                        spanEnd = std::max(spanEnd, address + length);
                 }
             } catch (const Codegen::CodegenException&) {
             }
             bool spanHasFsPrefix = false;
-            for (const auto& header : headers) {
-                if (header.Type != 1 || (header.Flags & 1) == 0 || address < header.MappedAddress || address - header.MappedAddress >= header.FileSize) continue;
-                const auto base = header.Offset + address - header.MappedAddress;
+            if (const auto* header = findCodeHeader(address)) {
+                const auto base = header->Offset + address - header->MappedAddress;
                 for (auto probe = base; probe < base + (spanEnd - address) && probe < bytes.size(); ++probe) {
                     if (bytes[probe] == 0x64) {
                         spanHasFsPrefix = true;
                         break;
                     }
                 }
-                break;
             }
             if (!spanHasFsPrefix) {
                 const auto previous = instructions.lower_bound(address);
                 if (previous != instructions.begin()) {
                     const auto previousStart = *std::prev(previous);
-                    for (const auto& header : headers) {
-                        if (header.Type != 1 || (header.Flags & 1) == 0 || previousStart < header.MappedAddress || previousStart - header.MappedAddress >= header.FileSize) continue;
-                        const auto base = header.Offset + previousStart - header.MappedAddress;
+                    if (const auto* header = findCodeHeader(previousStart)) {
+                        const auto base = header->Offset + previousStart - header->MappedAddress;
                         if (decoder.DecodeInstruction(bytes.data() + base, bytes.size() - base).SegmentPrefix == 0x64) spanHasFsPrefix = true;
-                        break;
                     }
                 }
             }
@@ -455,11 +469,9 @@ std::set<Domain::VirtualAddress> CodeInstructionCollector::Collect(const std::ve
             previousEnd = spanEnd;
             continue;
         }
-        for (const auto& header : headers) {
-            if (header.Type != 1 || (header.Flags & 1) == 0 || address < header.MappedAddress || address - header.MappedAddress >= header.FileSize) continue;
-            const auto offset = address - header.MappedAddress;
-            previousEnd = address + decoder.DecodeInstruction(bytes.data() + header.Offset + offset, header.FileSize - offset).Length;
-            break;
+        if (const auto* header = findCodeHeader(address)) {
+            const auto offset = address - header->MappedAddress;
+            previousEnd = address + decoder.DecodeInstruction(bytes.data() + header->Offset + offset, header->FileSize - offset).Length;
         }
     }
     report(10000);
