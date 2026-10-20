@@ -221,6 +221,13 @@ def page(points):
     ]) + "\n"
 
 
+def write_reports(output, points):
+    output.mkdir(parents=True, exist_ok=True)
+    (output / "history.json").write_text(json.dumps(points, indent=2), encoding="utf-8")
+    (output / "history.svg").write_text(chart(points) + "\n", encoding="utf-8")
+    (output / "history.html").write_text(page(points), encoding="utf-8")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("output", type=Path)
@@ -238,8 +245,5 @@ if __name__ == "__main__":
         parser.error(str(error))
     if not points:
         parser.error("no commit with a measurable tree")
-    args.output.mkdir(parents=True, exist_ok=True)
-    (args.output / "history.json").write_text(json.dumps(points, indent=2))
-    (args.output / "history.svg").write_text(chart(points) + "\n")
-    (args.output / "history.html").write_text(page(points))
+    write_reports(args.output, points)
     print(f"{len(points)} days, {points[0]['date']} .. {points[-1]['date']}")

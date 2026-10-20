@@ -130,6 +130,20 @@ class ProgressHistoryTests(unittest.TestCase):
             self.assertIn(f">{label}<", svg)
 
 
+    def test_reports_are_written_as_utf8_whatever_the_locale(self):
+        point = {"date": "2026-01-01", "libraries": {"done": 3, "total": 4, "percent": 75.0},
+                 "shaders": {"done": 1, "total": 1, "percent": 100.0}}
+        encodings = []
+        original = Path.write_text
+
+        def spy(self, data, encoding=None, errors=None, newline=None):
+            encodings.append(encoding)
+            return original(self, data, encoding="utf-8")
+
+        with tempfile.TemporaryDirectory() as directory, patch.object(Path, "write_text", spy):
+            progress_history.write_reports(Path(directory) / "out dir", [point, {**point, "date": "2026-01-02"}])
+        self.assertEqual(encodings, ["utf-8", "utf-8", "utf-8"])
+
 
 if __name__ == "__main__":
     unittest.main()
