@@ -82,6 +82,29 @@ class ProgressEncodingTests(unittest.TestCase):
             for name in ("progress.svg", "progress.html"):
                 self.assertIn(library.removeprefix("libSce"), generated[name])
 
+    def test_compare_accepts_utf8_bom_snapshots(self):
+        with tempfile.TemporaryDirectory(prefix="progress bom ") as directory:
+            paths = [Path(directory) / name for name in ("base.json", "head.json")]
+            for path, data in zip(paths, (snapshot(False), snapshot(True))):
+                path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8-sig")
+            env = {**os.environ, "PYTHONIOENCODING": "cp1252", "PYTHONUTF8": "0"}
+            result = subprocess.run([sys.executable, "-X", "utf8=0", str(PROGRESS), "--compare", *map(str, paths)],
+                                    env=env, capture_output=True, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr.decode("utf-8", errors="replace"))
+        self.assertIn("\U0001f4c8 **System libraries**: 100%", result.stdout.decode("utf-8"))
+
+    def test_error_preserves_unicode_with_cp1252_stderr(self):
+        library = "libSce\u6e2c\u8a66\U0001f3ae"
+        with tempfile.TemporaryDirectory(prefix="progress stderr ") as directory:
+            missing = Path(directory) / f"{library}.json"
+            env = {**os.environ, "PYTHONIOENCODING": "cp1252", "PYTHONUTF8": "0"}
+            result = subprocess.run([sys.executable, "-X", "utf8=0", str(PROGRESS), "--compare", str(missing), str(missing)],
+                                    env=env, capture_output=True, timeout=30)
+        stderr = result.stderr.decode("utf-8", errors="replace")
+        self.assertEqual(result.returncode, 2, stderr)
+        self.assertIn(library, stderr)
+        self.assertNotIn("Traceback", stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

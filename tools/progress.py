@@ -476,7 +476,7 @@ def main(argv=None):
             snapshots = []
             for path in args.compare:
                 try:
-                    snapshots.append(json.loads(path.read_text(encoding="utf-8")))
+                    snapshots.append(json.loads(path.read_text(encoding="utf-8-sig")))
                 except (OSError, ValueError) as error:
                     parser.error(f"{path}: {error}")
             base, head = snapshots
@@ -505,6 +505,7 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8")
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     raise SystemExit(main())
