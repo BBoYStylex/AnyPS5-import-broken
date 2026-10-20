@@ -416,7 +416,8 @@ bool RaiseOn(Pthread thread, GuestExceptionHandler handler, int signum) {
             ResumeThread(native);
             throw std::runtime_error("sceKernelRaiseException: cannot read the target thread context");
         }
-        if (thread->waitCount.load(std::memory_order_seq_cst) > 0) {
+        const bool holdingHostLock = thread->hostSignalDeferrals.load(std::memory_order_seq_cst) > 0;
+        if (!holdingHostLock && thread->waitCount.load(std::memory_order_seq_cst) > 0) {
             const bool accepted = QueueUserAPC(WaitingEntry, native, reinterpret_cast<ULONG_PTR>(queued.get())) != 0;
             ResumeThread(native);
             if (!accepted) throw std::runtime_error("sceKernelRaiseException: cannot queue delivery to the waiting thread");
@@ -426,13 +427,13 @@ bool RaiseOn(Pthread thread, GuestExceptionHandler handler, int signum) {
         const bool restoring = RestoringContext(delivery.context.Rip) || InWinpthread(delivery.context.Rip);
         DWORD64 image = 0;
         const auto running = restoring ? CodeKind::Guest : RunningCode(delivery.context.Rip, image);
-        if (!restoring && (running == CodeKind::Guest || (running == CodeKind::Host && std::chrono::steady_clock::now() >= hostDeadline))) break;
+        if (!holdingHostLock && !restoring && (running == CodeKind::Guest || (running == CodeKind::Host && std::chrono::steady_clock::now() >= hostDeadline))) break;
         ResumeThread(native);
         if (running == CodeKind::Unknown) {
             static_cast<void>(ClassifyImage(image));
             continue;
         }
-        if (restoring && std::chrono::steady_clock::now() >= retryDeadline) throw std::runtime_error("sceKernelRaiseException: the target thread stayed inside NtContinue or winpthreads for 1 s");
+        if ((holdingHostLock || restoring) && std::chrono::steady_clock::now() >= retryDeadline) throw std::runtime_error("sceKernelRaiseException: the target thread stayed inside NtContinue, winpthreads or an internal host lock for 1 s");
         SwitchToThread();
     }
     const DWORD64 slot = (delivery.context.Rsp - RedZone - sizeof(Delivery)) & ~static_cast<DWORD64>(15);
