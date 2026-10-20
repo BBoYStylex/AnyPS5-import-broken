@@ -6,6 +6,7 @@
 #include <cstring>
 #include <filesystem>
 #include <initializer_list>
+#include <sys/mman.h>
 
 struct Iovec {
     void* base;
@@ -198,6 +199,28 @@ static void CheckTruncatedControl(const int (&pair)[2]) {
     Require(close_nid_postfix(spare[0]) == 0 && close_nid_postfix(spare[1]) == 0);
 }
 
+static void CheckFaultedReceive(const int (&pair)[2]) {
+    int spare[2] = {-1, -1};
+    Require(pipe_nid_postfix(spare) == 0);
+    std::size_t length = 0;
+    auto control = RightsControl({spare[0], spare[1]}, length);
+    void* page = ::mmap(nullptr, 4096, PROT_READ, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    Require(page != MAP_FAILED);
+    const auto before = OpenHostDescriptors();
+    Require(SendWith(pair[0], "ro", control.data(), length) == 2);
+    std::array<unsigned char, 64> received{};
+    Iovec vector{page, 16};
+    Msghdr message{};
+    message.iov = &vector;
+    message.iovLength = 1;
+    message.control = received.data();
+    message.controlLength = static_cast<std::uint32_t>(received.size());
+    Require(recvmsg_nid_postfix(pair[1], &message, 0) == -1 && *__error_nid_postfix() == 14);
+    Require(OpenHostDescriptors() == before);
+    Require(::munmap(page, 4096) == 0);
+    Require(close_nid_postfix(spare[0]) == 0 && close_nid_postfix(spare[1]) == 0);
+}
+
 static void CheckRefusedControl(const int (&pair)[2]) {
     int closed[2] = {-1, -1};
     Require(pipe_nid_postfix(closed) == 0);
@@ -220,6 +243,7 @@ int main() {
     CheckPassedPipe(pair);
     CheckPassedSockets(pair);
     CheckTruncatedControl(pair);
+    CheckFaultedReceive(pair);
     CheckRefusedControl(pair);
     Require(close_nid_postfix(pair[0]) == 0 && close_nid_postfix(pair[1]) == 0);
 }

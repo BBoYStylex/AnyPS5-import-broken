@@ -1509,6 +1509,12 @@ int GuestFromHostSocket(int domain) {
 int GuestFromHostSocketType(int type) {
     return type == SOCK_STREAM ? 1 : type == SOCK_DGRAM ? 2 : type == SOCK_SEQPACKET ? 5 : -1;
 }
+void ClosePassed(const std::vector<int>& passed) {
+    for (const int number : passed) {
+        if (GuestSockets::IsOpen(number)) GuestSockets::Close(number);
+        else ::close(number);
+    }
+}
 int InstallPassed(int native, bool closeOnExec) {
     struct stat status{};
     if (::fstat(native, &status) != 0) throw std::runtime_error("recvmsg: a received descriptor cannot be queried, errno " + std::to_string(errno));
@@ -1661,6 +1667,14 @@ std::int64_t APS5_VABI recvmsg_nid_postfix(int descriptor, GuestMsghdr* message,
 #ifndef _WIN32
     std::vector<int> passed;
     bool controlTruncated = false;
+    const auto faulted = [&passed] {
+        ClosePassed(passed);
+        return Fail(14);
+    };
+#else
+    const auto faulted = [] { return Fail(14); };
+#endif
+#ifndef _WIN32
     if (passing) {
         std::vector<char> control(CMSG_SPACE(MostPassedDescriptors * sizeof(int)));
         iovec vector{buffer.data(), buffer.size()};
@@ -1725,7 +1739,7 @@ std::int64_t APS5_VABI recvmsg_nid_postfix(int descriptor, GuestMsghdr* message,
     for (const auto& vector : vectors) {
         if (offset >= static_cast<std::size_t>(received)) break;
         const auto count = std::min<std::size_t>(vector.length, static_cast<std::size_t>(received) - offset);
-        if (!WriteGuest(vector.base, buffer.data() + offset, count)) return Fail(14);
+        if (!WriteGuest(vector.base, buffer.data() + offset, count)) return faulted();
         offset += count;
     }
     if (header.name) {
@@ -1737,8 +1751,8 @@ std::int64_t APS5_VABI recvmsg_nid_postfix(int descriptor, GuestMsghdr* message,
         } else {
             header.nameLength = 0;
         }
-        if (!WriteGuest(header.name, address, header.nameLength)) return Fail(14);
-        if (!WriteGuest(&message->nameLength, &header.nameLength, sizeof(header.nameLength))) return Fail(14);
+        if (!WriteGuest(header.name, address, header.nameLength)) return faulted();
+        if (!WriteGuest(&message->nameLength, &header.nameLength, sizeof(header.nameLength))) return faulted();
     }
     header.controlLength = 0;
 #ifndef _WIN32
@@ -1754,11 +1768,8 @@ std::int64_t APS5_VABI recvmsg_nid_postfix(int descriptor, GuestMsghdr* message,
         if (fits && WriteGuest(header.control, record.data(), record.size())) {
             header.controlLength = static_cast<std::uint32_t>(record.size());
         } else {
-            for (const int number : passed) {
-                if (GuestSockets::IsOpen(number)) GuestSockets::Close(number);
-                else ::close(number);
-            }
-            if (fits) return Fail(14);
+            if (fits) return faulted();
+            ClosePassed(passed);
             controlTruncated = true;
         }
     }
