@@ -76,6 +76,11 @@ std::int32_t APS5_VABI sceHmd2GetDeviceInformationByHandle(std::int32_t handle, 
 std::int32_t APS5_VABI sceHmd2GetFieldOfView(std::int32_t handle, Hmd2::FieldOfView* fieldOfView);
 std::int32_t APS5_VABI sceHmd2GetFieldOfViewWithoutHandle(Hmd2::FieldOfView* fieldOfView);
 std::int32_t APS5_VABI sceHmd2SetVibration(std::int32_t handle, std::uint32_t level);
+std::int32_t APS5_VABI sceHmd2ReprojectionBeginFrame(std::int64_t flipArg);
+std::int32_t APS5_VABI sceHmd2ReprojectionDisableMirroring();
+std::int32_t APS5_VABI sceHmd2ReprojectionDisableVrMode();
+std::int32_t APS5_VABI sceHmd2ReprojectionGetStatus();
+std::int32_t APS5_VABI sceHmd2ReprojectionSetMirroringOption();
 Hmd2::SizeAlign APS5_VABI sceHmd2ReprojectionQueryDisplayBufferSizeAlign();
 Hmd2::SizeAlign APS5_VABI sceHmd2ReprojectionQuerySeeThroughBufferSizeAlign();
 Hmd2::SizeAlign APS5_VABI sceHmd2ReprojectionGetMirroringDisplayBufferSizeAlign();

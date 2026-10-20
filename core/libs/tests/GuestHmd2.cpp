@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <stdexcept>
 
 extern "C" {
@@ -74,6 +75,19 @@ void InstallProcessParameters() {
     std::memcpy(process.data(), &size, sizeof(size));
     std::memcpy(process.data() + 8, &magic, sizeof(magic));
     Require(ProcessParametersFixture::Install(process.data(), process.size()), "process parameters were not installed");
+}
+
+void TestReprojectionWithoutSession() {
+    constexpr std::array<std::int64_t, 4> flipArgs{0, 1, -1, std::numeric_limits<std::int64_t>::max()};
+    for (const std::int64_t flipArg : flipArgs) {
+        Require(sceHmd2ReprojectionBeginFrame(flipArg) == Hmd2::ReprojectionNotInitialized, "begin frame without a reprojection session");
+    }
+    for (int call = 0; call < 2; ++call) {
+        Require(sceHmd2ReprojectionDisableMirroring() == Hmd2::ReprojectionNotInitialized, "disable mirroring without a reprojection session");
+        Require(sceHmd2ReprojectionDisableVrMode() == Hmd2::ReprojectionNotInitialized, "disable VR mode without a reprojection session");
+        Require(sceHmd2ReprojectionGetStatus() == Hmd2::ReprojectionNotInitialized, "status without a reprojection session");
+        Require(sceHmd2ReprojectionSetMirroringOption() == Hmd2::ReprojectionNotInitialized, "mirroring option without a reprojection session");
+    }
 }
 
 void TestBeforeInitialize() {
@@ -297,8 +311,10 @@ void SizeQueriesReturnTheConsoleSizes() {
 int main() {
     SizeQueriesReturnTheConsoleSizes();
     InstallProcessParameters();
+    TestReprojectionWithoutSession();
     TestBeforeInitialize();
     TestWithoutHeadset();
+    TestReprojectionWithoutSession();
     std::puts("HMD2 tests passed");
     return 0;
 }
