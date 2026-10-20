@@ -1568,7 +1568,8 @@ void EmitSampleOp(SpirvValueEmitContext& ctx, const ImageEmitAccess& access, con
         return sample;
     };
     std::uint32_t sample = 0;
-    const bool baseLevelIfUnnormalized = !setup.dref && SamplesBaseLevelIfUnnormalized(state.program.Info().samplers.at(mem.sampler));
+    const bool alreadyBaseLevel = !hasOffset && opcode == spv::OpImageSampleExplicitLod && operandMask == spv::ImageOperandsLodMask && !HasFlag(mem, RdnaImageSampleFlagLod) && setup.layout.clamp == NoImageComponent;
+    const bool baseLevelIfUnnormalized = !setup.dref && !alreadyBaseLevel && SamplesBaseLevelIfUnnormalized(state.program.Info().samplers.at(mem.sampler));
     if (baseLevelIfUnnormalized) {
         const auto selector = state.module.SpecializationConstant(TypeU32(state), PipelineSpecialization::UnnormalizedBaseLevelBase + mem.sampler, 0u);
         const auto unnormalized = Binary(state, spv::OpINotEqual, TypeBool(state), selector, ConstantU32(state, 0u));
