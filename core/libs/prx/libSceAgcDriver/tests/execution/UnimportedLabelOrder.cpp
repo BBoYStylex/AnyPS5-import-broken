@@ -30,13 +30,15 @@ constexpr std::uint32_t ReleaseMemHeader = 0xc0064900u;
 
 class GuestBlock {
 public:
-    GuestBlock() {
+    explicit GuestBlock(bool isolated = false) {
+        const std::size_t reserved = isolated ? 3 * BlockBytes : BlockBytes;
 #ifdef _WIN32
-        block = static_cast<std::uint8_t*>(VirtualAlloc(nullptr, BlockBytes, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
+        allocation = static_cast<std::uint8_t*>(VirtualAlloc(nullptr, reserved, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
 #else
-        block = static_cast<std::uint8_t*>(std::aligned_alloc(BlockBytes, BlockBytes));
+        allocation = static_cast<std::uint8_t*>(std::aligned_alloc(BlockBytes, reserved));
 #endif
-        Require(block != nullptr, "unimported label order: cannot allocate the guest block");
+        Require(allocation != nullptr, "unimported label order: cannot allocate the guest block");
+        block = isolated ? allocation + BlockBytes : allocation;
         std::memset(block, 0, BlockBytes);
         GuestAllocations::Mutation().Add(block, BlockBytes, true, true, true);
     }
@@ -44,9 +46,9 @@ public:
     ~GuestBlock() {
         GuestAllocations::Mutation().Remove(block);
 #ifdef _WIN32
-        VirtualFree(block, 0, MEM_RELEASE);
+        VirtualFree(allocation, 0, MEM_RELEASE);
 #else
-        std::free(block);
+        std::free(allocation);
 #endif
     }
 
@@ -58,6 +60,7 @@ public:
     std::uint64_t Address() const { return static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(block)); }
 
 private:
+    std::uint8_t* allocation = nullptr;
     std::uint8_t* block = nullptr;
 };
 
@@ -82,7 +85,7 @@ int StoreLabel(AgcDriver::VulkanDevice& device, std::uint64_t address, std::uint
 int main() {
     try {
         GuestBlock labels;
-        GuestBlock temporary;
+        GuestBlock temporary(true);
         auto device = OpenVulkanTestDevice();
         if (!device) return VulkanTestSkipped;
         std::lock_guard lock(AgcDriver::GuestMemory::GpuMutex());
