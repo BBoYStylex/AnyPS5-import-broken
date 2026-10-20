@@ -74,6 +74,12 @@ static constexpr std::array<std::uint8_t, 43> SDK_MMAP_EXEC_INLINE{
     0x49, 0x89, 0xC7, 0x49, 0xF7, 0xDF, 0x84, 0xC9, 0x4C, 0x0F, 0x45, 0xF8, 0x4D, 0x85, 0xFF,
 };
 
+static constexpr std::array<std::uint8_t, 32> SDK_MOUNT_INLINE{
+    0x48, 0x63, 0xD2, 0x31, 0xDB, 0xB8, 0x15, 0x00, 0x00, 0x00,
+    0x49, 0x89, 0xCA, 0x45, 0x31, 0xC0, 0x45, 0x31, 0xC9, 0x0F, 0x05,
+    0x0F, 0x93, 0xC1, 0x49, 0x89, 0xC6, 0x49, 0xF7, 0xDE, 0x84, 0xC9,
+};
+
 struct RecentInstructions {
     static constexpr std::size_t Capacity = 64;
     std::array<Codegen::InstructionMatch, Capacity> matches{};
@@ -103,8 +109,11 @@ static bool MatchesSdkInlineStub(const std::vector<std::uint8_t>& code, std::siz
     return recent.Contains(codeOffset + start);
 }
 
-static bool IsSdkMmanSyscallStub(const std::vector<std::uint8_t>& code, std::size_t syscallOffset, std::size_t limit, const RecentInstructions& recent, FileByteOffset codeOffset) {
-    return MatchesSdkInlineStub(code, syscallOffset, limit, SDK_MPROTECT_INLINE, 42, recent, codeOffset) || MatchesSdkInlineStub(code, syscallOffset, limit, SDK_MMAP_INLINE, 17, recent, codeOffset) || MatchesSdkInlineStub(code, syscallOffset, limit, SDK_MMAP_EXEC_INLINE, 23, recent, codeOffset);
+static bool IsSdkInlineSyscallStub(const std::vector<std::uint8_t>& code, std::size_t syscallOffset, std::size_t limit, const RecentInstructions& recent, FileByteOffset codeOffset) {
+    return MatchesSdkInlineStub(code, syscallOffset, limit, SDK_MPROTECT_INLINE, 42, recent, codeOffset)
+        || MatchesSdkInlineStub(code, syscallOffset, limit, SDK_MMAP_INLINE, 17, recent, codeOffset)
+        || MatchesSdkInlineStub(code, syscallOffset, limit, SDK_MMAP_EXEC_INLINE, 23, recent, codeOffset)
+        || MatchesSdkInlineStub(code, syscallOffset, limit, SDK_MOUNT_INLINE, 19, recent, codeOffset);
 }
 
 static ForbiddenInstruction ClassifyForbiddenInstruction(const std::vector<std::uint8_t>& codeSection, const std::size_t opcodeOffset, const std::size_t limit) {
@@ -291,7 +300,7 @@ std::vector<std::size_t> SyscallScanner::ScanCodeSectionForSyscalls(const std::v
             return;
 
         if (trapSdkStubs && kind == ForbiddenInstruction::Invocation &&
-            (IsSdkSyscallStub(codeSection, opcode) || IsSdkMmanSyscallStub(codeSection, opcode, limit, recent, codeSectionOffset))) {
+            (IsSdkSyscallStub(codeSection, opcode) || IsSdkInlineSyscallStub(codeSection, opcode, limit, recent, codeSectionOffset))) {
             trapped.push_back(opcode);
             std::ostringstream message;
             message << "Trapping SDK syscall instruction at code offset 0x" << std::hex << match.Offset << '\n';
