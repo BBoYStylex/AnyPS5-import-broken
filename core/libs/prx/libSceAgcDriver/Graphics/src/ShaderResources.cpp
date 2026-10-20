@@ -4883,7 +4883,6 @@ void ShaderResources::resolveImageTables() {
                         }
                     }
                 }
-                }
                 counters.tablesReplayed.fetch_add(1, std::memory_order_relaxed);
                 continue;
             }
