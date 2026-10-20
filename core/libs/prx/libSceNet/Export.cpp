@@ -1608,6 +1608,11 @@ int APS5_VABI sceNetInetPton(int af, const char* src, void* dst) {
         return fail(NET_EAFNOSUPPORT);
     }
     const std::string text = af == NET_AF_INET ? std::string(src, std::strcspn(src, " \t\n\v\f\r")) : std::string(src);
+    if (af == NET_AF_INET) {
+        for (std::size_t i = 0; i + 1 < text.size(); ++i) {
+            if ((i == 0 || text[i - 1] == '.') && text[i] == '0' && text[i + 1] >= '0' && text[i + 1] <= '9') return 0;
+        }
+    }
     std::array<unsigned char, 16> address{};
 #ifdef _WIN32
     const int converted = InetPtonA(af == NET_AF_INET ? AF_INET : AF_INET6, text.c_str(), address.data());
