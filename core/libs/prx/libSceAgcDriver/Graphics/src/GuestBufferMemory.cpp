@@ -1293,6 +1293,11 @@ ImportRun leasedRun(const GuestAllocations::Lease& lease, std::size_t first, std
     return run;
 }
 
+bool writeWatchActive() {
+    static const bool active = GuestMemory::WriteWatched();
+    return active;
+}
+
 template<typename Remembered>
 const Remembered* rememberedRun(const std::map<std::pair<std::uint64_t, std::uint64_t>, Remembered>& runs, const GuestAllocations::Lease& lease, std::size_t first, std::size_t last) {
     const auto base = lease[first]->address;
@@ -1327,7 +1332,12 @@ ImportRun importRun(const GuestAllocations::Lease& lease, std::uint64_t address,
     auto last = index;
     while (last + 1 < lease.size() && lease[last + 1]->address + lease[last + 1]->bytes <= high && continuesRun(*lease[last], *lease[last + 1])) ++last;
     const auto skipped = [&](std::size_t from, std::size_t to) { return rememberedRun(state.failedBlocks, lease, from, to) != nullptr || stillRefused(state, rememberedRun(state.refusals, lease, from, to), budget); };
-    if (window == 0) return first == last || lease[last]->address + lease[last]->bytes - lease[first]->address > largest || skipped(first, last) ? leasedRun(lease, index, index) : leasedRun(lease, first, last);
+    const bool writeWatched = first != last && writeWatchActive();
+    if (window == 0) {
+        const auto bytes = lease[last]->address + lease[last]->bytes - lease[first]->address;
+        if (first == last || bytes > largest || skipped(first, last) || (writeWatched && !GuestMemory::Watched(lease[first]->address, static_cast<std::size_t>(bytes)))) return leasedRun(lease, index, index);
+        return leasedRun(lease, first, last);
+    }
     const auto bounding = [&](std::size_t from, std::size_t to, std::uint64_t value, bool start) {
         const auto found = std::lower_bound(lease.begin() + static_cast<std::ptrdiff_t>(from), lease.begin() + static_cast<std::ptrdiff_t>(to) + 1, value, [start](const auto& range, std::uint64_t wanted) { return (start ? range->address : range->address + range->bytes) < wanted; });
         const auto position = static_cast<std::size_t>(found - lease.begin());
@@ -1343,6 +1353,7 @@ ImportRun importRun(const GuestAllocations::Lease& lease, std::uint64_t address,
         const auto blockLast = bounding(index, last, blockHigh, false);
         if (blockFirst == lease.size() || blockLast == lease.size()) continue;
         if (blockFirst == blockLast) break;
+        if (writeWatched && !GuestMemory::Watched(blockLow, static_cast<std::size_t>(size))) continue;
         if (skipped(blockFirst, blockLast)) continue;
         return leasedRun(lease, blockFirst, blockLast);
     }
