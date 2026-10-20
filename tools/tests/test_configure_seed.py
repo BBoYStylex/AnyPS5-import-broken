@@ -104,6 +104,37 @@ class ConfigureSeedPathTests(unittest.TestCase):
                 self.assertEqual(seed.read_text(encoding="utf-8"), expected)
                 self.assertEqual(self.cache.read_bytes(), self.original)
 
+    def test_creates_missing_parent_directories_for_seed_output(self):
+        seed = self.root / "nested" / "seeds" / "seed.cmake"
+        result = self.run_seed(seed)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "1 check results\n")
+        self.assertEqual(seed.read_text(encoding="utf-8"),
+                         'set("HAVE_FEATURE" "1" CACHE INTERNAL "Test HAVE_FEATURE")\n')
+
+    def test_unreadable_or_invalid_cache_and_directory_seed_report_cli_errors(self):
+        missing_cache = self.root / "missing" / "CMakeCache.txt"
+        seed = self.root / "unwritten" / "seed.cmake"
+        result = subprocess.run([sys.executable, str(TOOL), str(missing_cache), str(seed)],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertFalse(seed.parent.exists())
+
+        invalid_cache = self.root / "invalid-CMakeCache.txt"
+        invalid_cache.write_bytes(b"\xff\xfe//Test HAVE_FEATURE\nHAVE_FEATURE:INTERNAL=1\n")
+        result = subprocess.run([sys.executable, str(TOOL), str(invalid_cache), str(seed)],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertFalse(seed.parent.exists())
+
+        directory_seed = self.root / "seed-dir"
+        directory_seed.mkdir()
+        result = self.run_seed(directory_seed)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
 
 @unittest.skipUnless(shutil.which("ninja") and (shutil.which("gcc") or shutil.which("cc")), "needs ninja and a C compiler")
 class ConfigureSeedProject(unittest.TestCase):
