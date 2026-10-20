@@ -37,6 +37,7 @@ constexpr std::uint32_t FormatBc1Unorm = 169;
 constexpr std::uint32_t FormatBc7Unorm = 181;
 constexpr std::uint32_t Type2D = 9;
 constexpr std::uint32_t ClampEdge = 2;
+constexpr std::uint32_t ForceDegamma = 1u << 20u;
 constexpr std::size_t BlockBytes = 1u << 20u;
 constexpr std::uint32_t Texels = 256;
 
@@ -130,8 +131,8 @@ std::array<std::uint32_t, 8> TextureDescriptor(const void* data, const Shape& sh
     };
 }
 
-std::array<std::uint32_t, 4> SamplerDescriptor() {
-    return {ClampEdge | (ClampEdge << 3u) | (ClampEdge << 6u), 0u, 0u, 0u};
+std::array<std::uint32_t, 4> SamplerDescriptor(std::uint32_t forced) {
+    return {ClampEdge | (ClampEdge << 3u) | (ClampEdge << 6u) | forced, 0u, 0u, 0u};
 }
 
 ShaderRecompiler::RecompileResult Compile(AgcDriver::VulkanDevice& device, std::span<const std::uint32_t> code, std::span<const std::uint32_t> userData) {
@@ -167,12 +168,12 @@ void Settle(AgcDriver::VulkanDevice& device, std::uint8_t* texels, std::uint64_t
     AgcDriver::GuestMemory::CollectWritesUncached(reinterpret_cast<std::uintptr_t>(texels), bytes);
 }
 
-std::vector<std::uint32_t> Sample(AgcDriver::VulkanDevice& device, std::uint8_t* texels, const Shape& shape) {
+std::vector<std::uint32_t> Sample(AgcDriver::VulkanDevice& device, std::uint8_t* texels, const Shape& shape, std::uint32_t forced = 0u) {
     std::vector<std::uint32_t> userData(24, 0u);
     const auto input = BufferDescriptor(Input.data(), static_cast<std::uint32_t>(Input.size_bytes()));
     const auto output = BufferDescriptor(Output.data(), static_cast<std::uint32_t>(Output.size_bytes()));
     const auto texture = TextureDescriptor(texels, shape);
-    const auto sampler = SamplerDescriptor();
+    const auto sampler = SamplerDescriptor(forced);
     std::copy(input.begin(), input.end(), userData.begin());
     std::copy(output.begin(), output.end(), userData.begin() + 4);
     std::copy(texture.begin(), texture.end(), userData.begin() + 8);
@@ -224,6 +225,21 @@ void PendingBlocksCase(AgcDriver::VulkanDevice& device, const Case& test) {
     RequireSame(Sample(device, texels, test.compressed), first, test.name + ": sample of blocks stored again");
 }
 
+void ForcedSrgbCase(AgcDriver::VulkanDevice& device, const Case& test) {
+    constexpr std::uint32_t Value = 0x13572440u;
+    GuestBlock block;
+    auto* texels = block.Data();
+    const auto bytes = SurfaceBytes(texels, test.compressed);
+    Store(device, texels, test, Value);
+    Settle(device, texels, bytes);
+    const auto stored = Sample(device, texels, test.compressed, ForceDegamma);
+    Require(stored != Sample(device, texels, test.compressed), test.name + ": FORCE_DEGAMMA did not change the sampled blocks");
+    Store(device, texels, test, Value);
+    const auto pending = Sample(device, texels, test.compressed, ForceDegamma);
+    Require(AgcDriver::Graphics::StorageTexture::FindPending(reinterpret_cast<std::uintptr_t>(texels), bytes) != nullptr, test.name + ": sampling through FORCE_DEGAMMA stored the pending blocks to guest memory");
+    RequireSame(pending, stored, test.name + ": FORCE_DEGAMMA sample of pending blocks");
+}
+
 }
 
 int main() {
@@ -235,6 +251,8 @@ int main() {
         Output = std::span<std::uint32_t>(reinterpret_cast<std::uint32_t*>(buffers.Data() + 4096u), Threads * 4u);
         PendingBlocksCase(*device, {"BC7 through 32x4 uint blocks", {Format32x4Uint, Texels / 4u, Texels / 4u}, {FormatBc7Unorm, Texels, Texels}, StoreQuadCode});
         PendingBlocksCase(*device, {"BC1 through 32x2 uint blocks", {Format32x2Uint, Texels / 4u, Texels / 4u}, {FormatBc1Unorm, Texels, Texels}, StorePairCode});
+        ForcedSrgbCase(*device, {"BC7 through 32x4 uint blocks", {Format32x4Uint, Texels / 4u, Texels / 4u}, {FormatBc7Unorm, Texels, Texels}, StoreQuadCode});
+        ForcedSrgbCase(*device, {"BC1 through 32x2 uint blocks", {Format32x2Uint, Texels / 4u, Texels / 4u}, {FormatBc1Unorm, Texels, Texels}, StorePairCode});
         std::puts("bc block copy tests passed");
         return 0;
     } catch (const std::exception& error) {
