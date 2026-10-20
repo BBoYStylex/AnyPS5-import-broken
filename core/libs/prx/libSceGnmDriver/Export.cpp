@@ -236,6 +236,8 @@ std::vector<std::uint32_t> MergeEngines(std::span<const std::uint32_t> dcb, std:
 
 void SubmitLocked(std::uint32_t count, std::uint32_t* const* dcbs, const std::uint32_t* dcbBytes, std::uint32_t* const* ccbs, const std::uint32_t* ccbBytes) {
     static FrameStart frameStart;
+    static const bool waitIdle = std::getenv("APS5_GNM_SUBMIT_WAIT_IDLE") != nullptr;
+    if (waitIdle && g_frameStarted) AgcDriverWaitIdle_nid_postfix();
     std::vector<std::vector<std::uint32_t>> merged;
     for (std::uint32_t i = 0; i < count; ++i) {
         const auto constantWords = ccbBytes ? ccbBytes[i] / 4 : 0;
