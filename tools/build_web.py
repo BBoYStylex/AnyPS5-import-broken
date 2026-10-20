@@ -37,19 +37,21 @@ def publish_libraries(output, release=None):
         with request("https://api.github.com/repos/boykopovar/AnyPS5/releases/latest") as response:
             release = json.load(response)
     tag = release["tag_name"]
-    if not re.fullmatch(r"v[0-9A-Za-z][0-9A-Za-z._-]*", tag):
+    if not re.fullmatch(r"v[0-9A-Za-z][0-9A-Za-z._-]*", tag) or tag.endswith("."):
         raise ValueError("Invalid release tag")
     manifest = {"tag": tag, "url": release["html_url"], "platforms": {}}
     destination = output / "libraries"
     destination.mkdir(exist_ok=True)
-    for platform in ("windows", "linux"):
-        name = f"prx-{platform}-{tag}.zip"
-        matches = [asset for asset in release["assets"] if asset["name"] == name]
-        if len(matches) != 1:
-            raise ValueError(f"Missing or ambiguous release asset: {name}")
-        asset = matches[0]
-        temporary = destination / f"{platform}.download"
-        try:
+    staged = []
+    try:
+        for platform in ("windows", "linux"):
+            name = f"prx-{platform}-{tag}.zip"
+            matches = [asset for asset in release["assets"] if asset["name"] == name]
+            if len(matches) != 1:
+                raise ValueError(f"Missing or ambiguous release asset: {name}")
+            asset = matches[0]
+            temporary = destination / f"{platform}.download"
+            staged.append((temporary, None))
             digest = hashlib.sha256()
             size = 0
             with request(asset["browser_download_url"]) as response, temporary.open("wb") as target:
@@ -87,9 +89,12 @@ def publish_libraries(output, release=None):
                 if corrupt:
                     raise ValueError(f"Corrupt release entry: {corrupt}")
             path = f"libraries/{platform}-{checksum}.zip"
-            temporary.replace(output / path)
+            staged[-1] = (temporary, output / path)
             manifest["platforms"][platform] = {"path": path, "size": size, "expandedBytes": expanded, "sha256": checksum}
-        finally:
+        for temporary, target in staged:
+            temporary.replace(target)
+    finally:
+        for temporary, _ in staged:
             temporary.unlink(missing_ok=True)
     (output / "release.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     print(f"Published library assets from {tag}")

@@ -108,7 +108,15 @@ class LibraryPublicationTests(unittest.TestCase):
             self.publish(valid, invalid)
         self.assertEqual(self.manifest.read_bytes(), self.previous)
         self.assertEqual(self.existing.read_bytes(), b"previous archive")
-        self.assertFalse(any(file.suffix == ".download" for file in self.libraries.iterdir()))
+        self.assertEqual(list(self.libraries.iterdir()), [self.existing])
+
+    def test_trailing_dot_tag_is_rejected_before_downloading_libraries(self):
+        release = {"tag_name": "v1.", "html_url": "https://example.invalid/v1.", "assets": []}
+        with patch.object(build_web, "request", side_effect=AssertionError("unexpected download")), \
+                self.assertRaisesRegex(ValueError, "Invalid release tag"):
+            build_web.publish_libraries(self.output, release)
+        self.assertEqual(self.manifest.read_bytes(), self.previous)
+        self.assertEqual(list(self.libraries.iterdir()), [self.existing])
 
     def test_distinct_full_paths_publish_both_platforms(self):
         payload = library_zip([("libs/", b""), ("libs/libc.prx", b"first"), ("libs/extra/libc.prx", b"second")])
