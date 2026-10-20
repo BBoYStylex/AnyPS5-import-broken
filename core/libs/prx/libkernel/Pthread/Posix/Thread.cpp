@@ -9,7 +9,7 @@
 #include "Common.hpp"
 #include "prx/libkernel/KernelErrors.hpp"
 #include <atomic>
-#include <chrono>
+#include <mutex>
 #include <cstring>
 #include <thread>
 
@@ -225,6 +225,16 @@ int APS5_VABI pthread_join_nid_postfix(Pthread thread, void** value) {
     return PosixThread::ToErrno(scePthreadJoin(thread, value));
 }
 
+namespace {
+struct RegisterPthreadOnLoad {
+    RegisterPthreadOnLoad() {
+        RegisterPthreadCreate_nid_no_patch(reinterpret_cast<PthreadCreateFn_nid_no_patch>(pthread_create_nid_postfix));
+        RegisterPthreadJoin_nid_no_patch(reinterpret_cast<PthreadJoinFn_nid_no_patch>(pthread_join_nid_postfix));
+    }
+};
+const RegisterPthreadOnLoad gRegisterPthread;
+}
+
 int APS5_VABI pthread_rename_np_nid_postfix(Pthread thread, const char* name) {
     if (thread && name && std::strlen(name) >= 32) return PosixThread::ToErrno(SCE_KERNEL_ERROR_ENAMETOOLONG);
     return PosixThread::ToErrno(scePthreadRename(thread, name));
@@ -301,7 +311,15 @@ void APS5_VABI pthread_yield_nid_postfix(void) {
 
 unsigned int APS5_VABI sleep_nid_postfix(unsigned int seconds) {
     ThreadCancel::Check();
-    std::this_thread::sleep_for(std::chrono::seconds(seconds));
+    {
+        const auto deadline = TimedWait::DeadlineNanos(static_cast<std::uint64_t>(seconds) * 1000000ULL);
+        std::mutex mutex;
+        TimedWait::Condition condition;
+        std::unique_lock lock(mutex);
+        while (!ThreadCancel::Requested()) {
+            if (!ThreadCancel::Wait(condition, lock, deadline)) break;
+        }
+    }
     ThreadCancel::Check();
     return 0;
 }
