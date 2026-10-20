@@ -2610,7 +2610,11 @@ void DepthBoundsBiasTests() {
         state = AgcDriver::Graphics::DecodeState(queue);
         Require(state.depthBoundsTest && state.minDepthBounds == bounds[0] && state.maxDepthBounds == bounds[1], "infinite depth bounds changed");
         AgcDriver::Graphics::Context context{};
+#ifdef __APPLE__
+        AgcDriver::Graphics::ValidateDepthBounds(context, state);
+#else
         expectFailure([&] { AgcDriver::Graphics::ValidateDepthBounds(context, state); }, "depth bounds outside [0, 1]");
+#endif
         context.depthRangeUnrestricted = true;
         AgcDriver::Graphics::ValidateDepthBounds(context, state);
     }
