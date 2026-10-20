@@ -1,9 +1,5 @@
 # libSceSysmodule technical debt
 
-### Silent stubs
-
-- [sceSysmoduleIsLoaded, sceSysmoduleLoadModule, sceSysmoduleUnloadModule](../../../core/libs/prx/libSceSysmodule/Export.cpp) (libSceSysmodule) accept a module id missing from the module table: they log it and return 0 without loading anything, so `sceSysmoduleIsLoaded` reports an unknown module as loaded and unloading it succeeds, because titles that load or unload such an id aborted otherwise. The internal variants (`sceSysmoduleLoadModuleInternal`, `sceSysmoduleUnloadModuleInternal`, `sceSysmoduleLoadModuleInternalWithArg`, `sceSysmoduleUnloadModuleInternalWithArg`, `sceSysmoduleGetModuleHandleInternal`) throw for an unknown id. What the console returns for an id it does not know is not verified.
-
 ### Unknown function info
 
 - [kModuleTable](../../../core/libs/prx/libSceSysmodule/ModuleTable.hpp) (libSceSysmodule) - module id 0x00000132 is named `libSceProprietaryVoiceChatHelperPrx`, the name of the built module, because `sceSysmoduleGetModuleHandleInternal` opens `libs/<table name>.prx`. The name the console's table uses for this id is not verified
@@ -13,5 +9,7 @@
 - [sceSysmoduleIsCalledFromSysModule, sceSysmoduleIsCameraPreloaded, sceSysmoduleLoadModuleByNameInternal, sceSysmoduleMapLibcForLibkernel, sceSysmodulePreloadModuleForLibkernel and sceSysmoduleUnloadModuleByNameInternal](../../../core/libs/prx/libSceSysmodule/Export.cpp) (libSceSysmodule) - names and NIDs are present in the [PS5 3.20 export inventory](https://github.com/DNNDHH/PS5-3.20_Libs/blob/b2a77c09cd71c01f34c790cfbe98c751a13262ad/libSceSysmodule.c). `sceSysmoduleLoadModuleByNameInternal` takes `(uint8_t* fname, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5)` from [SharpProspero's Sysmodule bindings](https://github.com/SvenGDK/SharpProspero/blob/5dfdb4b0b166e83dc9ae275001afb695f12c7174/src/SharpProspero/Interop/Sysmodule/Sysmodule.cs#L149-L151), not measured on a console. The other exports had no credible prototypes and are declared without parameters solely to resolve known imports; they make no ABI claim.
 
 ### Functional
+
+- [sceSysmoduleIsLoaded, sceSysmoduleLoadModule and sceSysmoduleUnloadModule](../../../core/libs/prx/libSceSysmodule/Export.cpp) - IDs missing from `kModuleTable` throw without changing load counts, as the internal variants do. The console error code and behavior for an unknown ID are not verified
 
 - [sceSysmoduleGetModuleInfoForUnwind](../../../core/libs/prx/libSceSysmodule/Export.cpp) (libSceSysmodule) - on Windows the region and file name of an address inside a loaded image are cached after the first lookup, because `VirtualQuery` on a large image section is slow. An entry is used only while the loader still reports the same image for the address (same base, time stamp and size). A page protection change inside the image after the first lookup, which would split or merge the region `VirtualQuery` reports, is not noticed. Addresses outside loaded images are queried every time

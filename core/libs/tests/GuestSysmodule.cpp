@@ -128,12 +128,12 @@ void CheckUnknownIds() {
     const std::uint16_t id = UnknownModuleId();
     const std::uint32_t internalId = id | kInternalFlag;
     Require(kModuleTable.find(internalId) == kModuleTable.end());
-    Require(sceSysmoduleIsLoaded(id) == 0);
-    Require(sceSysmoduleLoadModule(id) == 0);
-    Require(sceSysmoduleIsLoaded(id) == 0);
-    Require(sceSysmoduleUnloadModule(id) == 0);
-    Require(sceSysmoduleUnloadModule(id) == 0);
-    Require(sceSysmoduleIsLoaded(id) == 0);
+    Require(ThrowsRuntimeError([id] { sceSysmoduleIsLoaded(id); }));
+    Require(ThrowsRuntimeError([id] { sceSysmoduleLoadModule(id); }));
+    Require(ThrowsRuntimeError([id] { sceSysmoduleIsLoaded(id); }));
+    Require(ThrowsRuntimeError([id] { sceSysmoduleUnloadModule(id); }));
+    Require(ThrowsRuntimeError([id] { sceSysmoduleUnloadModule(id); }));
+    Require(ThrowsRuntimeError([id] { sceSysmoduleIsLoaded(id); }));
     Require(ThrowsRuntimeError([internalId] { sceSysmoduleLoadModuleInternal(internalId); }));
     Require(ThrowsRuntimeError([internalId] { sceSysmoduleUnloadModuleInternal(internalId); }));
     int result = 0x5a5a5a5a;
@@ -223,6 +223,19 @@ int main() {
 
     Require(ThrowsRuntimeError([] { sceSysmoduleIsLoadedInternal(0x00ffffffu); }));
     Require(sceSysmoduleIsLoadedInternal(kFiberModuleId) == kModuleUnloaded);
+    for (std::uint32_t id = 1; id <= 0xffff; ++id) {
+        if (kModuleTable.contains(id)) continue;
+        const auto publicId = static_cast<std::uint16_t>(id);
+        Require(ThrowsRuntimeError([&] { sceSysmoduleIsLoaded(publicId); }));
+        Require(ThrowsRuntimeError([&] { sceSysmoduleLoadModule(publicId); }));
+        Require(ThrowsRuntimeError([&] { sceSysmoduleUnloadModule(publicId); }));
+        Require(ThrowsRuntimeError([&] { sceSysmoduleLoadModuleInternal(id); }));
+        Require(ThrowsRuntimeError([&] { sceSysmoduleUnloadModuleInternal(id); }));
+        int result = 0x5a5a5a5a;
+        Require(ThrowsRuntimeError([&] { sceSysmoduleLoadModuleInternalWithArg(id, 0, nullptr, 0, &result); }));
+        Require(result == 0x5a5a5a5a);
+    }
+
     Require(sceSysmoduleIsLoaded(kFiberModuleId) == kModuleUnloaded);
     Require(sceSysmoduleLoadModuleInternal(kFiberModuleId) == 0);
     Require(sceSysmoduleIsLoadedInternal(kFiberModuleId) == 0);

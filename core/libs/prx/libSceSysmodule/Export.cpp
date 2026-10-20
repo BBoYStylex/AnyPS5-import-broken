@@ -185,8 +185,7 @@ int APS5_VABI sceSysmoduleIsLoaded(std::uint16_t id) {
         return SCE_SYSMODULE_ERROR_INVALID_VALUE;
     }
     if (!findModuleName(id)) {
-        APS5_LOG_OUT("unknown id: %u", static_cast<unsigned>(id));
-        return 0;
+        NotImplemented_nid_no_patch(__func__);
     }
     std::lock_guard<std::mutex> lock(gMutex);
     auto it = gLoadCount.find(id);
@@ -201,8 +200,7 @@ int APS5_VABI sceSysmoduleLoadModule(std::uint16_t id) {
         return SCE_SYSMODULE_ERROR_INVALID_VALUE;
     }
     if (!findModuleName(id)) {
-        APS5_LOG_OUT("unknown id: %u", static_cast<unsigned>(id));
-        return 0;
+        NotImplemented_nid_no_patch(__func__);
     }
     std::lock_guard<std::mutex> lock(gMutex);
     gLoadCount[id]++;
@@ -232,8 +230,7 @@ int APS5_VABI sceSysmoduleUnloadModule(std::uint16_t id) {
         return SCE_SYSMODULE_ERROR_INVALID_VALUE;
     }
     if (!findModuleName(id)) {
-        APS5_LOG_OUT("unknown id: %u", static_cast<unsigned>(id));
-        return 0;
+        NotImplemented_nid_no_patch(__func__);
     }
     std::lock_guard<std::mutex> lock(gMutex);
     auto it = gLoadCount.find(id);
