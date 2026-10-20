@@ -1,0 +1,58 @@
+
+name: Auto Sync Fork at 3000 Commits Behind
+
+on:
+  schedule:
+    # Check every 30 minutes, away from the top of the hour
+    - cron: "17,47 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: auto-sync-upstream-main
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Check commits behind upstream
+        id: check
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git remote add upstream \
+            https://github.com/boykopovar/AnyPS5.git
+
+          git fetch upstream main
+
+          BEHIND=$(git rev-list --count HEAD..upstream/main)
+
+          echo "behind=$BEHIND" >> "$GITHUB_OUTPUT"
+          echo "Fork is $BEHIND commits behind upstream."
+
+          if [ "$BEHIND" -ge 3000 ]; then
+            echo "Threshold reached. Sync will start."
+          else
+            echo "Threshold not reached. No changes made."
+          fi
+
+      - name: Sync fork with upstream
+        if: steps.check.outputs.behind != '' && fromJSON(steps.check.outputs.behind) >= 3000
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api \
+            --method POST \
+            repos/Monkore/AnyPS5/merge-upstream \
+            -f branch=main
