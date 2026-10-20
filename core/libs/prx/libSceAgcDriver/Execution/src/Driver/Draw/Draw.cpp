@@ -602,6 +602,7 @@ DrawVerdict Driver::draw(QueueState& queue, std::span<const std::uint32_t> packe
             if (pipelined && pipelinedIndirect && record == lastDrawable && !gpuLock.owns_lock() && deferredLabels().labels.empty()) {
                 phaseTiming.Phase(DrawRowVectors);
                 auto writes = drawWriteRanges(graphics, stages);
+                auto reads = QueuedDrawReadRanges(drawParameters, stages);
                 const auto commitQueue = submission.queue;
                 const auto commitPacket = (packet[0] >> 8u) & 0xffu;
                 const auto epoch = DrawPipeline::EpochToken().load(std::memory_order_relaxed);
@@ -611,7 +612,7 @@ DrawVerdict Driver::draw(QueueState& queue, std::span<const std::uint32_t> packe
                     commitDraw(localDevice, commitQueue, decode->state, direct, stages, snapshots, nullptr, {}, 0);
                 };
                 auto held = std::make_shared<decltype(commit)>(std::move(commit));
-                DrawPipeline::Queue0().Enqueue([held] { (*held)(); }, std::move(writes));
+                DrawPipeline::Queue0().Enqueue([held] { (*held)(); }, std::move(writes), 0, {}, std::move(reads));
                 phaseTiming.Phase(DrawRowLockWait);
                 timing.Mark("draw_enqueued");
                 return drawn();

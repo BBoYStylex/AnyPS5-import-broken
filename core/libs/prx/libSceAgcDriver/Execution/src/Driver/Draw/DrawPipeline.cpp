@@ -266,4 +266,19 @@ bool DrawPipeline::Overlaps(std::uint64_t address, std::size_t bytes) {
     return false;
 }
 
+bool DrawPipeline::Touches(std::uint64_t address, std::size_t bytes) {
+    if (bytes == 0) return false;
+    const auto end = address + bytes;
+    std::lock_guard lock(mutex);
+    for (const auto& item : items) {
+        for (const auto& [begin, limit] : item.writes) {
+            if (address < limit && begin < end) return true;
+        }
+        for (const auto& [begin, limit] : item.reads) {
+            if (address < limit && begin < end) return true;
+        }
+    }
+    return false;
+}
+
 }

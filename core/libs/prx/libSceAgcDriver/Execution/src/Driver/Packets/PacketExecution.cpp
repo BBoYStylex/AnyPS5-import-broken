@@ -31,6 +31,56 @@ bool pipelineDma() {
     return enabled;
 }
 
+std::optional<std::vector<DrawPipeline::Range>> packetGuestMemory(std::span<const std::uint32_t> packet, std::uint32_t header, std::uint32_t opcode) {
+    std::vector<DrawPipeline::Range> ranges;
+    const auto add = [&](std::uint64_t begin, std::size_t bytes) {
+        if (begin == 0 || bytes == 0) return;
+        ranges.emplace_back(begin, begin + bytes);
+    };
+    switch (opcode) {
+        case 0x22: {
+            if (packet.size() < 5) return std::nullopt;
+            add(packet[1] | (static_cast<std::uint64_t>(packet[2]) << 32u), 4);
+            return ranges;
+        }
+        case 0x37: {
+            if (packet.size() <= 4) return std::nullopt;
+            if (((packet[1] >> 8u) & 0xfu) == 0) return ranges;
+            add(packet[2] | (static_cast<std::uint64_t>(packet[3]) << 32u), (packet.size() - 4) * 4);
+            return ranges;
+        }
+        case 0x45: {
+            if (packet.size() != 9) return std::nullopt;
+            const auto write = Pm4::DecodeConditionalWrite(packet);
+            add(write.compared, 4);
+            add(write.destination, 4);
+            return ranges;
+        }
+        case 0x83: {
+            if (packet.size() != 5) return std::nullopt;
+            const auto dump = Pm4::DecodeConstantRamDump(packet);
+            add(dump.destination, static_cast<std::size_t>(dump.words) * 4);
+            return ranges;
+        }
+        case 0x46:
+            return std::nullopt;
+        default:
+            break;
+    }
+    if (!Pm4::AccessesMemory(header)) return ranges;
+    return std::nullopt;
+}
+
+bool packetNeedsOrder(std::span<const std::uint32_t> packet, std::uint32_t header, std::uint32_t opcode) {
+    if (header == FlipPacketHeader || header == RenderingWaitPacketHeader) return true;
+    const auto memory = packetGuestMemory(packet, header, opcode);
+    if (!memory.has_value()) return true;
+    for (const auto& range : *memory) {
+        if (DrawPipeline::Queue0().Touches(range.first, range.second - range.first)) return true;
+    }
+    return false;
+}
+
 bool keepsDrawPipeline(std::span<const std::uint32_t> packet, std::uint32_t header, std::uint32_t opcode) {
     if (header == FlipPacketHeader || header == RenderingWaitPacketHeader) return false;
     if (Pm4::DrawOpcode(opcode)) return true;
@@ -65,7 +115,7 @@ bool keepsDrawPipeline(std::span<const std::uint32_t> packet, std::uint32_t head
             const auto operation = (header >> 2u) & 0x3fu;
             return operation == 0 || operation == 0x09 || operation == 0x0b || operation == 0x0c || operation == 0x1a;
         }
-        default: return false;
+        default: return !packetNeedsOrder(packet, header, opcode);
     }
 }
 
