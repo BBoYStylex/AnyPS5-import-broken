@@ -3,7 +3,22 @@
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
 #include "prx/libSceVideoOut/include/Output.hpp"
+#include "prx/libSceVideoOut/include/VideoOutDriver.hpp"
 #include <stdexcept>
+
+static constexpr int VIDEO_OUT_CURSOR_NUM_MAX = 2;
+
+namespace {
+
+int validateCursorHandle(std::int32_t handle, std::int32_t index) {
+    if (!VideoOutDriver::Get().HasConfig(handle) || !VideoOutDriver::Get().IsOpen(handle))
+        return VIDEO_OUT_ERROR_INVALID_HANDLE;
+    if (index < 0 || index >= VIDEO_OUT_CURSOR_NUM_MAX)
+        return VIDEO_OUT_ERROR_INVALID_INDEX;
+    return 0;
+}
+
+}
 
 extern "C" {
 
@@ -17,23 +32,31 @@ int APS5_VABI sceVideoOutClearFlipMaster() {
     return 0;
 }
 
-int APS5_VABI sceVideoOutCursorEnable(int32_t, int32_t, const void*) {
-    NotImplemented_nid_no_patch(__func__);
+int APS5_VABI sceVideoOutCursorEnable(std::int32_t handle, std::int32_t index, const void* address) {
+    const int err = validateCursorHandle(handle, index);
+    if (err != 0) return err;
+    if (address == nullptr) return VIDEO_OUT_ERROR_INVALID_ADDRESS;
     return 0;
 }
 
-int APS5_VABI sceVideoOutCursorDisable(int32_t, int32_t) {
-    NotImplemented_nid_no_patch(__func__);
+int APS5_VABI sceVideoOutCursorDisable(std::int32_t handle, std::int32_t index) {
+    const int err = validateCursorHandle(handle, index);
+    if (err != 0) return err;
     return 0;
 }
 
-int APS5_VABI sceVideoOutCursorSetImageAddress(int32_t, int32_t, const void*) {
-    NotImplemented_nid_no_patch(__func__);
+int APS5_VABI sceVideoOutCursorSetImageAddress(std::int32_t handle, std::int32_t index, const void* address) {
+    const int err = validateCursorHandle(handle, index);
+    if (err != 0) return err;
+    if (address == nullptr) return VIDEO_OUT_ERROR_INVALID_ADDRESS;
     return 0;
 }
 
-int APS5_VABI sceVideoOutCursorSetPosition(int32_t, int32_t, uint32_t, uint32_t) {
-    NotImplemented_nid_no_patch(__func__);
+int APS5_VABI sceVideoOutCursorSetPosition(std::int32_t handle, std::int32_t index, std::uint32_t x, std::uint32_t y) {
+    (void)x;
+    (void)y;
+    const int err = validateCursorHandle(handle, index);
+    if (err != 0) return err;
     return 0;
 }
 

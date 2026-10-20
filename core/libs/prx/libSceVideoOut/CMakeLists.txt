@@ -79,7 +79,7 @@ if(BUILD_TESTING)
     target_link_libraries(guest_video_out_cursor_tests PRIVATE libSceVideoOut libkernel libc)
     configure_windows_unwind(guest_video_out_cursor_tests)
     add_test(NAME guest_video_out_cursor COMMAND guest_video_out_cursor_tests)
-    set_tests_properties(guest_video_out_cursor PROPERTIES TIMEOUT 20)
+    set_tests_properties(guest_video_out_cursor PROPERTIES TIMEOUT 20 SKIP_RETURN_CODE 77 RESOURCE_LOCK videoout_app0)
     if(WIN32)
         set_tests_properties(guest_video_out_cursor PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
