@@ -5007,7 +5007,10 @@ bool StorageTexture::unchangedSinceBaseline(std::uint64_t from, std::uint64_t to
 void StorageTexture::PrepareLinearDraw() {
     if (descriptor.tileMode != TextureTileMode::kLinear) return;
     WriteBack();
+    FlushPending(descriptor.baseAddress, static_cast<std::size_t>(guestBytes), this, "linear draw baseline");
     linearDrawOriginal.reset();
+    uploadReason = "linear draw baseline";
+    upload();
     auto* recorder = Recorder::Active();
     Require(recorder != nullptr, "a recorded linear target needs an active recorder");
     const auto bytes = sliceLinearBytes * arrayLayers;
