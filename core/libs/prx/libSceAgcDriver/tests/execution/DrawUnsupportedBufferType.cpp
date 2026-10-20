@@ -5,7 +5,6 @@
 #include <array>
 #include <bit>
 #include <cstdint>
-#include <cstdio>
 #include <exception>
 #include <initializer_list>
 #include <iostream>
@@ -25,15 +24,18 @@ alignas(256) constexpr std::array<std::uint32_t, 16> VertexCode{
 alignas(256) constexpr std::array<std::uint32_t, 16> PixelCode{
     0x7e020280u, 0xe0301000u, 0x80000201u, 0xbf8c3f70u, 0x7e000280u, 0x7e0602f2u, 0xf800180fu, 0x03010002u, 0xbf810000u,
 };
+alignas(256) constexpr std::array<std::uint32_t, 9> InactivePixelCode{
+    0xbefe0404u, 0xe0301000u, 0x80000201u, 0xbf8c3f70u, 0x7e000280u, 0x7e0602f2u, 0xf800180fu, 0x03010002u, 0xbf810000u,
+};
 
 void Append(std::vector<std::uint32_t>& commands, std::uint32_t opcode, std::initializer_list<std::uint32_t> payload) {
     commands.push_back(0xc0000000u | (static_cast<std::uint32_t>(payload.size() - 1) << 16u) | (opcode << 8u));
     commands.insert(commands.end(), payload);
 }
 
-void Draw(const std::array<std::uint32_t, 4>& descriptor) {
+void Draw(const std::array<std::uint32_t, 4>& descriptor, bool inactive = false) {
     const auto vertex = reinterpret_cast<std::uintptr_t>(VertexCode.data());
-    const auto pixel = reinterpret_cast<std::uintptr_t>(PixelCode.data());
+    const auto pixel = reinterpret_cast<std::uintptr_t>(inactive ? InactivePixelCode.data() : PixelCode.data());
     const std::vector<std::pair<std::uint32_t, std::uint32_t>> context{
         {0x2d5, 0x2000},
         {0x1b6, 0}, {0x207, 0}, {0x200, 0}, {0x203, 0x800},
@@ -57,8 +59,9 @@ void Draw(const std::array<std::uint32_t, 4>& descriptor) {
     };
     const std::vector<std::pair<std::uint32_t, std::uint32_t>> shader{
         {0xc8, static_cast<std::uint32_t>(vertex >> 8u)}, {0xc9, static_cast<std::uint32_t>(vertex >> 40u)}, {0x8b, 0u},
-        {0x008, static_cast<std::uint32_t>(pixel >> 8u)}, {0x009, static_cast<std::uint32_t>(pixel >> 40u)}, {0x00b, 4u << 1u},
+        {0x008, static_cast<std::uint32_t>(pixel >> 8u)}, {0x009, static_cast<std::uint32_t>(pixel >> 40u)}, {0x00b, 6u << 1u},
         {0x00c, descriptor[0]}, {0x00d, descriptor[1]}, {0x00e, descriptor[2]}, {0x00f, descriptor[3]},
+        {0x010, 0}, {0x011, 0},
     };
     std::vector<std::uint32_t> commands;
     Append(commands, 0x79, {0x242, 4});
@@ -80,16 +83,17 @@ void NamesShaderAndDescriptor() {
         Draw(descriptor);
     } catch (const std::exception& error) {
         const std::string message = error.what();
-        char shader[64];
-        std::snprintf(shader, sizeof(shader), "shader 0x%llx stage %u", static_cast<unsigned long long>(reinterpret_cast<std::uintptr_t>(PixelCode.data())), static_cast<unsigned>(ShaderRecompiler::ShaderStage::Fragment));
-        char words[64];
-        std::snprintf(words, sizeof(words), "(buffer 0 V# %08x %08x %08x %08x)", descriptor[0], descriptor[1], descriptor[2], descriptor[3]);
-        Require(message.find("buffer descriptor uses an unsupported type") != std::string::npos, "draw failed for another reason: " + message);
-        Require(message.find(shader) != std::string::npos, std::string("draw error does not name ") + shader + ": " + message);
-        Require(message.find(words) != std::string::npos, std::string("draw error does not name ") + words + ": " + message);
+        Require(message.find("BDA access failed") != std::string::npos, "draw failed for another reason: " + message);
+        Require(message.find("stage=5 reason=8") != std::string::npos, "draw did not report an invalid fragment descriptor: " + message);
         return;
     }
-    throw std::runtime_error("a pixel shader read a buffer through a descriptor of type 2");
+    throw std::runtime_error("a pixel shader read a buffer through a descriptor of type 2 without reporting a draw-completion fault");
+}
+
+void InactiveLaneDoesNotFault() {
+    const auto address = reinterpret_cast<std::uintptr_t>(Source.data());
+    const std::array<std::uint32_t, 4> descriptor{static_cast<std::uint32_t>(address), static_cast<std::uint32_t>((address >> 32u) & 0xffffu), sizeof(Source), 0xa1b00facu};
+    Draw(descriptor, true);
 }
 
 }
@@ -100,6 +104,7 @@ int main() {
             const auto device = OpenVulkanTestDevice();
             if (!device) return VulkanTestSkipped;
         }
+        InactiveLaneDoesNotFault();
         NamesShaderAndDescriptor();
         try { AgcDriverShutdown_nid_postfix(); } catch (const std::exception&) {}
         std::puts("draw unsupported buffer type tests passed");
