@@ -85,6 +85,7 @@ extern "C" int APS5_VABI remove_nid_postfix(const char* path) {
             errno = 22;
             return -1;
         }
+        if (NamesNonDirectoryWithSlash_nid_no_patch(resolved)) { errno = 20; return -1; }
         std::error_code error;
 #ifdef _WIN32
         const DWORD attributes = GetFileAttributesW(resolved.c_str());

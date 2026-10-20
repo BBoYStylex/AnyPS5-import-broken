@@ -270,6 +270,7 @@ int APS5_VABI sceKernelOpen(const char* path, int flags, std::uint16_t mode) {
         APS5_LOG_ERR("open failed path=%s resolveError=%d result=0x%08X", path != nullptr ? path : "<null>", error, static_cast<unsigned>(result));
         return result;
     }
+    if (NamesNonDirectoryWithSlash_nid_no_patch(native)) return SceErrorFromErrno(ENOTDIR);
     const int result = OpenNative(native, flags, mode);
     if (result < 0) {
         const auto resolved = native.u8string();
@@ -416,6 +417,7 @@ int APS5_VABI sceKernelUnlink(const char* path) {
     std::filesystem::path native;
     if (const int error = ResolvePathError_nid_no_patch(path, native)) return SceKernelError(error);
     constexpr int GuestEperm = 1;
+    if (NamesNonDirectoryWithSlash_nid_no_patch(native)) return SceErrorFromErrno(20);
     std::error_code error;
     if (std::filesystem::is_directory(std::filesystem::symlink_status(native, error))) return SceErrorFromErrno(GuestEperm);
     if (NativeUnlink(native) != 0) {

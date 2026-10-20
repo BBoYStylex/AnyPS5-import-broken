@@ -33,6 +33,15 @@ inline bool HasNonDirectoryPrefix_nid_no_patch(const std::filesystem::path& nati
     return false;
 }
 
+inline bool NamesNonDirectoryWithSlash_nid_no_patch(const std::filesystem::path& native) {
+    if (native.has_filename()) return false;
+    auto named = native;
+    while (!named.has_filename() && named.has_relative_path()) named = named.parent_path();
+    std::error_code error;
+    const auto status = std::filesystem::status(named, error);
+    return std::filesystem::exists(status) && !std::filesystem::is_directory(status);
+}
+
 inline int NotFoundError_nid_no_patch(const std::filesystem::path& native) {
     return HasNonDirectoryPrefix_nid_no_patch(native) ? 20 : 2;
 }

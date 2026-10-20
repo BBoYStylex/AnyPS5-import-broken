@@ -115,6 +115,7 @@ extern "C" int RenameGuestPath_nid_no_patch(const char* from, const char* to) {
             return -1;
         }
         const auto destination = ResolvePath_nid_no_patch(to);
+        if (NamesNonDirectoryWithSlash_nid_no_patch(source) || (std::filesystem::exists(source) && NamesNonDirectoryWithSlash_nid_no_patch(destination))) { errno = 20; return -1; }
         int error = RenamePath_nid_no_patch(source, destination);
         if (error == 2) {
             std::error_code status;
