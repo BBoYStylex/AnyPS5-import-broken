@@ -28,6 +28,8 @@ struct Function {
 struct Module {
     std::unordered_map<std::uint32_t, std::uint32_t> builtins;
     std::unordered_map<std::uint32_t, std::uint32_t> storageClasses;
+    std::unordered_map<std::uint32_t, std::uint32_t> pointerClasses;
+    std::unordered_map<std::uint32_t, std::uint32_t> constants;
     std::vector<Function> functions;
 };
 
@@ -44,6 +46,12 @@ Module Parse(std::span<const std::uint32_t> words) {
         switch (Opcode(instruction)) {
         case spv::OpDecorate:
             if (instruction.size() >= 4u && instruction[2] == spv::DecorationBuiltIn) module.builtins[instruction[1]] = instruction[3];
+            break;
+        case spv::OpTypePointer:
+            if (instruction.size() >= 4u) module.pointerClasses[instruction[1]] = instruction[2];
+            break;
+        case spv::OpConstant:
+            if (instruction.size() >= 4u) module.constants[instruction[2]] = instruction[3];
             break;
         case spv::OpVariable:
             if (instruction.size() >= 4u) module.storageClasses[instruction[2]] = instruction[3];
@@ -118,13 +126,37 @@ bool PrivateStorage(std::uint32_t storageClass) {
     return storageClass == spv::StorageClassFunction || storageClass == spv::StorageClassPrivate;
 }
 
+bool AtomicWrite(spv::Op op) {
+    const auto raw = static_cast<std::uint32_t>(op);
+    return (raw >= spv::OpAtomicExchange && raw <= spv::OpAtomicXor) || op == spv::OpAtomicFlagTestAndSet || op == spv::OpAtomicFMinEXT || op == spv::OpAtomicFMaxEXT ||
+        op == spv::OpAtomicFAddEXT;
+}
+
+bool ImageRead(spv::Op op) {
+    return op == spv::OpImageRead || op == spv::OpImageFetch || op == spv::OpImageSparseRead || op == spv::OpImageSparseFetch;
+}
+
 class Analysis {
 public:
     explicit Analysis(const Module& module) : module(module) {
         for (const auto& function : module.functions) {
             for (const auto& block : function.blocks) {
                 for (const auto& instruction : block.body) {
-                    if (Opcode(instruction) == spv::OpControlBarrier) barriers.insert(function.id);
+                    const auto op = Opcode(instruction);
+                    if (op == spv::OpControlBarrier) barriers.insert(function.id);
+                    bool hasResult = false;
+                    bool hasType = false;
+                    spv::HasResultAndType(op, &hasResult, &hasType);
+                    if (hasResult && hasType && instruction.size() > 2u) types[instruction[2]] = instruction[1];
+                }
+            }
+        }
+        for (const auto& function : module.functions) {
+            for (const auto& block : function.blocks) {
+                for (const auto& instruction : block.body) {
+                    const auto pointer = WrittenPointer(instruction);
+                    if (pointer != 0u) written.insert(ClassOf(pointer));
+                    if (Opcode(instruction) == spv::OpImageWrite) written.insert(spv::StorageClassImage);
                 }
             }
         }
@@ -142,13 +174,16 @@ public:
     }
 
     std::optional<std::string> Run() {
-        for (std::size_t round = 0u; round < 64u; ++round) {
+        if (barriers.empty()) return std::nullopt;
+        std::vector<Flow> flows;
+        flows.reserve(module.functions.size());
+        for (const auto& function : module.functions) flows.push_back(BuildFlow(function));
+        for (;;) {
             const auto before = Size();
             report.reset();
-            for (const auto& function : module.functions) Visit(function);
+            for (std::size_t index = 0u; index < module.functions.size(); ++index) Visit(module.functions[index], flows[index]);
             if (Size() == before) return report;
         }
-        throw std::runtime_error("spanned wave uniformity did not settle");
     }
 
 private:
@@ -159,6 +194,74 @@ private:
         std::unordered_map<std::uint32_t, std::uint32_t> idom;
         std::unordered_map<std::uint32_t, std::vector<std::uint32_t>> children;
     };
+
+    static std::uint32_t WrittenPointer(const Instruction& instruction) {
+        const auto op = Opcode(instruction);
+        if ((op == spv::OpStore || op == spv::OpAtomicStore || op == spv::OpAtomicFlagClear || op == spv::OpCopyMemory) && instruction.size() > 1u) return instruction[1];
+        if (AtomicWrite(op) && instruction.size() > 3u) return instruction[3];
+        return 0u;
+    }
+
+    std::uint32_t ClassOf(std::uint32_t pointer) const {
+        if (const auto variable = module.storageClasses.find(pointer); variable != module.storageClasses.end()) return variable->second;
+        const auto type = types.find(pointer);
+        if (type == types.end()) return UnknownClass;
+        const auto storage = module.pointerClasses.find(type->second);
+        return storage == module.pointerClasses.end() ? UnknownClass : storage->second;
+    }
+
+    bool Written(std::uint32_t storageClass) const {
+        return written.contains(UnknownClass) || written.contains(storageClass);
+    }
+
+    bool Fence(const Instruction& instruction) const {
+        if (Opcode(instruction) != spv::OpControlBarrier || instruction.size() < 4u) return false;
+        const auto scope = module.constants.find(instruction[1]);
+        const auto semantics = module.constants.find(instruction[3]);
+        return scope != module.constants.end() && semantics != module.constants.end() && scope->second <= spv::ScopeWorkgroup &&
+            (semantics->second & spv::MemorySemanticsWorkgroupMemoryMask) != 0u;
+    }
+
+    bool Fenced(bool fenced, const Instruction& instruction) const {
+        if (Fence(instruction)) return true;
+        if (Opcode(instruction) == spv::OpFunctionCall) return false;
+        const auto pointer = WrittenPointer(instruction);
+        if (pointer == 0u) return fenced;
+        const auto storageClass = ClassOf(pointer);
+        return fenced && storageClass != spv::StorageClassWorkgroup && storageClass != UnknownClass;
+    }
+
+    bool Racy(std::uint32_t pointer, bool fenced) const {
+        const auto storageClass = ClassOf(pointer);
+        if (storageClass != UnknownClass && (PrivateStorage(storageClass) || storageClass == spv::StorageClassInput)) return false;
+        if (!Written(storageClass)) return false;
+        return !fenced || storageClass != spv::StorageClassWorkgroup;
+    }
+
+    std::unordered_map<std::uint32_t, bool> FencedEntries(const Function& function, const Flow& flow, const std::unordered_map<std::uint32_t, const Block*>& blocks) const {
+        std::unordered_map<std::uint32_t, std::vector<std::uint32_t>> predecessors;
+        for (const auto node : flow.order) {
+            for (const auto successor : flow.successors.at(node)) predecessors[successor].push_back(node);
+        }
+        std::unordered_map<std::uint32_t, bool> entries;
+        std::unordered_map<std::uint32_t, bool> exits;
+        for (const auto node : flow.order) exits[node] = true;
+        const auto root = function.blocks.front().label;
+        for (bool changed = true; changed;) {
+            changed = false;
+            for (const auto node : flow.order) {
+                bool fenced = node != root;
+                for (const auto predecessor : predecessors[node]) fenced = fenced && exits.at(predecessor);
+                entries[node] = fenced;
+                for (const auto& instruction : blocks.at(node)->body) fenced = Fenced(fenced, instruction);
+                if (exits[node] != fenced) {
+                    exits[node] = fenced;
+                    changed = true;
+                }
+            }
+        }
+        return entries;
+    }
 
     std::size_t Size() const {
         return nonUniform.size() + storedNonUniform.size() + varyingFunctions.size();
@@ -237,6 +340,27 @@ private:
         return flow;
     }
 
+    static bool Exits(spv::Op op) {
+        return op == spv::OpReturn || op == spv::OpReturnValue || op == spv::OpKill || op == spv::OpTerminateInvocation || op == spv::OpUnreachable;
+    }
+
+    static std::vector<std::uint32_t> Reachable(const Flow& flow, std::uint32_t from) {
+        std::vector<std::uint32_t> blocks;
+        std::unordered_set<std::uint32_t> seen{from};
+        std::vector<std::uint32_t> pending{from};
+        while (!pending.empty()) {
+            const auto node = pending.back();
+            pending.pop_back();
+            blocks.push_back(node);
+            if (const auto found = flow.successors.find(node); found != flow.successors.end()) {
+                for (const auto successor : found->second) {
+                    if (seen.insert(successor).second) pending.push_back(successor);
+                }
+            }
+        }
+        return blocks;
+    }
+
     static std::vector<std::uint32_t> Construct(const Flow& flow, std::uint32_t header, std::uint32_t merge) {
         std::vector<std::uint32_t> blocks;
         std::vector<std::uint32_t> pending;
@@ -260,9 +384,8 @@ private:
         return pointer;
     }
 
-    void Visit(const Function& function) {
+    void Visit(const Function& function, const Flow& flow) {
         if (function.blocks.empty()) return;
-        const auto flow = BuildFlow(function);
         std::unordered_map<std::uint32_t, const Block*> blocks;
         std::unordered_map<std::uint32_t, std::uint32_t> chains;
         for (const auto& block : function.blocks) {
@@ -272,6 +395,7 @@ private:
                 if ((op == spv::OpAccessChain || op == spv::OpInBoundsAccessChain || op == spv::OpPtrAccessChain) && instruction.size() > 3u) chains[instruction[2]] = instruction[3];
             }
         }
+        const auto fencedEntries = FencedEntries(function, flow, blocks);
         for (const auto parameter : function.parameters) nonUniform.insert(parameter);
         std::unordered_set<std::uint32_t> divergent;
         std::unordered_set<std::uint32_t> divergentMerges;
@@ -303,11 +427,29 @@ private:
             divergent.insert(construct.begin(), construct.end());
             if (mergeOp == spv::OpLoopMerge) divergent.insert(header);
             divergentMerges.insert(merge);
+            const std::unordered_set<std::uint32_t> inside(construct.begin(), construct.end());
+            bool exits = false;
+            bool escapes = false;
+            for (const auto node : construct) {
+                exits = exits || (!blocks.at(node)->body.empty() && Exits(Opcode(blocks.at(node)->body.back())));
+                for (const auto successor : flow.successors.at(node)) escapes = escapes || (successor != merge && successor != header && !inside.contains(successor));
+            }
+            if (exits) {
+                const auto after = Reachable(flow, merge);
+                divergent.insert(after.begin(), after.end());
+            } else if (escapes) {
+                const auto after = Construct(flow, merge, 0u);
+                divergent.insert(merge);
+                divergent.insert(after.begin(), after.end());
+            }
         }
         for (const auto label : flow.order) {
             const bool inDivergentFlow = divergent.contains(label);
+            bool fenced = fencedEntries.at(label);
             for (const auto& instruction : blocks.at(label)->body) {
                 const auto op = Opcode(instruction);
+                const bool fencedBefore = fenced;
+                fenced = Fenced(fenced, instruction);
                 if (op == spv::OpStore && instruction.size() >= 3u) {
                     const auto variable = BaseVariable(instruction[1], chains);
                     const auto storage = module.storageClasses.find(variable);
@@ -326,9 +468,12 @@ private:
                     const auto builtin = module.builtins.find(variable);
                     const auto storage = module.storageClasses.find(variable);
                     varying = NonUniform(instruction[3]) || (builtin != module.builtins.end() && VaryingBuiltin(builtin->second)) || storedNonUniform.contains(variable) ||
-                        (storage != module.storageClasses.end() && storage->second == spv::StorageClassInput && builtin == module.builtins.end());
+                        (storage != module.storageClasses.end() && storage->second == spv::StorageClassInput && builtin == module.builtins.end()) || Racy(instruction[3], fencedBefore);
                     break;
                 }
+                case spv::OpAtomicLoad:
+                    varying = NonUniform(instruction.at(3)) || Racy(instruction[3], fencedBefore);
+                    break;
                 case spv::OpPhi:
                     varying = inDivergentFlow || divergentMerges.contains(label);
                     for (std::size_t operand = 3u; !varying && operand < instruction.size(); operand += 2u) varying = NonUniform(instruction[operand]);
@@ -338,7 +483,7 @@ private:
                     for (std::size_t operand = 4u; !varying && operand < instruction.size(); ++operand) varying = NonUniform(instruction[operand]);
                     break;
                 default:
-                    varying = PerInvocationResult(op);
+                    varying = PerInvocationResult(op) || (ImageRead(op) && Written(spv::StorageClassImage));
                     if (!varying) VisitIdOperands(instruction, 1u, [&](std::size_t operand) { varying = varying || NonUniform(instruction[operand]); });
                     break;
                 }
@@ -349,7 +494,11 @@ private:
         }
     }
 
+    static constexpr std::uint32_t UnknownClass = 0xffffffffu;
+
     const Module& module;
+    std::unordered_map<std::uint32_t, std::uint32_t> types;
+    std::unordered_set<std::uint32_t> written;
     std::unordered_set<std::uint32_t> barriers;
     std::unordered_set<std::uint32_t> nonUniform;
     std::unordered_set<std::uint32_t> storedNonUniform;
@@ -360,6 +509,9 @@ private:
 }
 
 std::optional<std::string> SpannedBarrierInDivergentFlow(std::span<const std::uint32_t> words) {
+    bool barrier = false;
+    for (std::size_t cursor = 5u; !barrier && cursor < words.size(); cursor += std::max(words[cursor] >> 16u, 1u)) barrier = (words[cursor] & 0xffffu) == spv::OpControlBarrier;
+    if (!barrier) return std::nullopt;
     const auto module = Parse(words);
     return Analysis(module).Run();
 }

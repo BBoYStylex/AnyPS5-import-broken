@@ -365,8 +365,15 @@ function(add_shader_recompiler target runtimeTarget)
         target_include_directories(spanned_uniformity_tests PRIVATE
             "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/SpirvBackend/include"
             ${ANYPS5_SPIRV_HEADERS_INCLUDE_DIR})
+        set_target_properties(spanned_uniformity_tests PROPERTIES CXX_EXTENSIONS OFF)
+        configure_windows_unwind(spanned_uniformity_tests)
         add_test(NAME spanned_uniformity COMMAND spanned_uniformity_tests)
         set_tests_properties(spanned_uniformity PROPERTIES TIMEOUT 20)
+        if(MINGW)
+            target_link_libraries(spanned_uniformity_tests PRIVATE libc)
+            set_tests_properties(spanned_uniformity PROPERTIES ENVIRONMENT_MODIFICATION
+                    "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+        endif()
     endif()
     if(BUILD_TESTING AND ANYPS5_ENABLE_SPIRV_TOOLS AND NOT ANYPS5_USE_SYSTEM_DEPS AND NOT TARGET spirv_validator_exit_tests)
         add_test_executable(spirv_validator_exit_tests "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/tests/SpirvValidatorExit.cpp")
