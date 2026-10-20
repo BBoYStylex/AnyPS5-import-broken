@@ -140,9 +140,8 @@ int APS5_VABI sceVoiceQoSSetLocalEndpointAttribute(int32_t localId, int32_t attr
     return Locked([&](QoS& qos) { return SetAttribute(qos.locals, localId, attributeId, value, size); });
 }
 
-int APS5_VABI sceVoiceQoSSetRemoteEndpointAttribute() {
- NotImplemented_nid_no_patch(__func__);
- return 0;
+int APS5_VABI sceVoiceQoSSetRemoteEndpointAttribute(int32_t remoteId, int32_t attributeId, const void* value, int32_t size) {
+    return Locked([&](QoS& qos) { return SetAttribute(qos.remotes, remoteId, attributeId, value, size); });
 }
 
 int APS5_VABI sceVoiceQoSReadPacket() {
@@ -156,6 +155,83 @@ int APS5_VABI sceVoiceQoSWritePacket() {
 }
 
 int APS5_VABI sceVoiceQoSGetLocalEndpointAttribute() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceVoiceQoSGetRemoteEndpointAttribute(int32_t remoteId, int32_t attributeId, const void* value, int32_t size) {
+    (void)remoteId;
+    (void)attributeId;
+    (void)value;
+    (void)size;
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceVoiceQoSGetConnectionAttribute(int32_t connectionId, int32_t attributeId, void* value, int32_t size) {
+    (void)connectionId;
+    (void)attributeId;
+    (void)value;
+    (void)size;
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceVoiceQoSGetLocalEndpoint(int32_t connectionId, int32_t* localId) {
+    return Locked([&](QoS& qos) {
+        if (!localId) return SCE_VOICE_ERROR_LIBVOICEQOS_ARGUMENT_INVALID;
+        const auto it = qos.connections.find(connectionId);
+        if (it == qos.connections.end()) return SCE_VOICE_ERROR_LIBVOICEQOS_ARGUMENT_INVALID;
+        *localId = it->second.local;
+        return 0;
+    });
+}
+
+int APS5_VABI sceVoiceQoSGetRemoteEndpoint(int32_t connectionId, int32_t* remoteId) {
+    return Locked([&](QoS& qos) {
+        if (!remoteId) return SCE_VOICE_ERROR_LIBVOICEQOS_ARGUMENT_INVALID;
+        const auto it = qos.connections.find(connectionId);
+        if (it == qos.connections.end()) return SCE_VOICE_ERROR_LIBVOICEQOS_ARGUMENT_INVALID;
+        *remoteId = it->second.remote;
+        return 0;
+    });
+}
+
+int APS5_VABI sceVoiceQoSEnableChat() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceVoiceQoSDisableChat() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceVoiceQoSGetStatus(int32_t connectionId, int32_t statusId, void* value, int32_t size) {
+    (void)connectionId;
+    (void)statusId;
+    (void)value;
+    (void)size;
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceVoiceQoSDebugGetStatus() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceVoiceQoSInitHQ() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceVoiceQoSSetMode() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceVoiceQoSTerminate() {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
