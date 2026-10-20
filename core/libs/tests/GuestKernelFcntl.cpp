@@ -11,6 +11,9 @@
 #include <thread>
 #ifndef _WIN32
 #include <sys/stat.h>
+#include <fcntl.h>
+#include <sys/socket.h>
+#include <unistd.h>
 #endif
 extern "C" {
 int APS5_VABI socket_nid_postfix(int, int, int);
@@ -388,6 +391,27 @@ static void PipeFlagsRoundTrip() {
     for (const int descriptor : pipe) Require(close_nid_postfix(descriptor) == 0);
 }
 
+#ifndef _WIN32
+static void HostSocketFlags() {
+    int sockets[2] = {-1, -1};
+    Require(::socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) == 0);
+    Require(fcntl_nid_postfix(sockets[0], GetFlags) == ReadWrite);
+    Require(fcntl_nid_postfix(sockets[0], SetFlags, NonBlocking) == 0);
+    Require(fcntl_nid_postfix(sockets[0], GetFlags) == (ReadWrite | NonBlocking));
+    Require((::fcntl(sockets[0], F_GETFL) & O_NONBLOCK) != 0);
+    Require(fcntl_nid_postfix(sockets[0], SetDescriptorFlags, 1) == 0);
+    Require(fcntl_nid_postfix(sockets[0], GetDescriptorFlags) == 1);
+    Require(::write(sockets[1], "abc", 3) == 3);
+    int available = 0;
+    Require(ioctl_nid_postfix(sockets[0], ReadableRequest, &available) == 0 && available == 3);
+    GuestLock lock{0, 0, 0, WriteLock, FromStart, 0};
+    RequireFailure(fcntl_nid_postfix(sockets[0], SetLock, &lock), GuestEbadf);
+    RequireFailure(fcntl_nid_postfix(sockets[0], DarwinReadAhead, 1), GuestEbadf);
+    Require(ThrowsWith([&sockets] { fcntl_nid_postfix(sockets[0], SetFlags, NonBlocking | 0x40); }, "fcntl: O_ASYNC on a socket is not implemented"));
+    for (const int socket : sockets) Require(close_nid_postfix(socket) == 0);
+}
+#endif
+
 static void StandardInputFlags() {
 #ifndef _WIN32
     struct stat status{};
@@ -412,6 +436,9 @@ int main() {
     FileFlagsRoundTrip();
     RecordLocksBelongToTheProcess();
     PipeFlagsRoundTrip();
+#ifndef _WIN32
+    HostSocketFlags();
+#endif
     StandardInputFlags();
     return 0;
 }
