@@ -62,9 +62,9 @@ constexpr std::uint64_t DriverMemoryAddress = MacOsDriverMemoryBase;
 constexpr std::size_t DriverMemoryBytes = DriverMemorySpan;
 constexpr std::uint64_t FsTableAddress = RetargetPs5DriverMemory(0xfe0040000ull);
 #else
-constexpr std::uint64_t DriverMemoryAddress = 0xfe0000000ull;
+constexpr std::uint64_t DriverMemoryAddress = 0xfe0000000ull + GuestArena::GuestAddressOffset;
 constexpr std::size_t DriverMemoryBytes = 2u << 20u;
-constexpr std::uint64_t FsTableAddress = 0xfe0040000ull;
+constexpr std::uint64_t FsTableAddress = DriverMemoryAddress + 0x40000ull;
 #endif
 constexpr std::uint64_t FsTableSlotBytes = 16u;
 constexpr std::uint64_t FsTableSlots = 6u;
