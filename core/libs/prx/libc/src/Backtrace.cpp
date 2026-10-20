@@ -7,9 +7,14 @@
 
 #include "prx/libc/include/General.hpp"
 
+#if defined(__linux__) || defined(_WIN32)
+
 #ifdef __linux__
 #include <dlfcn.h>
 #include <execinfo.h>
+#elif defined(_WIN32)
+#include <windows.h>
+#endif
 
 namespace {
 
@@ -29,6 +34,11 @@ struct FrameRecord {
 };
 static_assert(sizeof(FrameRecord) == NameOffset);
 
+std::size_t RecordSize(const Frame& frame) {
+    return (NameOffset + frame.module.size() + 1 + 7) & ~std::size_t{7};
+}
+
+#ifdef __linux__
 [[gnu::noinline]] std::vector<Frame> CaptureFrames(int limit) {
     void* addresses[MaxFrames];
     const int captured = backtrace(addresses, MaxFrames);
@@ -46,10 +56,29 @@ static_assert(sizeof(FrameRecord) == NameOffset);
     }
     return frames;
 }
-
-std::size_t RecordSize(const Frame& frame) {
-    return (NameOffset + frame.module.size() + 1 + 7) & ~std::size_t{7};
+#elif defined(_WIN32)
+[[gnu::noinline]] std::vector<Frame> CaptureFrames(int limit) {
+    void* addresses[MaxFrames];
+    const USHORT captured = CaptureStackBackTrace(2, MaxFrames, addresses, nullptr);
+    std::vector<Frame> frames;
+    for (USHORT index = 0; index < captured && (limit < 0 || static_cast<int>(frames.size()) < limit); ++index) {
+        HMODULE hModule = nullptr;
+        if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                reinterpret_cast<LPCSTR>(addresses[index]), &hModule) || hModule == nullptr)
+            continue;
+        const auto offset = reinterpret_cast<std::uintptr_t>(addresses[index]) - reinterpret_cast<std::uintptr_t>(hModule);
+        if (offset > UINT32_MAX) continue;
+        char path[MAX_PATH];
+        if (GetModuleFileNameA(hModule, path, MAX_PATH) == 0) continue;
+        std::string module = path;
+        if (const auto slash = module.find_last_of("/\\"); slash != std::string::npos) module.erase(0, slash + 1);
+        if (module.size() > sizeof(GuestSuffix) - 1 && module.compare(module.size() - (sizeof(GuestSuffix) - 1), std::string::npos, GuestSuffix) == 0)
+            module.resize(module.size() - (sizeof(GuestSuffix) - 1));
+        frames.push_back({static_cast<std::uint32_t>(offset), std::move(module)});
+    }
+    return frames;
 }
+#endif
 
 }  // namespace
 
