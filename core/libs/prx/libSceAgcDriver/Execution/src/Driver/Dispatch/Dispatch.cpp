@@ -362,7 +362,13 @@ void Driver::dispatch(QueueState& queue, std::span<const std::uint32_t> packet, 
             totalMs += elapsed;
             if (profile && elapsed > 200) std::fprintf(stderr, "[gpu] compute shader 0x%llx recompile took %.0f ms (%zu SPIR-V words, %zu captured regions, total %.1f s)\n", static_cast<unsigned long long>(address), elapsed, compiledResult->spirv.size(), captured.size(), totalMs / 1000);
         } catch (const std::exception& error) {
-            const auto dump = dumpShaders ? dumpRequest(address, request) : std::string{};
+            std::string dump;
+            if (dumpShaders) {
+                const auto regions = shaderMemory->Regions();
+                auto failed = request;
+                failed.context.memory = regions;
+                dump = dumpRequest(address, failed, "_failed");
+            }
 
             std::string reason = error.what();
             if (const auto newline = reason.find('\n'); newline != std::string::npos) reason.resize(newline);
@@ -387,8 +393,8 @@ void Driver::dispatch(QueueState& queue, std::span<const std::uint32_t> packet, 
         parked.keepVariant = keepVariant;
         parked.attachVariant = attachVariant;
         parked.shaderMemory = shaderMemory;
-        parked.captured = captured;
-        parked.liveWords = liveWords;
+        parked.captured = std::move(captured);
+        parked.liveWords = std::move(liveWords);
         parked.capture = capture;
         parked.dataHit = dataHit;
         parked.cached = cached;
@@ -448,7 +454,7 @@ void Driver::dispatch(QueueState& queue, std::span<const std::uint32_t> packet, 
         const auto epoch = DrawPipeline::EpochToken().load(std::memory_order_relaxed);
         const auto queueId = submission.queue;
         itemCommits.fetch_add(1, std::memory_order_relaxed);
-        DrawPipeline::Queue0().Enqueue([this, localDevice = std::move(localDevice), result = compiledResult, snapshots = std::move(snapshots), groups, address, queueId, recipe, keepVariant, dataHit, epoch] {
+        DrawPipeline::Queue0().Enqueue([this, localDevice = std::move(localDevice), result = compiledResult, snapshots = std::move(snapshots), liveWords = std::move(liveWords), groups, address, queueId, recipe, keepVariant, dataHit, epoch] {
             DrawPipeline::FollowEpoch(epoch);
             GuestMemory::SetCurrentPacket(0x15, queueId);
             const auto& compiledCommit = *result;

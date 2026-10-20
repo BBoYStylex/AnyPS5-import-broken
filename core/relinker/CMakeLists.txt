@@ -465,6 +465,9 @@ if(BUILD_TESTING)
         add_test(NAME guest_relative_section_symbols COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_guest_relative_section_symbols.py $<TARGET_FILE:relinker>)
         set_tests_properties(guest_relative_section_symbols PROPERTIES TIMEOUT 20)
+        add_test(NAME overlapping_relocations COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_overlapping_relocations.py $<TARGET_FILE:relinker>)
+        set_tests_properties(overlapping_relocations PROPERTIES TIMEOUT 30)
         add_test(NAME optional_plt COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_optional_plt.py $<TARGET_FILE:relinker>)
         add_test(NAME optional_rela COMMAND ${Python3_EXECUTABLE}
@@ -599,6 +602,10 @@ if(BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_guest_absolute_symbols.py $<TARGET_FILE:relinker>)
         add_test(NAME guest_module_identity COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_guest_module_identity.py $<TARGET_FILE:relinker>)
+        add_test(NAME guest_unused_import_dependencies COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_guest_unused_import_dependencies.py
+            $<TARGET_FILE:relinker> $<TARGET_FILE:guest_module_args_host>)
+        set_property(TEST guest_unused_import_dependencies APPEND PROPERTY LABELS relinker)
         add_test(NAME guest_export_lookup COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_guest_export_lookup.py $<TARGET_FILE:relinker>)
         set_tests_properties(guest_export_lookup PROPERTIES TIMEOUT 30)
@@ -678,6 +685,8 @@ if(BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_sce_relro.py $<TARGET_FILE:relinker>)
         add_test(NAME sce_module_code_extent COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_sce_module_code_extent.py $<TARGET_FILE:relinker>)
+        add_test(NAME sce_code_gaps COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_sce_code_gaps.py $<TARGET_FILE:relinker>)
         add_test(NAME call_registry COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_call_registry.py $<TARGET_FILE:relinker>)
         add_test(NAME jmprel_table_bounds COMMAND ${Python3_EXECUTABLE}

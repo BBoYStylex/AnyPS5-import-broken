@@ -239,6 +239,7 @@ function(add_shader_recompiler target runtimeTarget)
             HashBytes
             LayoutBarycentricEmulation
             MeshBarycentricLayoutOf
+            NativeCachePath_nid_no_patch
             ImageTableAbi::PoisonCode
             ImageTableAbi::PoisonReasonName
             ImageTableAbi::TableHeader

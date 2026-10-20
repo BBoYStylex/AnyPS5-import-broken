@@ -260,6 +260,10 @@ When a dump has neither `sce_sys/playgo-chunk.dat` nor `sce_sys/playgo-scenario.
 
 Leave the variable unset to keep the explicit error. Any other value also stops with an error. Dumps that include PlayGo metadata are unaffected. These title-specific results come from emulator runs and have not been verified against a console.
 
+### Screenshots
+
+Press F12 in the game window to save the next displayed frame as a PNG at the resolution of the game's display buffer, without the window's scaling, letterbox or [performance overlay](#performance-overlay). A BT.2100 PQ display buffer is saved converted to SDR, also while it is shown through [HDR output](#hdr-output). Files are named `<title ID>-<YYYYMMDD-HHMMSS>.png` and written to an `anyps5-screenshots/` directory beside the output executable, which is created when needed; set `ANYPS5_SCREENSHOTS` to use another directory. The saved path is printed to stderr. Presses while the previous screenshot is still being written are merged into one. The key is the `Screenshot` action of the [input mapping](INPUT_MAPPING.md). A screenshot that cannot be written stops the game with the error.
+
 ### GPU selection
 
 The game runs on the first Vulkan 1.1 device with graphics and compute queues and swapchain presentation, preferring a discrete GPU over an integrated one. Set `ANYPS5_GPU` to a part of a device name, compared without regard to case, to run on another device; the names are printed at start-up in the `Physical device candidate` lines. When no usable device contains the text, the start fails and the error lists the device names.
@@ -283,7 +287,7 @@ HDR output is available on Windows only. Titles see it when the monitor showing 
 
 ### Shader cache
 
-Recompiled shaders and the Vulkan pipeline cache are kept in a `shader_cache/` directory beside the output executable, so later runs skip recompilation. Set `ANYPS5_SHADER_CACHE_DIR` to use another directory, or set `ANYPS5_NO_SHADER_CACHE` to any non-empty value other than `0` to disable both caches. Shaders are stored in a subdirectory named after the recompiler's source version; subdirectories of other versions unused for 14 days are removed the first time a run looks up a shader. The pipeline cache is one `vk-pipelines-*.bin` file per GPU and driver version. Entries of the current version are never removed and the directory has no size limit, so a title that compiles many shaders can add several GB within minutes. Deleting the directory is safe: it is rebuilt on the next run.
+Recompiled shaders and the Vulkan pipeline cache are kept in a `shader_cache/` directory beside the output executable, so later runs skip recompilation. Set `ANYPS5_SHADER_CACHE_DIR` to use another directory, or set `ANYPS5_NO_SHADER_CACHE` to any non-empty value other than `0` to disable both caches. Shaders are stored in a subdirectory named after the recompiler's source version; subdirectories of other versions unused for 14 days are removed the first time a run looks up a shader. The pipeline cache is one `vk-pipelines-*.bin` file per GPU and driver version in the same subdirectory, so it goes with the shaders it was built from. Entries of the current version are never removed and the directory has no size limit, so a title that compiles many shaders can add several GB within minutes. Deleting the directory is safe: it is rebuilt on the next run.
 
 ### Pipeline journal
 
