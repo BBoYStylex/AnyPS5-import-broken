@@ -1,3 +1,4 @@
+#include "prx/libSceAgcDriver/Execution/include/Driver/Synchronization/SynchronizationStatistics.hpp"
 #include "prx/libSceAgcDriver/Execution/include/GuestMemory.hpp"
 #include "prx/libSceAgcDriver/Execution/include/VulkanDevice.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Context.hpp"
@@ -150,8 +151,8 @@ std::uint64_t AddressOf(volatile const std::uint32_t* word) {
 int StoreLabel(AgcDriver::VulkanDevice& device, std::uint64_t address, std::uint32_t value, std::uint64_t stamp) {
     const auto bytes = std::as_bytes(std::span(&value, 1));
     const int reason = device.WriteLabelOnGpu(address, bytes, stamp, 0);
-    if (reason >= 1 && reason <= 4) {
-        if (reason != 1) device.WaitIdle();
+    if ((reason >= 1 && reason <= 4) || reason == 7) {
+        if (reason != 1 && reason != 7) device.WaitIdle();
         AgcDriver::GuestMemory::Write(address, bytes, 4);
     }
     return reason;
@@ -179,7 +180,7 @@ int main() {
             const auto bytes = std::as_bytes(std::span(value));
             const auto address = temporary.Address() + 4092;
             const int reason = device->WriteLabelOnGpu(address, bytes, 90, 0);
-            Require(reason == 1 && AgcDriver::Graphics::HostImportLiveBytes() == imported, "an eight-byte label did not select its unimported CPU path (reason " + std::to_string(reason) + ")");
+            Require(reason == 7 && AgcDriver::Graphics::HostImportLiveBytes() == imported, "an eight-byte label did not select its unimported CPU path (reason " + std::to_string(reason) + ")");
             Require(labels.Words()[1024] == pattern[0], "the targeted label returned before preceding GPU work completed");
             device->WaitIdle();
             AgcDriver::GuestMemory::Write(address, bytes, 4);
@@ -203,6 +204,14 @@ int main() {
         std::array<char, 256> message{};
         std::snprintf(message.data(), message.size(), "unimported label order: the label held 0x%08x when a later label had landed, and the guest's reused word holds 0x%08x instead of 0x%08x", seen, reused, ReleaseMemHeader);
         Require(seen == 1 && reused == ReleaseMemHeader, message.data());
+        {
+            using namespace AgcDriver::DriverDetail;
+            const auto synced = syncedUnimportedLabels.load();
+            const auto idle = labelFallbacks[1].load();
+            const auto notImported = labelFallbacks[3].load();
+            countLabelOutcome(7);
+            Require(syncedUnimportedLabels.load() == synced + 1 && labelFallbacks[1].load() == idle && labelFallbacks[3].load() == notImported, "an unimported label after a recorder sync was not counted on its own");
+        }
         {
             Require(device->FillBuffer(labels.Address() + 4096, 4096, pattern), "cannot record work before the compute-queue label");
             auto* recorder = AgcDriver::Graphics::Recorder::Active();
