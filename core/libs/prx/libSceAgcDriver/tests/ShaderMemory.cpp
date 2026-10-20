@@ -5453,8 +5453,8 @@ void verifyMergedHullConfiguration() {
     require(!serializer.Deserialize(separate).request.graphics->tessellation->mergedHull, "a separate hull configuration was read as merged");
     constexpr std::size_t pointTailBytes = 13u;
     auto legacy = decodeBase64(merged);
-    require(legacy.size() > 54u + pointTailBytes && legacy[4] == 44u, "a merged hull request did not use serialization version 44");
-    legacy.resize(legacy.size() - 1u - pointTailBytes);
+    require(legacy.size() > 54u + pointTailBytes && legacy[4] == 45u, "a merged hull request did not use serialization version 45");
+    legacy.resize(legacy.size() - 2u - pointTailBytes);
     legacy.pop_back();
     require(legacy[legacy.size() - 52u] == 1u, "the merged hull flag is not the last byte of the tessellation configuration");
     legacy.erase(legacy.end() - 52);
