@@ -889,27 +889,7 @@ int APS5_VABI sceNpCheckNpAvailabilityA() {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
-int APS5_VABI sceNpCheckPlus() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-int APS5_VABI sceNpGetAccountCountry() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-int APS5_VABI sceNpGetAccountDateOfBirth() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
 int APS5_VABI sceNpGetAccountDateOfBirthA() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-int APS5_VABI sceNpGetAccountId() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-int APS5_VABI sceNpGetAccountLanguage() {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -925,15 +905,7 @@ int APS5_VABI sceNpGetGamePresenceStatusA() {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
-int APS5_VABI sceNpGetParentalControlInfo() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
 int APS5_VABI sceNpGetParentalControlInfoA() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-int APS5_VABI sceNpGetUserIdByOnlineId() {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -1121,11 +1093,6 @@ int APS5_VABI sceNpManagerPrxStopVsh() {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
-int APS5_VABI sceNpNotifyPlusFeature(void* param) {
-    (void)param;
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
 int APS5_VABI sceNpPush2CreateUserContext() {
     NotImplemented_nid_no_patch(__func__);
     return 0;
@@ -1286,13 +1253,6 @@ int APS5_VABI sceNpSetAdditionalScope() {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
-int APS5_VABI sceNpSetGamePresenceOnline(int req_id, const NpOnlineId* online_id, uint32_t presence) {
-    (void)req_id;
-    (void)online_id;
-    (void)presence;
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
 int APS5_VABI sceNpSetGamePresenceOnlineA(int req_id, int user_id, uint32_t presence) {
     (void)req_id;
     (void)user_id;
@@ -1306,10 +1266,6 @@ int APS5_VABI sceNpSetNpTitleIdVsh() {
 }
 int APS5_VABI sceNpUnregisterGamePresenceCallbackA(int callback_id) {
     (void)callback_id;
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-int APS5_VABI sceNpUnregisterPlusEventCallback() {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
