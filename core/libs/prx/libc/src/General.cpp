@@ -15,6 +15,9 @@
 #include <set>
 #include <span>
 #include <system_error>
+#ifdef __APPLE__
+#include <limits.h>
+#endif
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -155,6 +158,11 @@ std::filesystem::path ResolveHostPath(std::filesystem::path root, const std::vec
         error = MatchNames(root, std::span(names, last ? 2 : 1));
         if (names[0].ambiguous) throw std::runtime_error("Ambiguous case-insensitive guest path: " + candidate.string());
         const bool matched = !error && names[0].path;
+#ifdef __APPLE__
+        if (!matched && std::next(part) != relative.end() && direct.native().size() >= PATH_MAX) {
+            throw std::filesystem::filesystem_error("Guest path component is missing", candidate, std::make_error_code(std::errc::no_such_file_or_directory));
+        }
+#endif
         root = matched ? *names[0].path : candidate;
         if (!last || matched) continue;
         if (std::filesystem::is_regular_file(relinked, error)) return relinked;
