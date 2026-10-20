@@ -18,6 +18,7 @@
 #include <string>
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
+#include "prx/libc/include/RemoveTree.hpp"
 #include "prx/libkernel/AppMetadata/include/AppMetadata.hpp"
 #include "SaveData.hpp"
 #include "prx/libSceSaveData/SaveDataFile.hpp"
@@ -340,7 +341,7 @@ static int deleteSave(const SaveDataDelete* del) {
     std::lock_guard lock(g_slots_mutex);
     if (isMountedDirectory(path)) return SAVE_DATA_ERROR_BUSY;
     if (std::filesystem::is_directory(path)) {
-        std::filesystem::remove_all(path);
+        RemoveTree(path);
     }
     std::error_code ec;
     std::filesystem::remove(param_path(path), ec);
@@ -989,6 +990,51 @@ int APS5_VABI sceSaveDataDirNameSearch2(const SaveDataDirNameSearchCond* cond, S
 }
 
 int APS5_VABI sceSaveDataPrepareForTransferring() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceSaveDataCheckIpmiIfSize() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceSaveDataDebug() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceSaveDataDebugCheckBackupData() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceSaveDataDebugCleanMount() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceSaveDataDebugCompiledSdkVersion() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceSaveDataDebugCreateSaveDataRoot() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceSaveDataDebugProspero() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceSaveDataDebugRemoveSaveDataRoot() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceSaveDataDebugTarget() {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }

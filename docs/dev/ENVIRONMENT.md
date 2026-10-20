@@ -73,6 +73,7 @@ The code reads environment names through `getenv`, `IsEnvironmentSet`, `kibSetti
 | `ANYPS5_REQUIRE_DESCRIPTOR_BINDING_FLAGS` | presence | `core/libs/prx/libSceAgcDriver/tests/ComputePipelineReplay.cpp` |  | fails the replay test instead of accepting a device that refuses descriptor binding flags |
 | `ANYPS5_REQUIRE_ROBUST2` | presence | `core/libs/prx/libSceAgcDriver/tests/execution/LdsMixedWidthAtomics.cpp` |  | fails the LDS lock-budget test when the device does not enable robustBufferAccess2, instead of only printing it |
 | `ANYPS5_REQUIRE_VULKAN` | presence | `core/libs/prx/libSceAgcDriver/tests/BdaDevice.cpp` |  | fails a test instead of skipping when no usable Vulkan device is present |
+| `ANYPS5_SCREENSHOTS` | string | `core/libs/prx/libSceAgcDriver/Execution/src/Screenshot.cpp` |  | directory the screenshot key saves its PNG files to, defaulting to anyps5-screenshots beside the executable |
 | `APS5_ADDRESS_COPY_MAX_MIB` | integer | `core/libs/prx/libSceAgcDriver/Graphics/src/GuestBufferMemory.cpp` | 64 | upper bound in MiB on the guest memory one address-based build copies; exceeding it aborts |
 | `APS5_ALL_BUFFERS_WRITTEN` | presence | `core/libs/prx/libSceAgcDriver/Graphics/src/ShaderResources.cpp` |  | notes every shader buffer element as written, as before bufferWritten existed |
 | `APS5_ASSERT_GPU_LOCK` | presence | `core/libs/prx/libSceAgcDriver/Execution/src/GuestMemory.cpp` |  | aborts when a guarded path is reached without holding GuestMemory::GpuMutex |
@@ -102,6 +103,7 @@ The code reads environment names through `getenv`, `IsEnvironmentSet`, `kibSetti
 | `APS5_COUNT_ALL_COMPLETION_LABELS` | presence | `core/libs/prx/libSceAgcDriver/Graphics/src/Recorder.cpp` |  | counts a completion label also stored on the GPU as pending from its registration |
 | `APS5_CPU_COPIES` | presence | `core/libs/prx/libSceAgcDriver/Graphics/src/GuestBufferMemory.cpp` |  | copies misaligned descriptor sub-ranges on the CPU instead of with a GPU buffer copy |
 | `APS5_CPU_DCC_KEYS` | presence | `core/libs/prx/libSceAgcDriver/Graphics/src/DccMetadata.cpp` |  | always stores DCC keys on the CPU |
+| `APS5_CPU_FLIP_IN_ORDER` | presence | `core/libs/prx/libSceAgcDriver/Execution/src/Driver/Queues/Submission.cpp` |  | orders every CPU flip behind queued work instead of presenting unqueued flips at once |
 | `APS5_CPU_STORES` | presence | `core/libs/prx/libSceAgcDriver/Execution/src/Driver/Packets/PacketMemory.cpp` |  | writes packet stores on the CPU instead of recording them on the GPU |
 | `APS5_DCC_KEYS_EACH` | presence | `core/libs/prx/libSceAgcDriver/Graphics/src/Recorder.cpp` |  | records every DCC key store at once instead of batching them |
 | `APS5_DEPTH_COPY_MIN_KIB` | integer | `core/libs/prx/libSceAgcDriver/Graphics/src/ShaderResources.cpp` | 1024 | minimum surface size in KiB for a depth target to take the depth-copy path |
@@ -152,7 +154,7 @@ The code reads environment names through `getenv`, `IsEnvironmentSet`, `kibSetti
 | `APS5_HOOK_FLUSH_CPU_BLOCKS` | presence | `core/libs/prx/libSceAgcDriver/Graphics/src/Recorder.cpp` |  | set to 0 flushes pending images whose every 64 KiB block the CPU wrote, instead of skipping them |
 | `APS5_HOOK_FULL_SYNC` | presence | `core/libs/prx/libSceAgcDriver/Graphics/src/Recorder.cpp` |  | makes the flush hook's recorded-store wait a full Sync under the GpuMutex |
 | `APS5_HOOK_LOCKED_WAIT` | presence | `core/libs/prx/libSceAgcDriver/Graphics/src/Recorder.cpp` |  | keeps the flush hook's pending-write wait under the GpuMutex |
-| `APS5_HOST_IMPORT_MIB` | integer | `core/libs/prx/libSceAgcDriver/Graphics/src/GuestBufferMemory.cpp` | 6144 | budget in MiB for pinned host imports; 6144 is the floor, and an unset or 0 value uses the largest host heap minus 2 GiB |
+| `APS5_HOST_IMPORT_MIB` | integer | `core/libs/prx/libSceAgcDriver/Graphics/src/GuestBufferMemory.cpp` | 0 | budget in MiB for pinned host imports; `0` selects the larger of 6144 MiB and half the physical memory, at most the largest host heap minus the larger of 2 GiB and half that heap (4055 MiB on a 16 GB Windows PC with an RTX 4060) |
 | `APS5_IGNORE_DEPTH_TEST` | presence | `core/libs/prx/libSceAgcDriver/Graphics/src/State.cpp` |  | renders depth- and stencil-tested draws without a depth target as if the tests always passed |
 | `APS5_INDIRECT_VERTEX_MIB` | integer | `core/libs/prx/libSceAgcDriver/Execution/src/Driver/Draw/IndirectDraw.cpp` | 64 | cap in MiB on a vertex attribute extent, above which a GPU-side indirect draw resolves on the CPU |
 | `APS5_INSERT_COMPARE` | presence | `core/libs/prx/libSceAgcDriver/Execution/src/Driver/Dispatch/DispatchCache.cpp` |  | compares a fresh capture's regions against the recorder before inserting it into the cache |
@@ -225,7 +227,7 @@ The code reads environment names through `getenv`, `IsEnvironmentSet`, `kibSetti
 | `APS5_NO_FLUSH_PRETEST` | presence | `core/libs/prx/libSceAgcDriver/Graphics/src/Texture.cpp` |  | lists every pending image on FlushPending instead of testing whether a pending unit lies inside the range |
 | `APS5_NO_FOREIGN_WRITERS` | presence | `core/libs/prx/libSceAgcDriver/Execution/src/Driver/Memory/WriteEvidence.cpp` |  | records no draw-written ranges as foreign writers for capture validation |
 | `APS5_NO_GATE_RETRY` | presence | `core/libs/prx/libSceAgcDriver/Execution/src/Driver/Memory/WriteEvidence.cpp` |  | retries no validation whose entry moved, leaving the dispatch or draw unvalidated |
-| `APS5_NO_GPL` | presence | `core/libs/prx/libSceAgcDriver/Execution/src/VulkanDevice.cpp` |  | disables graphics pipeline libraries |
+| `APS5_NO_GPL` | presence | `core/libs/prx/libSceAgcDriver/Execution/src/VulkanDevice.cpp` |  | draws without graphics pipeline libraries; the device still enables their extensions, so the driver builds its pipelines as for a default device |
 | `APS5_NO_GPU_DUMP` | presence | `core/libs/prx/libSceAgcDriver/Execution/src/VulkanDevice.cpp` |  | decodes dump frames from the tiled guest buffer on the CPU |
 | `APS5_NO_GPU_INDIRECT` | presence | `core/libs/prx/libSceAgcDriver/Execution/src/Driver/Dispatch/IndirectDispatch.cpp` |  | reads indirect dispatch arguments on the CPU instead of letting the GPU count them |
 | `APS5_NO_GPU_INDIRECT_DRAW` | presence | `core/libs/prx/libSceAgcDriver/Graphics/src/Draw.cpp` |  | reads indirect draw arguments through the flush hook on the CPU instead of from the GPU |
@@ -379,6 +381,7 @@ The code reads environment names through `getenv`, `IsEnvironmentSet`, `kibSetti
 | `APS5_THREAD_RT` | integer | `core/libs/prx/libSceAgcDriver/Execution/src/ThreadPriority.cpp` | 10 | realtime priority the raised threads ask rtkit for (clamped to 1..99) |
 | `APS5_THREAD_RTTIME_US` | integer | `core/libs/prx/libSceAgcDriver/Execution/src/ThreadPriority.cpp` | 200000 | hard RLIMIT_RTTIME the realtime plan lowers to, in microseconds |
 | `APS5_TRACE_BARRIERS` | integer | `core/libs/prx/libSceAgcDriver/Graphics/src/Recorder.cpp` |  | prints that many simulated hazard barriers before stopping |
+| `APS5_TRACE_BENCH` | string | `core/libs/prx/libSceAgcDriver/Execution/include/PerformanceTrace.hpp` |  | `1` with `APS5_TRACE_SUMMARY_EVERY` also rewrites `aps5-bench-<commit>-<pid>.json.gz` with every interval's frame times; any other value fails the first present |
 | `APS5_TRACE_BIGBUF` | presence | `core/libs/prx/libSceAgcDriver/Graphics/src/GuestBufferMemory.cpp` |  | lists every copied guest region of at least 1 MiB |
 | `APS5_TRACE_CAPSYNC` | presence | `core/libs/prx/libSceAgcDriver/Execution/src/Driver/Memory/WriteEvidence.cpp` |  | prints every unlocked hook wait |
 | `APS5_TRACE_CONTEXT_STATE` | presence | `core/libs/prx/libSceAgcDriver/Execution/src/Pm4.cpp` |  | logs context-state operations and the context registers written |
@@ -506,6 +509,7 @@ The code reads environment names through `getenv`, `IsEnvironmentSet`, `kibSetti
 | `ANYPS5_INPUT_CONFIG` | string | `core/libs/prx/libSceVideoOut/src/InputMapping.cpp` |  | path of the input mapping file that binds host keys and mouse to guest pad actions |
 | `ANYPS5_REQUIRE_DISPLAY` | presence | `core/libs/prx/libSceVideoOut/tests/Flip.cpp` |  | makes video-out tests fail instead of skipping when no display or Vulkan device is available |
 | `APS5_NO_PAD_INPUT` | presence | `core/libs/prx/libSceVideoOut/src/PadInput.cpp` |  | ignores keyboard and mouse input so a measurement run is not advanced by a stray press |
+| `APS5_VIDEOOUT_TELEMETRY_DIR` | string | `core/libs/prx/libSceVideoOut/src/Telemetry.cpp` |  | directory where videoout.jsonl is appended with the pad and present telemetry lines; nothing is opened when unset or empty |
 
 ### libSceVideodec2
 
