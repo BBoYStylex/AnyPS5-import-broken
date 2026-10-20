@@ -1593,7 +1593,7 @@ ResolutionMemo& resolutionMemo() {
 
 constexpr std::size_t ResolutionMemoEntries = 256;
 constexpr std::size_t ResolutionMemoVariantEntries = 4;
-constexpr std::size_t ResolutionMemoWords = std::size_t{1} << 23u;
+constexpr std::size_t ResolutionMemoWords = std::size_t{1} << 26u;
 
 bool sameColumns(const std::vector<ImageTableColumnSnapshot>& left, const std::vector<ImageTableColumnSnapshot>& right) {
     if (left.size() != right.size()) return false;
