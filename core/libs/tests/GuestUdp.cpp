@@ -99,6 +99,39 @@ static void CheckAddressLengths(int family) {
     Require(close_nid_postfix(sender) == 0 && close_nid_postfix(receiver) == 0);
 }
 
+static void CheckDissolvedIpv6Name() {
+    const int peer = socket_nid_postfix(28, 2, 0);
+    if (peer < 0 && *__error_nid_postfix() == 47) return;
+    Require(peer >= 0);
+    const int dissolved = socket_nid_postfix(28, 2, 0);
+    Require(dissolved >= 0);
+    std::array<unsigned char, 28> peerAddress{};
+    peerAddress[0] = 28;
+    peerAddress[1] = 28;
+    peerAddress[23] = 1;
+    std::array<unsigned char, 28> dissolvedAddress = peerAddress;
+    if (bind_nid_postfix(peer, peerAddress.data(), peerAddress.size()) != 0 && *__error_nid_postfix() == 49) {
+        Require(close_nid_postfix(peer) == 0 && close_nid_postfix(dissolved) == 0);
+        return;
+    }
+    Require(bind_nid_postfix(dissolved, dissolvedAddress.data(), dissolvedAddress.size()) == 0);
+    std::uint32_t size = peerAddress.size();
+    Require(getsockname_nid_postfix(peer, peerAddress.data(), &size) == 0);
+    size = dissolvedAddress.size();
+    Require(getsockname_nid_postfix(dissolved, dissolvedAddress.data(), &size) == 0);
+    Require(connect_nid_postfix(dissolved, peerAddress.data(), peerAddress.size()) == 0);
+    const std::array<unsigned char, 28> unspecified{28, 0};
+    Require(connect_nid_postfix(dissolved, unspecified.data(), unspecified.size()) == -1 && *__error_nid_postfix() == 47);
+    std::array<unsigned char, 28> name{};
+    size = name.size();
+    Require(getpeername_nid_postfix(dissolved, name.data(), &size) == -1 && *__error_nid_postfix() == 57);
+    size = name.size();
+    Require(getsockname_nid_postfix(dissolved, name.data(), &size) == 0 && size == name.size());
+    Require(name[2] == dissolvedAddress[2] && name[3] == dissolvedAddress[3]);
+    for (int offset = 8; offset < 24; ++offset) Require(name[static_cast<std::size_t>(offset)] == 0);
+    Require(close_nid_postfix(peer) == 0 && close_nid_postfix(dissolved) == 0);
+}
+
 static void CheckDontWait() {
     const int receiver = socket_nid_postfix(2, 2, 0);
     const int sender = socket_nid_postfix(2, 2, 0);
@@ -136,6 +169,7 @@ int main() {
     CheckAddressLengths(2);
     CheckAddressLengths(28);
     CheckDontWait();
+    CheckDissolvedIpv6Name();
     const int receiver = socket_nid_postfix(2, 2, 0);
     const int sender = socket_nid_postfix(2, 2, 17);
     Require(receiver >= 0 && sender >= 0 && receiver != sender);
