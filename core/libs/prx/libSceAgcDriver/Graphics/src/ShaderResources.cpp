@@ -3229,6 +3229,7 @@ bool ShaderResources::Revalidate(std::span<const CompiledShader> shaders, ProofR
     const auto start = profile ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
     for (const auto& region : directRegions) CompletePendingCpuWrites(context, region.begin, static_cast<std::size_t>(region.end - region.begin));
     for (const auto& range : describedRanges) {
+        if (!range.imageTable) RequireNoMultisampleColorTarget(range.address, static_cast<std::size_t>(range.bytes), "a cached image access");
         CompletePendingCpuWrites(context, range.address, static_cast<std::size_t>(range.bytes));
         if (range.dccAddress != 0) CompletePendingCpuWrites(context, range.dccAddress, DccKeyBytes(range.bytes));
     }
@@ -4487,6 +4488,7 @@ std::shared_ptr<Texture> ShaderResources::fastTexture(const ImageRecord& record)
     // between the stages marks them uncompressed).
     const auto address = record.resource.baseAddress;
     const auto bytes = static_cast<std::size_t>(record.guestBytes);
+    RequireNoMultisampleColorTarget(address, bytes != 0 ? bytes : 1u, "a texture read");
     if (DepthSurfaceAt(address)) return nullptr;
     if (GuestMemory::CollectWrites(address, bytes) == 0) return nullptr;
     if (PendingStorageOverlaps(address, bytes, record.source.get())) return nullptr;
@@ -4825,7 +4827,7 @@ void ShaderResources::resolveImageTables() {
         const auto place = [&](std::uint32_t element, std::shared_ptr<Texture> texture, const GuestTextureResource& resource, std::uint64_t guestBytes, bool firstLayer) {
             textures.push_back(std::move(texture));
             textureFirstLayer.push_back(firstLayer);
-            describedRanges.push_back({"texture", resource.baseAddress, guestBytes, resource.width, resource.height, resource.format, static_cast<int>(resource.tileMode), resource.dccAddress});
+            describedRanges.push_back({"texture", resource.baseAddress, guestBytes, resource.width, resource.height, resource.format, static_cast<int>(resource.tileMode), resource.dccAddress, true});
             table.elementTextures[element] = textures.size() - 1u;
             item->imageAllocations[static_cast<std::size_t>(table.elementBase) + element] = textures.size() - 1u;
         };
@@ -4944,7 +4946,7 @@ void ShaderResources::resolveImageTables() {
                 storageWritten.push_back(true);
                 storageAtomic.push_back(false);
                 storageAtomic64.push_back(false);
-                describedRanges.push_back({"storage", resource.baseAddress, guestBytes, resource.width, resource.height, resource.format, static_cast<int>(resource.tileMode), resource.dccAddress});
+                describedRanges.push_back({"storage", resource.baseAddress, guestBytes, resource.width, resource.height, resource.format, static_cast<int>(resource.tileMode), resource.dccAddress, true});
                 bindings[storageBinding].imageAllocations[absolute] = storageTextures.size() - 1u;
                 continue;
             }
