@@ -403,7 +403,7 @@ class JournalFile {
 public:
     explicit JournalFile(const std::filesystem::path& path) {
 #ifdef _WIN32
-        handle = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        handle = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, nullptr);
         LARGE_INTEGER length{};
         if (handle != INVALID_HANDLE_VALUE && GetFileSizeEx(handle, &length) && length.QuadPart >= 0) {
             size = static_cast<std::uint64_t>(length.QuadPart);
@@ -445,11 +445,21 @@ public:
         for (std::size_t done = 0; done < bytes.size();) {
             const auto position = offset + done;
 #ifdef _WIN32
+            struct ReadEvent {
+                HANDLE event = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+                ~ReadEvent() {
+                    if (event != nullptr) CloseHandle(event);
+                }
+            };
+            static thread_local ReadEvent completion;
+            if (completion.event == nullptr) return false;
             OVERLAPPED at{};
             at.Offset = static_cast<DWORD>(position);
             at.OffsetHigh = static_cast<DWORD>(position >> 32u);
+            at.hEvent = completion.event;
             DWORD count = 0;
-            if (!ReadFile(handle, bytes.data() + done, static_cast<DWORD>(std::min<std::size_t>(bytes.size() - done, MAXDWORD)), &count, &at) || count == 0) return false;
+            if (!ReadFile(handle, bytes.data() + done, static_cast<DWORD>(std::min<std::size_t>(bytes.size() - done, MAXDWORD)), nullptr, &at) && GetLastError() != ERROR_IO_PENDING) return false;
+            if (!GetOverlappedResult(handle, &at, &count, TRUE) || count == 0) return false;
 #else
             const auto count = ::pread(descriptor, bytes.data() + done, bytes.size() - done, static_cast<off_t>(position));
             if (count < 0 && errno == EINTR) continue;
