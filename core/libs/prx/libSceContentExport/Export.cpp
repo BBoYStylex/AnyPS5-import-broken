@@ -11,6 +11,8 @@
 
 namespace {
 constexpr std::size_t MaxExecution = 10;
+constexpr int ErrorMultipleInit = static_cast<int>(0x809D3005u);
+constexpr int ErrorInvalidParam = static_cast<int>(0x809D3016u);
 std::atomic<bool> g_initialized{false};
 std::mutex g_sessionMutex;
 std::set<std::int32_t> g_sessions;
@@ -90,9 +92,12 @@ int APS5_VABI sceContentExportFromFileWithTitleIdList(void) {
  return 0;
 }
 
-int APS5_VABI sceContentExportInit(void) {
- NotImplemented_nid_no_patch(__func__);
- return 0;
+int APS5_VABI sceContentExportInit(const ContentExportInitParam* initParam) {
+    if (g_initialized.load()) return ErrorMultipleInit;
+    if (initParam == nullptr || initParam->malloc_func == nullptr || initParam->free_func == nullptr) return ErrorInvalidParam;
+    bool expected = false;
+    if (!g_initialized.compare_exchange_strong(expected, true)) return ErrorMultipleInit;
+    return 0;
 }
 
 int APS5_VABI sceContentExportMalloc(void) {
