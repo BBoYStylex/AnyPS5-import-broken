@@ -59,6 +59,7 @@ constexpr int GuestEfault = 14;
 constexpr int GuestEnotdir = 20;
 constexpr int GuestEisdir = 21;
 constexpr int GuestEinval = 22;
+constexpr int GuestEopnotsupp = 45;
 constexpr int GuestEexist = 17;
 constexpr int GuestExdev = 18;
 constexpr int GuestEdeadlk = 11;
@@ -532,13 +533,15 @@ int APS5_VABI fchmodat_nid_postfix(int fd, const char* path, int mode, int flag)
 
 int APS5_VABI fchown_nid_postfix(int fd, std::uint32_t uid, std::uint32_t gid) {
     constexpr std::uint32_t Unchanged = 0xFFFFFFFFu;
-    if (uid != 0 && uid != Unchanged) NotImplemented_nid_no_patch("fchown: an owner other than the guest user");
-    if (gid != 0 && gid != Unchanged) NotImplemented_nid_no_patch("fchown: a group other than the guest group");
 #ifdef _WIN32
     if (GuestFstat(fd) != 0) return static_cast<int>(Fail(GuestEbadf));
+    if ((uid != 0 && uid != Unchanged) || (gid != 0 && gid != Unchanged))
+        return static_cast<int>(Fail(GuestEopnotsupp));
 #else
-    struct stat status{};
-    if (::fstat(fd, &status) != 0) return static_cast<int>(Fail(GuestEbadf));
+    const auto nativeUid = uid == 0 ? static_cast<uid_t>(-1) : static_cast<uid_t>(uid);
+    const auto nativeGid = gid == 0 ? static_cast<gid_t>(-1) : static_cast<gid_t>(gid);
+    if (::fchown(fd, nativeUid, nativeGid) != 0)
+        return static_cast<int>(Fail(GuestError(std::error_code(errno, std::generic_category()))));
 #endif
     return 0;
 }
