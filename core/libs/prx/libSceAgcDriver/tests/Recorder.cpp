@@ -1918,7 +1918,10 @@ bool settleFirstUseRaced(const Context& context, int copies) {
     const auto* import = HostImportFor(context, address, unit);
     Require(import != nullptr && import->unwatched && !Watched(address, unit), "(f) a 64 KiB import was not compared at first");
     const auto commands = recorder.Commands();
-    for (int copy = 0; copy < copies; ++copy) CopyBuffer(context, commands, import->buffer, 0, scratch.Handle(), 0, unit);
+    for (int copy = 0; copy < copies; ++copy) {
+        RecordMemoryBarrier(context, commands, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
+        CopyBuffer(context, commands, import->buffer, 0, scratch.Handle(), 0, unit);
+    }
     recorder.Submit();
     const auto submittedAt = std::chrono::steady_clock::now();
     const auto deadline = submittedAt + std::chrono::seconds(5);
@@ -1957,6 +1960,69 @@ bool settleFirstUseRaced(const Context& context, int copies) {
     return racing;
 }
 
+bool settleWriteOrderTests(const Device& device) {
+    using namespace AgcDriver::GuestMemory;
+    const auto& context = device.GetContext();
+    constexpr std::size_t unit = 65536;
+    if (context.hostImportAlignment == 0 || context.hostImportAlignment > unit || context.settleQueue == VK_NULL_HANDLE || !WriteWatched()) {
+        std::cout << "host imports within 64 KiB, a settle queue or write watching unavailable: settle write order not tested\n";
+        return false;
+    }
+    std::unique_lock gpu(GpuMutex());
+    PrepareImportWatch(context);
+    if (!settledImportsWatchPrivate(context)) {
+        std::cout << "this device compares every Windows import: settle write order not tested\n";
+        return false;
+    }
+    void* block = AllocateWatched(unit, unit);
+    struct Release {
+        void* block;
+        ~Release() { ReleaseWatched(block, unit); }
+    } release{block};
+    const auto address = reinterpret_cast<std::uint64_t>(block);
+    {
+        GuestAllocations::Mutation mutation;
+        mutation.Add(block, unit, true, true, true);
+    }
+    Recorder recorder(context);
+    recorder.Activate();
+    const auto* import = HostImportFor(context, address, unit);
+    Require(import != nullptr && import->unwatched, "the write-order import was not initially compared");
+    const auto fill = [&](std::uint32_t value) {
+        const auto commands = recorder.Commands();
+        RecordMemoryBarrier(context, commands, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
+        context.Function<PFN_vkCmdFillBuffer>("vkCmdFillBuffer")(commands, import->buffer, HostImportOffset(*import, address), unit, value);
+        RecordMemoryBarrier(context, commands, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT | VK_PIPELINE_STAGE_HOST_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT);
+        recorder.NotePendingWrite(address, unit);
+        recorder.Submit();
+    };
+    const auto before = HostImportSettles().submitted;
+    fill(0x22222222u);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (HostImportSettles().submitted == before && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        Require(HostImportFor(context, address, unit) == import, "the write-order import changed while settling");
+    }
+    Require(HostImportSettles().submitted > before, "the write-order import did not submit a settle");
+    fill(0x33333333u);
+    recorder.Sync();
+    while (!Watched(address, unit) && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        HostImportFor(context, address, unit);
+    }
+    Require(Watched(address, unit), "the write-order import did not return to the write watch");
+    const auto* bytes = static_cast<const std::uint8_t*>(block);
+    Require(std::all_of(bytes, bytes + unit, [](std::uint8_t value) { return value == 0x33; }), "the GPU store after the settle did not preserve its bytes");
+    {
+        GuestAllocations::Mutation mutation;
+        mutation.Remove(block);
+    }
+    HostImportFor(context, address, unit);
+    std::cout << "settle read between main-queue GPU writes passed\n";
+    return true;
+}
+
+
 bool settleFirstUseTests(const Device& device) {
     using namespace AgcDriver::GuestMemory;
     const auto& context = device.GetContext();
@@ -1971,15 +2037,9 @@ bool settleFirstUseTests(const Device& device) {
         std::cout << "this device compares every Windows import: the first use of a settled import not tested\n";
         return false;
     }
-    for (int copies = 4096; copies <= 65536; copies *= 4) {
-        if (settleFirstUseRaced(context, copies)) {
-            std::cout << "settled import first use tests passed\n";
-            return true;
-        }
-        std::cout << "(f) the main-queue copies had finished before the import returned to the write watch, so its read did not race them\n";
-    }
-    std::cout << "(f) the main-queue copies finished first in every round: the first use of a settled import not tested\n";
-    return false;
+    Require(!settleFirstUseRaced(context, 4096), "(f) the import returned to the write watch while its earlier main-queue reads were still in flight");
+    std::cout << "settled import first use ordering tests passed\n";
+    return true;
 }
 
 bool settleEarlierImportTests(const Device& device) {
@@ -2018,7 +2078,10 @@ bool settleEarlierImportTests(const Device& device) {
     const auto* earlier = HostImportFor(context, address, 16);
     Require(earlier != nullptr && earlier->base == address && earlier->bytes == unit && earlier->unwatched, "(e) the first window of the range was not imported compared");
     const auto commands = recorder.Commands();
-    for (int copy = 0; copy < copies; ++copy) CopyBuffer(context, commands, earlier->buffer, 0, scratch.Handle(), 0, unit);
+    for (int copy = 0; copy < copies; ++copy) {
+        RecordMemoryBarrier(context, commands, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
+        CopyBuffer(context, commands, earlier->buffer, 0, scratch.Handle(), 0, unit);
+    }
     const auto* whole = HostImportFor(context, address + unit - 16, 32);
     Require(whole != nullptr && whole->base == address && whole->bytes == 2 * unit && whole->unwatched, "(e) an access across the windows did not replace the first window's import");
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
@@ -9653,7 +9716,7 @@ int main(int argc, char** argv) {
         }
         std::unique_ptr<Device> created;
         try {
-            created = std::make_unique<Device>(argc == 2 && (std::string_view(argv[1]) == "--import-watch-other-family-only" || std::string_view(argv[1]) == "--deferred-settle-other-family-only"));
+            created = std::make_unique<Device>(argc == 2 && (std::string_view(argv[1]) == "--import-watch-other-family-only" || std::string_view(argv[1]) == "--deferred-settle-other-family-only" || std::string_view(argv[1]) == "--settle-write-order-other-family-only"));
         } catch (const std::exception& error) {
             if (std::getenv("ANYPS5_REQUIRE_VULKAN") != nullptr) throw;
             std::cout << "skipped, no usable Vulkan device: " << error.what() << '\n';
@@ -9684,6 +9747,13 @@ int main(int argc, char** argv) {
                 return 77;
             }
             return deferredSettleTests(device) ? 0 : 77;
+        }
+        if (argc == 2 && (std::string_view(argv[1]) == "--settle-write-order-only" || std::string_view(argv[1]) == "--settle-write-order-other-family-only")) {
+            if (std::string_view(argv[1]) == "--settle-write-order-other-family-only" && device.GetContext().settleFamily == device.GetContext().queueFamily) {
+                std::cout << "skipped, no other queue family to settle imports on\n";
+                return 77;
+            }
+            return settleWriteOrderTests(device) ? 0 : 77;
         }
         if (argc == 2 && std::string_view(argv[1]) == "--settle-first-use-only") return settleFirstUseTests(device) ? 0 : 77;
         if (argc == 2 && std::string_view(argv[1]) == "--settle-earlier-import-only") return settleEarlierImportTests(device) ? 0 : 77;
