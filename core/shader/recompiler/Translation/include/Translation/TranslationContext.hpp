@@ -256,6 +256,7 @@ private:
     bool integer16Shift(const RdnaInstruction& inst, IrOpcode opcode, bool arithmetic);
     bool integer16Binary(const RdnaInstruction& inst, IrOpcode opcode, bool sign);
     IrU32 readU16Factor(const RdnaOperand& operand, bool highHalf, bool negate);
+    IrU32 lowU16Product(const IrU32& left, const IrU32& right);
     bool vMulLoU16(const RdnaInstruction& inst);
     bool vPkMulLoU16(const RdnaInstruction& inst);
     bool integer16Mad(const RdnaInstruction& inst, bool sign, bool wide);

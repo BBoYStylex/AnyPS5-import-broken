@@ -2,6 +2,7 @@
 #include "Translation/TranslationContext.hpp"
 #include <array>
 #include <stdexcept>
+#include <utility>
 
 namespace ShaderRecompiler {
 
@@ -31,12 +32,17 @@ IrU32 TranslationContext::readU16Factor(const RdnaOperand& operand, bool highHal
     return negate ? IrU32(ir.BitwiseXor(field.Value(), ir.Constant(0x8000u))) : field;
 }
 
+IrU32 TranslationContext::lowU16Product(const IrU32& left, const IrU32& right) {
+    IrValue& product = ir.IMul(left.Value(), right.Value());
+    return IrU32(ir.ISub(product, ir.ShiftLeftLogical(ir.ShiftRightLogical(product, ir.Constant(16u)), ir.Constant(16u))));
+}
+
 bool TranslationContext::vMulLoU16(const RdnaInstruction& inst) {
     const RdnaOperand& lhs = sourceAt(inst, 0u);
     const RdnaOperand& rhs = sourceAt(inst, 1u);
     const IrU32 left = readU16Factor(lhs, lhs.opSel, false);
     const IrU32 right = readU16Factor(rhs, rhs.opSel, false);
-    write16Bits(inst.destination, IrU32(ir.BitwiseAnd(ir.IMul(left.Value(), right.Value()), ir.Constant(0xffffu))));
+    write16Bits(inst.destination, lowU16Product(left, right));
     return true;
 }
 
@@ -46,11 +52,11 @@ bool TranslationContext::vPkMulLoU16(const RdnaInstruction& inst) {
     const auto lane = [&](bool highLane) {
         const IrU32 left = readU16Factor(lhs, highLane ? lhs.opSelHi : lhs.opSel, highLane ? lhs.negateHi : lhs.negate);
         const IrU32 right = readU16Factor(rhs, highLane ? rhs.opSelHi : rhs.opSel, highLane ? rhs.negateHi : rhs.negate);
-        return IrU32(ir.IMul(left.Value(), right.Value()));
+        return std::pair{left, right};
     };
-    const IrU32 low = lane(false);
-    const IrU32 high = lane(true);
-    const IrU32 result = packU16Lanes(low, high);
+    const auto [lowLeft, lowRight] = lane(false);
+    const auto [highLeft, highRight] = lane(true);
+    const IrU32 result(ir.BitwiseOr(lowU16Product(lowLeft, lowRight).Value(), ir.ShiftLeftLogical(ir.IMul(highLeft.Value(), highRight.Value()), ir.Constant(16u))));
     writeOperand(inst.destination, &result.Value());
     return true;
 }
