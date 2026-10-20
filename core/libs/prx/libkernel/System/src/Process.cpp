@@ -253,6 +253,25 @@ int APS5_VABI getsid_nid_postfix(int pid) {
     return -1;
 }
 
+int APS5_VABI setpgid_nid_postfix(int pid, int pgid) {
+    if (pid < 0 || pgid < 0) {
+        *__error_nid_postfix() = errnoInvalidArgument;
+        return -1;
+    }
+    const int self = getpid_nid_postfix();
+    if (pid != 0 && pid != self) {
+        *__error_nid_postfix() = errnoNoSuchProcess;
+        return -1;
+    }
+    if (pgid != 0 && pgid != self)
+        throw std::runtime_error("setpgid: unsupported process group " + std::to_string(pgid));
+    return 0;
+}
+
+int APS5_VABI setpgrp_nid_postfix(int pid, int pgrp) {
+    return setpgid_nid_postfix(pid, pgrp);
+}
+
 int APS5_VABI getppid_nid_postfix(void) {
 #ifdef _WIN32
     const DWORD self = GetCurrentProcessId();
