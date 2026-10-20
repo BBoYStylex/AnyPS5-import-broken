@@ -13,6 +13,7 @@ Entries about one library or component are in [debt](debt/), one file per librar
 ### Silent stubs
 
 Throughout the project, every function at every stage either **does exactly what it's supposed to or throws an exception**. Everywhere... except:
+- [sceVideoOutCursorEnable, sceVideoOutCursorSetImageAddress, sceVideoOutCursorSetPosition, sceVideoOutCursorDisable](../../core/libs/prx/libSceVideoOut/Unimplemented.cpp) (libSceVideoOut) - validate their handle and index arguments and accept the call; the cursor image is not rendered on the host display. The PS5 hardware cursor format is unknown and affects only UI cursor overlay; titles that use it do not depend on it for gameplay. Prospero Win (PPSA99995) is the only known caller
 
 ### Unknown function info
 

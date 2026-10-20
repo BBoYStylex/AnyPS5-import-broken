@@ -1,35 +1,60 @@
-#include "prx/libc/include/general/VabiMacros.hpp"
-
+#include "SceTypes.hpp"
+#include "prx/libc/include/Shutdown.hpp"
+#include "tests/VideoOutTestEnvironment.hpp"
 #include <cstdint>
 #include <cstdio>
-#include <functional>
-#include <stdexcept>
-#include <string>
+#include <cstdlib>
 
 extern "C" {
+int APS5_VABI sceVideoOutOpen(int userId, int busType, int index, const void* param);
+int APS5_VABI sceVideoOutClose(int handle);
 int APS5_VABI sceVideoOutCursorEnable(std::int32_t handle, std::int32_t index, const void* address);
 int APS5_VABI sceVideoOutCursorDisable(std::int32_t handle, std::int32_t index);
 int APS5_VABI sceVideoOutCursorSetImageAddress(std::int32_t handle, std::int32_t index, const void* address);
 int APS5_VABI sceVideoOutCursorSetPosition(std::int32_t handle, std::int32_t index, std::uint32_t x, std::uint32_t y);
 }
 
-static bool ReportsNotImplemented(const std::string& name, const std::function<int()>& call) {
-    try {
-        call();
-    } catch (const std::runtime_error& error) {
-        if (error.what() == name + " not implemented") return true;
-        std::fprintf(stderr, "%s threw: %s\n", name.c_str(), error.what());
-        return false;
-    }
-    std::fprintf(stderr, "%s returned instead of reporting that it is not implemented\n", name.c_str());
-    return false;
+static constexpr int VIDEO_OUT_ERROR_INVALID_HANDLE = -2144796661;
+static constexpr int VIDEO_OUT_ERROR_INVALID_INDEX = -2144796662;
+static constexpr int VIDEO_OUT_ERROR_INVALID_ADDRESS = -2144796670;
+static constexpr int SYSTEM_USER = 255;
+static constexpr int MAIN_BUS = 0;
+
+static void Require(bool value) {
+    if (!value) std::abort();
 }
 
+static const std::uint32_t image[64 * 64] = {};
+
 int main() {
-    static const std::uint32_t image[64 * 64] = {};
-    bool passed = ReportsNotImplemented("sceVideoOutCursorEnable", [] { return sceVideoOutCursorEnable(1, 0, image); });
-    passed = ReportsNotImplemented("sceVideoOutCursorSetImageAddress", [] { return sceVideoOutCursorSetImageAddress(1, 0, image); }) && passed;
-    passed = ReportsNotImplemented("sceVideoOutCursorSetPosition", [] { return sceVideoOutCursorSetPosition(1, 0, 960, 540); }) && passed;
-    passed = ReportsNotImplemented("sceVideoOutCursorDisable", [] { return sceVideoOutCursorDisable(1, 0); }) && passed;
-    return passed ? 0 : 1;
+    VideoOutTestEnvironment environment;
+
+    const int handle = sceVideoOutOpen(SYSTEM_USER, MAIN_BUS, 0, nullptr);
+    Require(handle > 0);
+
+    Require(sceVideoOutCursorEnable(0, 0, image) == VIDEO_OUT_ERROR_INVALID_HANDLE);
+    Require(sceVideoOutCursorDisable(0, 0) == VIDEO_OUT_ERROR_INVALID_HANDLE);
+    Require(sceVideoOutCursorSetImageAddress(0, 0, image) == VIDEO_OUT_ERROR_INVALID_HANDLE);
+    Require(sceVideoOutCursorSetPosition(0, 0, 0, 0) == VIDEO_OUT_ERROR_INVALID_HANDLE);
+
+    Require(sceVideoOutCursorEnable(handle, -1, image) == VIDEO_OUT_ERROR_INVALID_INDEX);
+    Require(sceVideoOutCursorEnable(handle, 2, image) == VIDEO_OUT_ERROR_INVALID_INDEX);
+    Require(sceVideoOutCursorDisable(handle, -1) == VIDEO_OUT_ERROR_INVALID_INDEX);
+    Require(sceVideoOutCursorSetImageAddress(handle, 2, image) == VIDEO_OUT_ERROR_INVALID_INDEX);
+    Require(sceVideoOutCursorSetPosition(handle, 2, 0, 0) == VIDEO_OUT_ERROR_INVALID_INDEX);
+
+    Require(sceVideoOutCursorEnable(handle, 0, nullptr) == VIDEO_OUT_ERROR_INVALID_ADDRESS);
+    Require(sceVideoOutCursorSetImageAddress(handle, 0, nullptr) == VIDEO_OUT_ERROR_INVALID_ADDRESS);
+
+    Require(sceVideoOutCursorEnable(handle, 0, image) == 0);
+    Require(sceVideoOutCursorEnable(handle, 1, image) == 0);
+    Require(sceVideoOutCursorSetImageAddress(handle, 0, image) == 0);
+    Require(sceVideoOutCursorSetPosition(handle, 0, 960, 540) == 0);
+    Require(sceVideoOutCursorSetPosition(handle, 1, 0, 0) == 0);
+    Require(sceVideoOutCursorDisable(handle, 0) == 0);
+    Require(sceVideoOutCursorDisable(handle, 1) == 0);
+
+    sceVideoOutClose(handle);
+    return 0;
 }
+
