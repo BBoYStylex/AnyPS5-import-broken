@@ -2,6 +2,8 @@
 
 ### Unknown function info
 
+- [sceFontRenderCharGlyphImage, sceFontRenderCharGlyphImageHorizontal, sceFontRenderCharGlyphImageVertical](../../../core/libs/prx/libSceFont/src/Render.cpp) (libSceFont) throw for a positive row stride smaller than the declared pixel width times the supported pixel size (1 or 4 bytes), even with a narrower scissor. The console response to this inconsistent surface is unverified. Outputs are cleared before throwing; no surface bytes are written.
+
 - [Typographic design](../../../core/libs/prx/libSceFont/src/Style.cpp): native selector, feature, font-set eligibility and output-clearing rules are recovered. Driver typography selection and queries, feature-cache updates and glyph substitution remain unimplemented and throw instead of storing arbitrary selector/value pairs.
 - [sceFontSetScriptLanguage and sceFontGetScriptLanguage](../../../core/libs/prx/libSceFont/src/Style.cpp): native script/language ranges, handle-error precedence and clearing of failed getter outputs are implemented. Valid driver queries and updates throw; the previous arbitrary-value map and fabricated zero default are no longer used. Driver selection and actual language-dependent shaping remain unimplemented.
 - [sceFontGetRenderScaledKerning](../../../core/libs/prx/libSceFont/src/Render.cpp) (libSceFont) - arguments, the cleared output and the bound renderer check taken from `cellFontGetRenderScaledKerning` in [RPCS3](https://github.com/RPCS3/rpcs3/blob/master/rpcs3/Emu/Cell/Modules/cellFont.cpp) (PS3 predecessor of the library), not confirmed on a title. The kerning is the `sceFontGetKerning` one at the render scale
