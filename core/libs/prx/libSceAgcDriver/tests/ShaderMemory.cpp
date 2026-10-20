@@ -5289,6 +5289,7 @@ void verifyVertexInfoVersion19() {
     auto version32 = decodeBase64(serializer.Serialize(spanned));
     version32.pop_back();
     version32.pop_back();
+    version32.pop_back();
     require(version32.size() > 2u && version32.back() == 0u && version32[version32.size() - 2u] == 0u && version32[version32.size() - 3u] == 1u, "the spanned-waves flag is not the byte before the depth remap flag");
     version32.pop_back();
     version32.pop_back();
@@ -5389,9 +5390,10 @@ void verifyDepthRemapRequests() {
     const auto plainBytes = decodeBase64(plain);
     const auto remappedBytes = decodeBase64(remapped);
     constexpr std::size_t pointTailBytes = 13u;
-    require(plainBytes.size() == remappedBytes.size() && plainBytes.size() > 8u + pointTailBytes && std::equal(plainBytes.begin(), plainBytes.end() - 8 - pointTailBytes, remappedBytes.begin()) && std::equal(plainBytes.end() - 1 - pointTailBytes, plainBytes.end(), remappedBytes.end() - 1 - pointTailBytes), "the depth remap flag and mode are not the 6 bytes before the f32 flush and denormal preserve flags, the point tail and the fused arithmetic flag of a vertex request");
+    require(plainBytes.size() == remappedBytes.size() && plainBytes.size() > 9u + pointTailBytes && std::equal(plainBytes.begin(), plainBytes.end() - 9 - pointTailBytes, remappedBytes.begin()) && std::equal(plainBytes.end() - 2 - pointTailBytes, plainBytes.end(), remappedBytes.end() - 2 - pointTailBytes), "the depth remap flag and mode are not the 6 bytes before the f32 flush and denormal preserve flags, the point tail, the fused arithmetic flag and the pixel function LDS flag of a vertex request");
     for (const std::uint8_t legacyVersion : {32u, 34u}) {
         auto legacyBytes = remappedBytes;
+        legacyBytes.pop_back();
         legacyBytes.pop_back();
         legacyBytes.pop_back();
         legacyBytes[4] = legacyVersion;
@@ -5401,6 +5403,7 @@ void verifyDepthRemapRequests() {
         require(serializer.Serialize(legacy.request) == plain, ("a version " + std::to_string(legacyVersion) + " vertex request misread the fields before the depth remap").c_str());
     }
     auto version35 = remappedBytes;
+    version35.pop_back();
     version35.pop_back();
     version35.pop_back();
     version35[4] = 35u;
