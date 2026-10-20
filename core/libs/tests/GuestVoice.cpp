@@ -1,5 +1,6 @@
 #include "SceTypes.hpp"
 #include "prx/libc/include/general/VabiMacros.hpp"
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -32,6 +33,11 @@ constexpr int NotInitialized = static_cast<int>(0x804E0801u);
 constexpr int AlreadyInitialized = static_cast<int>(0x804E0802u);
 
 void Require(bool value) { if (!value) std::abort(); }
+
+struct GuardedResourceInfo {
+    VoiceResourceInfo info;
+    std::uint8_t guard[2];
+};
 
 template <typename TFunction>
 void RequireThrows(TFunction function) {
@@ -92,7 +98,14 @@ int main() {
     Require(resourceInfo.max_voice_output_ports == 7);
     Require(resourceInfo.max_device_input_ports == 1);
     Require(resourceInfo.max_device_output_ports == 1);
-    Require(resourceInfo.max_ports == 64);
+    GuardedResourceInfo guarded{};
+    Require(offsetof(GuardedResourceInfo, guard) == 8);
+    guarded.guard[0] = 0xA5;
+    guarded.guard[1] = 0xA5;
+    Require(sceVoiceGetResourceInfo(&guarded.info) == 0);
+    Require(guarded.info.max_voice_input_ports == 7 && guarded.info.max_voice_output_ports == 7);
+    Require(guarded.info.max_device_input_ports == 1 && guarded.info.max_device_output_ports == 1);
+    Require(guarded.guard[0] == 0xA5 && guarded.guard[1] == 0xA5);
     Require(sceVoiceEnableChat() == 0);
     Require(sceVoiceDisableChat() == 0);
     const auto input = CreatePort(2, 0.5f);

@@ -239,7 +239,6 @@ int APS5_VABI sceVoiceGetResourceInfo(VoiceResourceInfo* info) {
     info->max_voice_output_ports = 7;
     info->max_device_input_ports = 1;
     info->max_device_output_ports = 1;
-    info->max_ports = 64;
     return 0;
 }
 

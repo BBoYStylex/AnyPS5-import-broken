@@ -967,7 +967,6 @@ struct VoiceResourceInfo {
     std::uint16_t max_voice_output_ports;
     std::uint16_t max_device_input_ports;
     std::uint16_t max_device_output_ports;
-    std::uint16_t max_ports;
 };
 
 struct VoiceStartParam {
