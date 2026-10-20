@@ -496,7 +496,6 @@ int APS5_VABI sceImeSetCaret(const Caret* caret) {
 
 int APS5_VABI sceImeSetConsecutiveClauseConversionEnabled(bool enabled) {
     (void)enabled;
-    NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
