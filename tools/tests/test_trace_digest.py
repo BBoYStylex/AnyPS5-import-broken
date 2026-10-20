@@ -232,6 +232,43 @@ class TraceDigestTests(unittest.TestCase):
         self.assertAlmostEqual(presenter["wait_ms_per_frame"], 15.5 / 3)
         self.assertAlmostEqual(presenter["busy_ms_per_frame"], 2.5 / 3)
 
+    def test_thread_totals_only_count_time_inside_the_frame_window(self):
+        events = [
+            complete(1, "Driver.Packet", -5000, 20000),
+            complete(1, "GpuMutex.wait.draw", -2000, 4000),
+            complete(1, "Driver.Packet.after", 12000, 1000),
+            complete(2, "Driver.WorkerWait", -10000, 2000),
+            {"name": "present", "ph": "i", "ts": 0, "tid": 1, "args": {"present": 600}},
+            {"name": "present", "ph": "i", "ts": 10000, "tid": 1, "args": {"present": 601}},
+        ]
+        result = trace_digest.digest(trace_digest.Trace(events))
+        active, outside = result["threads"]
+        self.assertEqual(active["busy_ms_per_frame"], 8.0)
+        self.assertEqual(active["wait_ms_per_frame"], 2.0)
+        self.assertEqual(active["busy_pct"], 80.0)
+        self.assertEqual(active["wait_pct"], 20.0)
+        self.assertEqual(active["top"], [{"name": "Driver.Packet", "ms_per_frame": 10.0}])
+        self.assertEqual(outside["busy_ms_per_frame"], 0.0)
+        self.assertEqual(outside["wait_ms_per_frame"], 0.0)
+        self.assertEqual(outside["untraced_ms_per_frame"], 10.0)
+        self.assertEqual(outside["top"], [])
+        self.assertEqual(result["top_slices_ms_per_frame"], [
+            {"name": "Driver.Packet", "ms": 10.0},
+            {"name": "GpuMutex.wait.draw", "ms": 2.0},
+        ])
+
+    def test_thread_totals_use_the_summary_end_after_the_last_present(self):
+        trace = trace_digest.Trace([
+            complete(1, "Driver.Packet", 1000, 20000),
+            {"name": "present", "ph": "i", "ts": 0, "tid": 1, "args": {"present": 600}},
+        ])
+        result = trace_digest.digest(trace, {"window": {"ms": 10.0}})
+        thread = result["threads"][0]
+        self.assertEqual(result["frames"], 1)
+        self.assertEqual(thread["busy_ms_per_frame"], 9.0)
+        self.assertEqual(thread["busy_pct"], 90.0)
+        self.assertEqual(thread["untraced_ms_per_frame"], 1.0)
+
     def test_largest_slices_per_frame(self):
         largest = self.result()["top_slices_ms_per_frame"]
         self.assertEqual(largest[0]["name"], "Driver.Packet")
@@ -242,6 +279,83 @@ class TraceDigestTests(unittest.TestCase):
         self.assertEqual((waits[0]["name"], waits[0]["thread"], waits[0]["present"]), ("Driver.Present.inflight_wait", "presenter", 601))
         self.assertAlmostEqual(waits[0]["ms"], 14.5)
         self.assertEqual(waits[1]["name"], "Driver.WorkerWait")
+
+    def test_longest_waits_omit_slices_outside_capture_in_cli(self):
+        events = [EVENTS[1], *EVENTS[-3:],
+                  complete(1, "Inside.wait", 1000, 2000),
+                  complete(3, "Before.wait", -100000, 90000),
+                  complete(4, "After.wait", 40000, 90000),
+                  complete(5, "EndsAtStart.wait", -1000, 1000),
+                  complete(6, "StartsAtEnd.wait", 40000, 1000)]
+        plain = self.trace.with_suffix("")
+        plain.write_text(json.dumps({"traceEvents": events}), encoding="utf-8")
+        self.trace.write_bytes(gzip.compress(plain.read_bytes()))
+        for path in (self.trace, plain):
+            for output in ([], ["--json"]):
+                with self.subTest(path=path.name, output=output):
+                    result = subprocess.run([sys.executable, trace_digest.__file__, str(path), "--top", "1", *output],
+                                            capture_output=True, text=True, encoding="utf-8", timeout=20)
+                    self.assertEqual((result.returncode, result.stderr), (0, ""))
+                    if output:
+                        report = json.loads(result.stdout)
+                        self.assertEqual(report["longest_waits"], [
+                            {"name": "Inside.wait", "thread": "queue worker 0x0", "ms": 2.0, "at_ms": 1.0, "present": 600}])
+                    else:
+                        self.assertIn("- Inside.wait (queue worker 0x0) 2.0 ms at 1 ms, present 600", result.stdout)
+                        for name in ("Before.wait", "After.wait", "EndsAtStart.wait", "StartsAtEnd.wait"):
+                            self.assertNotIn(name, result.stdout)
+
+    def test_longest_waits_rank_only_the_overlap_with_capture(self):
+        events = [dict(EVENTS[-3], ts=10000), dict(EVENTS[-2], ts=30000),
+                  complete(1, "Leading.wait", -100000, 111000),
+                  complete(2, "Inside.wait", 12000, 4000),
+                  complete(3, "Trailing.wait", 28000, 90000),
+                  complete(4, "Spanning.wait", -100000, 230000),
+                  complete(4, "Nested.wait", 11000, 1000)]
+        report = trace_digest.digest(trace_digest.Trace(events), top=4)
+        self.assertEqual(report["longest_waits"], [
+            {"name": "Spanning.wait", "thread": "tid 4", "ms": 20.0, "at_ms": 10.0, "present": 600},
+            {"name": "Inside.wait", "thread": "tid 2", "ms": 4.0, "at_ms": 12.0, "present": 600},
+            {"name": "Trailing.wait", "thread": "tid 3", "ms": 2.0, "at_ms": 28.0, "present": 600},
+            {"name": "Leading.wait", "thread": "tid 1", "ms": 1.0, "at_ms": 10.0, "present": 600}])
+        threads = {thread["thread"]: thread for thread in report["threads"]}
+        for wait in report["longest_waits"]:
+            self.assertEqual(wait["ms"], threads[wait["thread"]]["wait_ms_per_frame"])
+
+    def test_longest_waits_clip_to_summary_end(self):
+        trace = trace_digest.Trace([EVENTS[-3],
+                                    complete(1, "Trailing.wait", 8000, 20000),
+                                    complete(2, "Inside.wait", 1000, 3000)])
+        report = trace_digest.digest(trace, {"window": {"ms": 10.0}}, top=1)
+        self.assertEqual(report["longest_waits"], [
+            {"name": "Inside.wait", "thread": "tid 2", "ms": 3.0, "at_ms": 1.0, "present": 600}])
+
+    def test_longest_waits_without_frames_keep_the_full_slices(self):
+        for duration in (0, 3000):
+            with self.subTest(duration=duration):
+                trace = trace_digest.Trace([complete(1, "Worker.wait", -1000, duration)])
+                self.assertEqual(trace_digest.digest(trace)["longest_waits"], [
+                    {"name": "Worker.wait", "thread": "tid 1", "ms": duration / 1000.0, "at_ms": -1.0, "present": None}])
+
+    def test_wait_subscope_without_parent_is_not_busy(self):
+        events = [EVENTS[1], complete(1, "Driver.WorkerWait.dequeue_order", 0, 4000),
+                  complete(1, "Driver.Packet", 4000, 5000), EVENTS[-3], EVENTS[-2]]
+        result = trace_digest.digest(trace_digest.Trace({"traceEvents": events}))
+        worker = result["threads"][0]
+        self.assertAlmostEqual(worker["wait_pct"], 40.0)
+        self.assertAlmostEqual(worker["busy_pct"], 50.0)
+        self.assertEqual(result["longest_waits"][0]["name"], "Driver.WorkerWait.dequeue_order")
+        self.assertEqual(worker["top"][0]["name"], "Driver.Packet")
+
+    def test_nested_wait_subscope_does_not_double_count(self):
+        events = [EVENTS[1], complete(1, "Driver.WorkerWait", 0, 4000),
+                  complete(1, "Driver.WorkerWait.dequeue_order", 1000, 2000),
+                  complete(1, "Driver.Packet", 4000, 5000), EVENTS[-3], EVENTS[-2]]
+        result = trace_digest.digest(trace_digest.Trace({"traceEvents": events}))
+        worker = result["threads"][0]
+        self.assertAlmostEqual(worker["wait_pct"], 40.0)
+        self.assertAlmostEqual(worker["busy_pct"], 50.0)
+        self.assertEqual(len(result["longest_waits"]), 1)
 
     def test_gpu_mutex_waits_with_site_names(self):
         for site in ("other", "dispatch", "indirect", "draw", "hook", "wait", "label", "flush", "present", "fill", "copy", "end", "try"):
@@ -396,6 +510,15 @@ class TraceDigestTests(unittest.TestCase):
         self.assertEqual([(entry[3], entry[4]) for entry in trace.slices[1]],
                          [(0, False), (1, True), (0, False)])
 
+    def test_missing_summary_file_is_an_error(self):
+        missing = Path(self.directory.name) / "missing.jsonl"
+        error = io.StringIO()
+        with contextlib.redirect_stderr(error), contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(SystemExit) as raised:
+                trace_digest.main([str(self.trace), "--summary", str(missing)])
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("summary file not found", error.getvalue())
+
 
 def interval_line(start, end, p99, gpu_ms, **changes):
     line = dict(SUMMARY, window={"spec": "summary_every 30", "first_present": 0, "ms": (end - start) * 1000.0}, interval_start_s=start, interval_end_s=end,
@@ -429,10 +552,36 @@ class IntervalDigestTests(unittest.TestCase):
         self.assertIsNone(third["top_phase"])
         self.assertEqual(result["identity_changed_at"], [3])
 
+    def test_identity_changes_are_reported_where_they_happen(self):
+        lines = [interval_line(30.0 * index, 30.0 * (index + 1), 20.0, 5.0, commit=commit)
+                 for index, commit in enumerate(("a", "a", "b", "b", "a"))]
+        result = trace_digest.digest_intervals(lines)
+        self.assertEqual(result["identity_changed_at"], [2, 4])
+        self.assertIn("commit, environment, GPU, driver or OS changed at interval 3, 5", trace_digest.markdown_intervals(result).splitlines())
+
     def test_sparkline_scales_to_the_largest_value(self):
         self.assertEqual(trace_digest.sparkline([0.0, 5.0, 10.0]), ".+@")
         self.assertEqual(trace_digest.sparkline([0.0, 0.0]), "..")
         self.assertEqual(trace_digest.sparkline([]), "")
+
+    def test_largest_phase_does_not_depend_on_json_key_order(self):
+        phases = [("Driver.Completion", 1.0), ("Driver.Packet", 7.0), ("Driver.Present", 2.0)]
+        for offset in range(len(phases)):
+            for sort_keys in (False, True):
+                with self.subTest(offset=offset, sort_keys=sort_keys):
+                    line = interval_line(0.0, 30.0, 20.0, 5.0,
+                                         top_phases_ms_per_frame=dict(phases[offset:] + phases[:offset]))
+                    self.path.write_text(json.dumps(line, sort_keys=sort_keys) + "\n", encoding="utf-8")
+                    output = io.StringIO()
+                    with contextlib.redirect_stdout(output):
+                        self.assertEqual(trace_digest.main([str(self.path), "--json"]), 0)
+                    result = json.loads(output.getvalue())
+                    self.assertEqual(result["intervals"][0]["top_phase"],
+                                     {"name": "Driver.Packet", "ms_per_frame": 7.0})
+                    output = io.StringIO()
+                    with contextlib.redirect_stdout(output):
+                        self.assertEqual(trace_digest.main([str(self.path)]), 0)
+                    self.assertIn("| Driver.Packet 7.0 |", output.getvalue())
 
     def test_command_line_table_and_json(self):
         output = io.StringIO()
@@ -478,6 +627,29 @@ class IntervalDigestTests(unittest.TestCase):
                 self.assertTrue(all(line.count("|") == 11 for line in rows), rows)
                 cells = [cell.strip() for cell in rows[2].split("|")[1:-1]]
                 self.assertEqual(cells, ["1", "0-30", "1800", "16.6", "18.0", "20.0", "25.0", "5.0", "50 %", escaped + " 7.5"])
+
+    def test_bom_encoded_stacks_load(self):
+        with tempfile.TemporaryDirectory() as directory:
+            stacks_file = Path(directory) / "stacks.txt"
+            stacks_file.write_bytes(b"\xef\xbb\xbf# samples=1 depth=1 truncated=0\nmodule.prx+0x10 1\n")
+            loaded = trace_digest.load_stacks(stacks_file)
+            self.assertEqual(loaded, [(["module.prx+0x10"], 1)])
+
+    def test_bom_encoded_intervals_load(self):
+        with tempfile.TemporaryDirectory() as directory:
+            intervals_file = Path(directory) / "intervals.jsonl"
+            intervals_file.write_bytes(b"\xef\xbb\xbf" + json.dumps({"interval_start_s": 0.0, "interval_end_s": 10.0, "presents": 600}).encode("utf-8") + b"\n")
+            loaded = trace_digest.load_intervals(intervals_file)
+            self.assertEqual(len(loaded), 1)
+            self.assertEqual(loaded[0]["interval_start_s"], 0.0)
+
+    def test_bom_encoded_summary_loads(self):
+        with tempfile.TemporaryDirectory() as directory:
+            summary_file = Path(directory) / "aps5-summary.jsonl"
+            summary_file.write_bytes(b"\xef\xbb\xbf" + json.dumps(SUMMARY).encode("utf-8") + b"\n")
+            loaded = trace_digest.load_summary(str(summary_file), SUMMARY["trace"])
+            self.assertEqual(loaded["commit"], SUMMARY["commit"])
+
 
 if __name__ == "__main__":
     unittest.main()
