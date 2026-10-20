@@ -8,8 +8,9 @@ import tempfile
 import unittest
 
 
-SOURCE = Path(sys.argv.pop(1))
-CMAKE = sys.argv.pop(1)
+ROOT = Path(__file__).resolve().parents[2]
+SOURCE = Path(sys.argv.pop(1)) if len(sys.argv) > 2 and not sys.argv[1].startswith('-') else (ROOT / 'core/shader/recompiler')
+CMAKE = sys.argv.pop(1) if len(sys.argv) > 1 and not sys.argv[1].startswith('-') else (shutil.which('cmake') or 'cmake')
 
 
 class Fixture:
@@ -103,6 +104,7 @@ file(WRITE "${{CMAKE_CURRENT_BINARY_DIR}}/runtime-sources.txt" "${{runtimeSource
         return {Path(line.split(' ', 1)[1]) for line in self.listing.read_text(encoding='utf-8').splitlines() if line.startswith('sources ')}
 
 
+@unittest.skipUnless(shutil.which(CMAKE) and shutil.which('ninja'), 'cmake and ninja are required')
 class ShaderCacheRuntimeSourceTests(unittest.TestCase):
     def fixture(self, spirv_tools=False):
         temporary = tempfile.TemporaryDirectory(prefix='shader_cache_sources_')
@@ -210,4 +212,5 @@ class ShaderCacheRuntimeSourceTests(unittest.TestCase):
         self.assertIn('has not been reviewed', fixture.version(False))
 
 
-unittest.main()
+if __name__ == '__main__':
+    unittest.main()
