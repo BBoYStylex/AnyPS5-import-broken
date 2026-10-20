@@ -120,6 +120,10 @@ std::int32_t APS5_VABI sceHmd2ReprojectionSetAllowPositionalReprojection(std::in
 std::int32_t APS5_VABI sceHmd2ReprojectionSetTiming(std::int32_t timing);
 std::int32_t APS5_VABI sceHmd2ReprojectionEnableVrMode(std::uint64_t outputMode);
 std::int32_t APS5_VABI sceHmd2ReprojectionTerminate();
+Hmd2::SizeAlign APS5_VABI sceHmd2ReprojectionQueryDisplayBufferSizeAlign();
+Hmd2::SizeAlign APS5_VABI sceHmd2ReprojectionQuerySeeThroughBufferSizeAlign();
+Hmd2::SizeAlign APS5_VABI sceHmd2ReprojectionGetMirroringDisplayBufferSizeAlign();
+Hmd2::SizeAlign APS5_VABI sceHmd2ReprojectionGetMirroringWorkMemorySizeAlign();
 }
 
 #endif
