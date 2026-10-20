@@ -36,7 +36,7 @@ def main():
         work = Path(directory)
 
         def run(*arguments):
-            return subprocess.run([str(relinker), *arguments], capture_output=True, text=True, timeout=60)
+            return subprocess.run([str(relinker), *arguments], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
 
         def case(name):
             root = work / name
@@ -68,6 +68,13 @@ def main():
         assert 'main_target = "eboot.bin"' in text and 'name = "flip_bit"' in text, text
         assert f"Patch manifest: {manifest}\n" in result.stdout
         assert f'config = "{source.parent.as_posix()}/relinker-patches.toml"\n' in text, text
+
+        _, unicode_source, unicode_output = case("unicode-\u65e5\u672c")
+        (unicode_source.parent / "relinker-patches.toml").write_text(patch_text(address, expected, "flip_bit"), encoding="utf-8")
+        result = run("--skip-sce-module", str(unicode_source), str(unicode_output))
+        assert result.returncode == 0, (result.stdout, result.stderr)
+        unicode_manifest = (unicode_output.parent / "app.patches.toml").read_text(encoding="utf-8")
+        assert f'config = "{unicode_source.parent.as_posix()}/relinker-patches.toml"\n' in unicode_manifest, unicode_manifest
 
         if os.name != "nt":
             quoted = work / "quoted"

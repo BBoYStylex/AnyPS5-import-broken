@@ -452,6 +452,12 @@ void manifestConfig() {
     const auto config = [&](const std::string& path) { return WriteManifest({patch}, "main.elf", path); };
     require(config("").find("config =") == std::string::npos, "empty config was recorded");
     require(config("dir/p.toml").find("config = \"dir/p.toml\"\n") != std::string::npos, "forward-slash path");
+    const auto unicode = config("\xe6\x97\xa5\xe6\x9c\xac/\xd0\xb8\xd0\xb3\xd1\x80\xd1\x8b.toml");
+    require(unicode.find("config = \"\xe6\x97\xa5\xe6\x9c\xac/\xd0\xb8\xd0\xb3\xd1\x80\xd1\x8b.toml\"\n") != std::string::npos, "UTF-8 config path");
+    require(ParsePatchFile(unicode).Entries.size() == 1, "manifest with a UTF-8 config did not parse");
+    const auto reducedUnicode = config("we\"ird/\xe6\x97\xa5\xe6\x9c\xac.toml");
+    require(reducedUnicode.find("config = \"\xe6\x97\xa5\xe6\x9c\xac.toml\"\n") != std::string::npos, "quote path with UTF-8 file name was not reduced");
+    require(ParsePatchFile(reducedUnicode).Entries.size() == 1, "manifest with a reduced UTF-8 config did not parse");
     rejects([&] { config("dir/p\x7f.toml"); }, "Patch manifest cannot hold the config");
     rejects([&] { config("dir/p\x01.toml"); }, "Patch manifest cannot hold the config: p\x01.toml");
     const auto quoted = config("we\"ird/p.toml");

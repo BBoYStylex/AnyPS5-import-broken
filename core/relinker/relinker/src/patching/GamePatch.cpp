@@ -515,8 +515,13 @@ std::string WriteManifest(const std::vector<AppliedPatch>& patches, const std::s
         if (!holdable(text)) throw Domain::RelinkerException(std::string("Patch manifest cannot hold the ") + field + ": " + text);
         return "\"" + text + "\"";
     };
-    std::string config = std::filesystem::path(Io::NativePath(configPath)).generic_string();
-    if (!config.empty() && !holdable(config)) config = std::filesystem::path(Io::NativePath(configPath)).filename().generic_string();
+    const auto generic = [](const std::filesystem::path& path) {
+        const auto utf8 = path.generic_u8string();
+        return std::string(utf8.begin(), utf8.end());
+    };
+    const auto configFile = Io::NativePath(configPath);
+    std::string config = generic(configFile);
+    if (!config.empty() && !holdable(config)) config = generic(configFile.filename());
     std::ostringstream manifest;
     manifest << "format = 1\nmain_target = " << quoted(mainTarget, "main_target") << '\n';
     if (!config.empty()) manifest << "config = " << quoted(config, "config") << '\n';
