@@ -168,6 +168,9 @@ struct ShaderPixelInputInfo {
         return vgprs;
     }();
     std::uint8_t targetOutputMode[8] = {};
+#ifdef __APPLE__
+    std::uint8_t metalTargetOutputMode[8] = {};
+#endif
     std::uint32_t scratchSizeDwords = 0;
     bool psPosX = false;
     bool psPosY = false;

@@ -1823,7 +1823,12 @@ void EmitSetAttribute(SpirvValueEmitContext& ctx, const IrValue& inst) {
         if (state.program.Resources().stage != IrShaderStage::Mesh && variable == 0u) {
             return;
         }
+#ifdef __APPLE__
+        const bool metalUint = state.program.Resources().stage == IrShaderStage::Pixel && exp.kind == ExportTargetKind::Mrt && state.inputInfo.pixel != nullptr && exp.index < std::size(state.inputInfo.pixel->metalTargetOutputMode) && state.inputInfo.pixel->metalTargetOutputMode[exp.index] == 7u;
+        const bool uintOutput = MrtOutputMode(state, exp) == 7u || metalUint;
+#else
         const bool uintOutput = MrtOutputMode(state, exp) == 7u;
+#endif
         const auto vectorType = uintOutput ? TypeU32Vector(state, 4u) : TypeF32Vector(state, 4u);
         auto value = ExportVector(ctx, data, exp, uintOutput);
         if (state.program.Resources().stage == IrShaderStage::Pixel && exp.kind == ExportTargetKind::Mrt) {

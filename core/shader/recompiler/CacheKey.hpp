@@ -216,6 +216,9 @@ private:
         append(key, value.positionLocation);
         append(key, value.sampleLocations);
         append(key, value.targetOutputMode);
+#ifdef __APPLE__
+        append(key, value.metalTargetOutputMode);
+#endif
     }
 
     static void append(std::vector<std::uint64_t>& key, const ShaderVertexResourceDestination& value) {

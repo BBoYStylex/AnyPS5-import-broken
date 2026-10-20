@@ -128,6 +128,9 @@ ShaderStageInputInfo BuildShaderStageInputInfo(ShaderStageKind stage, const Gues
         place(PixelInput::PositionFixedPoint, (pixel.inputAddr & PixelInputBit(PixelInput::PositionFixedPoint)) != 0u);
         for (std::uint32_t i = 0; i < 8; ++i) {
             pixelStorage.targetOutputMode[i] = pixel.targetOutputMode[i];
+#ifdef __APPLE__
+            pixelStorage.metalTargetOutputMode[i] = pixel.metalTargetOutputMode[i];
+#endif
         }
         pixelStorage.psPosX = pixel.posX;
         pixelStorage.psPosY = pixel.posY;

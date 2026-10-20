@@ -175,6 +175,9 @@ struct ShaderPixelStageInfo {
     ConservativeZExport conservativeZExport;
     bool orderedPixelShader;
     std::array<std::uint8_t, 8> targetOutputMode;
+#ifdef __APPLE__
+    std::array<std::uint8_t, 8> metalTargetOutputMode{};
+#endif
     std::array<std::uint8_t, 8> targetExportMapping;
     std::array<ColorExportPacking, 8> targetExportPacking;
     bool dualSourceBlend;

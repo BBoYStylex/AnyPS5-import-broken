@@ -708,7 +708,11 @@ std::set<std::uint32_t> ValidateShaders(std::span<const CompiledShader> shaders,
     for (const auto& [location, signature] : previous.outputs) {
         if (location >= attachments) continue;
         const auto color = std::find_if(state.colors.begin(), state.colors.end(), [&](const ColorTarget& target) { return target.exportIndex == location; });
+#ifdef __APPLE__
+        const bool uintExport = color != state.colors.end() && (color->uintExport || color->metalUintOutput);
+#else
         const bool uintExport = color != state.colors.end() && color->uintExport;
+#endif
         const bool packed = color != state.colors.end() && color->packing != ShaderRecompiler::ColorExportPacking::None;
         Require(signature == (uintExport || packed ? "vertex:u32x4" : "vertex:f32x4"), packed ? "fragment shader must export uint4 words to its packed color attachments" : uintExport ? "fragment shader must export uint4 colors to its unsigned integer attachments" : "fragment shader must export float4 colors to its attachments");
         locations.insert(location);

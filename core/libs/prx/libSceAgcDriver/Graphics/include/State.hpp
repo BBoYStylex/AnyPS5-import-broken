@@ -65,6 +65,11 @@ struct ColorTarget {
     std::uint32_t layers = 1;
     std::uint32_t exportIndex = 0;
     bool uintExport = false;
+#ifdef __APPLE__
+    // Metal refuses a pipeline whose float4 output feeds an unsigned integer attachment, which Vulkan accepts, so such
+    // targets get a uint4 shader output (see DecodeState).
+    bool metalUintOutput = false;
+#endif
     std::uint32_t pipeBankXor = 0;
     std::uint32_t samples = 1;
     std::uint32_t dccControl = 0;

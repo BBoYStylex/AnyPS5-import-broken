@@ -1299,6 +1299,12 @@ State DecodeState(const QueueState& queue, bool vertexWorkgroup) {
         if (slotExport == 7 && ((read(cx, 0x31c + slot * 0xfu) >> 8u) & 7u) != 4u) throw std::runtime_error("AGC graphics: color export format 7 (UINT16_ABGR) into a target that is not unsigned integer is unsupported");
         color.exportIndex = index;
         color.uintExport = slotExport == 7;
+#ifdef __APPLE__
+        // The 32-bit export formats hand the target their exported dwords unchanged, so an unsigned integer target fed by
+        // one takes a uint4 output carrying the same bits.
+        const bool rawDwords = slotExport == 1 || slotExport == 2 || slotExport == 3 || slotExport == 9;
+        color.metalUintOutput = color.uintExport || (rawDwords && ((read(cx, 0x31c + slot * 0xfu) >> 8u) & 7u) == 4u);
+#endif
         if (color.samples == 1 && result.samples > 1 && result.colors.empty() && !result.depth && (read(cx, 0x292) & 1u) == 0) {
             const auto sampleInputs = read(cx, 0x1b3) & read(cx, 0x1b4) & (ShaderRecompiler::PixelInputBit(ShaderRecompiler::PixelInput::Ancillary) | ShaderRecompiler::PixelInputBit(ShaderRecompiler::PixelInput::SampleCoverage));
             Require(!result.perSampleShading && sampleInputs == 0 && (read(cx, 0x203) & 0x100u) == 0, "a one-sample color target under a multisampled rasterizer without MSAA_ENABLE is unsupported with PS_ITER_SAMPLE, a sample index or coverage input, or a sample-mask export");
