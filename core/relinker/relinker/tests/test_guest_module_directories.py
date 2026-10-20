@@ -88,7 +88,7 @@ def main():
             output = case / ("output.exe" if windows else "output.elf")
             result = subprocess.run([str(relinker), *(["--windows"] if windows else []),
                                      *options, str(source), str(output)],
-                                    capture_output=True, text=True, timeout=30)
+                                    capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)
             return result, output
 
         for windows in (False, True):
@@ -148,25 +148,25 @@ def main():
                 case = work / f"{windows}-self-{magic.hex()}"
                 for name in ("sce_module", "prx"):
                     (case / name).mkdir(parents=True)
-                (case / "sce_module" / "libc.prx").write_bytes(magic + bytes(0x1000))
+                (case / "sce_module" / "libc_\u65e5\u672c.prx").write_bytes(magic + bytes(0x1000))
                 (case / "prx" / "provider.prx").write_bytes(module_with_symbol(True))
                 result, output = convert(case, windows)
                 assert result.returncode == 0 and output.exists(), result.stderr
-                warning = "Skipping SELF container: sce_module/libc.prx (unwrap it before relinking)"
+                warning = "Skipping SELF container: sce_module/libc_\u65e5\u672c.prx (unwrap it before relinking)"
                 assert result.stdout.count(warning) == 1, result.stdout
                 assert {path.name for path in (case / "app0").rglob("*.guest.prx")} == {"provider.prx.guest.prx"}
-                result, output = convert(case, windows, ["--exclude-sce-module", "libc.prx"])
+                result, output = convert(case, windows, ["--exclude-sce-module", "libc_\u65e5\u672c.prx"])
                 assert result.returncode == 0 and output.exists(), result.stderr
                 assert warning not in result.stdout, result.stdout
                 assert {path.name for path in (case / "app0").rglob("*.guest.prx")} == {"provider.prx.guest.prx"}
 
             case = work / f"{windows}-backup-copies"
             (case / "sce_module").mkdir(parents=True)
-            for name in ("libSceFace.prx", "libSceFace.prx.esbak", "libSceFace.prxbak"):
+            for name in ("libSceFace.prx", "libSceFace.prx.esbak", "libSceFace.prxbak", "libSceFace.prx.bak\u00e9"):
                 (case / "sce_module" / name).write_bytes(module_with_soname("libSceFace.prx"))
             result, output = convert(case, windows)
             assert result.returncode == 0 and output.exists(), (result.stdout, result.stderr)
-            for name in ("libSceFace.prx.esbak", "libSceFace.prxbak"):
+            for name in ("libSceFace.prx.esbak", "libSceFace.prxbak", "libSceFace.prx.bak\u00e9"):
                 skipped = f"Skipping backup copy: sce_module/{name} (same SONAME as sce_module/libSceFace.prx)"
                 assert result.stdout.count(skipped) == 1, result.stdout
             assert {path.name for path in (case / "app0").rglob("*.guest.prx")} == {"libSceFace.prx.guest.prx"}

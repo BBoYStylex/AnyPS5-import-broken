@@ -55,6 +55,10 @@ NativeModules ReadModules(const std::filesystem::path& inputPath, const std::fil
         self = (byte(0) == 0x4f && byte(1) == 0x15 && byte(2) == 0x3d && byte(3) == 0x1d) || (byte(0) == 0x54 && byte(1) == 0x14 && byte(2) == 0xf5 && byte(3) == 0xee);
         return byte(0) == 0x7f && magic[1] == 'E' && magic[2] == 'L' && magic[3] == 'F';
     };
+    const auto relativePath = [&](const std::filesystem::path& candidate) {
+        const auto utf8 = candidate.lexically_relative(root).generic_u8string();
+        return std::string(utf8.begin(), utf8.end());
+    };
     for (const auto& directory : directories) {
         if (!std::filesystem::is_directory(directory)) throw Domain::RelinkerException("Guest module path is not a directory: " + Io::Utf8Path(directory));
         for (const auto& entry : std::filesystem::directory_iterator(directory)) {
@@ -68,7 +72,7 @@ NativeModules ReadModules(const std::filesystem::path& inputPath, const std::fil
             bool self = false;
             if (isElf(entry.path(), self)) paths.push_back(entry.path());
             else if (self)
-                std::cout << "Skipping SELF container: " << entry.path().lexically_relative(root).generic_string()
+                std::cout << "Skipping SELF container: " << relativePath(entry.path())
                           << " (unwrap it before relinking)\n";
         }
     }
@@ -94,8 +98,8 @@ NativeModules ReadModules(const std::filesystem::path& inputPath, const std::fil
             if (kept.parent_path() != path.parent_path() || prefix.size() >= name.size() || !name.starts_with(prefix)) continue;
             if (soname(copy).empty() || soname(copy) != soname(original)) continue;
             copies[copy] = true;
-            std::cout << "Skipping backup copy: " << path.lexically_relative(root).generic_string() << " (same SONAME as "
-                      << kept.lexically_relative(root).generic_string() << ")\n";
+            std::cout << "Skipping backup copy: " << relativePath(path) << " (same SONAME as "
+                      << relativePath(kept) << ")\n";
             break;
         }
     }
