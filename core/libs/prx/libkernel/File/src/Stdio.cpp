@@ -511,6 +511,10 @@ static bool NativeIsPipe(int descriptor) {
 #include <sys/statvfs.h>
 #ifdef __APPLE__
 #include <sys/mount.h>
+static bool NativeIsPipe(int descriptor) {
+    struct stat file{};
+    return ::fstat(descriptor, &file) == 0 && S_ISFIFO(file.st_mode);
+}
 #else
 #include <sys/vfs.h>
 static bool NativeIsPipe(int descriptor) {

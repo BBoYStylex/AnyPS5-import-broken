@@ -256,7 +256,7 @@ std::uint32_t EmitBuiltinU32(SpirvEmitterState& state, StageInputKind kind, std:
             // unnormalized unless the fragment function reads [[position]], so the load keeps a use of gl_FragCoord.w
             // that leaves the weight unchanged and that fast math cannot fold away.
             const auto fragCoordW = state.module.AllocateId();
-            state.module.AddFunction(spv::OpBitcast, TypeF32(state), fragCoordW, EmitInputComponentU32(state, StageInputKind::FragCoord, 3u));
+            state.module.AddFunction(spv::OpBitcast, TypeF32(state), fragCoordW, EmitBuiltinU32(state, StageInputKind::FragCoord, 3u));
             const auto magnitude = state.module.AllocateId();
             state.module.AddFunction(spv::OpExtInst, TypeF32(state), magnitude, GlslStd450(state), GLSLstd450FAbs, fragCoordW);
             const auto bound = state.module.AllocateId();
