@@ -9,3 +9,42 @@
 - [sceVrTracker2QueryMemory](../../../core/libs/prx/libSceVrTracker2/Export.cpp) (libSceVrTracker2, NID `TwqZnaIjWv4`) - accepts only a parameter whose first `uint32` is 0x20 and whose bytes 4 to 31 are zero, found by searching sizes 8 to 0x400 and setting each field and byte; it then writes 32 bytes, `uint32` 0x20, 32 MiB and 64 KiB followed by zeros, and returns 0, and otherwise returns 0x8A740006 without writing, as it does for a null argument. The meaning of the parameter's reserved bytes and of the written fields is assumed from their values
 - [libSceVrTracker2](../../../core/libs/prx/libSceVrTracker2/Export.cpp) - initialization (`6Jy73SRfG-o`) takes one parameter of 0x48 bytes. PPSA05666 passes the size 0x48 at offset 0, `uint32` 0x100 and 0x2BC at 0x8 and 0xC, `uint64` 0x1FFF at 0x10 and 0x18, a pointer to its work memory at 0x20, and the memory query's 32 MiB and 64 KiB as `uint32` at 0x28 and 0x2C, with the other bytes zero; the priority and CPU mask meanings of 0x8 to 0x1F are assumed from the values. Called with that parameter and 32 MiB of anonymous memory from a homebrew payload on a PS5 (firmware 13.60) with no PS VR2 headset, it did not return within a minute, so what it returns without a headset is unknown and it throws
 - [libSceVrTracker2](../../../core/libs/prx/libSceVrTracker2/Export.cpp) - eight exports throw. `6Jy73SRfG-o` (initialization) and `9R6W33Au4B4` return 0x8A740006 on the console for null arguments, for zeroed, 0xAA- and 0x01-filled buffers and for a size field from 8 to 0x400 in any of the first three arguments; initialization also returned it for the memory query's parameter with 32 MiB aligned to 64 KiB passed inside the parameter or as further arguments, so the parameter layout it accepts is unknown. `NBhWy+Gl0tY` returns 0x8A740006 for those buffers but crashes for null arguments; `jRmuXjsknsI` returns 0x8A740006 for null arguments and crashes for buffers, also when every 8-byte slot points at readable memory; `O8ZkTFtvUL4`, `940WPg+WwIk`, `oZDm1bynCaA` and `U1VYczwqukY` crash for both
+- [sceVrTracker2SetSlamConfig](../../../core/libs/prx/libSceVrTracker2/Export.cpp) (libSceVrTracker2) - unknown signature
+- [sceVrTracker2GetSlamConfig](../../../core/libs/prx/libSceVrTracker2/Export.cpp) (libSceVrTracker2) - unknown signature
+- [sceVrTracker2GetRelocalizerResult](../../../core/libs/prx/libSceVrTracker2/Export.cpp) (libSceVrTracker2) - unknown signature
+- [sceVrTracker2GetSlamResult](../../../core/libs/prx/libSceVrTracker2/Export.cpp) (libSceVrTracker2) - unknown signature
+- [sceVrTracker2SetControllerConfig](../../../core/libs/prx/libSceVrTracker2/Export.cpp) (libSceVrTracker2) - unknown signature
+- [sceVrTracker2GetControllerConfig](../../../core/libs/prx/libSceVrTracker2/Export.cpp) (libSceVrTracker2) - unknown signature
+- [sceVrTracker2GetControllerImage](../../../core/libs/prx/libSceVrTracker2/Export.cpp) (libSceVrTracker2) - unknown signature
+- [sceVrTracker2IrGetDebugRawImage](../../../core/libs/prx/libSceVrTracker2/Export.cpp) (libSceVrTracker2) - unknown signature
+- [sceVrTracker2GetIrTrackerResult](../../../core/libs/prx/libSceVrTracker2/Export.cpp) (libSceVrTracker2) - unknown signature
+- [sceVrTracker2GetControllerTraceResult](../../../core/libs/prx/libSceVrTracker2/Export.cpp) (libSceVrTracker2) - unknown signature
+- [sceVrTracker2GetPlayAreaResult](../../../core/libs/prx/libSceVrTracker2/Export.cpp) (libSceVrTracker2) - unknown signature
+- [sceVrTracker2GetPlayAreaData](../../../core/libs/prx/libSceVrTracker2/Export.cpp) (libSceVrTracker2) - unknown signature
+- [sceVrTracker2SetPlayAreaData](../../../core/libs/prx/libSceVrTracker2/Export.cpp) (libSceVrTracker2) - unknown signature
+- [sceVrTracker2SetPlayAreaConfig](../../../core/libs/prx/libSceVrTracker2/Export.cpp) (libSceVrTracker2) - unknown signature
+- [sceVrTracker2GetPlayAreaConfig](../../../core/libs/prx/libSceVrTracker2/Export.cpp) (libSceVrTracker2) - unknown signature
+- [sceVrTracker2SetRelocalizerConfig](../../../core/libs/prx/libSceVrTracker2/Export.cpp) (libSceVrTracker2) - unknown signature
+- [sceVrTracker2GetRelocalizerConfig](../../../core/libs/prx/libSceVrTracker2/Export.cpp) (libSceVrTracker2) - unknown signature
+- [sceVrTracker2SetCoordinateSystemEx](../../../core/libs/prx/libSceVrTracker2/Export.cpp) (libSceVrTracker2) - unknown signature
+- [sceVrTracker2GetCoordinateSystemEx](../../../core/libs/prx/libSceVrTracker2/Export.cpp) (libSceVrTracker2) - unknown signature
+- [sceVrTracker2ResetLocalCoordinateEx](../../../core/libs/prx/libSceVrTracker2/Export.cpp) (libSceVrTracker2) - unknown signature
+- [sceVrTracker2ResetLocalCoordinateWithPose](../../../core/libs/prx/libSceVrTracker2/Export.cpp) (libSceVrTracker2) - unknown signature
+- [sceVrTracker2CheckPointIsInsidePlayAreaBoundary](../../../core/libs/prx/libSceVrTracker2/Export.cpp) (libSceVrTracker2) - unknown signature
+- [sceVrTracker2CheckDeviceIsInsidePlayAreaBoundary](../../../core/libs/prx/libSceVrTracker2/Export.cpp) (libSceVrTracker2) - unknown signature
+- [sceVrTracker2GetMapQuality](../../../core/libs/prx/libSceVrTracker2/Export.cpp) (libSceVrTracker2) - unknown signature
+- [sceVrTracker2SetPlayAreaData2](../../../core/libs/prx/libSceVrTracker2/Export.cpp) (libSceVrTracker2) - unknown signature
+- [sceVrTracker2GetPlayAreaData2](../../../core/libs/prx/libSceVrTracker2/Export.cpp) (libSceVrTracker2) - unknown signature
+- [sceVrTracker2SetCurrentPlayAreaId](../../../core/libs/prx/libSceVrTracker2/Export.cpp) (libSceVrTracker2) - unknown signature
+- [sceVrTracker2InitializeMap](../../../core/libs/prx/libSceVrTracker2/Export.cpp) (libSceVrTracker2) - unknown signature
+- [sceVrTracker2GetResultForPlayArea](../../../core/libs/prx/libSceVrTracker2/Export.cpp) (libSceVrTracker2) - unknown signature
+- [sceVrTracker2GetPlayAreaInformation](../../../core/libs/prx/libSceVrTracker2/Export.cpp) (libSceVrTracker2) - unknown signature
+- [sceVrTracker2RemoveMap](../../../core/libs/prx/libSceVrTracker2/Export.cpp) (libSceVrTracker2) - unknown signature
+- [sceVrTracker2RefineMap](../../../core/libs/prx/libSceVrTracker2/Export.cpp) (libSceVrTracker2) - unknown signature
+- [sceVrTracker2ActivateMap](../../../core/libs/prx/libSceVrTracker2/Export.cpp) (libSceVrTracker2) - unknown signature
+- [sceVrTracker2GetRawCameraMeshSize](../../../core/libs/prx/libSceVrTracker2/Export.cpp) (libSceVrTracker2) - unknown signature
+- [sceVrTracker2GetRawCameraMesh](../../../core/libs/prx/libSceVrTracker2/Export.cpp) (libSceVrTracker2) - unknown signature
+- [sceVrTracker2GetNearObjectDepth](../../../core/libs/prx/libSceVrTracker2/Export.cpp) (libSceVrTracker2) - unknown signature
+- [SceVrTracker2DepthCubeMapUpdate](../../../core/libs/prx/libSceVrTracker2/Export.cpp) (libSceVrTracker2) - unknown signature
+- [SceVrTracker2DepthCubeMapGetData](../../../core/libs/prx/libSceVrTracker2/Export.cpp) (libSceVrTracker2) - unknown signature
+- [SceVrTracker2DepthCubeMapInit](../../../core/libs/prx/libSceVrTracker2/Export.cpp) (libSceVrTracker2) - unknown signature
