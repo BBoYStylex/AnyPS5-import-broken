@@ -3,6 +3,12 @@
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
 
+namespace {
+
+constexpr int VR_TRACKER_ERROR_NOT_INIT = static_cast<int>(0x81260801u);
+
+}
+
 extern "C" {
 
 int APS5_VABI sceVrTrackerCpuProcess() {
@@ -13,17 +19,17 @@ int APS5_VABI sceVrTrackerGetResult() {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
-int APS5_VABI sceVrTrackerGetTime() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+int APS5_VABI sceVrTrackerGetTime(std::uint64_t* time) {
+    (void)time;
+    return VR_TRACKER_ERROR_NOT_INIT;
 }
-int APS5_VABI sceVrTrackerGpuSubmit() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+int APS5_VABI sceVrTrackerGpuSubmit(const void* param) {
+    (void)param;
+    return VR_TRACKER_ERROR_NOT_INIT;
 }
-int APS5_VABI sceVrTrackerGpuWait() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+int APS5_VABI sceVrTrackerGpuWait(const void* param) {
+    (void)param;
+    return VR_TRACKER_ERROR_NOT_INIT;
 }
 int APS5_VABI sceVrTrackerInit() {
     NotImplemented_nid_no_patch(__func__);
