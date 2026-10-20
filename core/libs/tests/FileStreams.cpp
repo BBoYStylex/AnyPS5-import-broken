@@ -33,6 +33,11 @@ int APS5_VABI fflush_nid_postfix(FileStream* stream);
 int APS5_VABI remove_nid_postfix(const char* path);
 int APS5_VABI rename_nid_postfix(const char* from, const char* to);
 int APS5_VABI ferror_nid_postfix(FileStream* stream);
+int APS5_VABI feof_nid_postfix(FileStream* stream);
+int APS5_VABI fgetc_nid_postfix(FileStream* stream);
+int APS5_VABI getc_nid_postfix(FileStream* stream);
+int APS5_VABI getc_unlocked_nid_postfix(FileStream* stream);
+int APS5_VABI __srget_nid_postfix(FileStream* stream);
 void APS5_VABI clearerr_nid_postfix(FileStream* stream);
 }
 
@@ -115,7 +120,48 @@ static void CheckExclusiveCppOpen(const std::string& base) {
     }
 }
 
+static void RandomCharacterInput() {
+    const std::array readers{fgetc_nid_postfix, getc_nid_postfix, getc_unlocked_nid_postfix, __srget_nid_postfix};
+    for (const char* path : {"/dev/random", "/dev/urandom"}) {
+        auto* stream = fopen_nid_postfix(path, "rb");
+        Require(stream != nullptr, "open random character stream");
+        for (const auto reader : readers) {
+            for (int index = 0; index < 128; ++index) {
+                const int value = reader(stream);
+                Require(value >= 0 && value <= 255, "random character returned EOF or signed byte");
+            }
+            Require(feof_nid_postfix(stream) == 0 && ferror_nid_postfix(stream) == 0, "random character stream status");
+        }
+        stream->SetError();
+        Require(fgetc_nid_postfix(stream) >= 0 && ferror_nid_postfix(stream) != 0, "read cleared sticky error");
+        clearerr_nid_postfix(stream);
+        std::array<unsigned char, 18> buffer{};
+        buffer.front() = 19;
+        buffer.back() = 23;
+        Require(fread_nid_postfix(buffer.data() + 1, 2, 8, stream) == 8, "block read after character input");
+        Require(buffer.front() == 19 && buffer.back() == 23, "block read guard changed");
+        Require(fclose_nid_postfix(stream) == 0, "close random character stream");
+    }
+    FileStream closed{std::tmpfile()};
+    Require(closed.Close() == 0, "prepare closed character stream");
+    for (const auto reader : readers) {
+        errno = 0;
+        Require(reader(&closed) == EOF && errno == 9, "closed character stream");
+    }
+    FileStream ordinary{std::tmpfile()};
+    Require(ordinary.IsOpen(), "ordinary character stream");
+    const std::array<unsigned char, 4> expected{0, 127, 128, 255};
+    Require(std::fwrite(expected.data(), 1, expected.size(), GetStreamHandle(&ordinary)) == expected.size(), "prepare ordinary characters");
+    std::rewind(GetStreamHandle(&ordinary));
+    for (std::size_t index = 0; index < readers.size(); ++index)
+        Require(readers[index](&ordinary) == expected[index], "ordinary character read changed");
+    Require(fgetc_nid_postfix(&ordinary) == EOF && feof_nid_postfix(&ordinary) != 0, "ordinary EOF changed");
+    Require(ordinary.Close() == 0, "close ordinary character stream");
+}
+
 int main(int argc, char** argv) {
+    RandomCharacterInput();
+    if (argc == 2 && std::strcmp(argv[1], "--random-character-input") == 0) return 0;
     Require(argc == 2);
     CheckExclusiveCppOpen(argv[1]);
     Require(_Stdout_nid_postfix.GetHandle() == stdout);
