@@ -188,6 +188,11 @@ std::filesystem::path ExecutableRelative(const std::string& executable) {
     return relative;
 }
 
+std::string ExecutableTargetName(const std::filesystem::path& relative) {
+    const auto utf8 = relative.generic_u8string();
+    return std::string(utf8.begin(), utf8.end());
+}
+
 std::vector<std::filesystem::path> ModuleDirectories(const Cli::Args& args, const std::filesystem::path& moduleRoot) {
     std::vector<std::filesystem::path> moduleDirectories;
     for (const auto* name : {"sce_module", "sce_modules", "prx"}) moduleDirectories.push_back(moduleRoot / name);
@@ -233,7 +238,7 @@ int RunVerifyPatches(const Cli::Args& args) {
             const auto relative = ExecutableRelative(executable);
             const auto output = OutputExecutablePath(inputPath, executable);
             if (!std::filesystem::is_regular_file(output)) throw Domain::RelinkerException("output not found: " + Io::Utf8Path(output));
-            executables.push_back({relative.generic_string(), reader.Read(Io::Utf8Path(output))});
+            executables.push_back({ExecutableTargetName(relative), reader.Read(Io::Utf8Path(output))});
         }
     } else {
         executables.push_back({Io::Utf8Path(inputPath.filename()), reader.Read(args.inputPath)});
@@ -246,7 +251,7 @@ int RunVerifyPatches(const Cli::Args& args) {
         for (const auto& executable : args.executables) {
             const auto relative = ExecutableRelative(executable);
             const auto input = ResolveExtraExecutable(moduleRoot, moduleDirectories, relative, executable);
-            executables.push_back({relative.generic_string(), reader.Read(Io::Utf8Path(input))});
+            executables.push_back({ExecutableTargetName(relative), reader.Read(Io::Utf8Path(input))});
         }
     }
     const auto results = VerifyPatches(file, executables, modules, args.verifyOutput);
@@ -325,8 +330,9 @@ int Run(const int argc, char* argv[]) {
         std::vector<ConvertedExecutable> executables;
         executables.push_back(Convert(args, args.inputPath, absPath, true, mainTarget, patches, progress));
         for (const auto& [executable, relative, input, output] : extraExecutables) {
-            std::cout << "Executable: " << relative.generic_string() << '\n';
-            auto converted = Convert(args, Io::Utf8Path(input), Io::Utf8Path(output), false, relative.generic_string(), patches, progress);
+            const auto targetName = ExecutableTargetName(relative);
+            std::cout << "Executable: " << targetName << '\n';
+            auto converted = Convert(args, Io::Utf8Path(input), Io::Utf8Path(output), false, targetName, patches, progress);
             const auto& mainArtifacts = executables.front().GuestArtifacts;
             const bool shared = converted.GuestArtifacts.size() == mainArtifacts.size() && std::equal(mainArtifacts.begin(), mainArtifacts.end(), converted.GuestArtifacts.begin(), [](const auto& left, const auto& right) {
                 return left.Path == right.Path && left.Bytes == right.Bytes;
@@ -337,7 +343,7 @@ int Run(const int argc, char* argv[]) {
         const auto& guestArtifacts = executables.front().GuestArtifacts;
         if (!patches.empty()) {
             std::vector<std::string> targetNames{mainTarget};
-            for (const auto& extra : extraExecutables) targetNames.push_back(extra.Relative.generic_string());
+            for (const auto& extra : extraExecutables) targetNames.push_back(ExecutableTargetName(extra.Relative));
             if (!guestArtifacts.empty()) {
                 const auto patchModuleRoot = std::filesystem::absolute(Io::NativePath(args.sceModulePath)).lexically_normal();
                 for (const auto& artifact : guestArtifacts) targetNames.push_back(Relinker::GamePatch::ModuleTargetName(artifact.SourcePath, patchModuleRoot));

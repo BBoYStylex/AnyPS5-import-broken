@@ -26,7 +26,7 @@ def main():
             output = case / "out" / ("app.exe" if windows else "app.elf")
             output.parent.mkdir(exist_ok=True)
             result = subprocess.run([str(relinker), *(["--windows"] if windows else []), "--registry", *options, str(source), str(output)],
-                                    capture_output=True, text=True, timeout=60)
+                                    capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
             return result, output
 
         for windows in (False, True):
@@ -50,6 +50,47 @@ def main():
                 for executable in (output, secondary):
                     run = subprocess.run([str(executable)], capture_output=True, text=True, timeout=30)
                     assert run.returncode == 42, (executable, run.returncode, run.stdout, run.stderr)
+
+            unicode_case = work / f"{windows}-unicode-picker"
+            (unicode_case / "picker_\u65e5\u672c").mkdir(parents=True)
+            picker_bytes = bytes(main_fixture())
+            (unicode_case / "picker_\u65e5\u672c" / "picker.bin").write_bytes(picker_bytes)
+            from test_guest_intel_trampolines import elf_loads
+            _, _, offset, mapped, _, file_size, _, _ = next(header for header in elf_loads(picker_bytes) if header[1] & 1)
+            patch_va = mapped + file_size - 1
+            patch_expected = picker_bytes[offset + file_size - 1]
+            (unicode_case / "relinker-patches.toml").write_text(
+                "\n".join([
+                    "format = 1",
+                    "",
+                    "[[patch]]",
+                    'name = "flip_bit"',
+                    'target = "picker_\u65e5\u672c/picker.bin"',
+                    f"va = {patch_va:#x}",
+                    f'expected = "{patch_expected:02x}"',
+                    f'value = "{patch_expected ^ 1:02x}"',
+                    'description = "flip one bit"',
+                    "",
+                ]),
+                encoding="utf-8",
+            )
+            result, output = convert(unicode_case, windows, ["--executable", "picker_\u65e5\u672c/picker.bin"])
+            assert result.returncode == 0, (result.stdout, result.stderr)
+            assert "Executable: picker_\u65e5\u672c/picker.bin\n" in result.stdout, result.stdout
+            assert f"Patch: picker_\u65e5\u672c/picker.bin [flip_bit] va={patch_va:#x}" in result.stdout, result.stdout
+            manifest = output.parent / "app.patches.toml"
+            assert 'target = "picker_\u65e5\u672c/picker.bin"' in manifest.read_text(encoding="utf-8")
+            verify_input = subprocess.run(
+                [str(relinker), "--verify-patches", str(manifest), str(unicode_case / "eboot.bin"), "--executable", "picker_\u65e5\u672c/picker.bin"],
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
+            )
+            assert verify_input.returncode == 0 and "applicable: flip_bit picker_\u65e5\u672c/picker.bin" in verify_input.stdout, (verify_input.stdout, verify_input.stderr)
+            if not windows:
+                verify_output = subprocess.run(
+                    [str(relinker), "--verify-patches", str(manifest), "--verify-output", str(output), "--executable", "picker_\u65e5\u672c/picker.bin"],
+                    capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
+                )
+                assert verify_output.returncode == 0 and "applied: flip_bit picker_\u65e5\u672c/picker.bin" in verify_output.stdout, (verify_output.stdout, verify_output.stderr)
 
             for options, message in ((["--executable", "../eboot.bin"], "inside the guest module parent directory"),
                                      (["--executable", "picker"], "is not a file"),
