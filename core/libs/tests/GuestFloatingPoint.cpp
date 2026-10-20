@@ -119,6 +119,7 @@ void CheckFlags() {
     traps.x87[0] &= ~0x08u;
     traps.sse &= ~(0x08u << 7);
     WriteEnvironment(traps);
+    traps = ReadEnvironment();
     const std::uint16_t none = 0;
     Require(fesetexceptflag_nid_postfix(&none, 0x01) == 0, "restore with an unmasked exception");
     Require(feclearexcept_nid_postfix(0x02) == 0, "clear with an unmasked exception");
