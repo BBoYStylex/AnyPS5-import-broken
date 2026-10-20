@@ -1629,10 +1629,15 @@ const HostImport* importAllocation(const Context& context, HostImports& state, s
 }
 
 const HostImport* importJoined(const Context& context, HostImports& state, std::uint64_t begin, std::uint64_t end, const GuestAllocations::Lease& lease) {
+    const auto boundBegin = begin;
+    const auto boundEnd = end;
     if (const auto* low = peekImport(state, begin, begin + 1); low != nullptr) begin = low->base;
     if (const auto* high = peekImport(state, end - 1, end); high != nullptr) end = high->base + high->bytes;
     auto run = joinedRun(lease, begin, end);
     if (run.ranges.empty()) return nullptr;
+    const auto window = importWindow.load(std::memory_order_relaxed);
+    const bool exact = boundBegin == run.base && boundEnd == run.base + run.bytes;
+    if (!exact && run.bytes > window && !std::all_of(run.ranges.begin(), run.ranges.end(), [window](const auto& range) { return range->bytes > window; })) return nullptr;
     if (const auto failed = state.failedJoins.find(run.base); failed != state.failedJoins.end() && sameRun(failed->second, run)) return nullptr;
     return importRunAt(context, state, std::move(run), true, begin, lease, end, true, ImportRequester::Join);
 }
