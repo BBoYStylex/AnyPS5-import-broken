@@ -412,6 +412,7 @@ static void RequireThrd(int result, const char* what) {
 
 static std::atomic<PthreadCreateFn_nid_no_patch> registeredPthreadCreate{nullptr};
 static std::atomic<PthreadJoinFn_nid_no_patch> registeredPthreadJoin{nullptr};
+static std::atomic<PthreadSelfFn_nid_no_patch> registeredPthreadSelf{nullptr};
 
 void RegisterPthreadCreate_nid_no_patch(PthreadCreateFn_nid_no_patch fn) {
     registeredPthreadCreate.store(fn, std::memory_order_release);
@@ -419,6 +420,10 @@ void RegisterPthreadCreate_nid_no_patch(PthreadCreateFn_nid_no_patch fn) {
 
 void RegisterPthreadJoin_nid_no_patch(PthreadJoinFn_nid_no_patch fn) {
     registeredPthreadJoin.store(fn, std::memory_order_release);
+}
+
+void RegisterPthreadSelf_nid_no_patch(PthreadSelfFn_nid_no_patch fn) {
+    registeredPthreadSelf.store(fn, std::memory_order_release);
 }
 
 static void* APS5_VABI PadEntry_nid_no_patch(void* argument) {
@@ -477,9 +482,10 @@ int APS5_VABI _Thrd_join_nid_postfix(void* thread, int* code) {
     return threadSuccess;
 }
 
-int APS5_VABI _Thrd_id_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+void* APS5_VABI _Thrd_id_nid_postfix(void) {
+    const auto self = registeredPthreadSelf.load(std::memory_order_acquire);
+    if (!self) throw std::runtime_error("_Thrd_id: scePthreadSelf is not registered");
+    return self();
 }
 
 [[noreturn]] void APS5_VABI _ZSt16_Throw_Cpp_errori_nid_postfix(int code) {

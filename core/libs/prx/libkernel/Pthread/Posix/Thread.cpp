@@ -226,10 +226,15 @@ int APS5_VABI pthread_join_nid_postfix(Pthread thread, void** value) {
 }
 
 namespace {
+void* APS5_VABI PthreadSelfForCrt_nid_no_patch() {
+    return scePthreadSelf();
+}
+
 struct RegisterPthreadOnLoad {
     RegisterPthreadOnLoad() {
         RegisterPthreadCreate_nid_no_patch(reinterpret_cast<PthreadCreateFn_nid_no_patch>(pthread_create_nid_postfix));
         RegisterPthreadJoin_nid_no_patch(reinterpret_cast<PthreadJoinFn_nid_no_patch>(pthread_join_nid_postfix));
+        RegisterPthreadSelf_nid_no_patch(PthreadSelfForCrt_nid_no_patch);
     }
 };
 const RegisterPthreadOnLoad gRegisterPthread;

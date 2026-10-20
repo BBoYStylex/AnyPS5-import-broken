@@ -696,8 +696,8 @@ size_t APS5_VABI strxfrm_nid_postfix(char* destination, const char* source, size
     return strlcpy_nid_postfix(destination, source, count);
 }
 
-char* APS5_VABI strtok_s_nid_postfix(char* str, const char* delim, char** context) {
-    return SonyStrtokS(str, delim, context);
+char* APS5_VABI strtok_s_nid_postfix(char* str, std::size_t* remaining, const char* delim, char** context) {
+    return SonyStrtokS(str, remaining, delim, context);
 }
 
 int APS5_VABI wmemcpy_s_nid_postfix(char16_t* dest, size_t destsz, const char16_t* src, size_t count) {

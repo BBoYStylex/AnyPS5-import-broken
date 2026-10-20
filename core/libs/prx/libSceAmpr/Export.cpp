@@ -911,8 +911,8 @@ double APS5_VABI sceAmprSinh(double x, double y) {
 }
 
 APS5_EXPORT("-vXEQdRADLI", sceAmprStrtokS);
-char* APS5_VABI sceAmprStrtokS(char* str, const char* delim, char** context) {
-    return SonyStrtokS(str, delim, context);
+char* APS5_VABI sceAmprStrtokS(char* str, std::size_t* remaining, const char* delim, char** context) {
+    return SonyStrtokS(str, remaining, delim, context);
 }
 
 APS5_EXPORT("2UFh+YKfuzk", sceAmprCtimeS);

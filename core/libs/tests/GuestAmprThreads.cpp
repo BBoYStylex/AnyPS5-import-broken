@@ -53,6 +53,8 @@ struct TestPad {
 };
 
 extern "C" {
+Pthread APS5_VABI _Thrd_id_nid_postfix(void);
+Pthread APS5_VABI scePthreadSelf(void);
 void APS5_VABI _ZNSt4_PadC2Ev_nid_postfix(TestPad* pad);
 void APS5_VABI _ZNSt4_PadD2Ev_nid_postfix(TestPad* pad);
 void APS5_VABI _ZNSt4_Pad7_LaunchEPP7pthread_nid_postfix(TestPad* pad, Pthread* thread);
@@ -146,6 +148,44 @@ static Pthread Start(PthreadEntry entry, void* arg) {
     Pthread thread = nullptr;
     Require(scePthreadCreate(&thread, nullptr, entry, arg, nullptr) == 0);
     return thread;
+}
+
+struct ThreadIdentity {
+    Pthread identity = nullptr;
+    std::atomic<bool> ready{false};
+    std::atomic<bool>* release;
+};
+
+static void* APS5_VABI ReadThreadIdentity(void* argument) {
+    auto& context = *static_cast<ThreadIdentity*>(argument);
+    context.identity = _Thrd_id_nid_postfix();
+    Require(context.identity == scePthreadSelf());
+    context.ready.store(true);
+    while (!context.release->load()) std::this_thread::yield();
+    Require(_Thrd_id_nid_postfix() == context.identity);
+    return nullptr;
+}
+
+static void TestThreadIdentity() {
+    const Pthread current = _Thrd_id_nid_postfix();
+    Require(current != nullptr && current == scePthreadSelf());
+    std::atomic<bool> release{false};
+    std::array<ThreadIdentity, 4> identities{};
+    std::array<Pthread, 4> threads{};
+    for (std::size_t index = 0; index < threads.size(); ++index) {
+        identities[index].release = &release;
+        threads[index] = Start(ReadThreadIdentity, &identities[index]);
+    }
+    for (std::size_t index = 0; index < threads.size(); ++index) {
+        while (!identities[index].ready.load()) std::this_thread::yield();
+        Require(identities[index].identity == threads[index]);
+        Require(identities[index].identity != current);
+        for (std::size_t previous = 0; previous < index; ++previous)
+            Require(identities[index].identity != identities[previous].identity);
+    }
+    Require(_Thrd_id_nid_postfix() == current);
+    release.store(true);
+    for (Pthread thread : threads) Require(_Thrd_join_nid_postfix(thread, nullptr) == ThrdSuccess);
 }
 
 static void TestThreadJoin() {
@@ -568,6 +608,7 @@ static void TestPadErrors() {
 }
 
 int main() {
+    TestThreadIdentity();
     TestPadLaunch();
     TestPadLaunchMany();
     TestPadConcurrentLaunch();

@@ -53,8 +53,10 @@ extern "C" void KeepStandardHandle_nid_no_patch(int descriptor, void* handle);
 
 using PthreadCreateFn_nid_no_patch = int (APS5_VABI*)(void**, const void*, void* (APS5_VABI*)(void*), void*);
 using PthreadJoinFn_nid_no_patch = int (APS5_VABI*)(void*, void**);
+using PthreadSelfFn_nid_no_patch = void* (APS5_VABI*)();
 extern "C" void RegisterPthreadCreate_nid_no_patch(PthreadCreateFn_nid_no_patch fn);
 extern "C" void RegisterPthreadJoin_nid_no_patch(PthreadJoinFn_nid_no_patch fn);
+extern "C" void RegisterPthreadSelf_nid_no_patch(PthreadSelfFn_nid_no_patch fn);
 
 #define APS5_INVALID_ARG_EX throw std::invalid_argument(std::string(__func__) + ": invalid argument")
 

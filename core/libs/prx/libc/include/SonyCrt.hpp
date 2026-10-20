@@ -64,64 +64,78 @@ inline void SonyInvokeConstraintHandler(const char* message, void* pointer, int 
     if (handler) handler(message, pointer, error);
 }
 
-inline char* SonyStrtokS(char* str, const char* delim, char** context) {
-    if (!delim || !context) return nullptr;
+inline char* SonyStrtokS(char* str, std::size_t* remaining, const char* delim, char** context) {
+    const auto fail = [](const char* message) -> char* {
+        SonyInvokeConstraintHandler(message, nullptr, EINVAL);
+        return nullptr;
+    };
+    if (!remaining || *remaining >= (std::size_t{1} << 61) || !delim || !context || (!str && !*context))
+        return fail("strtok_s: bad argument");
     char* cursor = str ? str : *context;
-    if (!cursor) return nullptr;
-    cursor += std::strspn(cursor, delim);
+    std::size_t available = *remaining;
+    if (available == 0) return fail("strtok_s: missing token");
+    while (*cursor != '\0' && std::strchr(delim, static_cast<unsigned char>(*cursor))) {
+        ++cursor;
+        if (--available == 0) return fail("strtok_s: missing token");
+    }
+    *remaining = available;
     if (*cursor == '\0') {
         *context = cursor;
         return nullptr;
     }
     char* token = cursor;
-    cursor += std::strcspn(cursor, delim);
-    if (*cursor != '\0') {
-        *cursor = '\0';
-        *context = cursor + 1;
-    } else {
-        *context = cursor;
+    while (*cursor != '\0' && !std::strchr(delim, static_cast<unsigned char>(*cursor))) {
+        if (--available == 0) return fail("strtok_s: missing delimiter");
+        ++cursor;
     }
+    *remaining = available;
+    if (*cursor != '\0') {
+        *cursor++ = '\0';
+        --*remaining;
+    }
+    *context = cursor;
     return token;
 }
 
 inline int SonyFormatAsctime(char* buffer, std::size_t size, const GuestTm& time) {
     static const char* const days[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
     static const char* const months[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
-    if (!buffer || size < 26) return EINVAL;
-    const int year = 1900 + time.tm_year;
-    if (time.tm_wday < 0 || time.tm_wday > 6 || time.tm_mon < 0 || time.tm_mon > 11 ||
-        time.tm_mday < 1 || time.tm_mday > 31 || time.tm_hour < 0 || time.tm_hour > 23 ||
-        time.tm_min < 0 || time.tm_min > 59 || time.tm_sec < 0 || time.tm_sec > 60 ||
-        year < 0 || year > 9999) {
-        buffer[0] = '\0';
-        return EINVAL;
-    }
-    std::snprintf(buffer, size, "%.3s %.3s %2d %.2d:%.2d:%.2d %4d\n", days[time.tm_wday], months[time.tm_mon],
-        time.tm_mday, time.tm_hour, time.tm_min, time.tm_sec, year);
-    return 0;
+    const int written = std::snprintf(buffer, size, "%.3s %.3s %2d %.2d:%.2d:%.2d %04d\n", days[time.tm_wday], months[time.tm_mon],
+        time.tm_mday, time.tm_hour, time.tm_min, time.tm_sec, 1900 + time.tm_year);
+    return written == 25 ? 0 : EINVAL;
 }
 
-inline int SonyCtimeS(char* buffer, std::size_t size, const std::int64_t* time) {
-    if (!buffer || size < 26) return EINVAL;
-    if (!time) {
-        buffer[0] = '\0';
-        return EINVAL;
-    }
-    GuestTm parts{};
-    if (!localtime_s_nid_postfix(time, &parts)) {
-        buffer[0] = '\0';
-        return EINVAL;
-    }
-    return SonyFormatAsctime(buffer, size, parts);
+inline bool SonyTimeDestinationValid(const char* buffer, std::size_t size) {
+    return buffer != nullptr && size != 0 && size < (std::size_t{1} << 61);
 }
 
 inline int SonyAsctimeS(char* buffer, std::size_t size, const GuestTm* time) {
-    if (!buffer || size < 26) return EINVAL;
-    if (!time) {
+    if (!SonyTimeDestinationValid(buffer, size)) {
+        SonyInvokeConstraintHandler("asctime_s: bad destination argument", nullptr, EINVAL);
+        return EINVAL;
+    }
+    if (size < 26 || !time || time->tm_yday < 0 || time->tm_yday > 365 || time->tm_wday < 0 || time->tm_wday > 6 ||
+        time->tm_mon < 0 || time->tm_mon > 11 || time->tm_mday < 1 || time->tm_mday > 31 || time->tm_hour < 0 || time->tm_hour > 23 ||
+        time->tm_min < 0 || time->tm_min > 59 || time->tm_sec < 0 || time->tm_sec > 60 || time->tm_year < -1900 || time->tm_year > 8099) {
         buffer[0] = '\0';
+        SonyInvokeConstraintHandler("asctime_s: bad argument", nullptr, EINVAL);
         return EINVAL;
     }
     return SonyFormatAsctime(buffer, size, *time);
+}
+
+inline int SonyCtimeS(char* buffer, std::size_t size, const std::int64_t* time) {
+    if (!SonyTimeDestinationValid(buffer, size)) {
+        SonyInvokeConstraintHandler("ctime_s: bad destination argument", nullptr, EINVAL);
+        return EINVAL;
+    }
+    GuestTm parts{};
+    if (size < 26 || !time || !localtime_s_nid_postfix(time, &parts) || parts.tm_year < -1900 || parts.tm_year > 8099) {
+        buffer[0] = '\0';
+        SonyInvokeConstraintHandler("ctime_s: bad argument", nullptr, EINVAL);
+        return EINVAL;
+    }
+    return SonyAsctimeS(buffer, size, &parts);
 }
 
 inline void SonyIgnoreHandlerS(const char* message, void* pointer, int error) {
