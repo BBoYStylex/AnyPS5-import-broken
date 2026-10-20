@@ -147,6 +147,34 @@ inline constexpr std::uint64_t PreciseFractionalProductDiv(
     return quotient;
 }
 
+inline void PreciseSleepUntilTicks24MHz(LARGE_INTEGER counter, std::uint64_t targetTicks) {
+    constexpr std::uint64_t kSpinTailTicks = 6000ULL;
+    constexpr std::uint64_t kPauseThresholdTicks = 5ULL;
+    const std::uint64_t nowTicks = static_cast<std::uint64_t>(counter.QuadPart);
+    if (nowTicks >= targetTicks) {
+        return;
+    }
+    const std::uint64_t remainingTicks = targetTicks - nowTicks;
+    if (remainingTicks > kSpinTailTicks) [[unlikely]] {
+        const std::uint64_t timerTicks = remainingTicks - kSpinTailTicks;
+        const unsigned long long timerHundredNanos = static_cast<unsigned long long>(
+            PreciseTicksToHundredNanos24MHz(timerTicks));
+        if (timerHundredNanos > 0) {
+            PreciseSleepWaitableTimerWithHandle(PreciseWaitThreadTimer(), timerHundredNanos);
+        }
+    }
+    for (;;) {
+        QueryPerformanceCounter(&counter);
+        const std::uint64_t currentTicks = static_cast<std::uint64_t>(counter.QuadPart);
+        if (currentTicks >= targetTicks) {
+            break;
+        }
+        if (targetTicks - currentTicks > kPauseThresholdTicks) {
+            YieldProcessor();
+        }
+    }
+}
+
 template <class TDuration>
 inline constexpr std::uint64_t PreciseDurationToTicks24MHz(TDuration duration) {
     const auto raw = duration.count();
