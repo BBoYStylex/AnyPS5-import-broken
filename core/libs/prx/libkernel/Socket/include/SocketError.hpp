@@ -9,11 +9,6 @@ namespace GuestSockets {
 
 constexpr int GuestErrorIo = 5;
 
-#ifdef __APPLE__
-// Defined in SocketOptions.cpp: the libproc headers it needs pull in <sys/event.h>, whose EVFILT_* macros
-// collide with the guest constants in Equeue.hpp.
-bool HostSocketListening(int handle);
-#endif
 constexpr int GuestErrorFromHost(int hostError) {
     switch (hostError) {
 #ifdef _WIN32
