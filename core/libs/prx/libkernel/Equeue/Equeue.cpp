@@ -12,6 +12,55 @@
 #include <stdexcept>
 #include <unordered_map>
 
+extern "C" int APS5_VABI sceKernelFstat(int d, FileStat* sb);
+
+static constexpr std::uint64_t FileRepollNs = 1000000;
+
+static bool UnreadFileBytes(KernelEqueueEvent* e) {
+    const int file = static_cast<int>(e->event.ident);
+    FileStat status{};
+    if (sceKernelFstat(file, &status) != 0) {
+        return false;
+    }
+    const std::int64_t offset = sceKernelLseek(file, 0, 1);
+    if (offset < 0) {
+        return false;
+    }
+    e->event.data = static_cast<intptr_t>(status.st_size - offset);
+    return true;
+}
+
+static bool RegularFile(int descriptor) {
+    if (File::IsHostStream(descriptor)) {
+        return false;
+    }
+    FileStat status{};
+    return sceKernelFstat(descriptor, &status) == 0 && (status.st_mode & 0170000) == 0100000;
+}
+
+static KernelEqueueEvent FileEvent(int descriptor, int16_t filter, uint16_t flags, void* udata) {
+    KernelEqueueEvent event{};
+    event.event.ident = static_cast<uintptr_t>(descriptor);
+    event.event.filter = filter;
+    event.event.flags = flags;
+    event.event.udata = udata;
+    event.filter.repoll = true;
+    if (filter == EVFILT_WRITE) {
+        event.filter.pollFunc = [](KernelEqueueEvent* e) {
+            e->event.data = 0;
+            return true;
+        };
+    } else {
+        event.filter.pollFunc = [](KernelEqueueEvent* e) {
+            return UnreadFileBytes(e) && e->event.data != 0;
+        };
+    }
+    event.filter.resetFunc = [](KernelEqueueEvent* e) {
+        e->triggered = false;
+    };
+    return event;
+}
+
 static std::unordered_map<KernelEqueue, KernelEqueueRef> g_equeues;
 static std::mutex g_equeueMutex;
 static uint64_t g_nextEqueue = 1;
@@ -100,15 +149,24 @@ void KernelEqueuePrivate::WakePollers() {
 void KernelEqueuePrivate::WaitForDescriptors(std::unique_lock<std::mutex>& lock, std::uint64_t deadlineNanos) {
     std::vector<GuestSockets::Interest> interests;
     std::vector<std::shared_ptr<void>> held;
+    bool repoll = false;
     for (const auto& e : m_events) {
         if (!e.enabled || e.filter.pollFunc == nullptr) {
             continue;
         }
-        if (e.filter.waitDescriptor >= 0) {
+        if (e.filter.repoll) {
+            repoll = true;
+        } else if (e.filter.waitDescriptor >= 0) {
             interests.push_back({e.filter.waitDescriptor, false});
             held.push_back(e.filter.owner);
         } else {
             interests.push_back({static_cast<int>(e.event.ident), e.event.filter == EVFILT_WRITE});
+        }
+    }
+    if (repoll) {
+        const std::uint64_t soon = TimedWait::NowNanos() + FileRepollNs;
+        if (deadlineNanos == 0 || deadlineNanos > soon) {
+            deadlineNanos = soon;
         }
     }
     const auto waker = GuestSockets::CurrentWaker();
@@ -634,14 +692,18 @@ static int AddDescriptorEvent(KernelEqueue eq, int fd, std::size_t size, void* u
     std::int64_t available = 0;
     bool eof = false;
     const bool isPipe = !isSocket && filter == EVFILT_READ && !File::IsHostStream(fd) && GuestSockets::PipeReadState(fd, &available, &eof);
-    if (!isSocket && !isPipe && DescriptorIsOpen_nid_no_patch(fd)) {
-        NotImplemented_nid_no_patch(filter == EVFILT_READ ? "sceKernelAddReadEvent: descriptor that is neither a socket nor the read end of a pipe" : "sceKernelAddWriteEvent: non-socket descriptor");
+    const bool isFile = !isSocket && !isPipe && RegularFile(fd);
+    if (!isSocket && !isPipe && !isFile && DescriptorIsOpen_nid_no_patch(fd)) {
+        NotImplemented_nid_no_patch(filter == EVFILT_READ ? "sceKernelAddReadEvent: descriptor that is neither a socket, the read end of a pipe nor a regular file" : "sceKernelAddWriteEvent: descriptor that is neither a socket nor a regular file");
     }
     if (size > 1 && !isPipe) {
         NotImplemented_nid_no_patch(filter == EVFILT_READ ? "sceKernelAddReadEvent: low watermark" : "sceKernelAddWriteEvent: low watermark");
     }
-    if (!isSocket && !isPipe) {
+    if (!isSocket && !isPipe && !isFile) {
         return SCE_KERNEL_ERROR_EBADF;
+    }
+    if (isFile) {
+        return EqueueAddEvent_nid_postfix(eq, FileEvent(fd, filter, EV_ADD, udata));
     }
     return EqueueAddEvent_nid_postfix(eq, EqueueDescriptorEvent(fd, filter, EV_ADD, udata));
 }
