@@ -2087,7 +2087,18 @@ void VulkanDevice::startJournalReplay() {
     state->journalReplay = Graphics::StartPipelineJournalReplay(graphicsContext(), Graphics::PipelineJournalDeviceFingerprint(state->properties), {[this](const ShaderRecompiler::RecompileResult& shader, bool pushConstants) { return ReplayComputePipeline(shader, pushConstants); }});
 }
 
+#ifdef __APPLE__
+VulkanDevice::~VulkanDevice() {
+    // libc++'s unique_ptr clears its pointer before running ~State, so replay workers still calling
+    // ReplayComputePipeline would read a null state; stop them while state is still reachable.
+    if (state != nullptr && state->journalReplay != nullptr) {
+        state->journalReplay->Cancel();
+        state->journalReplay->Wait();
+    }
+}
+#else
 VulkanDevice::~VulkanDevice() = default;
+#endif
 
 VkPipelineCreateFlags VulkanDevice::computePipelineFlags() const {
     return (graphicsContext().pipelineExecutableInfo ? VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR : 0) | VK_PIPELINE_CREATE_DISPATCH_BASE_BIT;
