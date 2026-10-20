@@ -649,6 +649,7 @@ int main() {
     const std::string junctionText(junctionBuffer, static_cast<std::size_t>(junctionLength));
     std::error_code junctionError;
     Require(junctionText.find('?') == std::string::npos && std::filesystem::equivalent(junctionText, junctionTarget, junctionError) && !junctionError);
+    Require(readlinkat_nid_postfix(-100, junction.string().c_str(), junctionBuffer, sizeof(junctionBuffer)) == junctionLength);
     Require(std::filesystem::remove(junction) && std::filesystem::remove(junctionTarget));
 #endif
 #ifndef _WIN32
