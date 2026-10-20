@@ -5374,7 +5374,17 @@ void descriptorPoolResetFailureTest() {
     const auto previous = _ZSt13set_terminatePFvvE_nid_postfix([] {
         std::_Exit(mock.descriptorResetResult == VK_SUCCESS ? 0 : 1);
     });
+#ifdef __APPLE__
+    // On Linux libc aliases std::terminate to the guest one set above; that alias is a no-op on macOS, so the driver's
+    // std::terminate reaches the host runtime's handler instead.
+    const auto previousHost = std::set_terminate([] {
+        std::_Exit(mock.descriptorResetResult == VK_SUCCESS ? 0 : 1);
+    });
+#endif
     cache.Free(allocation);
+#ifdef __APPLE__
+    std::set_terminate(previousHost);
+#endif
     _ZSt13set_terminatePFvvE_nid_postfix(previous);
 }
 
