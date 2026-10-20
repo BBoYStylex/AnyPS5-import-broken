@@ -271,9 +271,7 @@ int main() {
     size = localName.size();
     Require(getsockname_nid_postfix(dissolved, localName.data(), &size) == 0);
     Require(localName[2] == dissolvedAddress[2] && localName[3] == dissolvedAddress[3]);
-#ifndef _WIN32
     Require(localName[4] == 0 && localName[5] == 0 && localName[6] == 0 && localName[7] == 0);
-#endif
     Require(send_nid_postfix(dissolved, "x", 1, 0) == -1 && *__error_nid_postfix() == 39);
     const char unrelated[] = "unrelated sender";
     Require(sendto_nid_postfix(other, unrelated, sizeof(unrelated), 0, dissolvedAddress.data(), dissolvedAddress.size()) == sizeof(unrelated));
