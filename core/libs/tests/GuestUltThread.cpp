@@ -40,6 +40,13 @@ int APS5_VABI sceUltQueueDataResourcePoolDestroy(void*);
 int APS5_VABI sceUltConditionVariableDestroy(void*);
 int APS5_VABI sceUltReaderWriterLockDestroy();
 int APS5_VABI sceUltGetConditionVariableInfo();
+int APS5_VABI sceUltConditionVariableOptParamInitialize(void*, std::uint32_t);
+int APS5_VABI sceUltQueueDataResourcePoolOptParamInitialize(void*, std::uint32_t);
+int APS5_VABI sceUltQueueOptParamInitialize(void*, std::uint32_t);
+int APS5_VABI sceUltReaderWriterLockOptParamInitialize(void*, std::uint32_t);
+int APS5_VABI sceUltSemaphoreOptParamInitialize(void*, std::uint32_t);
+int APS5_VABI sceUltUlthreadOptParamInitialize(void*, std::uint32_t);
+int APS5_VABI sceUltWaitingQueueResourcePoolOptParamInitialize(void*, std::uint32_t);
 }
 
 static constexpr int Ok = 0;
@@ -232,6 +239,27 @@ static void UnderscoredCreate() {
     CHECK(sceUltQueueDataResourcePoolDestroy(dataPool) == Ok);
 }
 
+static void OptParams() {
+    using Initialize = int (APS5_VABI *)(void*, std::uint32_t);
+    const Initialize initializers[] = {
+        sceUltConditionVariableOptParamInitialize,
+        sceUltQueueDataResourcePoolOptParamInitialize,
+        sceUltQueueOptParamInitialize,
+        sceUltReaderWriterLockOptParamInitialize,
+        sceUltSemaphoreOptParamInitialize,
+        sceUltUlthreadOptParamInitialize,
+        sceUltWaitingQueueResourcePoolOptParamInitialize,
+    };
+    for (const auto initialize : initializers) {
+        alignas(8) std::uint8_t optParam[136];
+        std::memset(optParam, 0xFF, sizeof(optParam));
+        CHECK(initialize(nullptr, 0) == Null);
+        CHECK(initialize(optParam, 0) == Ok);
+        for (std::size_t index = 0; index < 128; ++index) CHECK(optParam[index] == 0);
+        for (std::size_t index = 128; index < sizeof(optParam); ++index) CHECK(optParam[index] == 0xFF);
+    }
+}
+
 int main(int argc, char** argv) {
     CHECK(argc == 2);
     CHECK(sceUltInitialize() == Ok);
@@ -240,5 +268,6 @@ int main(int argc, char** argv) {
     else if (std::strcmp(argv[1], "tryjoin") == 0) TryJoin();
     else if (std::strcmp(argv[1], "destroy") == 0) Destroy();
     else if (std::strcmp(argv[1], "underscoredcreate") == 0) UnderscoredCreate();
+    else if (std::strcmp(argv[1], "optparams") == 0) OptParams();
     else CHECK(false);
 }

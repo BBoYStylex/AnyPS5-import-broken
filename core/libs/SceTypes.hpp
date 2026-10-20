@@ -1976,6 +1976,7 @@ struct UltMutexOptParam {
 };
 
 struct UltUlthreadRuntimeOptParam { std::uint8_t bytes[128]; };
+struct UltOptParam { std::uint8_t bytes[128]; };
 
 using UltUlthreadEntry = std::int32_t (APS5_VABI *)(std::uint64_t);
 
