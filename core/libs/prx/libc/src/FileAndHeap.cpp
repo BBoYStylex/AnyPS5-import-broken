@@ -557,6 +557,14 @@ void* APS5_VABI realloc_nid_postfix(void* ptr, size_t newSize) {
     return allocationOrNull([ptr, newSize] { return ApplicationHeapReallocate_nid_no_patch(ptr, newSize); });
 }
 
+void* APS5_VABI reallocarray_nid_postfix(void* ptr, size_t count, size_t size) {
+    if (size != 0 && count > std::numeric_limits<size_t>::max() / size) {
+        errno = 12;
+        return nullptr;
+    }
+    return realloc_nid_postfix(ptr, count * size);
+}
+
 void* APS5_VABI reallocf_nid_postfix(void* ptr, size_t newSize) {
     try {
         return ApplicationHeapReallocate_nid_no_patch(ptr, newSize);
