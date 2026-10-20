@@ -1034,8 +1034,19 @@ private:
         std::call_once(loadOnce, [&] {
             try {
                 auto journal = Journal::Instance().Load();
-                const auto limit = configured("APS5_PIPELINE_JOURNAL_ENTRIES", 1024u);
-                if (journal.entries.size() > limit) journal.entries.resize(static_cast<std::size_t>(limit));
+                const auto graphicsLimit = configured("APS5_PIPELINE_JOURNAL_ENTRIES", 1024u);
+                const auto computeLimit = configured("APS5_PIPELINE_JOURNAL_COMPUTE_ENTRIES", 1024u);
+                std::uint64_t graphics = 0;
+                std::uint64_t compute = 0;
+                std::vector<LoadedEntry> kept;
+                for (auto& entry : journal.entries) {
+                    const bool isCompute = entry.kind == ComputeRecord;
+                    if ((isCompute ? compute++ : graphics++) < (isCompute ? computeLimit : graphicsLimit)) kept.push_back(std::move(entry));
+                }
+                if (kept.size() != journal.entries.size()) {
+                    std::fprintf(stderr, "[pipeline-journal] replaying %llu of %llu graphics and %llu of %llu compute pipelines (APS5_PIPELINE_JOURNAL_ENTRIES, APS5_PIPELINE_JOURNAL_COMPUTE_ENTRIES)\n", static_cast<unsigned long long>(std::min(graphics, graphicsLimit)), static_cast<unsigned long long>(graphics), static_cast<unsigned long long>(std::min(compute, computeLimit)), static_cast<unsigned long long>(compute));
+                }
+                journal.entries = std::move(kept);
                 loaded = std::move(journal);
             } catch (const std::exception& error) {
                 std::fprintf(stderr, "[pipeline-journal] cannot load %s: %s\n", Journal::Instance().Path().string().c_str(), error.what());
