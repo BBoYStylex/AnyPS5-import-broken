@@ -2,6 +2,7 @@
 #include <cstddef>
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
+#include "prx/libc/include/ApplicationHeap.hpp"
 
 #include <libusb.h>
 
@@ -27,7 +28,7 @@ constexpr std::uint8_t TRANSFER_TYPE_ISOCHRONOUS = 1;
 constexpr std::uint8_t TRANSFER_TYPE_BULK = 2;
 constexpr std::uint8_t TRANSFER_TYPE_INTERRUPT = 3;
 constexpr std::int32_t CONTROL_SETUP_SIZE = 8;
-constexpr std::uint8_t SUPPORTED_TRANSFER_FLAGS = LIBUSB_TRANSFER_SHORT_NOT_OK | LIBUSB_TRANSFER_ADD_ZERO_PACKET;
+constexpr std::uint8_t SUPPORTED_TRANSFER_FLAGS = LIBUSB_TRANSFER_SHORT_NOT_OK | LIBUSB_TRANSFER_FREE_BUFFER | LIBUSB_TRANSFER_ADD_ZERO_PACKET;
 
 struct UsbdTimeval {
     std::int64_t seconds;
@@ -238,6 +239,7 @@ void APS5_VABI sceUsbdFreeTransfer(UsbdTransfer* transfer) {
         std::lock_guard lock(state.mutex);
         if (state.inFlight.contains(transfer)) throw std::runtime_error(std::string(__func__) + ": transfer is still in flight");
     }
+    if ((transfer->flags & LIBUSB_TRANSFER_FREE_BUFFER) != 0) ApplicationHeapFree_nid_no_patch(transfer->buffer);
     std::free(transfer);
 }
 
@@ -496,7 +498,7 @@ std::int32_t APS5_VABI sceUsbdSubmitTransfer(UsbdTransfer* transfer) {
     auto* host = libusb_alloc_transfer(transfer->numIsoPackets);
     if (host == nullptr) return ToGuestError(LIBUSB_ERROR_NO_MEM);
     host->dev_handle = handle;
-    host->flags = transfer->flags;
+    host->flags = transfer->flags & ~LIBUSB_TRANSFER_FREE_BUFFER;
     host->endpoint = transfer->endpoint;
     host->type = transfer->type;
     host->timeout = transfer->timeout;

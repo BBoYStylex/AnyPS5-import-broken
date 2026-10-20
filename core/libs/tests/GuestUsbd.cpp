@@ -1,5 +1,7 @@
 #include "prx/libc/include/general/VabiMacros.hpp"
+#include "prx/libc/include/ApplicationHeap.hpp"
 
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -187,6 +189,26 @@ void Device() {
     Pump(done);
     Require(done == 1 && transfer->status == 0 && transfer->actualLength == 18, "asynchronous control transfer did not complete");
     Require(std::memcmp(setup + 8, descriptor, 18) == 0, "asynchronous device descriptor differs from the cached one");
+    std::array<void*, 10> heapApi{};
+    ApplicationHeapRegister_nid_no_patch(heapApi.data());
+    auto* owned = static_cast<HostTransfer*>(sceUsbdAllocTransfer(0));
+    Require(owned != nullptr, "owned transfer allocation failed");
+    owned->buffer = static_cast<std::uint8_t*>(ApplicationHeapAllocate_nid_no_patch(sizeof(setup)));
+    std::memcpy(owned->buffer, setup, sizeof(setup));
+    owned->deviceHandle = handle;
+    owned->flags = 2;
+    owned->type = 0;
+    owned->timeout = 1000;
+    owned->length = sizeof(setup);
+    owned->callback = MarkDone;
+    owned->userData = &done;
+    done = 0;
+    Require(sceUsbdSubmitTransfer(owned) == 0, "submitting a free-buffer transfer failed");
+    Require(Throws([&] { sceUsbdFreeTransfer(owned); }), "an in-flight owned buffer was freed");
+    Pump(done);
+    Require(done == 1 && owned->status == 0 && owned->actualLength == 18, "owned control transfer did not complete");
+    Require(std::memcmp(owned->buffer + 8, descriptor, 18) == 0, "owned buffer was not retained through completion");
+    sceUsbdFreeTransfer(owned);
     bool broken = false;
     {
         const UsbdTimeval slice{0, 200};
