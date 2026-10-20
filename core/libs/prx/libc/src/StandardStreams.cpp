@@ -1,4 +1,5 @@
 #include "prx/libc/include/FileStream.hpp"
+#include "prx/libc/include/HostEntropy.hpp"
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include <cerrno>
 #include <cstddef>
@@ -12,6 +13,12 @@
 #endif
 
 namespace {
+int RandomCharacter() {
+    unsigned char value = 0;
+    HostEntropy_nid_no_patch(&value, sizeof(value));
+    return value;
+}
+
 #ifndef _WIN32
 const bool standardDescriptorsOpen = [] {
     for (int descriptor = 0; descriptor <= 2; ++descriptor) {
@@ -35,7 +42,7 @@ int __isthreaded_nid_postfix = 1;
 
 int APS5_VABI fgetc_nid_postfix(FileStream* stream) {
     if (stream && !stream->IsOpen()) { errno = 9; return -1; }
-    const int result = std::fgetc(GetNativeStream(stream));
+    const int result = stream && stream->IsRandomDevice() ? RandomCharacter() : std::fgetc(GetNativeStream(stream));
     stream->SyncStatus();
     return result;
 }
@@ -83,9 +90,9 @@ int APS5_VABI getc_nid_postfix(FileStream* stream) { return fgetc_nid_postfix(st
 int APS5_VABI getc_unlocked_nid_postfix(FileStream* stream) {
     if (stream && !stream->IsOpen()) { errno = 9; return -1; }
 #ifdef _WIN32
-    const int result = _fgetc_nolock(GetNativeStream(stream));
+    const int result = stream && stream->IsRandomDevice() ? RandomCharacter() : _fgetc_nolock(GetNativeStream(stream));
 #else
-    const int result = ::getc_unlocked(GetNativeStream(stream));
+    const int result = stream && stream->IsRandomDevice() ? RandomCharacter() : ::getc_unlocked(GetNativeStream(stream));
 #endif
     stream->SyncUnlockedStatus();
     return result;

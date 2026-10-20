@@ -580,9 +580,10 @@ if(BUILD_TESTING)
     target_link_libraries(file_streams_tests PRIVATE libc)
     configure_windows_unwind(file_streams_tests)
     add_test(NAME file_streams COMMAND file_streams_tests file_streams.tmp)
-    set_tests_properties(file_streams PROPERTIES TIMEOUT 20)
+    add_test(NAME file_streams_random_character_input COMMAND file_streams_tests --random-character-input)
+    set_tests_properties(file_streams file_streams_random_character_input PROPERTIES TIMEOUT 20)
     if(WIN32)
-        set_tests_properties(file_streams PROPERTIES ENVIRONMENT_MODIFICATION
+        set_tests_properties(file_streams file_streams_random_character_input PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
     endif()
     add_test_executable(guest_error_tests ${LIBS_INCLUDE_DIR}/tests/GuestErrors.cpp)
