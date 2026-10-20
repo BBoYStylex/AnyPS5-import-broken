@@ -630,13 +630,15 @@ int main() {
 #endif
     Require(fchown_nid_postfix(base, 0, 0) == 0);
     Require(fchown_nid_postfix(base, 0xFFFFFFFFu, 0xFFFFFFFFu) == 0);
+    Require(fchown_nid_postfix(base, 0, 0xFFFFFFFFu) == 0);
+    Require(fchown_nid_postfix(base, 0xFFFFFFFFu, 0) == 0);
     Require(fchown_nid_postfix(-1, 0, 0) == -1 && Error() == 9);
-    bool fchownThrew = false;
-    try { fchown_nid_postfix(base, 1, 0); } catch (const std::exception&) { fchownThrew = true; }
-    Require(fchownThrew);
-    fchownThrew = false;
-    try { fchown_nid_postfix(base, 0, 1); } catch (const std::exception&) { fchownThrew = true; }
-    Require(fchownThrew);
+    Require(fchown_nid_postfix(-1, 1, 1) == -1 && Error() == 9);
+    Require(fchown_nid_postfix(base, 1, 0) == -1 && Error() == 1);
+    Require(fchown_nid_postfix(base, 0, 1) == -1 && Error() == 1);
+    Require(fchown_nid_postfix(base, 1, 0xFFFFFFFFu) == -1 && Error() == 1);
+    Require(fchown_nid_postfix(base, 0xFFFFFFFFu, 1) == -1 && Error() == 1);
+    Require(fchown_nid_postfix(base, 1, 1) == -1 && Error() == 1);
     FileStat stat{};
     Require(fstatat_nid_postfix(base, "file.txt", &stat, 0) == 0 && (stat.st_mode & 0170000) == 0100000 && stat.st_size == 1);
     Require(fstatat_nid_postfix(base, "other_dir", &stat, 0) == 0 && (stat.st_mode & 0170000) == 0040000);
