@@ -5,6 +5,7 @@
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
 #include "prx/libc/include/FilesystemError.hpp"
+#include "prx/libc/include/RenameDot.hpp"
 #include "prx/libc/include/GuestArena.hpp"
 #include "prx/libkernel/DirectMemory/DirectMemory.hpp"
 #include "prx/libkernel/File/include/File.hpp"
@@ -140,7 +141,17 @@ static int NativeFtruncate(int descriptor, std::int64_t length) {
     if (handle == INVALID_HANDLE_VALUE) return EBADF;
     if (::GetFileType(handle) != FILE_TYPE_DISK) return EINVAL;
     if (WindowsHandleOnlyAppends_nid_no_patch(WindowsHandleAccess_nid_no_patch(handle, descriptor, "ftruncate"))) return TruncateThroughWriter(handle, length);
-    return static_cast<int>(WithoutParameterHandler([descriptor, length] { return ::_chsize_s(descriptor, length); }));
+    FILE_END_OF_FILE_INFO end{};
+    end.EndOfFile.QuadPart = length;
+    if (::SetFileInformationByHandle(handle, FileEndOfFileInfo, &end, sizeof(end))) return 0;
+    switch (::GetLastError()) {
+        case ERROR_ACCESS_DENIED: return EACCES;
+        case ERROR_DISK_FULL:
+        case ERROR_HANDLE_DISK_FULL: return ENOSPC;
+        case ERROR_FILE_TOO_LARGE:
+        case ERROR_INVALID_PARAMETER: return EFBIG;
+        default: return EINVAL;
+    }
 }
 static int NativeTruncate(const std::filesystem::path& path, std::int64_t length) {
     const int descriptor = ::_wopen(path.c_str(), _O_WRONLY | _O_BINARY);
@@ -190,6 +201,8 @@ static int NativeSync(int descriptor) {
         handle = CreateFileW(directory->c_str(), GENERIC_WRITE, share, nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
     } else {
         const int previous = errno;
+        const auto pipe = reinterpret_cast<HANDLE>(WithoutParameterHandler([descriptor] { return ::_get_osfhandle(descriptor); }));
+        if (pipe != INVALID_HANDLE_VALUE && GetFileType(pipe) == FILE_TYPE_PIPE) { errno = EINVAL; return -1; }
         if (::_commit(descriptor) == 0) return 0;
         const auto original = reinterpret_cast<HANDLE>(::_get_osfhandle(descriptor));
         if (original == INVALID_HANDLE_VALUE || GetFileType(original) != FILE_TYPE_DISK) { errno = EBADF; return -1; }
@@ -632,7 +645,7 @@ int APS5_VABI chmod_nid_postfix(const char* path, int mode) {
     if (const int error = PathError(path)) return PosixFailure(error);
     std::filesystem::path native;
     if (const int error = ResolvePathError_nid_no_patch(path, native)) return PosixFailure(error);
-    if (NativeChmod(native, mode & 07777) != 0) return PosixResult(SceErrorFromErrno(errno));
+    if (NativeChmod(native, mode & 07777) != 0) return PosixResult(SceErrorFromErrno(errno == ENOENT ? NotFoundError_nid_no_patch(native) : errno));
     return 0;
 }
 
@@ -788,6 +801,15 @@ int APS5_VABI dup2_nid_postfix(int from, int to) {
 int APS5_VABI flock_nid_postfix(int d, int operation) {
     if (GuestSockets::IsOpen(d)) return PosixFailure(GUEST_EOPNOTSUPP);
     File::RefuseArchivedFile(d, "flock");
+#ifdef _WIN32
+    const auto handle = reinterpret_cast<HANDLE>(WithoutParameterHandler([d] { return ::_get_osfhandle(d); }));
+    if (handle == INVALID_HANDLE_VALUE) return PosixFailure(GUEST_EBADF);
+    if (::GetFileType(handle) == FILE_TYPE_PIPE) return PosixFailure(GUEST_EOPNOTSUPP);
+#else
+    struct stat status;
+    if (::fstat(d, &status) != 0) return PosixFailure(GUEST_EBADF);
+    if (S_ISFIFO(status.st_mode)) return PosixFailure(GUEST_EOPNOTSUPP);
+#endif
     const int type = operation & 8 ? 8 : operation & 2 ? 2 : operation & 1 ? 1 : 0;
     if (type == 0) return PosixFailure(GUEST_EBADF);
     if (NativeFlock(d, type | (operation & 4)) != 0) {
@@ -973,7 +995,7 @@ int APS5_VABI lstat_nid_postfix(const char* path, FileStat* sb) {
     if (const int error = PathError(path)) return PosixFailure(error);
     std::filesystem::path native;
     if (const int error = ResolvePathError_nid_no_patch(path, native)) return PosixFailure(error);
-    if (!File::FillLinkStat(native, sb)) return PosixResult(SceErrorFromErrno(errno));
+    if (!File::FillLinkStat(native, sb)) return PosixResult(SceErrorFromErrno(errno == ENOENT ? NotFoundError_nid_no_patch(native) : errno));
     return 0;
 }
 
@@ -1463,6 +1485,8 @@ int APS5_VABI sceKernelRename(const char* from, const char* to) {
     if (!from || !to) return SceErrorFromErrno(GUEST_EFAULT);
     const int result = RenameGuestPath_nid_no_patch(from, to);
     return result == 0 ? 0 : SceKernelError(errno);
+    if (const int dot = RenameDotError_nid_no_patch(from)) return SceKernelError(dot);
+    if (const int dot = RenameDotError_nid_no_patch(to)) return SceKernelError(dot);
 }
 
 int APS5_VABI sceKernelRmdir(const char* path) {
@@ -1524,7 +1548,7 @@ int APS5_VABI sceKernelTruncate_nid_postfix(const char* path, std::int64_t lengt
     if (const int error = ResolvePathError_nid_no_patch(path, native)) return SceKernelError(error);
     std::error_code error;
     const auto status = std::filesystem::status(native, error);
-    if (!std::filesystem::exists(status)) return SceErrorFromErrno(GUEST_ENOENT);
+    if (!std::filesystem::exists(status)) return SceErrorFromErrno(NotFoundError_nid_no_patch(native));
     if (std::filesystem::is_directory(status)) return SceErrorFromErrno(GUEST_EISDIR);
     if (const int failure = NativeTruncate(native, length)) return SceErrorFromErrno(failure);
     RecordWrittenPath_nid_no_patch(native);
@@ -1543,7 +1567,7 @@ int APS5_VABI sceKernelUtimes_nid_postfix(const char* path, const KernelTimeval*
     if (*path == '\0') return SceErrorFromErrno(GUEST_ENOENT);
     std::filesystem::path native;
     if (const int error = ResolvePathError_nid_no_patch(path, native)) return SceKernelError(error);
-    if (NativeUtimes(native, times) != 0) return SceErrorFromErrno(errno);
+    if (NativeUtimes(native, times) != 0) return SceErrorFromErrno(errno == ENOENT ? NotFoundError_nid_no_patch(native) : errno);
     return 0;
 }
 
