@@ -4707,8 +4707,9 @@ void GuestBufferMemory::UploadFinish(bool addressable) {
                 copyOnGpu = true;
                 region.deviceLocal = staged;
                 region.copySource = entry->buffer;
-                region.copySourceBase = entry->base - entry->lead;
-                region.copySourceAddress = entry->address - entry->lead;
+                const auto start = HostImportBufferStart(*entry);
+                region.copySourceBase = start.guest;
+                region.copySourceAddress = start.device;
             }
         }
         if (region.direct != nullptr) {

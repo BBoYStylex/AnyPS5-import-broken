@@ -54,6 +54,15 @@ inline VkDeviceSize HostImportOffset(const HostImport& import, std::uint64_t add
     return address - import.base + import.lead;
 }
 
+struct HostImportStart {
+    std::uint64_t guest;
+    VkDeviceAddress device;
+};
+
+inline HostImportStart HostImportBufferStart(const HostImport& import) {
+    return {import.base - import.lead, import.address - import.lead};
+}
+
 enum class ImportWatch : std::uint8_t { Watch, Unwatch };
 
 struct ImportProbe {

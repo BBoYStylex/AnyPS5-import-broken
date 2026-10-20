@@ -792,6 +792,28 @@ void changedCopyTests(const Device& device, Recorder& recorder) {
         const auto expected = i % 7 == 0 && i % 5 != 0 ? shader[i] : held[i];
         Require(stored[i] == expected, "changed copy word " + std::to_string(i) + ": " + std::to_string(stored[i]) + ", expected " + std::to_string(expected) + (i % 7 == 0 && i % 5 != 0 ? " (the shader's result)" : " (the target's own word)"));
     }
+    constexpr std::uint64_t lead = 0x1000;
+    auto imported = std::make_shared<Buffer>(device.GetContext(), lead + words * 4u, usage);
+    std::memset(imported->Bytes().data(), 0xa5, lead);
+    std::memcpy(imported->Bytes().data() + lead, held.data(), words * 4u);
+    HostImport import{};
+    import.base = 0x7f0000011000ull;
+    import.bytes = words * 4u;
+    import.address = imported->DeviceAddress() + lead;
+    import.lead = lead;
+    const auto start = HostImportBufferStart(import);
+    Require(start.guest == import.base - lead && start.device == imported->DeviceAddress() && HostImportOffset(import, import.base) == lead, "the copy source of an import with a lead does not start at the import's buffer");
+    Require(recorder.RecordChangedCopy(recorder.Commands(), result->DeviceAddress(), snapshot->DeviceAddress(), start.device + (import.base - start.guest), words), "the changed copy kernel is unavailable");
+    recorder.Keep(imported);
+    recorder.Submit();
+    device.WaitQueue();
+    recorder.Sync();
+    for (std::uint64_t i = 0; i < lead; ++i) Require(imported->Bytes()[i] == std::byte{0xa5}, "the changed copy into an import with a lead wrote byte " + std::to_string(i) + " of the lead");
+    std::memcpy(stored.data(), imported->Bytes().data() + lead, words * 4u);
+    for (std::uint32_t i = 0; i < words; ++i) {
+        const auto expected = i % 7 == 0 && i % 5 != 0 ? shader[i] : held[i];
+        Require(stored[i] == expected, "changed copy word " + std::to_string(i) + " after a lead: " + std::to_string(stored[i]) + ", expected " + std::to_string(expected));
+    }
 }
 
 void readTrackingTests(const Device& device, Recorder& recorder) {
