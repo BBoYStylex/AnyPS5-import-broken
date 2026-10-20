@@ -284,6 +284,10 @@ int main() {
     Require(close_nid_postfix(descriptor) == 0);
     Require(fstatfs_nid_postfix(-1, viaPublic) == -1 && Error() == 9);
     char buffer[64];
+    {
+        const auto slashed = file + "/";
+        Require(readlink_nid_postfix(slashed.c_str(), buffer, sizeof(buffer)) == -1 && Error() == 20);
+    }
     for (const auto& component : {std::string("missing"), std::string("file.txt")}) {
         const auto prefix = root.generic_string() + "/" + component + "/../";
         const auto invalid = prefix + "file.txt";

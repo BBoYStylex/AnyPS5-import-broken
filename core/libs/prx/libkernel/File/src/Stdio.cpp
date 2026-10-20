@@ -651,6 +651,7 @@ int APS5_VABI chmod_nid_postfix(const char* path, int mode) {
     if (const int error = PathError(path)) return PosixFailure(error);
     std::filesystem::path native;
     if (const int error = ResolvePathError_nid_no_patch(path, native)) return PosixFailure(error);
+    if (NamesNonDirectoryWithSlash_nid_no_patch(native)) return PosixFailure(GUEST_ENOTDIR);
     if (NativeChmod(native, mode & 07777) != 0) return PosixResult(SceErrorFromErrno(errno == ENOENT ? NotFoundError_nid_no_patch(native) : errno));
     return 0;
 }
@@ -1022,6 +1023,7 @@ int APS5_VABI lstat_nid_postfix(const char* path, FileStat* sb) {
     if (const int error = PathError(path)) return PosixFailure(error);
     std::filesystem::path native;
     if (const int error = ResolvePathError_nid_no_patch(path, native)) return PosixFailure(error);
+    if (NamesNonDirectoryWithSlash_nid_no_patch(native)) return PosixFailure(GUEST_ENOTDIR);
     if (!File::FillLinkStat(native, sb)) return PosixResult(SceErrorFromErrno(errno == ENOENT ? NotFoundError_nid_no_patch(native) : errno));
     return 0;
 }
@@ -1466,6 +1468,7 @@ int APS5_VABI sceKernelTruncate_nid_postfix(const char* path, std::int64_t lengt
     if (*path == '\0') return SceErrorFromErrno(GUEST_ENOENT);
     std::filesystem::path native;
     if (const int error = ResolvePathError_nid_no_patch(path, native)) return SceKernelError(error);
+    if (NamesNonDirectoryWithSlash_nid_no_patch(native)) return SceErrorFromErrno(GUEST_ENOTDIR);
     std::error_code error;
     const auto status = std::filesystem::status(native, error);
     if (const int failure = PathLookupFailure(error)) return failure;
@@ -1488,6 +1491,7 @@ int APS5_VABI sceKernelUtimes_nid_postfix(const char* path, const KernelTimeval*
     if (*path == '\0') return SceErrorFromErrno(GUEST_ENOENT);
     std::filesystem::path native;
     if (const int error = ResolvePathError_nid_no_patch(path, native)) return SceKernelError(error);
+    if (NamesNonDirectoryWithSlash_nid_no_patch(native)) return SceErrorFromErrno(GUEST_ENOTDIR);
     if (NativeUtimes(native, times) != 0) return SceErrorFromErrno(errno == ENOENT ? NotFoundError_nid_no_patch(native) : errno);
     return 0;
 }

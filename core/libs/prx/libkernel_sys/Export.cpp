@@ -278,6 +278,7 @@ std::int64_t APS5_VABI readlink_nid_postfix(const char* path, char* buffer, std:
     if (size > static_cast<std::size_t>(std::numeric_limits<std::int64_t>::max())) return Fail(GuestEinval);
     std::filesystem::path native;
     if (const int error = ResolvePathError_nid_no_patch(path, native)) return Fail(error);
+    if (NamesNonDirectoryWithSlash_nid_no_patch(native)) return Fail(GuestEnotdir);
     return ReadNativeLink(native, buffer, size);
 }
 

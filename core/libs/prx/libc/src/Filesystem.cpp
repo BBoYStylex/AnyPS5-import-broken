@@ -17,6 +17,7 @@ extern "C" int APS5_VABI access_nid_postfix(const char* path, int mode) {
     if (!*path) { errno = 2; return -1; }
     try {
         const auto resolved = ResolvePath_nid_no_patch(path);
+        if (NamesNonDirectoryWithSlash_nid_no_patch(resolved)) { errno = 20; return -1; }
 #ifdef _WIN32
         const DWORD attributes = GetFileAttributesW(resolved.c_str());
         if (attributes == INVALID_FILE_ATTRIBUTES) {
