@@ -423,11 +423,6 @@ int APS5_VABI sceVrTracker2ActivateMap(void) {
     return 0;
 }
 
-int APS5_VABI sceVrTracker2GetRawCameraMeshSize(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
 int APS5_VABI sceVrTracker2GetRawCameraMesh(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;

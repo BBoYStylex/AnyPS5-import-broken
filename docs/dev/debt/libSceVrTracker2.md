@@ -42,7 +42,6 @@
 - [sceVrTracker2RemoveMap](../../../core/libs/prx/libSceVrTracker2/Export.cpp) (libSceVrTracker2) - unknown signature
 - [sceVrTracker2RefineMap](../../../core/libs/prx/libSceVrTracker2/Export.cpp) (libSceVrTracker2) - unknown signature
 - [sceVrTracker2ActivateMap](../../../core/libs/prx/libSceVrTracker2/Export.cpp) (libSceVrTracker2) - unknown signature
-- [sceVrTracker2GetRawCameraMeshSize](../../../core/libs/prx/libSceVrTracker2/Export.cpp) (libSceVrTracker2) - unknown signature
 - [sceVrTracker2GetRawCameraMesh](../../../core/libs/prx/libSceVrTracker2/Export.cpp) (libSceVrTracker2) - unknown signature
 - [sceVrTracker2GetNearObjectDepth](../../../core/libs/prx/libSceVrTracker2/Export.cpp) (libSceVrTracker2) - unknown signature
 - [SceVrTracker2DepthCubeMapUpdate](../../../core/libs/prx/libSceVrTracker2/Export.cpp) (libSceVrTracker2) - unknown signature
