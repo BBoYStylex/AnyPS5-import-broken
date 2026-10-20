@@ -2130,6 +2130,9 @@ if(BUILD_TESTING)
     if(WIN32)
         set_tests_properties(agc_shader_disk_cache_large_file PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
         add_test(NAME agc_shader_disk_cache_long_paths COMMAND agc_shader_disk_cache_tests --long-host-paths)
+        add_test(NAME agc_shader_disk_cache_host_stderr COMMAND agc_shader_disk_cache_tests --host-stderr)
+        set_tests_properties(agc_shader_disk_cache_host_stderr PROPERTIES TIMEOUT 30 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
         set_tests_properties(agc_shader_disk_cache_long_paths PROPERTIES TIMEOUT 30 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
             ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
     endif()
