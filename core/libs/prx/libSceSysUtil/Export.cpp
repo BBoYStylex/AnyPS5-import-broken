@@ -6,7 +6,8 @@
 extern "C" {
 
 int APS5_VABI sceSysUtilSendSystemNotificationWithText(int32_t type, const char* message) {
-    NotImplemented_nid_no_patch(__func__);
+    (void)type;
+    (void)message;
     return 0;
 }
 
