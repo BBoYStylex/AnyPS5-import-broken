@@ -7,4 +7,4 @@
 
 ### Functional
 
-- [sceOpusCeltDecDecode](../../../core/libs/prx/libSceOpusCeltDec/Export.cpp) (libSceOpusCeltDec) decodes with the FFmpeg decoder of [libSceOpusDec](../../../core/libs/prx/libSceOpusDec/include/OpusDecoder.hpp) and shares its limits. Packets whose TOC configuration is below 16 (SILK and hybrid) throw: whether the console decodes them or returns an error code is unknown. Contexts and decoder states are separate from libSceOpusDec's
+- [sceOpusCeltDecDecode](../../../core/libs/prx/libSceOpusCeltDec/Export.cpp) (libSceOpusCeltDec) decodes with the bundled libopus decoder of [libSceOpusDec](../../../core/libs/prx/libSceOpusDec/include/OpusDecoder.hpp) and shares its limits. Packets whose TOC configuration is below 16 (SILK and hybrid) throw: whether the console decodes them or returns an error code is unknown. Contexts and decoder states are separate from libSceOpusDec's
