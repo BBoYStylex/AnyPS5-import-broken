@@ -83,6 +83,28 @@ void windowsStubLoadsTheAllocatorFirst(const std::string& runPath, const std::u1
     require(bytesAt(stub.Code.Data, flags, {0x31, 0xd2, 0x41, 0xb8, 0x00, 0x11, 0x00, 0x00}), runPath + ": mimalloc.dll is not loaded from the stub's search directories");
 }
 
+void windowsStubMatchesUtf8AndBackslashLibraryFileNames() {
+    const auto nativeImports = Elfpatcher::Windows::WindowsImportBuilder().Build(0x1000);
+    const std::vector<std::string> libraries{
+        "app0/\xe6\x9d\xb1/\xe3\x81\x81.prx.guest.prx",
+        "app0\\\xe6\x9d\xb1\\helper.prx.guest.prx",
+        "sub\\opt\xe3\x81\x81.prx",
+    };
+    const std::vector<Domain::GuestRuntime> guestModules{
+        {.Path = libraries[0]},
+        {.Path = libraries[1]},
+    };
+    const std::vector<Elfpatcher::Windows::PeImport> imports{
+        {.Name = "first", .TargetRva = 0x2000, .Addend = 0, .Library = "\xe3\x81\x81.prx"},
+        {.Name = "second", .TargetRva = 0x2008, .Addend = 0, .Library = "helper.prx"},
+    };
+    const auto stub = Elfpatcher::Windows::WindowsEntryStubBuilder().Build(
+        0x40000, 0x1000, nativeImports, libraries, imports, "$ORIGIN/libs", false, false, guestModules, {"dir\\Opt\xe3\x81\x81.sprx"});
+    require(ripReference(stub.Code, {0x48, 0x8d, 0x35}, wideStringRva(stub.Data, u"app0\\\u6771\\\u3041.prx.guest.prx")) != std::string::npos, "the stub does not load the UTF-8 guest library");
+    require(ripReference(stub.Code, {0x48, 0x8d, 0x35}, wideStringRva(stub.Data, u"app0\\\u6771\\helper.prx.guest.prx")) != std::string::npos, "the stub does not load the backslash guest library");
+    require(ripReference(stub.Code, {0x48, 0x8d, 0x35}, wideStringRva(stub.Data, u"libs\\sub\\opt\u3041.prx")) != std::string::npos, "the stub does not load the matched UTF-8 host library");
+}
+
 void windowsStubLoadsTheAllocatorOnRequest(const std::string& runPath, const std::u16string& directory, const std::vector<std::uint8_t>& pathOpcode) {
     const auto nativeImports = Elfpatcher::Windows::WindowsImportBuilder().Build(0x1000);
     const auto stub = windowsStub(nativeImports, runPath, {"libc.prx"});
@@ -123,6 +145,7 @@ int main() {
         stubTerminatesTheFrameChain();
         windowsStubLoadsTheAllocatorFirst("C:/Games/Title/libs", u"C:\\Games\\Title\\libs\\", {0x48, 0x8d, 0x0d});
         windowsStubLoadsTheAllocatorFirst("$ORIGIN/libs", u"libs\\", {0x48, 0x8d, 0x35});
+        windowsStubMatchesUtf8AndBackslashLibraryFileNames();
         windowsStubLoadsTheAllocatorOnRequest("C:/Games/Title/libs", u"C:\\Games\\Title\\libs\\", {0x48, 0x8d, 0x0d});
         windowsStubLoadsTheAllocatorOnRequest("$ORIGIN/libs", u"libs\\", {0x48, 0x8d, 0x35});
         windowsStubRejectsAnOverlongAllocatorPath();

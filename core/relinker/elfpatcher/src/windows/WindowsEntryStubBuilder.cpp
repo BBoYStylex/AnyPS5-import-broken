@@ -10,7 +10,7 @@
 #include <map>
 #include <set>
 #include <optional>
-#include <filesystem>
+#include <string_view>
 
 namespace Elfpatcher::Windows {
 
@@ -20,6 +20,11 @@ constexpr std::uint32_t PathCapacity = 32768;
 constexpr std::uint32_t ErrorMessageCapacity = 32768;
 constexpr std::uint32_t ArgumentCapacity = 32768;
 constexpr std::uint32_t ArgumentTextCapacity = ArgumentCapacity * 3;
+
+std::string fileName(const std::string_view path) {
+    const auto separator = path.find_last_of("/\\");
+    return std::string(separator == std::string_view::npos ? path : path.substr(separator + 1));
+}
 
 std::string normalizeRunPath(std::string path) {
     if (path.empty() || std::any_of(path.begin(), path.end(), [](const unsigned char value) { return value == 0 || value >= 128; }))
@@ -162,7 +167,7 @@ WindowsEntryStub WindowsEntryStubBuilder::Build(const std::uint32_t dataRva, con
         const auto library = Domain::NeededLibraryName(import.Library);
         std::vector<std::uint32_t> order;
         for (std::size_t index = 0; index < libraries.size(); ++index) {
-            auto name = std::filesystem::path(libraries[index]).filename().string();
+            auto name = fileName(libraries[index]);
             if (name.ends_with(".guest.prx")) name.resize(name.size() - 10);
             const bool guestName = index < guestModules.size() &&
                 std::find(guestModules[index].Names.begin(), guestModules[index].Names.end(), import.Library) != guestModules[index].Names.end();
@@ -195,8 +200,8 @@ WindowsEntryStub WindowsEntryStubBuilder::Build(const std::uint32_t dataRva, con
         }
     }
 
-    const auto stem = [](const std::string& name) {
-        auto result = std::filesystem::path(name).filename().string();
+    const auto stem = [](const std::string_view name) {
+        auto result = fileName(name);
         result.resize(std::min(result.size(), result.find('.')));
         std::transform(result.begin(), result.end(), result.begin(), [](unsigned char character) { return static_cast<char>(std::tolower(character)); });
         return result;
