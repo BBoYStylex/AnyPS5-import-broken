@@ -5622,6 +5622,116 @@ void dispatchMoveTests() {
     Require(mock.live == 0, "dispatch move resources leaked Vulkan objects");
 }
 
+void constantExtentBindingTests() {
+    using AgcDriver::Graphics::CompiledShader;
+    using AgcDriver::Graphics::DescriptorCache;
+    using AgcDriver::Graphics::Recorder;
+    using AgcDriver::Graphics::ShaderResources;
+    constexpr std::size_t ringBytes = 65536;
+    constexpr std::uint32_t slotBytes = 256;
+    constexpr std::uint32_t extent = 0x58;
+    constexpr std::size_t bound = 0x60;
+    void* ring = ::operator new(ringBytes, std::align_val_t{ringBytes});
+    auto* bytes = static_cast<std::byte*>(ring);
+    for (std::size_t i = 0; i < ringBytes; ++i) bytes[i] = static_cast<std::byte>(i * 7u + 3u);
+    {
+        auto* mutation = GuestAllocations::GuestAllocationsBegin_nid_postfix();
+        GuestAllocations::GuestAllocationsAdd_nid_postfix(mutation, ring, ringBytes, true, true, true);
+        GuestAllocations::GuestAllocationsEnd_nid_postfix(mutation);
+    }
+    const auto slot = [&](std::uint32_t index) { return vsharp(bytes + static_cast<std::size_t>(index) * slotBytes, static_cast<std::uint32_t>(ringBytes - static_cast<std::size_t>(index) * slotBytes)); };
+    const auto constants = [&](std::vector<std::uint32_t> words, bool constant) {
+        auto binding = makeBinding(Role::GuestBuffers, 0, 1, std::move(words));
+        binding.bufferWritten = {false};
+        binding.bufferRead = {true};
+        binding.bufferExtent = {extent};
+        binding.bufferConstantOffsets = {constant};
+        return binding;
+    };
+    const auto address = [](const void* pointer) { return static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(pointer)); };
+    {
+        const auto binding = constants(slot(0), true);
+        Require(ShaderResources::ConstantExtentBytes(binding, 0, ringBytes) == bound, "a constant-offset read-only element was not cut to its extent rounded up to 16 bytes");
+        Require(ShaderResources::ConstantExtentBytes(binding, 0, 64) == 64, "a constant-offset element was cut past its V#'s own size");
+        Require(ShaderResources::ConstantExtentBytes(constants(slot(0), false), 0, ringBytes) == ringBytes, "a dynamically addressed element was cut to its extent");
+        auto written = binding;
+        written.bufferWritten = {true};
+        Require(ShaderResources::ConstantExtentBytes(written, 0, ringBytes) == ringBytes, "a written constant-offset element was cut to its extent");
+        auto unclassified = binding;
+        unclassified.bufferConstantOffsets.clear();
+        Require(ShaderResources::ConstantExtentBytes(unclassified, 0, ringBytes) == ringBytes, "an element the recompiler did not classify was cut to its extent");
+        const auto modes = [&](std::uint32_t word1, std::uint32_t word3) {
+            auto copy = binding;
+            copy.guestDescriptor[1] |= word1;
+            copy.guestDescriptor[3] |= word3;
+            return ShaderResources::ConstantExtentBytes(copy, 0, ringBytes);
+        };
+        Require(modes(16u << 16u, 0u) == bound, "a strided V# without swizzle or ADD_TID was not cut to its extent");
+        Require(modes(0x80000000u, 1u << 23u) == bound, "a V# without a stride kept its whole range for its swizzle bits");
+        Require(modes((16u << 16u) | 0x80000000u, 0u) == ringBytes, "a swizzled strided V# was cut to its extent");
+        Require(modes(16u << 16u, 1u << 23u) == ringBytes, "a strided V# with ADD_TID_ENABLE was cut to its extent");
+    }
+    mock = MockVulkan{};
+    mock.allowCopies = true;
+    {
+        ShaderRecompiler::RecompileResult vertex, fragment;
+        vertex.bindings.push_back(constants(vsharp(ring, 0xffffffffu), true));
+        const auto context = mockContext();
+        const auto state = AgcDriver::Graphics::DecodeState(makeState());
+        ShaderResources resources(context, vertex, fragment, state.color, 0, 0);
+        const auto& write = findWrite(0);
+        Require(write.buffers.size() == 1 && write.buffers[0].range == bound, "a constant-offset V# past the range limit was not bound up to its extent");
+    }
+    auto context = mockContext();
+    context.limits.maxStorageBufferRange = 1u << 20u;
+    for (const bool constant : {true, false}) {
+        mock.writes.clear();
+        DescriptorCache cache(context);
+        context.descriptorCache = &cache;
+        std::lock_guard lock(AgcDriver::GuestMemory::GpuMutex());
+        Recorder recorder(context);
+        const auto whole = [&](std::uint32_t index) { return constant ? bound : ringBytes - static_cast<std::size_t>(index) * slotBytes; };
+        ShaderRecompiler::RecompileResult vertex, fragment;
+        vertex.bindings.push_back(constants(slot(0), constant));
+        const auto state = AgcDriver::Graphics::DecodeState(makeState());
+        ShaderResources resources(context, vertex, fragment, state.color, 0, 0);
+        Require(findWrite(0).buffers.at(0).range == whole(0), constant ? "a constant-offset element was bound past its extent" : "a dynamically addressed element was not bound whole");
+        const auto listMoved = [&](const ShaderRecompiler::RecompileResult& program) {
+            const std::array<CompiledShader, 2> shaders{{{ShaderRecompiler::ShaderStage::Vertex, &program, 0}, {ShaderRecompiler::ShaderStage::Fragment, &fragment, 0}}};
+            return resources.MovedReadOnlyBuffers(shaders, recorder);
+        };
+        auto resized = vertex;
+        resized.bindings[0].guestDescriptor[2] -= slotBytes;
+        const auto kept = listMoved(resized);
+        Require(kept.has_value() && kept->size() == (constant ? 0u : 1u), constant ? "a constant-offset V# whose size changed past its extent was listed as moved" : "a dynamically addressed V# whose size changed was not listed as moved");
+        auto advanced = vertex;
+        advanced.bindings[0].guestDescriptor = slot(3);
+        const auto moved = listMoved(advanced);
+        Require(moved.has_value() && moved->size() == 1 && moved->front().address == address(bytes + 3u * slotBytes) && moved->front().size == whole(3), constant ? "a moved constant-offset V# was not listed at its extent" : "a moved dynamically addressed V# was not listed whole");
+        mock.writes.clear();
+        const auto draw = resources.PrepareDrawBindings(recorder, *moved);
+        Require(draw != nullptr && draw->snapshots.size() == 1 && draw->snapshots.front().bytes == whole(3) && sameBytes(draw->snapshots.front().Bytes(), bytes + 3u * slotBytes, whole(3)), constant ? "a moved constant-offset V# was not snapshotted at its extent" : "a moved dynamically addressed V# was not snapshotted whole");
+        Require(findWrite(0).buffers.at(0).range == whole(3), "the draw snapshot descriptor does not cover the snapshot");
+        ShaderRecompiler::RecompileResult built;
+        built.bindings.push_back(constants(slot(0), constant));
+        const CompiledShader compute{ShaderRecompiler::ShaderStage::Compute, &built, 0};
+        ShaderResources dispatch(context, compute);
+        auto relocated = built;
+        relocated.bindings[0].guestDescriptor = slot(5);
+        ShaderResources::MoveProof proof;
+        const auto dispatched = dispatch.MovedDispatchBuffers(CompiledShader{ShaderRecompiler::ShaderStage::Compute, &relocated, 0}, &recorder, 0, proof);
+        Require(dispatched.has_value() && dispatched->size() == 1 && dispatched->front().size == whole(5) && proof.bytes == whole(5), constant ? "a moved constant-offset dispatch V# was not proved at its extent" : "a moved dynamically addressed dispatch V# was not proved whole");
+        recorder.Sync();
+    }
+    Require(mock.live == 0, "constant-extent resources leaked Vulkan objects");
+    {
+        auto* mutation = GuestAllocations::GuestAllocationsBegin_nid_postfix();
+        GuestAllocations::GuestAllocationsRemove_nid_postfix(mutation, ring);
+        GuestAllocations::GuestAllocationsEnd_nid_postfix(mutation);
+    }
+    ::operator delete(ring, std::align_val_t{ringBytes});
+}
+
 void resourceTests() {
     mock = MockVulkan{};
     const auto context = mockContext();
@@ -10018,6 +10128,10 @@ int main(int argc, char** argv) {
     setenv("APS5_HEAP_MIRROR_MIB", "4", 1);
 #endif
     try {
+        if (argc == 2 && std::string_view(argv[1]) == "--constant-extent-bindings") {
+            constantExtentBindingTests();
+            return 0;
+        }
         if (argc == 2 && std::string_view(argv[1]) == "--descriptor-cache") {
             descriptorCacheTests();
             return 0;
@@ -10324,6 +10438,7 @@ int main(int argc, char** argv) {
         guestBufferViewBytesTests();
         descriptorSnapshotTests();
         dispatchMoveTests();
+        constantExtentBindingTests();
         descriptorCacheTests();
         bufferBudgetPlacementTests();
         imageTableAllocationTests();

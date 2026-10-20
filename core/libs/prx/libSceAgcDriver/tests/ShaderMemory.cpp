@@ -860,6 +860,59 @@ void verifyOutOfRangeConstantReads() {
     require(holds(first) && holds(std::array<std::uint32_t, 8>{}), "out-of-range s_buffer_load: a T# read through a null V# was not evaluated as zero");
 }
 
+void verifyConstantOffsetExtents() {
+    using namespace ShaderRecompiler;
+    constexpr std::uint32_t InputRecords = 0x01000000u;
+    constexpr std::uint32_t OutputRecords = 0x40u;
+    const std::array<std::uint32_t, 8> userData{0x10000000u, 0u, InputRecords, 0x00027facu, 0x20000000u, 0u, OutputRecords, 0x00027facu};
+    constexpr std::uint32_t ScalarLoad = 0xf4200200u;
+    constexpr std::uint32_t ScalarImmediate = 0xfa00005cu;
+    constexpr std::uint32_t ScalarRegister = 0x1800005cu;
+    constexpr std::uint32_t ReadFirstLane = 0x7e180500u;
+    constexpr std::uint32_t WaitScalar = 0xbf8cc07fu;
+    constexpr std::uint32_t WaitVector = 0xbf8c3f70u;
+    constexpr std::uint32_t MoveScalar = 0x7e020208u;
+    constexpr std::uint32_t MoveScalarHigh = 0x7e040208u;
+    constexpr std::uint32_t VectorLoad = 0xe030005cu;
+    constexpr std::uint32_t VectorLoadOffen = 0xe030105cu;
+    constexpr std::uint32_t VectorData = 0x80000100u;
+    constexpr std::uint32_t Store = 0xe0700000u;
+    constexpr std::uint32_t StoreData = 0x80010100u;
+    constexpr std::uint32_t StoreHigh = 0xe0700004u;
+    constexpr std::uint32_t StoreHighData = 0x80010200u;
+    constexpr std::uint32_t End = 0xbf810000u;
+    struct Case {
+        const char* name;
+        std::vector<std::uint32_t> code;
+        bool constant;
+        std::uint32_t outputExtent;
+    };
+    const std::array<Case, 5> cases{{
+        {"s_buffer_load at an immediate offset", {ScalarLoad, ScalarImmediate, WaitScalar, MoveScalar, Store, StoreData, End}, true, 4u},
+        {"s_buffer_load at an SGPR offset", {ReadFirstLane, ScalarLoad, ScalarRegister, WaitScalar, MoveScalar, Store, StoreData, End}, false, 4u},
+        {"buffer_load at an immediate offset", {VectorLoad, VectorData, WaitVector, Store, StoreData, End}, true, 4u},
+        {"buffer_load at a VGPR offset", {VectorLoadOffen, VectorData, WaitVector, Store, StoreData, End}, false, 4u},
+        {"s_buffer_load at an immediate offset and buffer_load at a VGPR offset", {ScalarLoad, ScalarImmediate, VectorLoadOffen, VectorData, WaitScalar, WaitVector, MoveScalarHigh, Store, StoreData, StoreHigh, StoreHighData, End}, false, 8u},
+    }};
+    for (const auto& item : cases) {
+        const auto result = Recompile(FrontendRequest(item.code, userData));
+        const auto guest = std::ranges::find_if(result.bindings, [](const DescriptorBinding& binding) { return binding.role == DescriptorRole::GuestBuffers; });
+        const auto prefix = std::string("constant offsets: ") + item.name;
+        require(guest != result.bindings.end() && guest->count == 2u && guest->guestDescriptor.size() == 8u && guest->bufferConstantOffsets.size() == 2u && guest->bufferExtent.size() == 2u, (prefix + ": the program does not bind its two V#s with constant-offset flags").c_str());
+        for (std::uint32_t element = 0; element < 2u; ++element) {
+            const bool input = guest->guestDescriptor[element * 4u + 2u] == InputRecords;
+            const bool constant = guest->bufferConstantOffsets[element];
+            const auto extent = guest->bufferExtent[element];
+            if (input) {
+                require(constant == item.constant, (prefix + (item.constant ? ": the input V# was not marked constant" : ": the input V# was marked constant")).c_str());
+                require(!item.constant || extent == 0x60u, (prefix + ": the input V#'s extent is not the end of the dword at 0x5c").c_str());
+            } else {
+                require(constant && extent == item.outputExtent, (prefix + ": the output V# stored at immediate offsets lost its constant extent").c_str());
+            }
+        }
+    }
+}
+
 // The pure flat slots of a hand-built plan (Detail::ComputePureFlatSlots): a slot is pure unless
 // a descriptor dword, a condition, a uniform value or another slot's address cone reaches it.
 void verifyPureFlatSlots() {
@@ -7376,6 +7429,11 @@ int main(int argc, char** argv) {
             std::cout << "TYPE=0 image descriptor materialization passed\n";
             return 0;
         }
+        if (argc == 2 && std::string_view(argv[1]) == "--constant-offset-extents") {
+            verifyConstantOffsetExtents();
+            std::cout << "Buffers read only at immediate offsets are marked with their extent; dynamic offsets are not\n";
+            return 0;
+        }
         require(argc == 1, "unknown shader memory test arguments");
         verifyRegisterSources();
         verifyEvaluatedValues();
@@ -7384,6 +7442,7 @@ int main(int argc, char** argv) {
         verifySignedSrtComparison();
         verifyTypeZeroImageMaterialization();
         verifyOutOfRangeConstantReads();
+        verifyConstantOffsetExtents();
         verifySignedMinimum();
         verifyMayEvaluate();
         verifyPureFlatSlots();
