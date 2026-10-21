@@ -623,6 +623,17 @@ if(BUILD_TESTING)
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceAmpr>")
     endif()
 
+    add_test_executable(guest_syscore_pending_tests tests/GuestSysCorePending.cpp)
+    target_include_directories(guest_syscore_pending_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(guest_syscore_pending_tests PRIVATE libc)
+    configure_windows_unwind(guest_syscore_pending_tests)
+    add_dependencies(guest_syscore_pending_tests libs)
+    add_test(NAME guest_syscore_pending COMMAND guest_syscore_pending_tests ${PATCHED_DIR})
+    if(WIN32)
+        set_tests_properties(guest_syscore_pending PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${PATCHED_DIR}")
+    endif()
+
     if(MINGW)
         target_compile_options(savedata_core_write_replacement_tests PRIVATE -fasynchronous-unwind-tables)
         target_compile_options(savedata_native_write_replacement_tests PRIVATE -fasynchronous-unwind-tables)
