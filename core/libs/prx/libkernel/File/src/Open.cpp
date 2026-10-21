@@ -20,6 +20,7 @@
 
 #include <cerrno>
 #include <cstdarg>
+#include <cstring>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -203,6 +204,33 @@ static int SceIoErrorFromErrno(int error) {
     return static_cast<int>(0x80020000u | static_cast<unsigned>(guest));
 }
 
+static bool EndsWithSeparator(const char* path) {
+    const std::size_t length = std::strlen(path);
+    return length > 0 && (path[length - 1] == '/' || path[length - 1] == '\\');
+}
+
+static std::string WithoutTrailingSeparators(const char* path) {
+    std::size_t end = std::strlen(path);
+    while (end > 1 && (path[end - 1] == '/' || path[end - 1] == '\\')) --end;
+    return std::string(path, end);
+}
+
+static bool TargetIsMissing(const std::filesystem::path& target) {
+    std::error_code error;
+    const auto status = std::filesystem::status(target, error);
+    return status.type() == std::filesystem::file_type::not_found && error == std::errc::no_such_file_or_directory;
+}
+
+static int TrailingSlashCreateError(const char* path, bool module) {
+    if (path == nullptr || *path == '\0') return 0;
+    if (!EndsWithSeparator(path)) return 0;
+    const std::string trimmed = WithoutTrailingSeparators(path);
+    if (trimmed.size() == 1 && (trimmed[0] == '/' || trimmed[0] == '\\')) return 0;
+    std::filesystem::path native;
+    if (ResolvePathError_nid_no_patch(trimmed.c_str(), native, module, true) != 0) return 0;
+    return TargetIsMissing(native) ? 2 : 0;
+}
+
 static int OpenNative(const std::filesystem::path& native, int flags, std::uint16_t mode) {
     if (const auto archived = File::OpenArchivedFile(native, flags)) {
         if (*archived < 0) return SceErrorFromErrno(-*archived);
@@ -276,7 +304,14 @@ int APS5_VABI sceKernelOpen(const char* path, int flags, std::uint16_t mode) {
     }
     std::filesystem::path native;
     const bool module = (flags & (SCE_KERNEL_O_ACCMODE | SCE_KERNEL_O_CREAT)) == SCE_KERNEL_O_RDONLY;
-    if (const int slash = TrailingSlashError_nid_no_patch(path, (flags & SCE_KERNEL_O_CREAT) != 0, module, true)) {
+    if ((flags & SCE_KERNEL_O_CREAT) != 0) {
+        if (const int error = TrailingSlashCreateError(path, module)) {
+            const int result = SceKernelError(error);
+            APS5_LOG_ERR("open failed path=%s trailingSlashError=%d result=0x%08X", path != nullptr ? path : "<null>", error, static_cast<unsigned>(result));
+            return result;
+        }
+    }
+    if (const int slash = TrailingSlashError_nid_no_patch(path, false, module, true)) {
         const int result = SceKernelError(slash);
         APS5_LOG_ERR("open failed path=%s trailingSlashError=%d result=0x%08X", path != nullptr ? path : "<null>", slash, static_cast<unsigned>(result));
         return result;
@@ -299,6 +334,12 @@ int OpenInDirectory_nid_no_patch(int directory, const char* path, int flags, std
     int error = 0;
     const char* base = GetDirectoryDescriptorPath_nid_no_patch(directory, &error);
     if (base == nullptr) return SceErrorFromErrno(error);
+    if ((flags & SCE_KERNEL_O_CREAT) != 0 && path != nullptr && EndsWithSeparator(path)) {
+        const std::string trimmed = WithoutTrailingSeparators(path);
+        const auto target = std::filesystem::path(reinterpret_cast<const char8_t*>(base)) /
+                            std::filesystem::path(reinterpret_cast<const char8_t*>(trimmed.c_str()));
+        if (TargetIsMissing(target)) return SCE_KERNEL_ERROR_ENOENT;
+    }
     return OpenNative(std::filesystem::path(reinterpret_cast<const char8_t*>(base)) / std::filesystem::path(reinterpret_cast<const char8_t*>(path)), flags, mode);
 }
 
