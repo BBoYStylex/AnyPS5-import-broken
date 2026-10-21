@@ -974,6 +974,10 @@ int64_t APS5_VABI pread_nid_postfix(int d, void* buf, size_t nbytes, int64_t off
 }
 
 int64_t APS5_VABI pwrite_nid_disambig1_nid_postfix(int d, const void* buf, size_t nbytes, int64_t offset) {
+    return PosixPwrite_nid_no_patch(d, buf, nbytes, offset);
+}
+
+std::int64_t PosixPwrite_nid_no_patch(int d, const void* buf, std::size_t nbytes, std::int64_t offset) {
     if (ExceedsTransferLimit(nbytes)) return PosixFailure(GUEST_EINVAL);
     if (buf == nullptr && nbytes != 0) return PosixFailure(GUEST_EFAULT);
     if (offset < 0) return PosixFailure(GUEST_EINVAL);

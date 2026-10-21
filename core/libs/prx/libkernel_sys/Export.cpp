@@ -23,6 +23,7 @@
 #include "prx/libkernel/File/include/DirectoryDescriptor.hpp"
 #include "prx/libc/include/CreationMask.hpp"
 #include "prx/libkernel/File/include/FileFlags.hpp"
+#include "prx/libkernel/File/include/File.hpp"
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -266,6 +267,10 @@ int APS5_VABI setsid_nid_postfix(void) {
 
 std::uint16_t APS5_VABI umask_nid_postfix(std::uint16_t mask) {
     return File::ExchangeCreationMask_nid_no_patch(mask);
+}
+
+std::int64_t APS5_VABI pwrite_nid_postfix(int d, const void* buf, std::size_t nbytes, std::int64_t offset) {
+    return PosixPwrite_nid_no_patch(d, buf, nbytes, offset);
 }
 
 int APS5_VABI _fstatfs_nid_postfix(int d, void* buf);
