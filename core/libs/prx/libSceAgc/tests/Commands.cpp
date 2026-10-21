@@ -243,6 +243,7 @@ void testMarkerSpans() {
     sceAgcAcbPushMarker(&plain.buffer, "frame", 0);
     check(std::equal(plain.words.begin(), plain.words.begin() + 3, acb.words.begin()), "marker span differs from the same text pushed whole");
     expectFailure([] { sceAgcAcbPushMarkerSpan(nullptr, "frame", 5, 0); });
+    expectFailure([] { sceAgcAcbPushMarker(nullptr, reinterpret_cast<const char*>(std::uintptr_t{0x10}), 0); });
     expectFailure([] { sceAgcDcbSetMarkerSpan(nullptr, "frame", 5, 0); });
     expectFailure([&] { sceAgcDcbPushMarkerSpan(&dcb.buffer, nullptr, 4, 0); });
 }
