@@ -62,6 +62,14 @@ int main() {
     int32_t relRes = aps5_sys_dmem_release(dmemAddr, 65536);
     assert(relRes == 0);
 
+    uint64_t jitAddr = 0;
+    int32_t jitRes = aps5_sys_jit_allocate(65536, 0, &jitAddr);
+    assert(jitRes == 0);
+    assert(jitAddr != 0);
+
+    int32_t jitFreeRes = aps5_sys_munmap(jitAddr, 65536);
+    assert(jitFreeRes == 0);
+
     uint64_t selfTid = aps5_sys_thr_self();
     assert(selfTid != 0);
 

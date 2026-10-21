@@ -132,6 +132,18 @@ int32_t aps5_sys_regmgr_call(uint32_t category, uint32_t propertyId, void* outBu
     return 0;
 }
 
+int32_t aps5_sys_jit_allocate(size_t size, int32_t flags, uint64_t* outAddress) {
+    static_cast<void>(flags);
+    if (!Aot::Runtime::gInitialized) {
+        Aot::Runtime::RuntimeRegistry::Initialize();
+    }
+    uint64_t allocated = Aot::Runtime::gMemoryBridge.Allocate(size, Aot::Runtime::MemoryPoolType::HostRam, Aot::Runtime::MemoryBridge::StandardPageSize);
+    if (outAddress != nullptr) {
+        *outAddress = allocated;
+    }
+    return (allocated != 0) ? 0 : -1;
+}
+
 uint64_t aps5_sys_dmem_allocate(size_t size, uint64_t alignment, uint32_t memoryType, uint64_t* outAddress) {
     static_cast<void>(memoryType);
     if (!Aot::Runtime::gInitialized) {
