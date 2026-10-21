@@ -51,12 +51,12 @@
 - [__udivti3](../../../core/libs/prx/libc/src/RuntimeSupport.cpp) (libc, re-exported by libSceAmpr) - the hardware traps on a zero divisor; this throws instead
 - [__umodti3](../../../core/libs/prx/libc/src/RuntimeSupport.cpp) (libc) - the hardware traps on a zero divisor; this throws instead
 - [__modti3](../../../core/libs/prx/libc/src/RuntimeSupport.cpp) (libc) - the hardware traps on a zero divisor; this throws instead
-- [_LDnorm](../../../core/libs/prx/libc/src/MathExact.cpp) (libSceLibcInternal, implemented in libc) - a zero significand never returns on the console, where the normalising loop shifts forever; this throws instead
 
 ### Functional
 
 - [_FSinh and _FCosh](../../../core/libs/prx/libc/src/Math.cpp) (libc) finite results are not verified bit for bit against the console: the scaled product uses the host's binary64 hyperbolic function before rounding to binary32, rather than the float rational and `_FExp` sequence in PRAGMATA's bundled `libc.prx`. NaN preference and payloads, signed zeros, infinite operands and the range-error thresholds follow that binary's instructions; the system `libSceLibcInternal` implementation and nondefault flush-to-zero modes are unverified.
 
+- [_LDnorm](../../../core/libs/prx/libc/src/MathExact.cpp) (libSceLibcInternal, implemented in libc) - a zero significand never returns on the console, where the normalising loop shifts forever; this throws instead
 - [sscanf_s and vsscanf_s](../../../core/libs/prx/libc/src/Formatting.cpp) (libc) return `EOF` when a reached conversion has a null destination, stopping before further assignments, following C11 K.3.5.3.7 and K.3.5.3.14. Earlier assignments are retained. The constraint handler is not invoked, and console behaviour is unverified.
 - [memmem and memccpy](../../../core/libs/prx/libc/src/Strings.cpp) (libc) - `memmem` searches for needle occurrences in memory buffers and `memccpy` copies buffers until a character match, following FreeBSD and POSIX specifications; behavior is unverified on console.
 
