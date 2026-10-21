@@ -63,9 +63,10 @@ std::uint32_t* UpdatePsRegisters(std::uint32_t* cmdbuf, const std::uint32_t* reg
 
 extern "C" {
 
-int APS5_VABI sceGnmBeginWorkload(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+int APS5_VABI sceGnmBeginWorkload(std::uint32_t stream, std::uint64_t* workload) {
+    if (!workload) return 3;
+    *workload = stream < 0x10 ? 1 : 0;
+    return stream < 0x10 ? 0 : 1;
 }
 
 int APS5_VABI sceGnmComputeWaitOnAddress(void) {
@@ -78,8 +79,9 @@ int APS5_VABI sceGnmComputeWaitSemaphore(void) {
     return 0;
 }
 
-int APS5_VABI sceGnmCreateWorkloadStream(void) {
-    NotImplemented_nid_no_patch(__func__);
+int APS5_VABI sceGnmCreateWorkloadStream(std::uint64_t name, std::uint32_t* stream) {
+    if (name == 0 || !stream) return 3;
+    *stream = 1;
     return 0;
 }
 
@@ -230,9 +232,9 @@ int APS5_VABI sceGnmDriverTraceInProgress(void) {
     return 0;
 }
 
-int APS5_VABI sceGnmEndWorkload(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+int APS5_VABI sceGnmEndWorkload(std::uint64_t workload) {
+    if (workload == 0) return 2;
+    return ((workload >> 56) & 0xff) > 0xf ? 2 : 0;
 }
 
 int APS5_VABI sceGnmFindResources(void) {
