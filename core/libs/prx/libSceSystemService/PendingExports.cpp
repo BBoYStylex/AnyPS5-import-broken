@@ -591,7 +591,9 @@ int APS5_VABI sceLncUtilResumeLocalProcess(std::int32_t processId) {
     return 0;
 }
 
-int APS5_VABI sceLncUtilSetAppFocus(std::int32_t appId, std::uint64_t flags, std::uint64_t contextId) {
+int APS5_VABI sceLncUtilSetAppFocus(std::int32_t appId, std::int32_t flag) {
+    (void)appId;
+    (void)flag;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -621,7 +623,9 @@ int APS5_VABI sceLncUtilStartLaunchAppByTitleId(const char* titleId, const char*
     return 0;
 }
 
-int APS5_VABI sceLncUtilSuspendApp(std::int32_t appId, std::uint64_t flags, std::int32_t reason) {
+int APS5_VABI sceLncUtilSuspendApp(std::int32_t appId, std::int32_t flag) {
+    (void)appId;
+    (void)flag;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -1386,7 +1390,10 @@ int APS5_VABI sceShellCoreUtilNotificationCancelForIDU(std::int64_t notification
     return 0;
 }
 
-int APS5_VABI sceShellCoreUtilNotificationRequestedForIDU(std::int64_t notificationId, const char* text, std::uint32_t type) {
+int APS5_VABI sceShellCoreUtilNotificationRequestedForIDU(std::int32_t notificationId, std::int32_t notificationMode, const char* message) {
+    (void)notificationId;
+    (void)notificationMode;
+    (void)message;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -1626,7 +1633,8 @@ int APS5_VABI sceShellCoreUtilShowCriticalErrorDialog(std::uint32_t error, const
     return 0;
 }
 
-int APS5_VABI sceShellCoreUtilShowErrorDialog(std::uint32_t error, const char* message) {
+int APS5_VABI sceShellCoreUtilShowErrorDialog(std::int32_t errorCode) {
+    (void)errorCode;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -1830,7 +1838,11 @@ int APS5_VABI sceSystemServiceActivateMpeg2Term(std::uintptr_t handle) {
     return 0;
 }
 
-int APS5_VABI sceSystemServiceAddLocalProcess(std::int32_t appId, const char* path, const char* const* argv, const SystemServiceLocalProcessParam* param) {
+int APS5_VABI sceSystemServiceAddLocalProcess(std::int32_t appId, const char* executablePath, std::int32_t args, const char* const* argsv) {
+    (void)appId;
+    (void)executablePath;
+    (void)args;
+    (void)argsv;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -1859,7 +1871,9 @@ int APS5_VABI sceSystemServiceChangeClock(const char* clock, std::uint32_t value
     return 0;
 }
 
-int APS5_VABI sceSystemServiceChangeCpuClock() {
+int APS5_VABI sceSystemServiceChangeCpuClock(std::int32_t clock) {
+    (void)clock;
+    NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 

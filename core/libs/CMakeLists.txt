@@ -694,4 +694,15 @@ if(BUILD_TESTING)
         set_tests_properties(guest_vorbis_dec PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceVorbisDec>")
     endif()
+
+    add_test_executable(guest_system_service_signatures_tests tests/GuestSystemServiceSignatures.cpp)
+    target_include_directories(guest_system_service_signatures_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(guest_system_service_signatures_tests PRIVATE libSceSystemService libc)
+    configure_windows_unwind(guest_system_service_signatures_tests)
+    add_test(NAME guest_system_service_signatures COMMAND guest_system_service_signatures_tests)
+    set_tests_properties(guest_system_service_signatures PROPERTIES TIMEOUT 20)
+    if(WIN32)
+        set_tests_properties(guest_system_service_signatures PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceSystemService>")
+    endif()
 endif()
