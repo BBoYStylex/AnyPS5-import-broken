@@ -254,6 +254,9 @@ T GuestFmax(T x, T y) {
 }
 
 float GuestBesselSecondKindZero() {
+#ifndef __EMSCRIPTEN__
+    std::feraiseexcept(FE_DIVBYZERO);
+#endif
     return -std::numeric_limits<float>::infinity();
 }
 
