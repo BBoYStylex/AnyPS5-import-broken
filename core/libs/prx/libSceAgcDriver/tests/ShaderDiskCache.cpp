@@ -323,6 +323,7 @@ CompiledVariant sampleVariant() {
     image.flatLineCompatible = false;
     image.flatVolumeLineCompatible = false;
     image.foldTexelOffsetsOnly = true;
+    image.remappedDepth1D = true;
     image.byElements = 4;
     image.byComponents = 1;
     image.emulatedCompare = 0x1a07u;
