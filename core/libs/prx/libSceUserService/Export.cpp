@@ -227,5 +227,4 @@ int APS5_VABI sceUserServiceGetNpAccountId(int user_id, uint64_t* account_id) {
  *account_id = 0;
  return USER_SERVICE_OK;
 }
-
 }

@@ -36,5 +36,4 @@ std::int32_t APS5_VABI sceRegMgrNonSysGetInt(std::int64_t key, std::int32_t unk,
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
-
 }

@@ -1,4 +1,5 @@
 add_library(libSceNpManager SHARED EXCLUDE_FROM_ALL Export.cpp)
+target_sources(libSceNpManager PRIVATE Export.Discovery.cpp)
 target_include_directories(libSceNpManager PRIVATE ${LIBS_INCLUDE_DIR})
 configure_windows_unwind(libSceNpManager)
 
