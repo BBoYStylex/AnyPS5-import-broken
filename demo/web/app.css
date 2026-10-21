@@ -19,7 +19,8 @@
 #ui-lang{font-size:11px;font-weight:600;letter-spacing:.05em;padding:4px 8px;border:1px solid var(--line);border-radius:4px;color:var(--muted);background:var(--surface);cursor:pointer;line-height:1}
 #ui-lang:hover{border-color:var(--text);color:var(--text)}
 [dir=rtl]{direction:rtl}
-[dir=rtl] body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+[dir=rtl] body,[dir=rtl] button,[dir=rtl] input,[dir=rtl] select{font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans Arabic",sans-serif}
+[dir=rtl] .eyebrow,[dir=rtl] .fine{font-family:inherit;letter-spacing:normal}
 [dir=rtl] .mark{margin-right:0;margin-left:3px}
 [dir=rtl] .private b{margin-right:0;margin-left:5px}
 [dir=rtl] .language-status b{margin-right:0;margin-left:4px}
