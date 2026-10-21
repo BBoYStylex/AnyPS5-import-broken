@@ -420,6 +420,7 @@ struct VulkanDevice::State {
     // The journal replay building this device's pipelines on its own threads; drained first at teardown.
     std::shared_ptr<Graphics::PipelineJournalReplay> journalReplay;
     std::atomic<bool> journalReplayPending{false};
+    std::once_flag journalAwaited;
     std::atomic<std::uint64_t> computePipelinesCreated{0};
     std::unique_ptr<Graphics::GpuColorTransfer> colorTransfer;
     std::shared_ptr<Graphics::BufferPool> bufferPool;
@@ -2154,6 +2155,13 @@ void VulkanDevice::WaitForPipelineJournalReplay() {
 
 void VulkanDevice::SavePipelineCache() {
     if (state->pipelineCache) state->pipelineCache->SaveNow();
+}
+
+void VulkanDevice::AwaitPipelineJournalBeforeDrawing(const std::function<bool()>& stopped) {
+    if (!Graphics::PipelineJournalWait() || Window() == nullptr) return;
+    std::call_once(state->journalAwaited, [&] {
+        Graphics::AwaitPipelineJournalReplay(state->journalReplay.get(), [] { DriverDetail::AwaitLibraryPrebuilds(); }, stopped, stdout, std::chrono::seconds(1));
+    });
 }
 
 std::uint64_t VulkanDevice::ComputePipelinesCreated() const {

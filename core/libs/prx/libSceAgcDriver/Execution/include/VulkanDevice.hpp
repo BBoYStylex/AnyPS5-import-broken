@@ -47,6 +47,7 @@ public:
     // draw or dispatch) and joins it (tests; the teardown joins it anyway).
     void WaitForPipelineJournalReplay();
     void SavePipelineCache();
+    void AwaitPipelineJournalBeforeDrawing(const std::function<bool()>& stopped);
     // Compute pipelines this device built, by dispatches and by the journal replay (tests).
     std::uint64_t ComputePipelinesCreated() const;
     ~VulkanDevice();

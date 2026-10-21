@@ -7,8 +7,10 @@
 #include "prx/libSceAgcDriver/Graphics/include/State.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/VertexInput.hpp"
 #include "Recompiler.hpp"
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -80,6 +82,12 @@ void RecordComputePipeline(const ShaderRecompiler::RecompileResult& shader, bool
 void FlushPipelineJournal();
 void ReportPipelineJournal();
 
+struct PipelineJournalProgress {
+    std::uint64_t processed = 0;
+    std::uint64_t total = 0;
+    bool loaded = false;
+};
+
 // Cancel stops the threads taking further entries (the pipeline each is building completes);
 // Wait joins them. A device cancels its replay before it is replaced or destroyed.
 class PipelineJournalReplay {
@@ -88,6 +96,7 @@ public:
     virtual void Cancel() = 0;
     virtual void Wait() = 0;
     [[nodiscard]] virtual bool Done() const = 0;
+    [[nodiscard]] virtual PipelineJournalProgress Progress() const = 0;
 };
 
 struct PipelineJournalHooks {
@@ -98,6 +107,9 @@ struct PipelineJournalHooks {
 // pipeline cache file; a replay for another device starts the file over.
 [[nodiscard]] std::uint64_t PipelineJournalDeviceFingerprint(const VkPhysicalDeviceProperties& properties);
 [[nodiscard]] std::shared_ptr<PipelineJournalReplay> StartPipelineJournalReplay(const Context& context, std::uint64_t deviceFingerprint, PipelineJournalHooks hooks);
+
+[[nodiscard]] bool PipelineJournalWait();
+void AwaitPipelineJournalReplay(PipelineJournalReplay* replay, const std::function<void()>& prebuilds, const std::function<bool()>& stopped, std::FILE* out, std::chrono::milliseconds interval);
 
 }
 

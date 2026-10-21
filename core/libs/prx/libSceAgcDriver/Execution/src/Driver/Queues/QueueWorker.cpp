@@ -9,6 +9,7 @@
 #include "prx/libSceAgcDriver/Execution/include/GuestMemory.hpp"
 #include "prx/libSceAgcDriver/Execution/include/WorkerSampler.hpp"
 #include "prx/libSceAgcDriver/Execution/include/PerformanceTimer.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/PipelineJournal.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
@@ -259,6 +260,9 @@ void Driver::run(std::uint32_t id) noexcept {
                 worker.queued.fetch_sub(1, std::memory_order_acq_rel);
                 running.Start();
                 if (profile && submission.enqueuedAt != std::chrono::steady_clock::time_point{}) costs.dequeueNs += static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - submission.enqueuedAt).count());
+            }
+            if (Graphics::PipelineJournalWait()) {
+                if (const auto localDevice = device.Load()) localDevice->AwaitPipelineJournalBeforeDrawing([this] { return shutdownToken.stop_requested(); });
             }
             execute(submission);
             if (traceGpu) std::fprintf(stderr, "[gpu] %.1f done serial=%llu queue=0x%x\n", TraceMs(), static_cast<unsigned long long>(submission.serial), id);

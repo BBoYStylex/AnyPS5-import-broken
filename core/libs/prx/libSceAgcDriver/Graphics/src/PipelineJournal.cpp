@@ -909,6 +909,10 @@ public:
 
     [[nodiscard]] bool Done() const override { return finished.load(std::memory_order_acquire); }
 
+    [[nodiscard]] PipelineJournalProgress Progress() const override {
+        return {processed.load(std::memory_order_relaxed), total.load(std::memory_order_relaxed), loadedOnce.load(std::memory_order_acquire)};
+    }
+
 private:
     void run() {
         std::call_once(loadOnce, [&] {
@@ -920,6 +924,8 @@ private:
             } catch (const std::exception& error) {
                 std::fprintf(stderr, "[pipeline-journal] cannot load %s: %s\n", Journal::Instance().Path().string().c_str(), error.what());
             }
+            total.store(loaded.entries.size(), std::memory_order_relaxed);
+            loadedOnce.store(true, std::memory_order_release);
         });
         for (;;) {
             if (cancelled.load(std::memory_order_relaxed)) break;
@@ -932,6 +938,7 @@ private:
                 static std::atomic<std::uint64_t> reported{0};
                 if (reported.fetch_add(1) < 8) std::fprintf(stderr, "[pipeline-journal] replay failed: %s\n", error.what());
             }
+            processed.fetch_add(1, std::memory_order_relaxed);
         }
         if (active.fetch_sub(1, std::memory_order_acq_rel) == 1) {
             loaded = LoadedJournal{};
@@ -991,6 +998,9 @@ private:
     std::once_flag loadOnce;
     LoadedJournal loaded;
     std::atomic<std::size_t> cursor{0};
+    std::atomic<std::uint64_t> processed{0};
+    std::atomic<std::uint64_t> total{0};
+    std::atomic<bool> loadedOnce{false};
     std::atomic<unsigned> active{0};
     std::atomic<bool> finished{false};
     std::atomic<bool> cancelled{false};
@@ -1152,6 +1162,33 @@ std::shared_ptr<PipelineJournalReplay> StartPipelineJournalReplay(const Context&
     const auto threads = static_cast<unsigned>(configured("APS5_PIPELINE_JOURNAL_THREADS", std::max(1u, std::thread::hardware_concurrency() / 2u)));
     if (threads == 0) return nullptr;
     return std::make_shared<Replay>(context, std::move(hooks), threads);
+}
+
+bool PipelineJournalWait() {
+    static const bool wait = PipelineSwitch("APS5_PIPELINE_JOURNAL_WAIT", 0u) != 0;
+    return wait;
+}
+
+void AwaitPipelineJournalReplay(PipelineJournalReplay* replay, const std::function<void()>& prebuilds, const std::function<bool()>& stopped, std::FILE* out, std::chrono::milliseconds interval) {
+    const auto start = std::chrono::steady_clock::now();
+    const auto seconds = [&] { return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count(); };
+    const auto halted = [&] { return stopped && stopped(); };
+    auto next = start + interval;
+    while (replay != nullptr && !replay->Done() && !halted()) {
+        std::this_thread::sleep_for(std::min(interval, std::chrono::milliseconds(20)));
+        const auto now = std::chrono::steady_clock::now();
+        if (now < next) continue;
+        next = now + interval;
+        const auto progress = replay->Progress();
+        if (progress.loaded) std::fprintf(out, "[pipeline-journal] precompiling: %llu/%llu pipelines, %.1f s\n", static_cast<unsigned long long>(progress.processed), static_cast<unsigned long long>(progress.total), seconds());
+        else std::fprintf(out, "[pipeline-journal] precompiling: loading %s, %.1f s\n", PipelineJournalPath().string().c_str(), seconds());
+        std::fflush(out);
+    }
+    const auto replayed = seconds();
+    if (prebuilds && !halted()) prebuilds();
+    const auto progress = replay != nullptr ? replay->Progress() : PipelineJournalProgress{};
+    std::fprintf(out, "[pipeline-journal] precompiled %llu/%llu pipelines in %.1f s, stage libraries in %.1f s%s\n", static_cast<unsigned long long>(progress.processed), static_cast<unsigned long long>(progress.total), replayed, seconds() - replayed, halted() ? " (stopped)" : "");
+    std::fflush(out);
 }
 
 }

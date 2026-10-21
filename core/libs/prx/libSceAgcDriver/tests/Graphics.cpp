@@ -49,6 +49,7 @@
 #include <exception>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <random>
 #include <initializer_list>
 #include <iostream>
@@ -10641,6 +10642,29 @@ void pipelineJournalTests(bool longPath = false, bool extended = false) {
         }};
         auto replay = StartPipelineJournalReplay(context, fingerprint, hooks);
         Require(replay != nullptr, "the replay did not start");
+        {
+            const auto awaitOutput = [](PipelineJournalReplay* awaited, const std::function<bool()>& stopped, std::uint32_t& prebuilds) {
+                std::FILE* out = std::tmpfile();
+                Require(out != nullptr, "no temporary file for the wait's progress");
+                AwaitPipelineJournalReplay(awaited, [&] { ++prebuilds; }, stopped, out, std::chrono::milliseconds(1));
+                std::rewind(out);
+                std::string text;
+                for (int c = std::fgetc(out); c != EOF; c = std::fgetc(out)) text.push_back(static_cast<char>(c));
+                std::fclose(out);
+                return text;
+            };
+            std::uint32_t prebuilds = 0;
+            const auto awaited = awaitOutput(replay.get(), {}, prebuilds);
+            const auto progress = replay->Progress();
+            Require(replay->Done() && progress.loaded && progress.total == 2 && progress.processed == 2, "the wait returned before the replay processed both recorded pipelines");
+            Require(prebuilds == 1 && awaited.find("precompiled 2/2 pipelines") != std::string::npos && awaited.find("(stopped)") == std::string::npos, "the wait did not drain the stage libraries once and report both pipelines");
+            prebuilds = 0;
+            const auto absent = awaitOutput(nullptr, {}, prebuilds);
+            Require(prebuilds == 1 && absent.find("precompiled 0/0 pipelines") != std::string::npos, "the wait without a replay did not drain the stage libraries and report no pipelines");
+            prebuilds = 0;
+            const auto stopped = awaitOutput(nullptr, [] { return true; }, prebuilds);
+            Require(prebuilds == 0 && stopped.find("(stopped)") != std::string::npos, "a stopped wait drained the stage libraries");
+        }
         replay->Wait();
         Require(replay->Done(), "the replay did not finish");
         const auto totals = PipelineJournalTotals();
