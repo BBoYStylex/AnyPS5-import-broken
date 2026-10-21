@@ -21,6 +21,12 @@ int APS5_VABI sceCesEucJpToUcs2(const void*, const std::uint8_t*, std::uint32_t,
 int APS5_VABI sceCesSbcToUtf8(const std::uint8_t*, std::uint8_t, std::uint8_t*, std::uint32_t, std::uint32_t*);
 int APS5_VABI sceCesUtf8ToSbc(const std::uint8_t*, std::uint32_t, std::uint32_t*, const std::uint8_t*, std::uint8_t*);
 void* APS5_VABI sceCesUcsProfileInitSJis1997Cp932(void*);
+void* APS5_VABI sceCesUcsProfileInitEucKr(void*);
+void* APS5_VABI sceCesUcsProfileInitUhc(void*);
+void* APS5_VABI sceCesUcsProfileInitBig5Cp950(void*);
+int APS5_VABI sceCesEucKrToUtf8(const void*, const std::uint8_t*, std::uint32_t, std::uint32_t*, std::uint8_t*, std::uint32_t, std::uint32_t*);
+int APS5_VABI sceCesUhcToUtf8(const void*, const std::uint8_t*, std::uint32_t, std::uint32_t*, std::uint8_t*, std::uint32_t, std::uint32_t*);
+int APS5_VABI sceCesBig5ToUtf8(const void*, const std::uint8_t*, std::uint32_t, std::uint32_t*, std::uint8_t*, std::uint32_t, std::uint32_t*);
 }
 
 static void Require(bool value) { if (!value) std::abort(); }
@@ -44,6 +50,46 @@ static int Utf8ToSbc(const std::uint8_t* profile, const char* utf8, std::uint32_
     std::uint32_t length = 0;
     std::uint8_t sbc = 0;
     return sceCesUtf8ToSbc(reinterpret_cast<const std::uint8_t*>(utf8), utf8max, &length, profile, &sbc);
+}
+
+template<typename Convert>
+static void RequireDoubleByte(Convert convert, const void* profile, const char* source, std::uint32_t size, std::uint32_t consumedExpected, const char* expected) {
+    std::uint8_t utf8[4] = {};
+    std::uint32_t consumed = 0;
+    std::uint32_t produced = 0;
+    Require(convert(profile, reinterpret_cast<const std::uint8_t*>(source), size, &consumed, utf8, sizeof(utf8), &produced) == 0);
+    Require(consumed == consumedExpected && produced == std::strlen(expected) && std::memcmp(utf8, expected, produced) == 0);
+}
+
+template<typename Convert>
+static int DoubleByteStatus(Convert convert, const void* profile, const char* source, std::uint32_t size, std::uint32_t utf8Max = 4) {
+    std::uint8_t utf8[4] = {};
+    std::uint32_t consumed = 0;
+    std::uint32_t produced = 0;
+    return convert(profile, reinterpret_cast<const std::uint8_t*>(source), size, &consumed, utf8, utf8Max, &produced);
+}
+
+template<typename Convert>
+static std::uint32_t CountAssignedPairs(Convert convert, const void* profile, std::uint32_t leadFirst, std::uint32_t leadLast) {
+    constexpr int invalidEncode = static_cast<int>(0x805C0014);
+    constexpr int unassignedCode = static_cast<int>(0x805C0020);
+    std::uint32_t assigned = 0;
+    for (std::uint32_t lead = leadFirst; lead <= leadLast; ++lead) {
+        for (std::uint32_t trail = 0; trail <= 0xFF; ++trail) {
+            const std::uint8_t pair[2] = {static_cast<std::uint8_t>(lead), static_cast<std::uint8_t>(trail)};
+            std::uint8_t utf8[4] = {};
+            std::uint32_t consumed = 0;
+            std::uint32_t produced = 0;
+            const int result = convert(profile, pair, 2, &consumed, utf8, sizeof(utf8), &produced);
+            if (result == 0) {
+                Require(consumed == 2 && produced >= 2 && produced <= 3);
+                ++assigned;
+            } else {
+                Require(result == invalidEncode || result == unassignedCode);
+            }
+        }
+    }
+    return assigned;
 }
 
 int main() {
@@ -320,4 +366,100 @@ int main() {
     Require(sceCesMbcsStrToUtf8Str(context, reinterpret_cast<const std::uint8_t*>("\xC0\xFF"), 2, &used, back, sizeof(back), &produced) == 0);
     Require(produced == 4 && std::memcmp(back, "\xD0\x90\xD1\x8F", 4) == 0);
     Require(sceCesUtf8StrToMbcsStr(context, back, 4, &used, mbcs, sizeof(mbcs), &produced) == 0 && produced == 2 && mbcs[0] == 0xC0 && mbcs[1] == 0xFF);
+
+    char eucKrSheet[256] = {};
+    char uhcSheet[256] = {};
+    char big5Sheet[256] = {};
+    const void* eucKr = sceCesUcsProfileInitEucKr(eucKrSheet);
+    const void* uhc = sceCesUcsProfileInitUhc(uhcSheet);
+    const void* big5 = sceCesUcsProfileInitBig5Cp950(big5Sheet);
+    Require(eucKr == eucKrSheet && uhc == uhcSheet && big5 == big5Sheet);
+    Require(sceCesUcsProfileInitEucKr(nullptr) == nullptr);
+    Require(sceCesUcsProfileInitUhc(nullptr) == nullptr);
+    Require(sceCesUcsProfileInitBig5Cp950(nullptr) == nullptr);
+
+    const auto eucKrConvert = [](const void* p, const std::uint8_t* s, std::uint32_t n, std::uint32_t* c, std::uint8_t* o, std::uint32_t m, std::uint32_t* w) { return sceCesEucKrToUtf8(p, s, n, c, o, m, w); };
+    const auto uhcConvert = [](const void* p, const std::uint8_t* s, std::uint32_t n, std::uint32_t* c, std::uint8_t* o, std::uint32_t m, std::uint32_t* w) { return sceCesUhcToUtf8(p, s, n, c, o, m, w); };
+    const auto big5Convert = [](const void* p, const std::uint8_t* s, std::uint32_t n, std::uint32_t* c, std::uint8_t* o, std::uint32_t m, std::uint32_t* w) { return sceCesBig5ToUtf8(p, s, n, c, o, m, w); };
+
+    RequireDoubleByte(eucKrConvert, eucKr, "A", 1, 1, "A");
+    RequireDoubleByte(eucKrConvert, eucKr, "\xB0\xA1", 2, 2, "\xEA\xB0\x80");
+    RequireDoubleByte(eucKrConvert, eucKr, "\xC7\xD1", 2, 2, "\xED\x95\x9C");
+    RequireDoubleByte(eucKrConvert, eucKr, "\xA1\xA1", 3, 2, "\xE3\x80\x80");
+    RequireDoubleByte(eucKrConvert, eucKr, "\xA2\xE6", 2, 2, "\xE2\x82\xAC");
+    Require(DoubleByteStatus(eucKrConvert, eucKr, "\xB0", 1) == srcBufferEnd);
+    Require(DoubleByteStatus(eucKrConvert, eucKr, "\xB0\x41", 2) == invalidEncode);
+    Require(DoubleByteStatus(eucKrConvert, eucKr, "\xB0\xFF", 2) == invalidEncode);
+    Require(DoubleByteStatus(eucKrConvert, eucKr, "\x80", 1) == invalidEncode);
+    Require(DoubleByteStatus(eucKrConvert, eucKr, "\x81\x41", 2) == invalidEncode);
+    Require(DoubleByteStatus(eucKrConvert, eucKr, "\xFF", 1) == invalidEncode);
+    Require(DoubleByteStatus(eucKrConvert, eucKr, "\xA4\xD4", 2) == unassignedCode);
+    Require(DoubleByteStatus(eucKrConvert, eucKr, "\xB0\xA1", 2, 2) == dstBufferEnd);
+    Require(DoubleByteStatus(eucKrConvert, eucKr, "\xB0\xA1", 2, 3) == 0);
+    Require(DoubleByteStatus(eucKrConvert, eucKr, "A", 0) == srcBufferEnd);
+    Require(DoubleByteStatus(eucKrConvert, nullptr, "A", 1) == invalidParameter);
+    Require(DoubleByteStatus(eucKrConvert, uhc, "A", 1) == invalidParameter);
+    Require(DoubleByteStatus(eucKrConvert, big5, "A", 1) == invalidParameter);
+    Require(DoubleByteStatus(eucKrConvert, eucJp, "A", 1) == invalidParameter);
+    Require(DoubleByteStatus(eucKrConvert, cyrillic, "A", 1) == invalidParameter);
+    Require(DoubleByteStatus(eucKrConvert, profile, "A", 1) == invalidParameter);
+    Require(DoubleByteStatus(eucKrConvert, latin2, "A", 1) == invalidParameter);
+    Require(sceCesEucKrToUtf8(eucKr, nullptr, 1, &used, back, sizeof(back), &produced) == invalidSrcBuffer);
+    Require(sceCesEucKrToUtf8(eucKr, reinterpret_cast<const std::uint8_t*>("A"), 1, &used, nullptr, sizeof(back), &produced) == invalidDstBuffer);
+    used = 77;
+    produced = 88;
+    Require(sceCesEucKrToUtf8(eucKr, reinterpret_cast<const std::uint8_t*>("\xA4\xD4"), 2, &used, back, sizeof(back), &produced) == unassignedCode);
+    Require(used == 77 && produced == 88);
+    Require(sceCesEucKrToUtf8(eucKr, reinterpret_cast<const std::uint8_t*>("\xB0\xA1"), 2, nullptr, back, sizeof(back), nullptr) == 0);
+    Require(CountAssignedPairs(eucKrConvert, eucKr, 0xA1, 0xFE) == 8225);
+    Require(CountAssignedPairs(eucKrConvert, eucKr, 0x81, 0xA0) == 0);
+
+    RequireDoubleByte(uhcConvert, uhc, "A", 1, 1, "A");
+    RequireDoubleByte(uhcConvert, uhc, "\xB0\xA1", 2, 2, "\xEA\xB0\x80");
+    RequireDoubleByte(uhcConvert, uhc, "\x81\x41", 2, 2, "\xEA\xB0\x82");
+    RequireDoubleByte(uhcConvert, uhc, "\x81\x61", 2, 2, "\xEA\xB0\xB5");
+    RequireDoubleByte(uhcConvert, uhc, "\xC6\x52", 2, 2, "\xED\x9E\xA3");
+    RequireDoubleByte(uhcConvert, uhc, "\xA4\xD4", 2, 2, "\xE3\x85\xA4");
+    Require(DoubleByteStatus(uhcConvert, uhc, "\x81", 1) == srcBufferEnd);
+    Require(DoubleByteStatus(uhcConvert, uhc, "\x81\x40", 2) == invalidEncode);
+    Require(DoubleByteStatus(uhcConvert, uhc, "\x81\x5B", 2) == invalidEncode);
+    Require(DoubleByteStatus(uhcConvert, uhc, "\x81\x7B", 2) == invalidEncode);
+    Require(DoubleByteStatus(uhcConvert, uhc, "\x81\x80", 2) == invalidEncode);
+    Require(DoubleByteStatus(uhcConvert, uhc, "\x81\xFF", 2) == invalidEncode);
+    Require(DoubleByteStatus(uhcConvert, uhc, "\x80", 1) == invalidEncode);
+    Require(DoubleByteStatus(uhcConvert, uhc, "\xFF", 1) == invalidEncode);
+    Require(DoubleByteStatus(uhcConvert, uhc, "\xFE\xFE", 2) == unassignedCode);
+    Require(DoubleByteStatus(uhcConvert, uhc, "\xC9\xA1", 2) == unassignedCode);
+    Require(DoubleByteStatus(uhcConvert, uhc, "\xB0\xA1", 2, 2) == dstBufferEnd);
+    Require(DoubleByteStatus(uhcConvert, nullptr, "A", 1) == invalidParameter);
+    Require(DoubleByteStatus(uhcConvert, eucKr, "A", 1) == invalidParameter);
+    Require(DoubleByteStatus(uhcConvert, big5, "A", 1) == invalidParameter);
+    Require(DoubleByteStatus(uhcConvert, cyrillic, "A", 1) == invalidParameter);
+    Require(DoubleByteStatus(uhcConvert, profile, "A", 1) == invalidParameter);
+    Require(DoubleByteStatus(uhcConvert, latin2, "A", 1) == invalidParameter);
+    Require(CountAssignedPairs(uhcConvert, uhc, 0x81, 0xFE) == 17048);
+
+    RequireDoubleByte(big5Convert, big5, "A", 1, 1, "A");
+    RequireDoubleByte(big5Convert, big5, "\xA4\xA4", 2, 2, "\xE4\xB8\xAD");
+    RequireDoubleByte(big5Convert, big5, "\xA4\xE5", 2, 2, "\xE6\x96\x87");
+    RequireDoubleByte(big5Convert, big5, "\xA4\x40", 2, 2, "\xE4\xB8\x80");
+    RequireDoubleByte(big5Convert, big5, "\xA1\x40", 2, 2, "\xE3\x80\x80");
+    RequireDoubleByte(big5Convert, big5, "\xA3\xE1", 2, 2, "\xE2\x82\xAC");
+    RequireDoubleByte(big5Convert, big5, "\xF9\xFE", 2, 2, "\xE2\x96\x93");
+    Require(DoubleByteStatus(big5Convert, big5, "\xA4", 1) == srcBufferEnd);
+    Require(DoubleByteStatus(big5Convert, big5, "\xA4\x3F", 2) == invalidEncode);
+    Require(DoubleByteStatus(big5Convert, big5, "\xA4\x7F", 2) == invalidEncode);
+    Require(DoubleByteStatus(big5Convert, big5, "\xA4\xA0", 2) == invalidEncode);
+    Require(DoubleByteStatus(big5Convert, big5, "\xA4\xFF", 2) == invalidEncode);
+    Require(DoubleByteStatus(big5Convert, big5, "\x80", 1) == invalidEncode);
+    Require(DoubleByteStatus(big5Convert, big5, "\xFF", 1) == invalidEncode);
+    Require(DoubleByteStatus(big5Convert, big5, "\x81\x40", 2) == unassignedCode);
+    Require(DoubleByteStatus(big5Convert, big5, "\xA4\xA4", 2, 2) == dstBufferEnd);
+    Require(DoubleByteStatus(big5Convert, nullptr, "A", 1) == invalidParameter);
+    Require(DoubleByteStatus(big5Convert, eucKr, "A", 1) == invalidParameter);
+    Require(DoubleByteStatus(big5Convert, uhc, "A", 1) == invalidParameter);
+    Require(DoubleByteStatus(big5Convert, cyrillic, "A", 1) == invalidParameter);
+    Require(DoubleByteStatus(big5Convert, profile, "A", 1) == invalidParameter);
+    Require(DoubleByteStatus(big5Convert, latin2, "A", 1) == invalidParameter);
+    Require(CountAssignedPairs(big5Convert, big5, 0x81, 0xFE) == 13752);
 }

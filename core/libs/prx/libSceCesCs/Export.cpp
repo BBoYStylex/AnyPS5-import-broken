@@ -8,6 +8,9 @@
 #include "prx/libc/include/General.hpp"
 #include "JisX0208.hpp"
 #include "JisX0212.hpp"
+#include "EucKr.hpp"
+#include "Uhc.hpp"
+#include "Big5.hpp"
 
 namespace {
 
@@ -140,6 +143,96 @@ bool isEucJp(const void* profile) {
 
 bool isSjis(const void* profile) {
     return profile != nullptr && std::memcmp(profile, SJIS_TAG, sizeof(SJIS_TAG)) == 0;
+}
+
+constexpr uint8_t EUC_KR_TAG[8] = {'E', 'U', 'C', 'K', 'R', '_', '_', '_'};
+constexpr uint8_t UHC_TAG[8] = {'U', 'H', 'C', '_', '_', '_', '_', '_'};
+constexpr uint8_t BIG5_TAG[8] = {'B', 'I', 'G', '5', '_', '_', '_', '_'};
+
+bool hasTag(const void* profile, const uint8_t (&tag)[8]) {
+    if (profile == nullptr || profile == CP1252_PROFILE || profile == CP1251_PROFILE || profile == CP1250_PROFILE) return false;
+    return std::memcmp(profile, tag, sizeof(tag)) == 0;
+}
+
+int uhcTrailIndex(uint8_t trail) {
+    if (trail >= 0x41 && trail <= 0x5A) return trail - 0x41;
+    if (trail >= 0x61 && trail <= 0x7A) return 26 + trail - 0x61;
+    if (trail >= 0x81 && trail <= 0xFE) return 52 + trail - 0x81;
+    return -1;
+}
+
+int big5TrailIndex(uint8_t trail) {
+    if (trail >= 0x40 && trail <= 0x7E) return trail - 0x40;
+    if (trail >= 0xA1 && trail <= 0xFE) return 63 + trail - 0xA1;
+    return -1;
+}
+
+int decodeEucKr(const uint8_t* source, uint32_t sourceMax, uint32_t& length, uint32_t& code) {
+    const uint8_t lead = source[0];
+    if (lead < 0x80) {
+        length = 1;
+        code = lead;
+        return 0;
+    }
+    if (lead < 0xA1 || lead > 0xFE) return CES_ERROR_INVALID_ENCODE;
+    if (sourceMax < 2) return CES_ERROR_SRC_BUFFER_END;
+    if (source[1] < 0xA1 || source[1] > 0xFE) return CES_ERROR_INVALID_ENCODE;
+    code = EucKr::TO_UCS2[(lead - 0xA1) * 94 + (source[1] - 0xA1)];
+    if (code == 0) return CES_ERROR_UNASSIGNED_CODE;
+    length = 2;
+    return 0;
+}
+
+int decodeUhc(const uint8_t* source, uint32_t sourceMax, uint32_t& length, uint32_t& code) {
+    const uint8_t lead = source[0];
+    if (lead < 0x80) {
+        length = 1;
+        code = lead;
+        return 0;
+    }
+    if (lead < 0x81 || lead > 0xFE) return CES_ERROR_INVALID_ENCODE;
+    if (sourceMax < 2) return CES_ERROR_SRC_BUFFER_END;
+    const int trail = uhcTrailIndex(source[1]);
+    if (trail < 0) return CES_ERROR_INVALID_ENCODE;
+    code = Uhc::TO_UCS2[(lead - 0x81) * 178 + trail];
+    if (code == 0) return CES_ERROR_UNASSIGNED_CODE;
+    length = 2;
+    return 0;
+}
+
+int decodeBig5(const uint8_t* source, uint32_t sourceMax, uint32_t& length, uint32_t& code) {
+    const uint8_t lead = source[0];
+    if (lead < 0x80) {
+        length = 1;
+        code = lead;
+        return 0;
+    }
+    if (lead < 0x81 || lead > 0xFE) return CES_ERROR_INVALID_ENCODE;
+    if (sourceMax < 2) return CES_ERROR_SRC_BUFFER_END;
+    const int trail = big5TrailIndex(source[1]);
+    if (trail < 0) return CES_ERROR_INVALID_ENCODE;
+    code = Big5::TO_UCS2[(lead - 0x81) * 157 + trail];
+    if (code == 0) return CES_ERROR_UNASSIGNED_CODE;
+    length = 2;
+    return 0;
+}
+
+template<typename Decode>
+int convertCharacterToUtf8(bool validProfile, const uint8_t* source, uint32_t sourceMax, uint32_t* sourceLength, uint8_t* utf8, uint32_t utf8Max, uint32_t* utf8Length, Decode decode) {
+    if (!validProfile) return CES_ERROR_INVALID_PARAMETER;
+    if (!source) return CES_ERROR_INVALID_SRC_BUFFER;
+    if (sourceMax == 0) return CES_ERROR_SRC_BUFFER_END;
+    if (!utf8) return CES_ERROR_INVALID_DST_BUFFER;
+    uint32_t consumed = 0;
+    uint32_t code = 0;
+    if (const int result = decode(source, sourceMax, consumed, code); result != 0) return result;
+    uint8_t encoded[3];
+    const uint32_t produced = encodeUtf8(code, encoded);
+    if (utf8Max < produced) return CES_ERROR_DST_BUFFER_END;
+    std::memcpy(utf8, encoded, produced);
+    if (sourceLength) *sourceLength = consumed;
+    if (utf8Length) *utf8Length = produced;
+    return 0;
 }
 
 bool isSbc(const void* profile) {
@@ -511,37 +604,34 @@ int APS5_VABI sceCesEucJpToUtf8(const void* profile, const uint8_t* eucBuffer, u
     return 0;
 }
 
-int APS5_VABI sceCesEucKrToUtf8(void* profile, uint8_t* eucBuffer, uint32_t eucMax, uint32_t* eucLength, uint8_t* utf8Buffer, uint32_t utf8Max, uint32_t* utf8Length) {
-    (void)profile;
-    (void)eucBuffer;
-    (void)eucMax;
-    (void)eucLength;
-    (void)utf8Buffer;
-    (void)utf8Max;
-    (void)utf8Length;
-    NotImplemented_nid_no_patch(__func__);
+void* APS5_VABI sceCesUcsProfileInitEucKr(void* sheet) {
+    if (!sheet) return nullptr;
+    std::memcpy(sheet, EUC_KR_TAG, sizeof(EUC_KR_TAG));
+    return sheet;
 }
 
-int APS5_VABI sceCesBig5ToUtf8(void* profile, uint8_t* big5Buffer, uint32_t big5Max, uint32_t* big5Length, uint8_t* utf8Buffer, uint32_t utf8Max, uint32_t* utf8Length) {
-    (void)profile;
-    (void)big5Buffer;
-    (void)big5Max;
-    (void)big5Length;
-    (void)utf8Buffer;
-    (void)utf8Max;
-    (void)utf8Length;
-    NotImplemented_nid_no_patch(__func__);
+void* APS5_VABI sceCesUcsProfileInitUhc(void* sheet) {
+    if (!sheet) return nullptr;
+    std::memcpy(sheet, UHC_TAG, sizeof(UHC_TAG));
+    return sheet;
 }
 
-int APS5_VABI sceCesUhcToUtf8(void* profile, uint8_t* uhcBuffer, uint32_t uhcMax, uint32_t* uhcLength, uint8_t* utf8Buffer, uint32_t utf8Max, uint32_t* utf8Length) {
-    (void)profile;
-    (void)uhcBuffer;
-    (void)uhcMax;
-    (void)uhcLength;
-    (void)utf8Buffer;
-    (void)utf8Max;
-    (void)utf8Length;
-    NotImplemented_nid_no_patch(__func__);
+void* APS5_VABI sceCesUcsProfileInitBig5Cp950(void* sheet) {
+    if (!sheet) return nullptr;
+    std::memcpy(sheet, BIG5_TAG, sizeof(BIG5_TAG));
+    return sheet;
+}
+
+int APS5_VABI sceCesEucKrToUtf8(const void* profile, const uint8_t* eucBuffer, uint32_t eucMax, uint32_t* eucLength, uint8_t* utf8Buffer, uint32_t utf8Max, uint32_t* utf8Length) {
+    return convertCharacterToUtf8(hasTag(profile, EUC_KR_TAG), eucBuffer, eucMax, eucLength, utf8Buffer, utf8Max, utf8Length, decodeEucKr);
+}
+
+int APS5_VABI sceCesBig5ToUtf8(const void* profile, const uint8_t* big5Buffer, uint32_t big5Max, uint32_t* big5Length, uint8_t* utf8Buffer, uint32_t utf8Max, uint32_t* utf8Length) {
+    return convertCharacterToUtf8(hasTag(profile, BIG5_TAG), big5Buffer, big5Max, big5Length, utf8Buffer, utf8Max, utf8Length, decodeBig5);
+}
+
+int APS5_VABI sceCesUhcToUtf8(const void* profile, const uint8_t* uhcBuffer, uint32_t uhcMax, uint32_t* uhcLength, uint8_t* utf8Buffer, uint32_t utf8Max, uint32_t* utf8Length) {
+    return convertCharacterToUtf8(hasTag(profile, UHC_TAG), uhcBuffer, uhcMax, uhcLength, utf8Buffer, utf8Max, utf8Length, decodeUhc);
 }
 
 }
