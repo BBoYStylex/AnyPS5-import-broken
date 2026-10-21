@@ -461,8 +461,13 @@ int APS5_VABI sceGnmSdmaOpen(void) {
     return Failure;
 }
 
-int APS5_VABI sceGnmSetCsShaderWithModifier(void) {
-    NotImplemented_nid_no_patch(__func__);
+int APS5_VABI sceGnmSetCsShaderWithModifier(std::uint32_t* cmdbuf, std::uint32_t size, const std::uint32_t* regs, std::uint32_t modifier) {
+    if (!cmdbuf || size <= 0x18 || !regs || (modifier & 0xfffffc3fu) != 0 || regs[1] != 0) return CommandFailed;
+    const std::uint32_t rsrc1 = modifier == 0 ? regs[2] : (regs[2] & 0xfffffc3fu) | modifier;
+    auto* at = EmitPacket(cmdbuf, OpSetShReg, {0x20c, regs[0], 0});
+    at = EmitPacket(at, OpSetShReg, {0x212, rsrc1, regs[3]});
+    at = EmitPacket(at, OpSetShReg, {0x207, regs[4], regs[5], regs[6]});
+    Nop(at, 11);
     return 0;
 }
 
