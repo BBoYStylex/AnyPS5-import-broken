@@ -105,7 +105,15 @@ void TestValidation() {
     port = sceAudioInAsyncOpen(user, 0, 0, 384, 48000, 0x10);
     gain = 0.5f;
     Require(port > 0 && sceAudioInGetGain(port, &gain) == 0 && gain == 1.0f && sceAudioInGetRerouteCount(port) == 0 && sceAudioInClose(port) == 0);
-    Require(ReportsNotImplemented("sceAudioInIsPadEmbeddedMic", [] { sceAudioInIsPadEmbeddedMic(1); }));
+
+    constexpr int invalidHandle = static_cast<int>(0x80260101);
+    Require(sceAudioInIsPadEmbeddedMic(0) == invalidHandle);
+    Require(sceAudioInIsPadEmbeddedMic(-1) == invalidHandle);
+    Require(sceAudioInIsPadEmbeddedMic(9) == invalidHandle);
+    port = sceAudioInOpen(user, 0, 0, 256, 48000, 2);
+    Require(port > 0 && sceAudioInIsPadEmbeddedMic(port) == 0);
+    Require(sceAudioInClose(port) == 0);
+    Require(sceAudioInIsPadEmbeddedMic(port) == invalidHandle);
 }
 
 void InputSound(int handle, std::vector<std::int16_t>& block) {
