@@ -52,6 +52,7 @@ bool SpirvStoresThroughAddresses(std::span<const std::uint32_t> words);
 // The cached storage image of a surface (render targets use it as their resident image); brought up
 // to date with guest memory before it is returned.
 std::shared_ptr<StorageTexture> CachedStorageSurface(const Context& context, const GuestTextureResource& resource);
+std::shared_ptr<StorageTexture> CachedStorageLayers(const Context& context, const GuestTextureResource& resource, std::uint32_t firstLayer, std::uint32_t layerCount);
 // Whether `image` is still the storage cache's image of its surface (what CachedStorageSurface
 // would return); a true answer counts as a use for the cache's eviction order, as a lookup would.
 bool StorageImageCached(const Context& context, const StorageTexture* image);
@@ -336,6 +337,9 @@ public:
 private:
     friend class AgcDriver::VulkanDevice;
     bool refreshData(VkCommandBuffer commands, const CompiledShader& shader, Recorder* recorder);
+    std::optional<std::size_t> shaderDataAllocation(const CompiledShader& shader) const;
+    VkBuffer shaderDataBuffer(const CompiledShader& shader) const;
+    void forgetShaderDataWords(const CompiledShader& shader);
     struct DescribedRange {
         const char* kind;
         std::uint64_t address;
@@ -543,6 +547,7 @@ private:
     GuestBufferMemory guestMemory;
     std::size_t maxDrawSnapshotBytes = MaxDrawSnapshotBytes();
     std::unique_ptr<BdaResources> bda;
+    std::vector<BdaResources::SrtGuardFaults> srtGuardFaults;
     bool usesBda = false;
     bool bdaReadOnly = true;
     std::vector<std::uint64_t> multisampleSources;
