@@ -1356,4 +1356,9 @@ int APS5_VABI sceSslSetSslVersion() {
     return 0;
 }
 
+int APS5_VABI sceSslSetServerName() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
 }
