@@ -9,6 +9,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include "prx/libc/include/general/VabiMacros.hpp"
 
 constexpr int SYSTEM_SERVICE_OK = 0;
 constexpr int SYSTEM_SERVICE_ERROR_PARAMETER = -2136932349;
@@ -49,6 +50,19 @@ inline int SystemServiceConsoleLanguage(std::string_view caller) {
             ", not \"" + std::string(text) + "\"");
     }
     return language;
+}
+
+struct SystemServiceLocalProcessParam;
+
+extern "C" {
+
+int APS5_VABI sceLncUtilSetAppFocus(std::int32_t appId, std::int32_t flag);
+int APS5_VABI sceLncUtilSuspendApp(std::int32_t appId, std::int32_t flag);
+int APS5_VABI sceShellCoreUtilShowErrorDialog(std::int32_t errorCode);
+int APS5_VABI sceShellCoreUtilNotificationRequestedForIDU(std::int32_t notificationId, std::int32_t notificationMode, const char* message);
+int APS5_VABI sceSystemServiceAddLocalProcess(std::int32_t appId, const char* executablePath, std::int32_t args, const char* const* argsv);
+int APS5_VABI sceSystemServiceChangeCpuClock(std::int32_t clock);
+
 }
 
 #endif
