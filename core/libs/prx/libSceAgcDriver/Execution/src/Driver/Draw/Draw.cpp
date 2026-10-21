@@ -466,7 +466,8 @@ DrawVerdict Driver::draw(QueueState& queue, std::span<const std::uint32_t> packe
         phaseTiming.Phase(DrawRowRectList);
     };
     if (graphics.rectList) buildRectList();
-    if (!programs.empty() && programResults.back() != nullptr && programResults.back()->barycentricEmulation.active && graphics.stages.path == Graphics::ShaderPath::Geometry) {
+    const bool meshCompute = !programs.empty() && programResults[0] != nullptr && programResults[0]->meshRecordLayout != 0;
+    if (!programs.empty() && programResults.back() != nullptr && programResults.back()->barycentricEmulation.active && graphics.stages.path == Graphics::ShaderPath::Geometry && !meshCompute) {
         require(localDevice->Target().mesh.has_value(), "a pixel shader on the mesh path reads barycentrics, and this device has neither VK_KHR_fragment_shader_barycentric nor mesh shaders (VK_EXT_mesh_shader), so they cannot be provided or emulated");
         require(!graphics.rectList && graphics.stages.mesh && programs.size() == 2 && programResults[0] != nullptr && programResults[1] != nullptr && stages.size() == 2, "a pixel shader that reads barycentrics needs exactly one mesh program before it to emulate them");
         meshBarycentrics = ShaderRecompiler::MeshBarycentricLayoutOf(*programResults[1]);
@@ -481,14 +482,22 @@ DrawVerdict Driver::draw(QueueState& queue, std::span<const std::uint32_t> packe
         }
         require(programResults[0]->meshBarycentrics == meshBarycentrics, "the mesh program was compiled for a different barycentric layout than its pixel shader");
     } else if (!programs.empty() && programResults.back() != nullptr && programResults.back()->barycentricEmulation.active) {
-        require(!graphics.rectList && graphics.stages.path == Graphics::ShaderPath::Vertex && programs.size() == 2 && programResults[0] != nullptr && stages.size() == 2, "a pixel shader that reads barycentrics without VK_KHR_fragment_shader_barycentric needs a vertex shader before it");
+        require(!graphics.rectList && (graphics.stages.path == Graphics::ShaderPath::Vertex || meshCompute) && programs.size() == 2 && programResults[0] != nullptr && stages.size() == 2, "a pixel shader that reads barycentrics without VK_KHR_fragment_shader_barycentric needs a vertex shader before it");
         const auto geometryLimits = localDevice->GeometryLimits();
-        if (geometryLimits || !localDevice->Target().tessellation) {
+        if (meshCompute) {
+            const auto layout = programResults[0]->meshRecordLayout;
+            require(localDevice->Target().tessellation.has_value(), "emulated barycentrics of a mesh-path draw run as compute need tessellation shaders");
+            require(graphics.stages.mesh->outputPrimitiveSize == 3u, "emulated mesh barycentrics require triangle output");
+            require(ShaderRecompiler::MeshRecordClipDistances(layout) == 0u && ShaderRecompiler::MeshRecordCullDistances(layout) == 0u && !ShaderRecompiler::MeshRecordLayer(layout), "emulated mesh barycentrics do not preserve clip, cull or layer outputs");
+        }
+        if (!meshCompute && (geometryLimits || !localDevice->Target().tessellation)) {
             results.push_back(ShaderRecompiler::BuildBarycentricGeometryShader(*programResults[0], *programResults[1], localDevice->Target(), geometryLimits));
             stages.insert(stages.begin() + 1, Graphics::CompiledShader{Stage::Geometry, &results.back(), 0});
         } else {
-            require(graphics.topology == VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST && !graphics.primitiveRestart, "a pixel shader that reads barycentrics without VK_KHR_fragment_shader_barycentric or geometry shaders needs a triangle list without primitive restart");
-            auto patches = ShaderRecompiler::BuildBarycentricTessellationShaders(*programResults[0], *programResults[1], localDevice->Target(), localDevice->MaxFragmentInputComponents(), graphics.provokingVertexMode == VK_PROVOKING_VERTEX_MODE_LAST_VERTEX_EXT ? 2u : 0u);
+            require(meshCompute || (graphics.topology == VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST && !graphics.primitiveRestart), "a pixel shader that reads barycentrics without VK_KHR_fragment_shader_barycentric or geometry shaders needs a triangle list without primitive restart");
+            std::optional<ShaderRecompiler::RecompileResult> readback;
+            if (meshCompute) readback = ShaderRecompiler::BuildMeshReadbackVertexShader(*programResults[0], localDevice->Target().vulkanVersion);
+            auto patches = ShaderRecompiler::BuildBarycentricTessellationShaders(readback ? *readback : *programResults[0], *programResults[1], localDevice->Target(), localDevice->MaxFragmentInputComponents(), graphics.provokingVertexMode == VK_PROVOKING_VERTEX_MODE_LAST_VERTEX_EXT ? 2u : 0u);
             const auto first = results.size();
             results.push_back(std::move(patches.control));
             results.push_back(std::move(patches.evaluation));
