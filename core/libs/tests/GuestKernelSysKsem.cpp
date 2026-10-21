@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <fstream>
 #include <source_location>
+#include <stdexcept>
 #include <string>
 #include <thread>
 
@@ -15,6 +16,7 @@ extern "C" {
 int* APS5_VABI __error_nid_postfix();
 int APS5_VABI open_nid_postfix(const char* path, int flags, int mode);
 int APS5_VABI close_nid_postfix(int descriptor);
+int APS5_VABI dup_nid_postfix(int descriptor);
 int APS5_VABI dup2_nid_postfix(int from, int to);
 int APS5_VABI ksem_init_nid_postfix(std::intptr_t* idp, unsigned int value);
 int APS5_VABI ksem_post_nid_postfix(std::intptr_t id);
@@ -30,6 +32,7 @@ namespace {
 constexpr int Efault = 14;
 constexpr int Ebusy = 16;
 constexpr int Einval = 22;
+constexpr int Enospc = 28;
 constexpr int Eagain = 35;
 constexpr int Etimedout = 60;
 constexpr int Eoverflow = 84;
@@ -134,6 +137,39 @@ void Identifiers() {
     std::filesystem::remove(path);
 }
 
+bool Throws(void (*call)(int), int argument) {
+    try {
+        call(argument);
+    } catch (const std::runtime_error&) {
+        return true;
+    }
+    return false;
+}
+
+void Duplicates() {
+    std::intptr_t id = -1;
+    std::intptr_t target = -1;
+    Require(ksem_init_nid_postfix(&id, 1) == 0 && ksem_init_nid_postfix(&target, 1) == 0);
+    Require(Throws([](int descriptor) { dup_nid_postfix(descriptor); }, static_cast<int>(id)));
+    static int destination = -1;
+    destination = static_cast<int>(target);
+    Require(Throws([](int descriptor) { dup2_nid_postfix(descriptor, destination); }, static_cast<int>(id)));
+    Require(dup2_nid_postfix(static_cast<int>(id), static_cast<int>(id)) == static_cast<int>(id));
+    Require(Value(id) == 1 && Value(target) == 1);
+    Require(ksem_destroy_nid_postfix(id) == 0 && ksem_destroy_nid_postfix(target) == 0);
+}
+
+void Limit() {
+    std::intptr_t ids[30] = {};
+    for (auto& id : ids) Require(ksem_init_nid_postfix(&id, 0) == 0);
+    std::intptr_t extra = -1;
+    Require(ksem_init_nid_postfix(&extra, 0) == -1 && Error() == Enospc && extra >= 0);
+    Require(ksem_post_nid_postfix(extra) == -1 && Error() == Einval);
+    Require(ksem_destroy_nid_postfix(ids[0]) == 0);
+    Require(ksem_init_nid_postfix(&ids[0], 0) == 0);
+    for (const auto id : ids) Require(ksem_destroy_nid_postfix(id) == 0);
+}
+
 }
 
 int main() {
@@ -141,6 +177,8 @@ int main() {
     Timed();
     Blocking();
     Identifiers();
+    Duplicates();
+    Limit();
     std::puts("ksem unnamed semaphores passed");
     return 0;
 }
