@@ -1,5 +1,20 @@
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
+#include "prx/libkernel/Pthread/include/Pthread.hpp"
+
+extern "C" {
+Pthread APS5_VABI scePthreadSelf();
+int APS5_VABI getpid_nid_postfix(void);
+int* APS5_VABI __error_nid_postfix();
+}
+
+namespace {
+constexpr int GuestEsrch = 3;
+constexpr int GuestEfault = 14;
+constexpr int GuestEinval = 22;
+constexpr int GuestSchedFifo = 1;
+constexpr int GuestSchedRr = 3;
+}
 
 extern "C" {
 
@@ -2463,14 +2478,30 @@ int APS5_VABI scePthreadTimedjoin(void) {
     return 0;
 }
 
-int APS5_VABI sched_getparam_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
+int APS5_VABI sched_getparam_nid_postfix(int pid, KernelSchedParam* param) {
+    if (pid != 0 && pid != getpid_nid_postfix()) {
+        *__error_nid_postfix() = GuestEsrch;
+        return -1;
+    }
+    if (param == nullptr) {
+        *__error_nid_postfix() = GuestEfault;
+        return -1;
+    }
+    param->sched_priority = scePthreadSelf()->priority.load(std::memory_order_relaxed);
     return 0;
 }
 
-int APS5_VABI sched_getscheduler_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+int APS5_VABI sched_getscheduler_nid_postfix(int pid) {
+    if (pid != 0 && pid != getpid_nid_postfix()) {
+        *__error_nid_postfix() = GuestEsrch;
+        return -1;
+    }
+    const int policy = scePthreadSelf()->schedPolicy.load(std::memory_order_relaxed);
+    if (policy != GuestSchedFifo && policy != GuestSchedRr) {
+        *__error_nid_postfix() = GuestEinval;
+        return -1;
+    }
+    return policy;
 }
 
 int APS5_VABI sched_rr_get_interval_nid_postfix(void) {

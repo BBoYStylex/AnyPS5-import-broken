@@ -1,4 +1,5 @@
 #include "SceTypes.hpp"
+#include "prx/libkernel/Pthread/include/Pthread.hpp"
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include "prx/libc/include/RemoveTree.hpp"
 #include "prx/libkernel/File/include/FileFlags.hpp"
@@ -57,6 +58,10 @@ int APS5_VABI renameat_nid_postfix(int, const char*, int, const char*);
 int APS5_VABI fchmodat_nid_postfix(int, const char*, int, int);
 int APS5_VABI fchown_nid_postfix(int, std::uint32_t, std::uint32_t);
 int APS5_VABI fstatat_nid_postfix(int, const char*, FileStat*, int);
+int APS5_VABI sched_getparam_nid_postfix(int, KernelSchedParam*);
+int APS5_VABI sched_getscheduler_nid_postfix(int);
+Pthread APS5_VABI scePthreadSelf();
+int APS5_VABI getpid_nid_postfix(void);
 std::int64_t APS5_VABI sceKernelRead(int, void*, std::size_t);
 std::uint16_t APS5_VABI umask_nid_postfix(std::uint16_t);
 int* APS5_VABI __error_nid_postfix();
@@ -257,6 +262,23 @@ void DirectoryRenameTests(const std::filesystem::path& parent) {
 }
 
 int main() {
+    const int process = getpid_nid_postfix();
+    for (const int pid : {0, process}) {
+        KernelSchedParam param{-1};
+        Require(sched_getparam_nid_postfix(pid, &param) == 0);
+        Require(param.sched_priority == scePthreadSelf()->priority.load());
+        Require(sched_getscheduler_nid_postfix(pid) == scePthreadSelf()->schedPolicy.load());
+    }
+    KernelSchedParam unchanged{123};
+    Require(sched_getparam_nid_postfix(process + 1, &unchanged) == -1 && Error() == 3 && unchanged.sched_priority == 123);
+    Require(sched_getscheduler_nid_postfix(process + 1) == -1 && Error() == 3);
+    Require(sched_getparam_nid_postfix(0, nullptr) == -1 && Error() == 14);
+    auto* self = scePthreadSelf();
+    const int savedPolicy = self->schedPolicy.load();
+    self->schedPolicy.store(0);
+    Require(sched_getscheduler_nid_postfix(0) == -1 && Error() == 22);
+    self->schedPolicy.store(savedPolicy);
+
 #ifdef _WIN32
     auto hostDirectorySpelling = std::filesystem::current_path().native();
     CharUpperBuffW(hostDirectorySpelling.data(), static_cast<DWORD>(hostDirectorySpelling.size()));
