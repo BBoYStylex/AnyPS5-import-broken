@@ -1,6 +1,6 @@
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
-#include <cerrno>
+#include "prx/libkernel/Semaphore/include/Ksem.hpp"
 #include <chrono>
 #include <climits>
 #include <condition_variable>
@@ -25,12 +25,12 @@ namespace {
 constexpr int GuestEfault = 14;
 constexpr int GuestEbusy = 16;
 constexpr int GuestEinval = 22;
-constexpr int GuestEnfile = 23;
-constexpr int GuestEmfile = 24;
+constexpr int GuestEnospc = 28;
 constexpr int GuestEagain = 35;
 constexpr int GuestEtimedout = 60;
 constexpr int GuestEoverflow = 84;
 constexpr unsigned SemValueMax = 0x7fffffffu;
+constexpr std::size_t SemMax = 30;
 
 struct GuestTimespec {
     std::int64_t seconds;
@@ -101,21 +101,33 @@ int Wait(std::intptr_t id, bool once, const GuestTimespec* abstime) {
 
 }
 
+bool IsKsemDescriptor(int descriptor) {
+    std::lock_guard lock(g_ksemLock);
+    return g_ksems.count(descriptor) != 0;
+}
+
 extern "C" {
 
 int APS5_VABI ksem_init_nid_postfix(std::intptr_t* idp, unsigned int value) {
     if (value > SemValueMax) return Fail(GuestEinval);
-    if (idp == nullptr) return Fail(GuestEfault);
     const int descriptor = ReserveDescriptor();
-    if (descriptor < 0) return Fail(errno == ENFILE ? GuestEnfile : GuestEmfile);
+    if (descriptor < 0) return Fail(GuestEnospc);
+    if (idp == nullptr) {
+        close_nid_postfix(descriptor);
+        return Fail(GuestEfault);
+    }
+    *idp = descriptor;
     auto ksem = std::make_shared<Ksem>();
     ksem->count = value;
     {
         std::lock_guard lock(g_ksemLock);
-        g_ksems[descriptor] = std::move(ksem);
+        if (g_ksems.size() < SemMax) {
+            g_ksems[descriptor] = std::move(ksem);
+            return 0;
+        }
     }
-    *idp = descriptor;
-    return 0;
+    close_nid_postfix(descriptor);
+    return Fail(GuestEnospc);
 }
 
 int APS5_VABI ksem_post_nid_postfix(std::intptr_t id) {
