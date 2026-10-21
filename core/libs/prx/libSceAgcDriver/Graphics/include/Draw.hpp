@@ -127,7 +127,6 @@ void CountDrawSkip(DrawSkip kind, double us);
 std::shared_ptr<std::vector<std::shared_ptr<ShaderResources>>> DrawCopiedWriters();
 
 void RunColorMetadataPass(const Context& context, const ColorMetadataPass& pass);
-void RunDepthCopyPass(const Context& context, const DepthCopyPass& pass);
 
 }
 
