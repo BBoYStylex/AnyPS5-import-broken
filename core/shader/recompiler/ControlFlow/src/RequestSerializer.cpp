@@ -434,21 +434,21 @@ ShaderPixelStageInfo readPixelInfo(Reader& reader, std::uint32_t version) {
         for (std::uint8_t& location : info.sampleLocations) location = reader.ReadU8();
     }
     if (version >= 37u) info.stencilOperationValueExport = reader.ReadBool();
-    if (version >= 40u) {
+    if (version >= 42u) {
         info.targetMerge.target = reader.ReadU8();
         info.targetMerge.mask = reader.ReadU32();
-        if (version < 41u && info.targetMerge.mask > 0xffffu) throw std::runtime_error("invalid recompile request target merge mask");
+        if (version < 43u && info.targetMerge.mask > 0xffffu) throw std::runtime_error("invalid recompile request target merge mask");
         info.targetMerge.samples = reader.ReadU8();
         for (std::uint32_t& word : info.targetMerge.descriptor) word = reader.ReadU32();
         info.targetMerge.depthStencilWrites = reader.ReadBool();
         info.targetMerge.depthStencilTests = reader.ReadBool();
-        if (version >= 41u) {
+        if (version >= 43u) {
             info.targetMerge.packing = readColorExportPacking(reader);
             info.targetMerge.blendControl = reader.ReadU32();
         } else if (info.targetMerge.mask != 0u) {
             info.targetMerge.packing = ColorExportPacking::Unorm4_4_4_4;
         }
-        if (version >= 42u) {
+        if (version >= 44u) {
             info.targetMerge.layered = reader.ReadBool();
             info.targetMerge.firstSlice = reader.ReadU32();
             info.targetMerge.lastSlice = reader.ReadU32();
@@ -858,7 +858,7 @@ std::string RequestSerializer::Serialize(const RecompileRequest& request) const 
     std::string buffer;
     Writer writer(buffer);
     writer.WriteU32(0x41505335u);
-    writer.WriteU32(42u);
+    writer.WriteU32(44u);
     writeShaderBinary(writer, request.shader);
     writeGuestContext(writer, request.context);
     writeSpirvTarget(writer, request.target);
@@ -889,6 +889,7 @@ std::string RequestSerializer::Serialize(const RecompileRequest& request) const 
         writer.WriteU32(request.context.vertex->depthRemapMode);
     }
     writer.WriteBool(request.target.float32FlushToZero);
+    writer.WriteBool(request.target.float32DenormPreserve);
     return base64Encode(buffer);
 }
 
@@ -897,7 +898,7 @@ DeserializedRequest RequestSerializer::Deserialize(std::string_view text) const 
     Reader reader(decoded);
     if (reader.ReadU32() != 0x41505335u) throw std::runtime_error("invalid recompile request signature");
     const auto version = reader.ReadU32();
-    if (version < 1u || version > 42u) throw std::runtime_error("unsupported recompile request serialization version");
+    if (version < 1u || version > 44u) throw std::runtime_error("unsupported recompile request serialization version");
     DeserializedRequest result{};
     result.request.shader = readShaderBinary(reader, result.shaderCode, result.shaderHeader);
     result.request.context = readGuestContext(reader, result, version);
@@ -942,6 +943,7 @@ DeserializedRequest RequestSerializer::Deserialize(std::string_view text) const 
         }
     }
     if (version >= 36u) result.request.target.float32FlushToZero = reader.ReadBool();
+    if (version >= 41u) result.request.target.float32DenormPreserve = reader.ReadBool();
     if (version >= 21u && reader.Remaining() != 0u) throw std::runtime_error("RequestSerializer: unexpected trailing data");
     return result;
 }
