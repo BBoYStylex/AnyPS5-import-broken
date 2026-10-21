@@ -287,6 +287,17 @@ static void CheckStrictMemoryProtectionBits() {
     Require(sceKernelReleaseDirectMemory(physical, length) == 0);
 }
 
+static void CheckPosixMprotectIgnoresUndefinedBits() {
+    constexpr std::size_t length = 0x4000;
+    auto* mapping = static_cast<volatile unsigned char*>(mmap_nid_postfix(nullptr, length, 3, 0x1002, -1, 0));
+    Require(mapping != reinterpret_cast<void*>(static_cast<std::uintptr_t>(-1)));
+    Require(mprotect_nid_postfix(const_cast<unsigned char*>(mapping), length, static_cast<int>(0xfffffff2u)) == 0);
+    mapping[length - 1] = 5;
+    Require(mapping[length - 1] == 5);
+    Require(mprotect_nid_postfix(const_cast<unsigned char*>(mapping), length, 0x8 | 0x3) == 0);
+    Require(munmap_nid_postfix(const_cast<unsigned char*>(mapping), length) == 0);
+}
+
 static void CheckInternalNamedFlexibleMapping() {
     constexpr std::size_t length = 0x10000;
     std::size_t before = 0;
@@ -3289,6 +3300,7 @@ int main(int argc, char** argv) {
     CheckAudioCoprocessorProtection();
     CheckMprotectIgnoresUndefinedBits();
     CheckStrictMemoryProtectionBits();
+    CheckPosixMprotectIgnoresUndefinedBits();
     CheckDirectMemoryFollowsPhysicalPages();
     CheckSparseDirectMemoryBacking();
     CheckSavedDirectMemorySurvivesCachePressure();
