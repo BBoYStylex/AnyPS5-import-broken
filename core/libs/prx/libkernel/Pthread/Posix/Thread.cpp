@@ -11,6 +11,8 @@
 #include <atomic>
 #include <mutex>
 #include <cstring>
+#include <stdexcept>
+#include <string>
 #include <thread>
 
 extern "C" {
@@ -200,6 +202,49 @@ int APS5_VABI scePthreadSetschedparam(Pthread thread, int policy, const KernelSc
 int APS5_VABI pthread_getschedparam_nid_postfix(Pthread thread, int* policy, KernelSchedParam* param) {
     if (!policy || !param) return PosixThread::GUEST_EINVAL;
     return PosixThread::ToErrno(scePthreadGetschedparam(thread, policy, param));
+}
+
+static Pthread SchedTarget(int pid, const char* function) {
+    if (pid == 0) return scePthreadSelf();
+    if (pid == getpid_nid_postfix())
+        throw std::runtime_error(std::string(function) + ": the first thread of the process, which its own pid selects, is not tracked");
+    return nullptr;
+}
+
+static int SchedFailure(int error) {
+    *__error_nid_postfix() = error;
+    return -1;
+}
+
+int APS5_VABI sched_getparam_nid_postfix(int pid, KernelSchedParam* param) {
+    const Pthread thread = SchedTarget(pid, "sched_getparam");
+    if (!thread) return SchedFailure(PosixThread::GUEST_ESRCH);
+    int policy = 0;
+    KernelSchedParam current{};
+    if (const int error = PosixThread::ToErrno(scePthreadGetschedparam(thread, &policy, &current))) return SchedFailure(error);
+    if (!param) return SchedFailure(PosixThread::GUEST_EFAULT);
+    *param = current;
+    return 0;
+}
+
+int APS5_VABI sched_getscheduler_nid_postfix(int pid) {
+    const Pthread thread = SchedTarget(pid, "sched_getscheduler");
+    if (!thread) return SchedFailure(PosixThread::GUEST_ESRCH);
+    int policy = 0;
+    KernelSchedParam current{};
+    if (const int error = PosixThread::ToErrno(scePthreadGetschedparam(thread, &policy, &current))) return SchedFailure(error);
+    return policy;
+}
+
+int APS5_VABI sched_setparam_nid_postfix(int pid, const KernelSchedParam* param) {
+    if (!param) return SchedFailure(PosixThread::GUEST_EFAULT);
+    const Pthread thread = SchedTarget(pid, "sched_setparam");
+    if (!thread) return SchedFailure(PosixThread::GUEST_ESRCH);
+    const int policy = thread->schedPolicy.load(std::memory_order_relaxed);
+    if (!AcceptsSchedParam(policy, param->sched_priority))
+        throw std::runtime_error("sched_setparam: priority " + std::to_string(param->sched_priority) + " is outside the range of policy " + std::to_string(policy) + "; FreeBSD answers EPERM and the console's answer is unverified");
+    if (const int error = PosixThread::ToErrno(scePthreadSetprio(thread, param->sched_priority))) return SchedFailure(error);
+    return 0;
 }
 
 int APS5_VABI pthread_getprio_nid_postfix(Pthread thread) {
