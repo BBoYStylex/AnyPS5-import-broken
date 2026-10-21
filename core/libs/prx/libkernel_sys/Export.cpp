@@ -54,6 +54,7 @@ static int GuestFstat(int fd) {
 
 constexpr int GuestEnoent = 2;
 constexpr int GuestEperm = 1;
+constexpr int GuestEsrch = 3;
 constexpr int GuestEio = 5;
 constexpr int GuestEbadf = 9;
 constexpr int GuestEfault = 14;
@@ -68,6 +69,7 @@ constexpr int GuestEloop = 62;
 constexpr int GuestEnametoolong = 63;
 constexpr int GuestEnotempty = 66;
 constexpr int GuestEoverflow = 84;
+constexpr int GuestMaxSignal = 128;
 constexpr int GuestAtFdcwd = -100;
 constexpr int GuestAtRemovedir = 0x800;
 constexpr std::size_t GuestPathMax = 1024;
@@ -261,6 +263,15 @@ int APS5_VABI fork_nid_postfix(void) {
 
 int APS5_VABI setsid_nid_postfix(void) {
     return static_cast<int>(Fail(GuestEperm));
+}
+
+int APS5_VABI getpid_nid_postfix(void);
+int APS5_VABI raise_nid_postfix(int signal);
+
+int APS5_VABI sigqueue_nid_postfix(int pid, int signal, void*) {
+    if (static_cast<unsigned>(signal) > GuestMaxSignal || pid <= 0) return static_cast<int>(Fail(GuestEinval));
+    if (pid != getpid_nid_postfix()) return static_cast<int>(Fail(GuestEsrch));
+    return signal == 0 ? 0 : raise_nid_postfix(signal);
 }
 
 std::uint16_t APS5_VABI umask_nid_postfix(std::uint16_t mask) {
