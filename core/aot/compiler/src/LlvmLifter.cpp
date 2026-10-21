@@ -1,4 +1,5 @@
 #include <compiler/LlvmLifter.hpp>
+#include <compiler/X86LifterContext.hpp>
 #include <llvm/IR/InlineAsm.h>
 #include <llvm/IR/Verifier.h>
 #include <llvm/Support/TargetSelect.h>
@@ -74,6 +75,7 @@ llvm::Function* LlvmLifter::liftFunctionAtAddress(
     uint64_t virtualAddress,
     std::string_view name,
     llvm::Module& module) {
+    static_cast<void>(virtualAddress);
     llvm::LLVMContext& context = module.getContext();
 
     llvm::FunctionType* funcType = llvm::FunctionType::get(
@@ -91,12 +93,15 @@ llvm::Function* LlvmLifter::liftFunctionAtAddress(
 
     llvm::BasicBlock* entryBlock = llvm::BasicBlock::Create(context, "entry", function);
     llvm::IRBuilder<> builder(entryBlock);
+    X86LifterContext lifterContext(function, builder);
 
     size_t offset = 0;
     while (offset < byteCount) {
         uint8_t byte = codeBytes[offset];
 
-        if (byte == 0x0F && (offset + 1 < byteCount) && codeBytes[offset + 1] == 0x05) {
+        if (byte == 0x90) {
+            offset += 1;
+        } else if (byte == 0x0F && (offset + 1 < byteCount) && codeBytes[offset + 1] == 0x05) {
             llvm::FunctionType* asmType = llvm::FunctionType::get(
                 llvm::Type::getInt64Ty(context),
                 {llvm::Type::getInt32Ty(context)},
@@ -108,10 +113,19 @@ llvm::Function* LlvmLifter::liftFunctionAtAddress(
                 "={rax},{rax},~{rcx},~{r11},~{memory}",
                 true
             );
-            builder.CreateCall(inlineAsm, {builder.getInt32(0)});
+            llvm::Value* raxVal = lifterContext.ReadRegister(X86Register::Rax, builder);
+            llvm::Value* sysId = builder.CreateTrunc(raxVal, builder.getInt32Ty());
+            llvm::Value* result = builder.CreateCall(inlineAsm, {sysId});
+            lifterContext.WriteRegister(X86Register::Rax, result, builder);
             offset += 2;
+        } else if (byte == 0x48 && (offset + 2 < byteCount) && codeBytes[offset + 1] == 0x31 && codeBytes[offset + 2] == 0xC0) {
+            llvm::Value* raxVal = lifterContext.ReadRegister(X86Register::Rax, builder);
+            llvm::Value* res = lifterContext.EvaluateAlu(X86AluOp::Xor, raxVal, raxVal, builder);
+            lifterContext.WriteRegister(X86Register::Rax, res, builder);
+            offset += 3;
         } else if (byte == 0xC3) {
-            builder.CreateRet(builder.getInt64(0));
+            llvm::Value* retVal = lifterContext.ReadRegister(X86Register::Rax, builder);
+            builder.CreateRet(retVal);
             offset += 1;
             break;
         } else {
@@ -120,7 +134,8 @@ llvm::Function* LlvmLifter::liftFunctionAtAddress(
     }
 
     if (entryBlock->getTerminator() == nullptr) {
-        builder.CreateRet(builder.getInt64(0));
+        llvm::Value* retVal = lifterContext.ReadRegister(X86Register::Rax, builder);
+        builder.CreateRet(retVal);
     }
 
     return function;
