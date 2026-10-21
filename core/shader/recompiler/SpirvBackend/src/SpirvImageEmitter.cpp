@@ -1085,6 +1085,11 @@ void EmitWriteOp(SpirvValueEmitContext& ctx, const ImageEmitAccess& access) {
         auto texel = access.mem.imagePacked ? PackedStoreTexel(ctx, access, ctx.Arg(access.inst, 2)) : StoreTexel(ctx, access, ctx.Arg(access.inst, 2), uintImage);
         if (!uintImage && !access.mem.imagePacked && !access.image.atomic && access.image.table == NoTable && !state.registrationModules && access.image.conversionFormat == IrBufferFormat::Invalid) texel = QuantizeStoreTexel(state, access.mem.resource, texel);
         EmitStorageImageWrite(state, access.mem.resource, mipLod, coord, texel, ImageSampleIndex(ctx, access));
+#ifdef __APPLE__
+        // Metal makes a read_write texture store visible to a later read or atomic in the same thread only after a
+        // texture fence, which MoltenVK emits for an image memory barrier.
+        state.module.AddFunction(spv::OpMemoryBarrier, ConstantU32(state, spv::ScopeDevice), ConstantU32(state, spv::MemorySemanticsAcquireReleaseMask | spv::MemorySemanticsImageMemoryMask));
+#endif
     });
 }
 
