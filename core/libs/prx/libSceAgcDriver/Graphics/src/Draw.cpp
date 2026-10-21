@@ -803,10 +803,11 @@ void CheckBufferAliases(std::span<const CompiledShader> shaders, const ColorTarg
             for (std::size_t offset = 0; offset + 4 <= words.size(); offset += 4) {
                 const ShaderRecompiler::ShaderBufferResource descriptor{{words[offset], words[offset + 1], words[offset + 2], words[offset + 3]}};
                 const auto address = descriptor.Base48();
-                const auto size = descriptor.GetSize();
+                auto size = descriptor.GetSize();
                 if (size == 0 || address == 0) continue;
                 const auto element = offset / 4;
                 const bool written = element >= binding.bufferWritten.size() || binding.bufferWritten[element];
+                if (const std::uint64_t stride = descriptor.Stride(); !written && stride != 0 && address < target.address && address + size > target.address && address + size - target.address < stride) size = target.address - address;
                 Require(!overlap(address, size, target.address, target.bytes), "shader buffer aliases the render target");
                 Require(!written || !overlap(address, size, indexAddress, indexBytes), "writable shader buffer aliases the index buffer");
             }
