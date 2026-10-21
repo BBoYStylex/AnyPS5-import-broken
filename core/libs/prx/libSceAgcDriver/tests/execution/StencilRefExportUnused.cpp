@@ -192,8 +192,26 @@ void IndependentReference(bool invert) {
     CheckWhitePixels(coverage, [](auto, auto) { return true; }, "dropping an unused reference changed the stencil readback");
 }
 
+constexpr std::uint32_t ExportedReference = 5u;
+constexpr std::uint32_t FixedReference = 37u;
+
+struct StencilState {
+    std::size_t color = 0;
+    std::size_t exported = 0;
+    std::size_t fixed = 0;
+};
+
+StencilState ReadState() {
+    StencilState state;
+    state.color = static_cast<std::size_t>(std::count_if(ColorMemory.begin(), ColorMemory.end(), [](auto value) { return value != Kept; }));
+    ProbeStencil(ExportedReference);
+    state.exported = static_cast<std::size_t>(std::count_if(ColorMemory.begin(), ColorMemory.end(), [](auto value) { return value != Kept; }));
+    ProbeStencil(FixedReference);
+    state.fixed = static_cast<std::size_t>(std::count_if(ColorMemory.begin(), ColorMemory.end(), [](auto value) { return value != Kept; }));
+    return state;
+}
+
 void DependentReference(std::string_view name) {
-    static_cast<void>(InitializeStencil());
     DrawOptions options{.depth = true};
     if (name == "compare") options.depthControl = 0x201u;
     else if (name == "back-compare") options.depthControl = 0x200781u;
@@ -202,16 +220,19 @@ void DependentReference(std::string_view name) {
     else if (name == "depth-fail-replace") { options.depthControl = 0x703u; options.operations = 0x300u; }
     else if (name == "partial-replace") { options.operations = 0x30u; options.front = options.back = 0x0080ff25u; }
     else throw std::runtime_error("unknown dependent stencil reference case");
-    const auto stencil = StencilMemory;
-    bool refused = false;
-    try { SubmitDraw(PixelCode, options); }
-    catch (const std::exception& error) {
-        refused = std::string_view(error.what()).find("a pixel shader that exports the stencil reference needs VK_EXT_shader_stencil_export, which the device lacks") != std::string_view::npos;
-        if (!refused) throw;
-    }
-    Require(refused, "a dependent reference without native stencil export was admitted");
-    Require(std::all_of(ColorMemory.begin(), ColorMemory.end(), [](auto value) { return value == Kept; }), "a refused stencil draw wrote color");
-    Require(StencilMemory == stencil, "a refused stencil draw changed its guest stencil memory");
+    DrawOptions exported = options;
+    exported.front = (options.front & ~0xffu) | ExportedReference;
+    exported.back = (options.back & ~0xffu) | ExportedReference;
+    exported.shaderControl = 0x800u;
+    static_cast<void>(InitializeStencil());
+    SubmitDraw(PixelCode, exported);
+    const auto exportedState = ReadState();
+    static_cast<void>(InitializeStencil());
+    SubmitDraw(PixelCode, options);
+    const auto dependentState = ReadState();
+    Require(dependentState.color == exportedState.color, "the exported stencil reference did not replace the fixed one in the stencil test");
+    Require(dependentState.exported == exportedState.exported, "the exported stencil reference did not write the exported value into the stencil");
+    Require(dependentState.fixed == exportedState.fixed, "the exported stencil reference did not leave the fixed value out of the stencil");
 }
 
 }
@@ -224,17 +245,17 @@ int main(int argc, char** argv) {
             if (!device) return VulkanTestSkipped;
             nativeStencilExport = TargetHasCapability(device->Target(), spv::CapabilityStencilExportEXT);
         }
-        bool expectedRefusal = false;
+        bool dependent = false;
         if (argc == 3 && std::string_view(argv[1]) == "--case") {
             const std::string_view name = argv[2];
             if (name == "keep" || name == "invert") IndependentReference(name == "invert");
             else {
                 if (nativeStencilExport) {
-                    std::puts("skipped: a dependent reference refusal requires a device without native stencil export");
+                    std::puts("skipped: a dependent reference needs a device without native stencil export");
                     return VulkanTestSkipped;
                 }
                 DependentReference(name);
-                expectedRefusal = true;
+                dependent = true;
             }
         } else {
             Require(argc == 1, "expected --case keep, invert, compare, back-compare, replace, fail-replace, depth-fail-replace, or partial-replace");
@@ -242,11 +263,8 @@ int main(int argc, char** argv) {
             IndependentReference(false);
             IndependentReference(true);
         }
-        try { AgcDriverShutdown_nid_postfix(); }
-        catch (const std::exception& error) {
-            if (!expectedRefusal || std::string_view(error.what()).find("a pixel shader that exports the stencil reference needs VK_EXT_shader_stencil_export, which the device lacks") == std::string_view::npos) throw;
-        }
-        std::puts(expectedRefusal ? "a dependent stencil reference retained the native extension refusal" : "unused stencil reference draws and full color/stencil readbacks passed");
+        AgcDriverShutdown_nid_postfix();
+        std::puts(dependent ? "a dependent stencil reference was replayed with the exported reference" : "unused stencil reference draws and full color/stencil readbacks passed");
         return 0;
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
