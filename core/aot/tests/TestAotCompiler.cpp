@@ -1,6 +1,7 @@
 #include <compiler/ElfBinaryParser.hpp>
 #include <compiler/SyscallRegistry.hpp>
 #include <compiler/ElfRelocationResolver.hpp>
+#include <compiler/AotCompilerDriver.hpp>
 #include <cassert>
 #include <vector>
 
@@ -33,6 +34,21 @@ int main() {
 
     Aot::Compiler::ElfRelocationResolver resolver;
     assert(resolver.GetRelocations().empty());
+
+    Aot::Compiler::CompilerOptions options{};
+    assert(options.OptimizationLevel == 2);
+    assert(!options.EmitLlvmIr);
+    assert(!options.EmitAssembly);
+    options.EmitLlvmIr = true;
+    options.OutputLlvmIrPath = "dummy.ll";
+    options.EmitAssembly = true;
+    options.OutputAssemblyPath = "dummy.s";
+    assert(options.EmitLlvmIr);
+    assert(options.EmitAssembly);
+
+    Aot::Compiler::AotCompilerDriver driver;
+    auto stats = driver.Compile(options);
+    assert(!stats.Success);
 
     return 0;
 }

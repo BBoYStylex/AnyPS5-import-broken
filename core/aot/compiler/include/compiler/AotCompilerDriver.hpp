@@ -21,6 +21,10 @@ struct CompilerOptions {
     bool EmitExecutable = false;
     std::vector<std::filesystem::path> AdditionalLibraries;
     bool VerboseLogging = false;
+    bool EmitLlvmIr = false;
+    std::filesystem::path OutputLlvmIrPath;
+    bool EmitAssembly = false;
+    std::filesystem::path OutputAssemblyPath;
 };
 
 struct CompilationStatistics {
@@ -48,6 +52,13 @@ public:
 
 private:
     bool emitObjectFile(
+        llvm::Module& module,
+        const std::filesystem::path& outputPath,
+        const std::string& targetTriple,
+        uint32_t optLevel
+    );
+
+    bool emitAssemblyFile(
         llvm::Module& module,
         const std::filesystem::path& outputPath,
         const std::string& targetTriple,

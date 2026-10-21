@@ -8,6 +8,8 @@ static void PrintUsage(const char* executableName) {
               << "  -i, --input <path>      Input console ELF binary\n"
               << "  -o, --output <path>     Output native object file\n"
               << "  -e, --exe <path>        Output native linked executable\n"
+              << "  -S, --emit-asm <path>   Output native assembly file\n"
+              << "  --emit-llvm <path>      Output LLVM IR file\n"
               << "  -O, --opt <0-3>         Optimization level (default: 2)\n"
               << "  --triple <target>       Target LLVM triple\n"
               << "  -h, --help              Display this help message\n";
@@ -31,6 +33,12 @@ int main(int argc, char* argv[]) {
         } else if ((argument == "-e" || argument == "--exe") && i + 1 < argc) {
             options.OutputExecutablePath = argv[++i];
             options.EmitExecutable = true;
+        } else if ((argument == "-S" || argument == "--emit-asm") && i + 1 < argc) {
+            options.OutputAssemblyPath = argv[++i];
+            options.EmitAssembly = true;
+        } else if (argument == "--emit-llvm" && i + 1 < argc) {
+            options.OutputLlvmIrPath = argv[++i];
+            options.EmitLlvmIr = true;
         } else if ((argument == "-O" || argument == "--opt") && i + 1 < argc) {
             options.OptimizationLevel = static_cast<uint32_t>(std::stoul(argv[++i]));
         } else if (argument == "--triple" && i + 1 < argc) {

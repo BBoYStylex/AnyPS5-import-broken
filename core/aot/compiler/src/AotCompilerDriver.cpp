@@ -68,6 +68,22 @@ CompilationStatistics AotCompilerDriver::Compile(const CompilerOptions& options)
 #endif
     }
 
+    if (options.EmitLlvmIr && !options.OutputLlvmIrPath.empty()) {
+        if (options.OutputLlvmIrPath.has_parent_path()) {
+            std::filesystem::create_directories(options.OutputLlvmIrPath.parent_path());
+        }
+        std::error_code errorCode;
+        llvm::raw_fd_ostream irStream(options.OutputLlvmIrPath.string(), errorCode, llvm::sys::fs::OF_None);
+        if (!errorCode) {
+            lifted.Module->print(irStream, nullptr);
+            irStream.flush();
+        }
+    }
+
+    if (options.EmitAssembly && !options.OutputAssemblyPath.empty()) {
+        emitAssemblyFile(*lifted.Module, options.OutputAssemblyPath, targetTriple, options.OptimizationLevel);
+    }
+
     stats.Success = emitObjectFile(
         *lifted.Module,
         options.OutputObjectPath,
@@ -172,6 +188,72 @@ bool AotCompilerDriver::emitObjectFile(
 
     llvm::legacy::PassManager passManager;
     if (targetMachine->addPassesToEmitFile(passManager, destinationFile, nullptr, llvm::CodeGenFileType::ObjectFile)) {
+        return false;
+    }
+
+    passManager.run(module);
+    destinationFile.flush();
+
+    return true;
+}
+
+bool AotCompilerDriver::emitAssemblyFile(
+    llvm::Module& module,
+    const std::filesystem::path& outputPath,
+    const std::string& targetTriple,
+    uint32_t optLevel) {
+    std::string error;
+    const llvm::Target* target = llvm::TargetRegistry::lookupTarget(targetTriple, error);
+    if (target == nullptr) {
+        return false;
+    }
+
+    llvm::CodeGenOptLevel codegenOpt = llvm::CodeGenOptLevel::Default;
+    if (optLevel == 0) {
+        codegenOpt = llvm::CodeGenOptLevel::None;
+    } else if (optLevel == 1) {
+        codegenOpt = llvm::CodeGenOptLevel::Less;
+    } else if (optLevel >= 3) {
+        codegenOpt = llvm::CodeGenOptLevel::Aggressive;
+    }
+
+    llvm::TargetOptions targetOptions;
+    std::unique_ptr<llvm::TargetMachine> targetMachine(
+        target->createTargetMachine(
+            targetTriple,
+            "generic",
+            "",
+            targetOptions,
+            std::optional<llvm::Reloc::Model>(llvm::Reloc::PIC_),
+            std::nullopt,
+            codegenOpt
+        )
+    );
+
+    if (!targetMachine) {
+        return false;
+    }
+
+    module.setDataLayout(targetMachine->createDataLayout());
+    module.setTargetTriple(targetTriple);
+
+    if (outputPath.has_parent_path()) {
+        std::filesystem::create_directories(outputPath.parent_path());
+    }
+
+    std::error_code errorCode;
+    llvm::raw_fd_ostream destinationFile(
+        outputPath.string(),
+        errorCode,
+        llvm::sys::fs::OF_None
+    );
+
+    if (errorCode) {
+        return false;
+    }
+
+    llvm::legacy::PassManager passManager;
+    if (targetMachine->addPassesToEmitFile(passManager, destinationFile, nullptr, llvm::CodeGenFileType::AssemblyFile)) {
         return false;
     }
 
