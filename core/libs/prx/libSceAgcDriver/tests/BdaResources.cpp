@@ -1714,6 +1714,44 @@ void importCeilingTests(const Context& context, const BdaTestAccess& access, boo
     ::operator delete(block, std::align_val_t{piece});
 }
 
+void importFailureWithoutMemoryTests(const Context& context, const BdaTestAccess& access) {
+    constexpr std::size_t piece = 65536;
+    constexpr std::size_t count = 24;
+    auto* block = static_cast<std::uint8_t*>(::operator new(2 * count * piece, std::align_val_t{piece}));
+    auto importing = context;
+    importing.hostImportAlignment = piece;
+    SetHostImportWindow(0);
+    ClearHostImports(importing.device);
+    {
+        GuestAllocations::Mutation mutation;
+        for (std::size_t index = 0; index < count; ++index) mutation.Add(block + 2 * index * piece, piece, true, true, true);
+    }
+    std::size_t next = 0;
+    const auto lookup = [&] { return HostImportFor(importing, reinterpret_cast<std::uintptr_t>(block + 2 * next++ * piece), 16) != nullptr; };
+    const auto counted = [] { return HostImportCounters().requesters[static_cast<std::size_t>(ImportRequester::Access)]; };
+    for (const bool nearBudget : {false, true}) {
+        SetHostImportBudget(nearBudget ? HostImportLiveBytes() + 2 * piece : 64 * piece);
+        Require(lookup(), "the unknown-failure test's first import was not made");
+        access.importFailure(VK_ERROR_UNKNOWN);
+        access.limitImports(0);
+        const auto before = counted();
+        for (int attempt = 0; attempt < 5; ++attempt) static_cast<void>(lookup());
+        const auto after = counted();
+        access.limitImports(std::nullopt);
+        access.importFailure(VK_ERROR_OUT_OF_DEVICE_MEMORY);
+        Require(after.failed - before.failed == 5 && after.refused == before.refused, std::string("vkAllocateMemory failures without an out-of-memory result ") + (nearBudget ? "within an eighth of the budget" : "far below the budget") + " were not five failures and no refusals: " + std::to_string(after.failed - before.failed) + " failed, " + std::to_string(after.refused - before.refused) + " refused");
+        Require(lookup(), std::string("vkAllocateMemory failures without an out-of-memory result ") + (nearBudget ? "within an eighth of the budget" : "far below the budget") + " lowered the import budget");
+        SetHostImportBudget(0);
+        ClearHostImports(importing.device);
+    }
+    {
+        GuestAllocations::Mutation mutation;
+        for (std::size_t index = 0; index < count; ++index) mutation.Remove(block + 2 * index * piece);
+    }
+    ClearHostImports(importing.device);
+    ::operator delete(block, std::align_val_t{piece});
+}
+
 std::uint64_t reportedHostHeapBudget = 0;
 std::uint64_t reportedHostHeapUsage = 0;
 
@@ -3436,6 +3474,7 @@ void RunBdaResourceTests(const Context& context, const BdaTestAccess& access) {
     importDeviceBudgetTests();
     importCeilingTests(context, access, false);
     importCeilingTests(context, access, true);
+    importFailureWithoutMemoryTests(context, access);
     importReportFloorTests(context, access, true);
     importReportFloorTests(context, access, false);
     importReportRefusalMemoryTests(context, access);
