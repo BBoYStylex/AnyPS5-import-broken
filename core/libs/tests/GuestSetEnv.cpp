@@ -169,14 +169,15 @@ void Threads() {
         desired.x87[0]=(desired.x87[0]&~0xc00u)|(rounding<<10)|0x3f;
         desired.x87[1]=(desired.x87[1]&~0xffu)|flags;
         desired.mxcsr=(desired.mxcsr&~0x603fu)|(rounding<<13)|(flags^0x3f)|(0x3f<<7);
-        *__error_nid_postfix()=static_cast<int>(flags);
         ready.arrive_and_wait();
+        *__error_nid_postfix()=static_cast<int>(flags);
         const int result=setEnvironment(&desired);
+        const int error=*__error_nid_postfix();
         ready.arrive_and_wait();
         const auto after=Read();
         Write(original);
         Require(result==0 && Same(after,desired),"thread-local environment");
-        Require(*__error_nid_postfix()==static_cast<int>(flags),"thread-local errno");
+        Require(error==static_cast<int>(flags),"thread-local errno");
     };
     std::thread a(worker,1,4),b(worker,2,8);
     a.join(); b.join();
