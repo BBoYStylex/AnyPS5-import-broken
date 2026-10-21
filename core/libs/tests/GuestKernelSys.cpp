@@ -15,6 +15,7 @@
 #include <stdexcept>
 #include <set>
 #include <string>
+#include <thread>
 #ifdef _WIN32
 #include <windows.h>
 #ifndef SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE
@@ -34,6 +35,7 @@ int APS5_VABI close_nid_postfix(int);
 std::int64_t APS5_VABI readlink_nid_postfix(const char*, char*, std::size_t);
 std::int64_t APS5_VABI pathconf_nid_postfix(const char*, int);
 int APS5_VABI fchdir_nid_postfix(int);
+int APS5_VABI pthread_main_np_nid_postfix();
 int APS5_VABI chdir_nid_postfix(const char*);
 int APS5_VABI chroot_nid_postfix(const char*);
 char* APS5_VABI getcwd_nid_postfix(char*, std::size_t);
@@ -262,6 +264,10 @@ int main() {
     CharUpperBuffW(hostDirectorySpelling.data(), static_cast<DWORD>(hostDirectorySpelling.size()));
     Require(SetCurrentDirectoryW(hostDirectorySpelling.c_str()) != 0);
 #endif
+    Require(pthread_main_np_nid_postfix() == 1);
+    int otherThread = -1;
+    std::thread([&] { otherThread = pthread_main_np_nid_postfix(); }).join();
+    Require(otherThread == 0);
     Require(setsid_nid_postfix() == -1 && Error() == 1);
     Require(umask_nid_postfix(0) == 022);
     Require(umask_nid_postfix(07777) == 0);

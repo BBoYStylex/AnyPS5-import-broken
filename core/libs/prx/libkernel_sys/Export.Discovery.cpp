@@ -408,9 +408,10 @@ int APS5_VABI pthread_getstack_np_nid_postfix(void) {
     return 0;
 }
 
+bool IsInitialThread_nid_no_patch();
+
 int APS5_VABI pthread_main_np_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return IsInitialThread_nid_no_patch() ? 1 : 0;
 }
 
 int APS5_VABI pthread_multi_np_nid_postfix(void) {
