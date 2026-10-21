@@ -590,6 +590,11 @@ constexpr std::uint32_t CoveredCentroidIsCenter = 1u << 29u;
 constexpr std::uint32_t SampleZeroRefusedInputs = ShaderRecompiler::PixelInputBit(ShaderRecompiler::PixelInput::PerspectiveCentroid) | ShaderRecompiler::PixelInputBit(ShaderRecompiler::PixelInput::LinearCentroid) | ShaderRecompiler::PixelInputBit(ShaderRecompiler::PixelInput::SampleCoverage);
 constexpr std::uint32_t CentroidInputs = ShaderRecompiler::PixelInputBit(ShaderRecompiler::PixelInput::PerspectiveCentroid) | ShaderRecompiler::PixelInputBit(ShaderRecompiler::PixelInput::LinearCentroid);
 
+bool staticAnchors(const Registers& cx, std::uint32_t depthSamples) {
+    const auto eqaa = find(cx, 0x201);
+    return eqaa != cx.end() && (eqaa->second & 7u) == static_cast<std::uint32_t>(std::countr_zero(depthSamples)) && (eqaa->second & 0x100000u) != 0;
+}
+
 bool overrasterized(const Registers& cx, std::uint32_t samples) {
     const auto eqaa = find(cx, 0x201);
     const auto mode = find(cx, 0x292);
@@ -1481,6 +1486,7 @@ State DecodeState(const QueueState& queue, bool vertexWorkgroup) {
         const bool merged = color.samples == 1u && color.coverageSamples == 1u && !result.depth && !result.perSampleShading && (result.colors.empty() || result.mergedCoverage) && overrasterized(cx, result.samples);
         if (!merged && color.samples == 1 && color.coverageSamples == 1u && result.colors.empty() && !result.depth && rasterizesSampleZeroOnly(cx, result)) rasterizeSampleZero(result);
         Require(color.coverageSamples == color.samples || color.coverageSamples == result.samples || (result.samples == 1u && (read(cx, 0x292) & 1u) == 0), "a one-fragment color target's sample count differs from the rasterizer's");
+        Require(color.coverageSamples == color.samples || (result.depth && staticAnchors(cx, result.depth->samples)), "a one-fragment color target is supported only with static DB_EQAA anchors at the depth target's sample count");
         const bool truncated = color.samples == 1u && result.samples > 1u && result.depth && result.depth->samples == result.samples && (result.colors.empty() || result.truncatedCoverage) && !overrasterized(cx, result.samples);
         Require((color.samples == result.samples && !result.mergedCoverage && !result.truncatedCoverage) || merged || truncated, "a color target's sample count differs from the rasterizer's");
         result.mergedCoverage = merged;
@@ -1794,6 +1800,7 @@ ColorTarget DecodeColorBuffer(const Registers& cx, std::uint32_t slot, bool allo
     color.coverageSamples = 1u << ((attrib >> 12u) & 7u);
     Require(color.coverageSamples <= 8u, "color targets with more than eight samples are unsupported");
     color.samples = 1u << ((attrib >> 15u) & 3u);
+    Require(color.samples <= color.coverageSamples, "color targets with more fragments than samples are unsupported");
     Require(color.samples == color.coverageSamples || color.samples == 1u, "color targets with more than one but fewer fragments than samples (EQAA) are unsupported");
     const auto multisampleInfo = color.coverageSamples > 1 ? 0x0c006000u : 0u;
     // ROUND_MODE (bit 18) only affects unorm rounding and packed float truncation. With DCC_ENABLE (bit 28) the target is written

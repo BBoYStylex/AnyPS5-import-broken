@@ -4297,6 +4297,15 @@ void multisampledDepthTests() {
     queue.context[0x31d] = 0xa000;
     expectFailure([&] { DecodeState(queue); }, "color targets with more than one but fewer fragments than samples (EQAA) are unsupported");
     queue = oneFragment();
+    queue.context[0x31d] = 0x8000;
+    expectFailure([&] { DecodeState(queue); }, "color targets with more fragments than samples are unsupported");
+    queue = oneFragment();
+    queue.context[0x201] = 0x012202;
+    expectFailure([&] { DecodeState(queue); }, "a one-fragment color target is supported only with static DB_EQAA anchors at the depth target's sample count");
+    queue = oneFragment();
+    queue.context[0x201] = 0x112201;
+    expectFailure([&] { DecodeState(queue); }, "a one-fragment color target is supported only with static DB_EQAA anchors at the depth target's sample count");
+    queue = oneFragment();
     queue.context[0x2f8] = 0x00100001;
     queue.context[0x010] = 0x22900987;
     for (std::uint32_t pixel = 0; pixel < 4; ++pixel) queue.context[0x2fe + pixel * 4u] = 0xcc44;
