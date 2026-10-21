@@ -4656,12 +4656,6 @@ void GuestBufferMemory::UploadFinish(bool addressable) {
             if (profile) refreshUs += microsecondsSince(refreshStart);
             continue;
         }
-        if (sparseHeapCandidate(region)) {
-            const auto refreshStart = profile ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
-            const bool bound = bindSparseMirror(region, importRanges());
-            if (profile) refreshUs += microsecondsSince(refreshStart);
-            if (bound) continue;
-        }
         bool copyOnGpu = false;
         if (context.hostImportAlignment != 0) {
             auto& state = Imports();
@@ -4747,6 +4741,12 @@ void GuestBufferMemory::UploadFinish(bool addressable) {
             region.gpuCopy = true;
             gpuCopies.push_back(&region);
             continue;
+        }
+        if (sparseHeapCandidate(region)) {
+            const auto refreshStart = profile ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+            const bool bound = bindSparseMirror(region, importRanges());
+            if (profile) refreshUs += microsecondsSince(refreshStart);
+            if (bound) continue;
         }
         if (region.deviceLocal) {
             // The staging shadow UploadPrepare made cannot take the CPU copy (no host mapping): the
