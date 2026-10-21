@@ -1,6 +1,7 @@
 # libSceFreeType technical debt
 
 ### Unknown function info
+- [FT_Reference_Face](../../../core/libs/prx/libSceFreeType/Export.cpp) (libSceFreeType) - console signature, reference-counter limits and finalizer behavior are unverified; the LP64 guest adapter follows bundled [FreeType 2.13.3](https://github.com/freetype/freetype/blob/42608f77f20749dd6ddc9e0536788eaad70ea4b5/src/base/ftobjs.c). Counter overflow and reentrant finalization have not been measured on the console.
 
 - [FT_Select_Charmap, FT_Set_Charmap, FT_Get_First_Char and FT_Get_Next_Char](../../../core/libs/prx/libSceFreeType/Export.cpp) (libSceFreeType) - console signatures and errors are unverified; the LP64 guest adapter follows the bundled [FreeType 2.13.3](https://github.com/freetype/freetype/blob/42608f77f20749dd6ddc9e0536788eaad70ea4b5/src/base/ftobjs.c). Character iteration uses the low 32 bits of the input code, as that version does internally, and updates the guest's selected charmap pointer without refreshing unrelated glyph or outline data. Guest charmap fields are treated as read-only copies of the native records.
 
