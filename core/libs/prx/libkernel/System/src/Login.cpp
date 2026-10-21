@@ -11,6 +11,8 @@
 #include <unistd.h>
 #endif
 
+extern "C" int* APS5_VABI __error_nid_postfix();
+
 namespace {
 int ReadLogin(char* output, int size) {
 #ifdef _WIN32
@@ -50,4 +52,13 @@ extern "C" int APS5_VABI getlogin_r_nid_postfix(char* output, int size) {
     const int result = ReadLogin(output, size);
     errno = saved;
     return result;
+}
+
+extern "C" char* APS5_VABI getlogin_nid_postfix(void) {
+    static char logname[33];
+    if (const int error = getlogin_r_nid_postfix(logname, static_cast<int>(sizeof(logname))); error != 0) {
+        *__error_nid_postfix() = error;
+        return nullptr;
+    }
+    return logname[0] != '\0' ? logname : nullptr;
 }
