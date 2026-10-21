@@ -5,9 +5,11 @@
 #include <climits>
 #include <condition_variable>
 #include <cstdint>
+#include <cstring>
 #include <map>
 #include <memory>
 #include <mutex>
+#include <string>
 #ifdef _WIN32
 #include <fcntl.h>
 #include <io.h>
@@ -22,14 +24,20 @@ extern "C" void RegisterDescriptorCloseObserver_nid_no_patch(void (*observer)(in
 
 namespace {
 
+constexpr int GuestEnoent = 2;
 constexpr int GuestEfault = 14;
 constexpr int GuestEbusy = 16;
+constexpr int GuestEexist = 17;
 constexpr int GuestEinval = 22;
 constexpr int GuestEnfile = 23;
 constexpr int GuestEmfile = 24;
 constexpr int GuestEagain = 35;
 constexpr int GuestEtimedout = 60;
+constexpr int GuestEnametoolong = 63;
 constexpr int GuestEoverflow = 84;
+constexpr int GuestOCreat = 0x0200;
+constexpr int GuestOExcl = 0x0800;
+constexpr std::size_t GuestPathMax = 1024;
 constexpr unsigned SemValueMax = 0x7fffffffu;
 
 struct GuestTimespec {
@@ -42,10 +50,12 @@ struct Ksem {
     std::condition_variable available;
     unsigned count = 0;
     unsigned waiters = 0;
+    bool named = false;
 };
 
 std::mutex g_ksemLock;
 std::map<int, std::shared_ptr<Ksem>> g_ksems;
+std::map<std::string, std::shared_ptr<Ksem>> g_named;
 
 int Fail(int error) {
     *__error_nid_postfix() = error;
@@ -152,12 +162,56 @@ int APS5_VABI ksem_getvalue_nid_postfix(std::intptr_t id, int* value) {
 
 int APS5_VABI ksem_destroy_nid_postfix(std::intptr_t id) {
     const auto ksem = Find(id);
-    if (!ksem) return Fail(GuestEinval);
+    if (!ksem || ksem->named) return Fail(GuestEinval);
     {
         std::lock_guard lock(ksem->lock);
         if (ksem->waiters != 0) return Fail(GuestEbusy);
     }
     return close_nid_postfix(static_cast<int>(id));
+}
+
+int APS5_VABI ksem_open_nid_postfix(std::intptr_t* idp, const char* name, int oflag, unsigned int mode, unsigned int value) {
+    (void)mode;
+    if (value > SemValueMax) return Fail(GuestEinval);
+    if (name == nullptr) return Fail(GuestEfault);
+    const std::string path(name, strnlen(name, GuestPathMax));
+    if (path.size() >= GuestPathMax) return Fail(GuestEnametoolong);
+    if (path.empty() || path[0] != '/') return Fail(GuestEinval);
+    if ((oflag & ~(GuestOCreat | GuestOExcl)) != 0) return Fail(GuestEinval);
+    if (idp == nullptr) return Fail(GuestEfault);
+    std::lock_guard lock(g_ksemLock);
+    std::shared_ptr<Ksem> ksem;
+    const auto found = g_named.find(path);
+    if (found == g_named.end()) {
+        if ((oflag & GuestOCreat) == 0) return Fail(GuestEnoent);
+        ksem = std::make_shared<Ksem>();
+        ksem->count = value;
+        ksem->named = true;
+    } else {
+        if ((oflag & (GuestOCreat | GuestOExcl)) == (GuestOCreat | GuestOExcl)) return Fail(GuestEexist);
+        ksem = found->second;
+    }
+    const int descriptor = ReserveDescriptor();
+    if (descriptor < 0) return Fail(errno == ENFILE ? GuestEnfile : GuestEmfile);
+    if (found == g_named.end()) g_named[path] = ksem;
+    g_ksems[descriptor] = std::move(ksem);
+    *idp = descriptor;
+    return 0;
+}
+
+int APS5_VABI ksem_close_nid_postfix(std::intptr_t id) {
+    const auto ksem = Find(id);
+    if (!ksem || !ksem->named) return Fail(GuestEinval);
+    return close_nid_postfix(static_cast<int>(id));
+}
+
+int APS5_VABI ksem_unlink_nid_postfix(const char* name) {
+    if (name == nullptr) return Fail(GuestEfault);
+    const std::string path(name, strnlen(name, GuestPathMax));
+    if (path.size() >= GuestPathMax) return Fail(GuestEnametoolong);
+    std::lock_guard lock(g_ksemLock);
+    if (g_named.erase(path) == 0) return Fail(GuestEnoent);
+    return 0;
 }
 
 }
