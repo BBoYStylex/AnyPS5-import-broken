@@ -607,6 +607,7 @@ CompiledVariant emitVariant(const RecompileRequest& request, IrProgram& program)
     targetOptions.float32DenormPreserve = request.target.float32DenormPreserve;
     targetOptions.fusedExactArithmetic = request.target.fusedExactArithmetic;
     targetOptions.largePixelFunctionLdsBuffer = request.target.largePixelFunctionLdsBuffer;
+    targetOptions.pixelFunctionStorageDwords = request.target.pixelFunctionStorageDwords;
     targetOptions.meshBarycentricPixel = request.shader.stage == ShaderStage::Fragment && request.graphics && request.graphics->mesh;
     if (request.shader.stage == ShaderStage::Mesh && request.graphics && request.graphics->meshBarycentrics) {
         const auto& paired = *request.graphics->meshBarycentrics;

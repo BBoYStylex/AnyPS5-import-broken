@@ -343,6 +343,7 @@ struct VulkanDevice::State {
     VkPhysicalDeviceProperties properties{};
     std::string driverInfo;
     VkDriverId driverId = VK_DRIVER_ID_MAX_ENUM;
+    std::uint32_t pixelFunctionStorageDwords = 4096u;
     bool individuallyFreeDescriptorSets = false;
     PFN_vkGetCalibratedTimestampsKHR calibratedTimestamps = nullptr;
     PFN_vkCmdSetCheckpointNV checkpointMarker = nullptr;
@@ -1267,6 +1268,17 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window, bool compileOnly) :
         state->individuallyFreeDescriptorSets = driver.driverID == VK_DRIVER_ID_MESA_LLVMPIPE;
         state->fusedExactArithmetic = driver.driverID == VK_DRIVER_ID_MOLTENVK;
         state->subgroupControlBarriers = SubgroupControlBarrierUsable(driver.driverID);
+    }
+    if (driverId == VK_DRIVER_ID_NVIDIA_PROPRIETARY && hasExtension(VK_NV_SHADER_SM_BUILTINS_EXTENSION_NAME)) {
+        VkPhysicalDeviceShaderSMBuiltinsPropertiesNV smBuiltins{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_SM_BUILTINS_PROPERTIES_NV};
+        VkPhysicalDeviceProperties2 smProperties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &smBuiltins};
+        state->InstanceFunction<PFN_vkGetPhysicalDeviceProperties2>("vkGetPhysicalDeviceProperties2")(selected, &smProperties);
+        const auto subgroup = state->subgroup.subgroupSize;
+        if (smBuiltins.shaderSMCount != 0u && smBuiltins.shaderWarpsPerSM != 0u && subgroup != 0u) {
+            const auto invocations = static_cast<std::uint64_t>(smBuiltins.shaderSMCount) * smBuiltins.shaderWarpsPerSM * subgroup;
+            const auto budgetDwords = (4ull << 30) / (invocations * 4ull);
+            if (budgetDwords < state->pixelFunctionStorageDwords) state->pixelFunctionStorageDwords = static_cast<std::uint32_t>(budgetDwords);
+        }
     }
     auto byteFeatures = QueryBdaByteFeatures(selected, state->InstanceFunction<PFN_vkGetPhysicalDeviceFeatures2>("vkGetPhysicalDeviceFeatures2"), availableExtensions);
     auto bdaFeatures = QueryBdaFeatures(selected, state->InstanceFunction<PFN_vkGetPhysicalDeviceFeatures2>("vkGetPhysicalDeviceFeatures2"), availableExtensions);
@@ -3787,6 +3799,7 @@ ShaderRecompiler::SpirvTarget VulkanDevice::buildTarget() const {
     target.robustBufferAccess2 = state->robustBufferAccess2;
     target.waveLdsMemoryBarriers = !state->subgroupControlBarriers;
     target.largePixelFunctionLdsBuffer = state->driverId == VK_DRIVER_ID_NVIDIA_PROPRIETARY;
+    target.pixelFunctionStorageDwords = state->pixelFunctionStorageDwords;
     target.srgbDecodeFormats = state->srgbDecodeFormats & ~state->srgbCopyFormats;
     target.vertexSubgroups = (state->subgroup.supportedStages & VK_SHADER_STAGE_VERTEX_BIT) != 0;
     if (state->meshShader) {

@@ -500,12 +500,14 @@ int main() {
         request.target.float32FlushToZero = !preserve;
         request.target.float32DenormPreserve = preserve;
         request.target.largePixelFunctionLdsBuffer = !preserve;
+        request.target.pixelFunctionStorageDwords = preserve ? 2048u : 4096u;
         const auto encoded = serializer.Serialize(request);
         const auto replay = serializer.Deserialize(encoded);
-        Require(replay.request.target.float16DenormPreserve == preserve && replay.request.target.float32FlushToZero == !preserve && replay.request.target.float32DenormPreserve == preserve && replay.request.target.largePixelFunctionLdsBuffer == !preserve);
+        Require(replay.request.target.float16DenormPreserve == preserve && replay.request.target.float32FlushToZero == !preserve && replay.request.target.float32DenormPreserve == preserve && replay.request.target.largePixelFunctionLdsBuffer == !preserve && replay.request.target.pixelFunctionStorageDwords == request.target.pixelFunctionStorageDwords);
         auto bytes = DecodeBase64(encoded);
         Require(bytes.size() >= 8u && bytes[4] == 45u && bytes[5] == 0u && bytes[6] == 0u && bytes[7] == 0u);
         auto version40 = bytes;
+        version40.resize(version40.size() - sizeof(std::uint32_t));
         version40.pop_back();
         version40.pop_back();
         version40.pop_back();
@@ -571,6 +573,7 @@ int main() {
         Require(serializer.Deserialize(serializer.Serialize(request)).request.target.spannedWaves == spanned);
         request.target.float32FlushToZero = true;
         auto version35 = DecodeBase64(serializer.Serialize(request));
+        version35.resize(version35.size() - sizeof(std::uint32_t));
         version35.pop_back();
         version35.pop_back();
         const auto stencilOperationValue = std::search(version35.begin(), version35.end(), pixel.sampleLocations.begin(), pixel.sampleLocations.begin() + 4) + pixel.sampleLocations.size();

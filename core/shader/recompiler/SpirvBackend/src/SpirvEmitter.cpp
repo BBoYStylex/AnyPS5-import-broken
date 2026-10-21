@@ -281,7 +281,7 @@ std::vector<std::uint32_t> SpirvEmitter::Emit(const IrProgram& program, const Sh
     state.float32DenormPreserve = target.float32DenormPreserve;
     state.fusedExactArithmetic = target.fusedExactArithmetic;
     state.hostSubgroupSize = target.subgroupSize;
-    if (target.largePixelFunctionLdsBuffer && program.Resources().stage == IrShaderStage::Pixel && state.requirements.functionLds && state.requirements.functionLdsDwords > PixelFunctionStorageDwords) {
+    if (target.largePixelFunctionLdsBuffer && program.Resources().stage == IrShaderStage::Pixel && state.requirements.functionLds && state.requirements.functionLdsDwords > target.pixelFunctionStorageDwords) {
         state.pixelFunctionLdsBuffer = true;
         state.requirements.subgroupLocalInvocationId = true;
         state.requirements.subgroupBallot = true;

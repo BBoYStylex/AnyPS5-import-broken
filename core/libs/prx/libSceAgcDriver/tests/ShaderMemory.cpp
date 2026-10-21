@@ -5176,6 +5176,7 @@ void verifyVertexInfoVersion19() {
     require(offset + 4u <= plain.size() && flagged[offset] == 0xefu && flagged[offset + 1u] == 0xcdu && flagged[offset + 2u] == 0xabu && flagged[offset + 3u] == 0x89u, "PA_CL_VS_OUT_CNTL is not the four bytes the version 20 vertex info adds");
     require(std::equal(plain.begin() + offset + 4u, plain.end(), flagged.begin() + offset + 4u), "PA_CL_VS_OUT_CNTL moved the fields after it");
     auto version20Vertex = flagged;
+    version20Vertex.resize(version20Vertex.size() - sizeof(std::uint32_t));
     version20Vertex.pop_back();
     version20Vertex.pop_back();
     version20Vertex.pop_back();
@@ -5188,6 +5189,7 @@ void verifyVertexInfoVersion19() {
     const auto layered = serializer.Deserialize(serializer.Serialize(vertex));
     require(layered.request.context.vertex.has_value() && layered.request.context.vertex->paClVsOutCntl == vertex.context.vertex->paClVsOutCntl, "a layered vertex info lost its clip distances or render target index");
     auto legacy = plain;
+    legacy.resize(legacy.size() - sizeof(std::uint32_t));
     legacy.pop_back();
     legacy.pop_back();
     legacy.pop_back();
@@ -5236,6 +5238,7 @@ void verifyVertexInfoVersion19() {
     const auto orderedBytes = decodeBase64(serializer.Serialize(ordered));
     require(orderedBytes.size() == plainPixel.size() && std::equal(plainPixel.begin(), plainPixel.begin() + static_cast<std::ptrdiff_t>(orderOffset), orderedBytes.begin()) && orderedBytes[orderOffset] == 0x10u && orderedBytes[orderOffset + 11u] == 0x76u && orderedBytes[orderOffset + 12u] == 0x01u && std::equal(plainPixel.begin() + static_cast<std::ptrdiff_t>(orderOffset + sampleOrderBytes), plainPixel.end(), orderedBytes.begin() + static_cast<std::ptrdiff_t>(orderOffset + sampleOrderBytes)), "the sample order is not the four words the version 42 pixel info adds after the stencil operation value export flag");
     auto orderedVersion34 = orderedBytes;
+    orderedVersion34.resize(orderedVersion34.size() - sizeof(std::uint32_t));
     orderedVersion34.pop_back();
     orderedVersion34.pop_back();
     orderedVersion34.pop_back();
@@ -5245,7 +5248,7 @@ void verifyVertexInfoVersion19() {
     const auto orderedReplay34 = serializer.Deserialize(encodeBase64(orderedVersion34));
     require(orderedReplay34.request.context.pixel.has_value() && orderedReplay34.request.context.pixel->sampleOrder == std::array<std::uint32_t, 4>{} && serializer.Serialize(orderedReplay34.request) == encodedPixel, "a version 34 request read a sample order, or misread the fields after its pixel iteration fields");
     auto orderedVersion30 = orderedBytes;
-    orderedVersion30.resize(orderedVersion30.size() - 5u);
+    orderedVersion30.resize(orderedVersion30.size() - 5u - sizeof(std::uint32_t));
     orderedVersion30.erase(orderedVersion30.begin() + static_cast<std::ptrdiff_t>(blendOffset + 4u), orderedVersion30.begin() + static_cast<std::ptrdiff_t>(orderOffset + sampleOrderBytes));
     orderedVersion30[4] = 30u;
     const auto orderedReplay30 = serializer.Deserialize(encodeBase64(orderedVersion30));
@@ -5253,6 +5256,7 @@ void verifyVertexInfoVersion19() {
     auto orderedSpanned = ordered;
     orderedSpanned.target.spannedWaves = true;
     auto orderedVersion32 = decodeBase64(serializer.Serialize(orderedSpanned));
+    orderedVersion32.resize(orderedVersion32.size() - sizeof(std::uint32_t));
     orderedVersion32.pop_back();
     orderedVersion32.pop_back();
     require(orderedVersion32.size() > 2u && orderedVersion32.back() == 0u && orderedVersion32[orderedVersion32.size() - 2u] == 0u && orderedVersion32[orderedVersion32.size() - 3u] == 1u, "the spanned-waves flag is not the byte before the depth remap flag");
@@ -5275,6 +5279,7 @@ void verifyVertexInfoVersion19() {
     const auto sampledBytes = decodeBase64(serializer.Serialize(sampledPixel));
     require(std::equal(maskedBytes.begin(), maskedBytes.begin() + static_cast<std::ptrdiff_t>(maskOffset + 1u), sampledBytes.begin()) && sampledBytes[maskOffset + 1u] == 0x1u && sampledBytes[maskOffset + 5u] == 0x2u && sampledBytes[maskOffset + 9u] == 0x4u && sampledBytes[maskOffset + 13u] == 0x8u, "the quad sample masks are not the four words after the quad pixel mask");
     auto version30 = sampledBytes;
+    version30.resize(version30.size() - sizeof(std::uint32_t));
     version30.pop_back();
     version30.pop_back();
     version30.pop_back();
@@ -5287,6 +5292,7 @@ void verifyVertexInfoVersion19() {
     auto spanned = sampledPixel;
     spanned.target.spannedWaves = true;
     auto version32 = decodeBase64(serializer.Serialize(spanned));
+    version32.resize(version32.size() - sizeof(std::uint32_t));
     version32.pop_back();
     version32.pop_back();
     version32.pop_back();
@@ -5298,6 +5304,7 @@ void verifyVertexInfoVersion19() {
     const auto replay32 = serializer.Deserialize(encodeBase64(version32));
     require(replay32.request.context.pixel.has_value() && !replay32.request.context.pixel->iteratesSamples && replay32.request.context.pixel->sampleLocations == std::array<std::uint8_t, 32>{} && replay32.request.target.spannedWaves && serializer.Serialize(replay32.request) == serializer.Serialize(spanned), "a version 32 request read pixel iteration or sample locations, or lost its spanned-waves flag");
     auto version29 = sampledBytes;
+    version29.resize(version29.size() - sizeof(std::uint32_t));
     version29.pop_back();
     version29.pop_back();
     version29.pop_back();
@@ -5305,6 +5312,7 @@ void verifyVertexInfoVersion19() {
     version29.pop_back();
     version29.erase(version29.begin() + static_cast<std::ptrdiff_t>(maskOffset + 1u + sampleMaskBytes), version29.begin() + static_cast<std::ptrdiff_t>(maskOffset + 1u + sampleMaskBytes + 4u + iterationBytes + sampleOrderBytes));
     auto version36 = sampledBytes;
+    version36.resize(version36.size() - sizeof(std::uint32_t));
     version36.pop_back();
     version36.pop_back();
     version36.erase(version36.begin() + static_cast<std::ptrdiff_t>(maskOffset + 1u + sampleMaskBytes + 4u + iterationBytes - 1u), version36.begin() + static_cast<std::ptrdiff_t>(maskOffset + 1u + sampleMaskBytes + 4u + iterationBytes + sampleOrderBytes));
@@ -5315,6 +5323,7 @@ void verifyVertexInfoVersion19() {
     const auto replay29 = serializer.Deserialize(encodeBase64(version29));
     require(replay29.request.context.pixel.has_value() && replay29.request.context.pixel->quadSampleMask == std::array<std::uint16_t, 4>{0x1u, 0x2u, 0x4u, 0x8u} && replay29.request.context.pixel->reversedBlend == 0u && decodeBase64(serializer.Serialize(replay29.request)) == sampledBytes, "a version 29 request read a reversed-order blend code or misread the fields after the quad sample masks");
     auto version28 = sampledBytes;
+    version28.resize(version28.size() - sizeof(std::uint32_t));
     version28.pop_back();
     version28.pop_back();
     version28.pop_back();
@@ -5325,6 +5334,7 @@ void verifyVertexInfoVersion19() {
     const auto replay28 = serializer.Deserialize(encodeBase64(version28));
     require(replay28.request.context.pixel.has_value() && replay28.request.context.pixel->quadPixelMask == 0x2u && replay28.request.context.pixel->quadSampleMask == std::array<std::uint16_t, 4>{0xffffu, 0xffffu, 0xffffu, 0xffffu} && replay28.request.context.pixel->reversedBlend == 0u && decodeBase64(serializer.Serialize(replay28.request)) == maskedBytes, "a version 28 request read quad sample masks or a reversed-order blend code, or misread the fields after them");
     auto version27 = maskedBytes;
+    version27.resize(version27.size() - sizeof(std::uint32_t));
     version27.pop_back();
     version27.pop_back();
     version27.pop_back();
@@ -5335,6 +5345,7 @@ void verifyVertexInfoVersion19() {
     const auto replay27 = serializer.Deserialize(encodeBase64(version27));
     require(replay27.request.context.pixel.has_value() && replay27.request.context.pixel->quadPixelMask == 0xfu && replay27.request.context.pixel->reversedBlend == 0u && serializer.Serialize(replay27.request) == encodedPixel, "a version 27 request read a quad pixel mask or reversed-order blend code, or misread the fields after it");
     auto legacyPixel = plainPixel;
+    legacyPixel.resize(legacyPixel.size() - sizeof(std::uint32_t));
     legacyPixel.pop_back();
     legacyPixel.pop_back();
     legacyPixel.pop_back();
@@ -5393,6 +5404,7 @@ void verifyDepthRemapRequests() {
     require(plainBytes.size() == remappedBytes.size() && plainBytes.size() > 9u + pointTailBytes && std::equal(plainBytes.begin(), plainBytes.end() - 9 - pointTailBytes, remappedBytes.begin()) && std::equal(plainBytes.end() - 2 - pointTailBytes, plainBytes.end(), remappedBytes.end() - 2 - pointTailBytes), "the depth remap flag and mode are not the 6 bytes before the f32 flush and denormal preserve flags, the point tail, the fused arithmetic flag and the pixel function LDS flag of a vertex request");
     for (const std::uint8_t legacyVersion : {32u, 34u}) {
         auto legacyBytes = remappedBytes;
+        legacyBytes.resize(legacyBytes.size() - sizeof(std::uint32_t));
         legacyBytes.pop_back();
         legacyBytes.pop_back();
         legacyBytes.pop_back();
@@ -5403,6 +5415,7 @@ void verifyDepthRemapRequests() {
         require(serializer.Serialize(legacy.request) == plain, ("a version " + std::to_string(legacyVersion) + " vertex request misread the fields before the depth remap").c_str());
     }
     auto version35 = remappedBytes;
+    version35.resize(version35.size() - sizeof(std::uint32_t));
     version35.pop_back();
     version35.pop_back();
     version35.pop_back();

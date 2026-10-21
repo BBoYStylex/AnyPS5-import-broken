@@ -872,6 +872,7 @@ std::string RequestSerializer::Serialize(const RecompileRequest& request) const 
     }
     writer.WriteBool(request.target.fusedExactArithmetic);
     writer.WriteBool(request.target.largePixelFunctionLdsBuffer);
+    writer.WriteU32(request.target.pixelFunctionStorageDwords);
     return base64Encode(buffer);
 }
 

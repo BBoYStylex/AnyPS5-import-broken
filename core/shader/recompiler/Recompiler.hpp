@@ -300,6 +300,7 @@ struct SpirvTarget {
     bool float32DenormPreserve = false;
     bool fusedExactArithmetic = false;
     bool largePixelFunctionLdsBuffer = false;
+    std::uint32_t pixelFunctionStorageDwords = 4096u;
 };
 
 struct BindingLayout {
