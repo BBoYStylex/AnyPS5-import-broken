@@ -247,6 +247,12 @@ struct HostImports {
     // Bumped whenever an import is dropped, so HostImport pointers taken under the lock earlier can be
     // reused while it is unchanged.
     std::uint64_t epoch = 1;
+    std::uint64_t inserted = 0;
+    std::uint64_t missPolicy = 0;
+    HostImportMissMemo missMemo;
+    std::uint64_t missMemoHits = 0;
+    std::uint64_t missMemoMisses = 0;
+    std::uint64_t missMemoStores = 0;
     VkDevice watchDevice = VK_NULL_HANDLE;
     bool unwatchImports = false;
     bool unwatchDmaBufImports = false;
@@ -335,6 +341,10 @@ void releaseSettleBatches(VkDevice device, ImportSettle& settle) {
     settle.batchMemory = VK_NULL_HANDLE;
 }
 #endif
+
+HostImportMissMemo::Stamp importMissStamp(const Context& context, const HostImports& state) {
+    return {context.device, context.hostImportAlignment, GuestAllocations::GuestAllocationsGeneration_nid_postfix(), GuestMemory::ForgetSerial(), state.epoch, state.inserted, state.missPolicy};
+}
 
 void destroyImport(const Context& context, const HostImport& entry) {
     context.Function<PFN_vkDestroyBuffer>("vkDestroyBuffer")(context.device, entry.buffer, nullptr);
@@ -1762,6 +1772,7 @@ const HostImport* importRunAt(const Context& context, HostImports& state, Import
     const auto failedBlockImport = [&]() -> const HostImport* {
         ++counts.failed;
         state.failedBlocks.insert_or_assign(std::pair{base, bytes}, ImportFailure{base, bytes, GuestAllocations::Mapped(entry.ranges.begin(), entry.ranges.end())});
+        ++state.missPolicy;
         return importAllocation(context, state, address, lease, requester, end, evict);
     };
     const auto failedImport = [&]() -> const HostImport* {
@@ -1908,6 +1919,7 @@ const HostImport* importRunAt(const Context& context, HostImports& state, Import
     }
 #endif
     const auto inserted = state.imports.emplace(base, entry);
+    if (inserted.second) ++state.inserted;
     owner.armed = false;
     return &inserted.first->second;
 }
@@ -2052,8 +2064,13 @@ const HostImport* findImport(HostImports& state, std::uint64_t begin, std::uint6
     return entry;
 }
 
-const HostImport* importAccess(const Context& context, HostImports& state, std::uint64_t begin, std::uint64_t end, const GuestAllocations::Lease& lease, ImportRequester requester) {
-    if (!runCovers(lease, begin, end)) return findImport(state, begin, end);
+const HostImport* importAccess(const Context& context, HostImports& state, std::uint64_t begin, std::uint64_t end, const GuestAllocations::Lease& lease, ImportRequester requester, bool* structuralMiss = nullptr) {
+    if (structuralMiss != nullptr) *structuralMiss = false;
+    if (!runCovers(lease, begin, end)) {
+        const auto* entry = findImport(state, begin, end);
+        if (structuralMiss != nullptr) *structuralMiss = entry == nullptr;
+        return entry;
+    }
     const auto* entry = importAllocation(context, state, begin, lease, requester, end);
     return entry != nullptr && findImport(state, begin, end) == entry ? entry : nullptr;
 }
@@ -3376,11 +3393,15 @@ void SetImportWatch(const Context& context, ImportWatch watch) {
 }
 
 void SetHostImportWindow(std::uint64_t bytes) {
-    importWindow.store(bytes, std::memory_order_relaxed);
+    auto& state = Imports();
+    std::lock_guard lock(state.mutex);
+    if (importWindow.exchange(bytes, std::memory_order_relaxed) != bytes) ++state.missPolicy;
 }
 
 void SetHostImportRangeWindow(std::uint64_t bytes) {
-    rangeImportWindow.store(bytes, std::memory_order_relaxed);
+    auto& state = Imports();
+    std::lock_guard lock(state.mutex);
+    if (rangeImportWindow.exchange(bytes, std::memory_order_relaxed) != bytes) ++state.missPolicy;
 }
 
 void SetHostImportBudget(std::uint64_t bytes) {
@@ -3493,6 +3514,62 @@ std::uint64_t HostImportsSettled() {
     return settledImports.load(std::memory_order_relaxed);
 }
 
+bool HostImportMissMemo::Enabled() {
+    static const bool disabled = std::getenv("APS5_NO_IMPORT_MISS_MEMO") != nullptr;
+    return !disabled;
+}
+
+bool HostImportMissMemo::Stable(const Stamp& before, const Stamp& after) {
+    return before.device != VK_NULL_HANDLE && before.alignment != 0 && before.generation != 0 && (before.forgetSerial & 1u) == 0 && before == after;
+}
+
+std::size_t HostImportMissMemo::SetOf(std::uint64_t begin, std::uint64_t end) {
+    auto hash = begin ^ std::rotl(end, 23);
+    hash ^= hash >> 30u;
+    hash *= 0xbf58476d1ce4e5b9ull;
+    hash ^= hash >> 27u;
+    return static_cast<std::size_t>(hash % Sets);
+}
+
+bool HostImportMissMemo::Contains(std::uint64_t begin, std::uint64_t end, const Stamp& current) const {
+    if (!Enabled() || begin >= end || !Stable(stamp, current)) return false;
+    const auto first = entries.begin() + static_cast<std::ptrdiff_t>(SetOf(begin, end) * Ways);
+    return std::any_of(first, first + Ways, [&](const Entry& entry) { return entry.begin == begin && entry.end == end; });
+}
+
+bool HostImportMissMemo::Store(std::uint64_t begin, std::uint64_t end, const Stamp& before, const Stamp& after) {
+    if (!Enabled() || begin >= end || !Stable(before, after)) return false;
+    if (stamp != after) {
+        if (filled != 0) {
+            ++resets;
+            entries = {};
+            victims = {};
+            filled = 0;
+        }
+        stamp = after;
+    }
+    const auto set = SetOf(begin, end);
+    const auto first = entries.begin() + static_cast<std::ptrdiff_t>(set * Ways);
+    const auto last = first + Ways;
+    if (std::any_of(first, last, [&](const Entry& entry) { return entry.begin == begin && entry.end == end; })) return true;
+    auto target = std::find_if(first, last, [](const Entry& entry) { return entry.begin == entry.end; });
+    if (target == last) {
+        target = first + victims[set];
+        victims[set] = static_cast<std::uint8_t>((victims[set] + 1u) % Ways);
+        ++evictions;
+    } else {
+        ++filled;
+    }
+    *target = {begin, end};
+    return true;
+}
+
+ImportMissMemoStats ImportMissMemoCounters() {
+    auto& state = Imports();
+    std::lock_guard lock(state.mutex);
+    return {HostImportMissMemo::Enabled(), state.missMemoHits, state.missMemoMisses, state.missMemoStores, state.missMemo.Evictions(), state.missMemo.Resets()};
+}
+
 const HostImport* HostImportFor(const Context& context, std::uint64_t address, std::size_t bytes, ImportRequester requester) {
     if (context.hostImportAlignment == 0 || bytes == 0 || bytes > std::numeric_limits<std::uint64_t>::max() - address) return nullptr;
     ensurePinWaiter();
@@ -3501,16 +3578,32 @@ const HostImport* HostImportFor(const Context& context, std::uint64_t address, s
 #ifdef _WIN32
     settleUnwatchedImports(context, state);
 #endif
+    const bool memoEnabled = HostImportMissMemo::Enabled();
     // A hit is only valid while the registry has not changed since the imports were reconciled.
     if (!importsStale(context, state)) {
         if (const auto* entry = findImport(state, address, address + bytes)) {
             entry->lastUse = ++state.useCounter;
             return entry;
         }
+        if (memoEnabled) {
+            const auto before = importMissStamp(context, state);
+            if (state.missMemo.Contains(address, address + bytes, before) && HostImportMissMemo::Stable(before, importMissStamp(context, state))) {
+                ++state.missMemoHits;
+                return nullptr;
+            }
+        }
     }
+    const auto before = memoEnabled ? importMissStamp(context, state) : HostImportMissMemo::Stamp{};
     const auto lease = GuestAllocations::GuestAllocationsAcquire_nid_postfix();
     refreshImports(context, state, lease);
-    return importAccess(context, state, address, address + bytes, lease, requester);
+    bool structuralMiss = false;
+    const auto* entry = importAccess(context, state, address, address + bytes, lease, requester, memoEnabled ? &structuralMiss : nullptr);
+    if (structuralMiss) {
+        ++state.missMemoMisses;
+        const auto after = importMissStamp(context, state);
+        if (after.generation == state.refreshedGeneration && state.missMemo.Store(address, address + bytes, before, after)) ++state.missMemoStores;
+    }
+    return entry;
 }
 
 const HostImport* ExistingHostImportFor(const Context& context, std::uint64_t address, std::size_t bytes) {
@@ -4160,6 +4253,7 @@ std::atomic<std::uint64_t> importUs{0};
 std::atomic<std::uint64_t> allocateUs{0};
 std::atomic<std::uint64_t> readUs{0};
 std::atomic<std::uint64_t> uploadsProfiled{0};
+std::atomic<std::uint64_t> memoLookupsReported{0};
 
 std::uint64_t microsecondsSince(std::chrono::steady_clock::time_point start) {
     return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - start).count());
@@ -4747,7 +4841,15 @@ void GuestBufferMemory::UploadFinish(bool addressable) {
     const auto uploads = uploadsProfiled.fetch_add(1, std::memory_order_relaxed) + 1;
     if (uploads % 2000 == 0) {
         const auto& copies = Copies();
-        AgcDriver::ProfilePrint_nid_no_patch("[buffers] %llu uploads: import lookup %.0f ms, buffer allocation %.0f ms, guest read %.0f ms; copies on the GPU: %llu regions (%.0f KiB) copied out of imports, %llu written sub-ranges (%.0f KiB) copied back, %llu staging stores by the CPU at write-back\n", static_cast<unsigned long long>(uploads), importUs.load(std::memory_order_relaxed) / 1000.0, allocateUs.load(std::memory_order_relaxed) / 1000.0, readUs.load(std::memory_order_relaxed) / 1000.0, static_cast<unsigned long long>(copies.gpuCopies.load(std::memory_order_relaxed)), copies.gpuCopyBytes.load(std::memory_order_relaxed) / 1024.0, static_cast<unsigned long long>(copies.gpuCopyBacks.load(std::memory_order_relaxed)), copies.gpuCopyBackBytes.load(std::memory_order_relaxed) / 1024.0, static_cast<unsigned long long>(copies.stagingStores.load(std::memory_order_relaxed)));
+        const auto memo = ImportMissMemoCounters();
+        const auto lookups = memo.hits + memo.misses;
+        std::string memoText;
+        if (memoLookupsReported.exchange(lookups, std::memory_order_relaxed) != lookups) {
+            char text[192];
+            std::snprintf(text, sizeof(text), "; import miss memo: %llu hits of %llu structural misses (%.1f%%), %llu stores, %llu evictions, %llu resets", static_cast<unsigned long long>(memo.hits), static_cast<unsigned long long>(lookups), 100.0 * static_cast<double>(memo.hits) / static_cast<double>(lookups), static_cast<unsigned long long>(memo.stores), static_cast<unsigned long long>(memo.evictions), static_cast<unsigned long long>(memo.resets));
+            memoText = text;
+        }
+        AgcDriver::ProfilePrint_nid_no_patch("[buffers] %llu uploads: import lookup %.0f ms, buffer allocation %.0f ms, guest read %.0f ms; copies on the GPU: %llu regions (%.0f KiB) copied out of imports, %llu written sub-ranges (%.0f KiB) copied back, %llu staging stores by the CPU at write-back%s\n", static_cast<unsigned long long>(uploads), importUs.load(std::memory_order_relaxed) / 1000.0, allocateUs.load(std::memory_order_relaxed) / 1000.0, readUs.load(std::memory_order_relaxed) / 1000.0, static_cast<unsigned long long>(copies.gpuCopies.load(std::memory_order_relaxed)), copies.gpuCopyBytes.load(std::memory_order_relaxed) / 1024.0, static_cast<unsigned long long>(copies.gpuCopyBacks.load(std::memory_order_relaxed)), copies.gpuCopyBackBytes.load(std::memory_order_relaxed) / 1024.0, static_cast<unsigned long long>(copies.stagingStores.load(std::memory_order_relaxed)), memoText.c_str());
     }
     const auto ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
     if (ms > 50) {

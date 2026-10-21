@@ -4677,6 +4677,346 @@ bool unitShadowTests(const Device& device, Recorder& recorder) {
     return true;
 }
 
+void importMissMemoProofTests() {
+    const bool enabled = std::getenv("APS5_NO_IMPORT_MISS_MEMO") == nullptr;
+    Require(HostImportMissMemo::Enabled() == enabled, "the import miss memo switch is not respected");
+    HostImportMissMemo memo;
+    const HostImportMissMemo::Stamp stamp{reinterpret_cast<VkDevice>(std::uintptr_t{1}), 65536, 1, 2, 1, 0, 0};
+    Require(!memo.Contains(0x1000, 0x1100, stamp), "an empty import miss memo hit");
+    Require(memo.Store(0x1000, 0x1100, stamp, stamp) == enabled, "the import miss memo store did not follow its switch");
+    Require(memo.Contains(0x1000, 0x1100, stamp) == enabled, "a repeated structural miss did not hit the memo");
+    Require(!memo.Contains(0x1001, 0x1100, stamp) && !memo.Contains(0x1000, 0x1101, stamp) && !memo.Contains(0x1000, 0x1080, stamp), "the import miss memo reused a different range");
+    const auto changed = [&](const HostImportMissMemo::Stamp& after, const char* reason) {
+        Require(!HostImportMissMemo::Stable(stamp, after) && !HostImportMissMemo::Stable(after, stamp), reason);
+        Require(!memo.Contains(0x1000, 0x1100, after), reason);
+        Require(!memo.Store(0x2000, 0x2100, stamp, after) && !memo.Contains(0x2000, 0x2100, after), reason);
+    };
+    auto after = stamp;
+    ++after.generation;
+    changed(after, "a registry generation change did not invalidate an import miss proof");
+    after = stamp;
+    ++after.inserted;
+    changed(after, "import creation did not invalidate an import miss proof");
+    after = stamp;
+    ++after.epoch;
+    changed(after, "import retirement or eviction did not invalidate an import miss proof");
+    after = stamp;
+    ++after.policy;
+    changed(after, "a window or unaliased-span policy change did not invalidate an import miss proof");
+    after = stamp;
+    after.alignment *= 2;
+    changed(after, "an alignment change did not invalidate an import miss proof");
+    after = stamp;
+    after.device = reinterpret_cast<VkDevice>(std::uintptr_t{2});
+    changed(after, "a device change did not invalidate an import miss proof");
+    after = stamp;
+    ++after.forgetSerial;
+    changed(after, "a forget in progress did not invalidate an import miss proof");
+    Require(!HostImportMissMemo::Stable(after, after) && !memo.Store(0x2000, 0x2100, after, after), "an unchanged odd forget serial allowed an import miss proof");
+    ++after.forgetSerial;
+    changed(after, "a completed forget did not invalidate an import miss proof");
+    after = stamp;
+    after.generation = 0;
+    Require(!memo.Store(0x2000, 0x2100, after, after), "an unknown registry generation allowed an import miss proof");
+    for (std::uint64_t index = 0; index < 512; ++index) {
+        const auto begin = 0x10000 + index * 65536;
+        Require(memo.Store(begin, begin + 256, stamp, stamp) == enabled, "a bounded import miss memo store failed");
+        Require(memo.Contains(begin, begin + 256, stamp) == enabled, "a new import miss memo entry was lost");
+    }
+    std::size_t retained = 0;
+    for (std::uint64_t index = 0; index < 512; ++index) {
+        const auto begin = 0x10000 + index * 65536;
+        retained += memo.Contains(begin, begin + 256, stamp) ? 1 : 0;
+        Require(!memo.Contains(begin, begin + 257, stamp), "a colliding import miss memo entry matched a different range");
+    }
+    Require(retained <= HostImportMissMemo::Sets * HostImportMissMemo::Ways && (enabled ? retained != 0 : retained == 0), "the import miss memo is not bounded or ignored its switch");
+    HostImportMissMemo ways;
+    std::vector<std::uint64_t> colliding;
+    const auto wanted = HostImportMissMemo::SetOf(0x100000, 0x100100);
+    for (std::uint64_t begin = 0x100000; colliding.size() < HostImportMissMemo::Ways + 1; begin += 0x1000) {
+        if (HostImportMissMemo::SetOf(begin, begin + 0x100) == wanted) colliding.push_back(begin);
+    }
+    for (std::size_t index = 0; index < HostImportMissMemo::Ways; ++index) Require(ways.Store(colliding[index], colliding[index] + 0x100, stamp, stamp) == enabled, "an import miss memo store into a free way failed");
+    for (std::size_t index = 0; index < HostImportMissMemo::Ways; ++index) Require(ways.Contains(colliding[index], colliding[index] + 0x100, stamp) == enabled, "ranges sharing an import miss memo set displaced each other before the set was full");
+    Require(ways.Evictions() == 0, "filling free import miss memo ways counted an eviction");
+    Require(ways.Store(colliding[1], colliding[1] + 0x100, stamp, stamp) == enabled && ways.Evictions() == 0, "storing a remembered range again evicted another");
+    Require(ways.Store(colliding.back(), colliding.back() + 0x100, stamp, stamp) == enabled, "an import miss memo store into a full set failed");
+    Require(ways.Evictions() == (enabled ? 1u : 0u) && ways.Contains(colliding.back(), colliding.back() + 0x100, stamp) == enabled, "a store into a full import miss memo set did not evict exactly one way");
+    Require(!ways.Contains(colliding.front(), colliding.front() + 0x100, stamp), "a full import miss memo set did not evict its oldest way first");
+    for (std::size_t index = 1; index < HostImportMissMemo::Ways; ++index) Require(ways.Contains(colliding[index], colliding[index] + 0x100, stamp) == enabled, "a full import miss memo set evicted more than one way");
+    auto renewed = stamp;
+    ++renewed.inserted;
+    Require(ways.Store(0x1000, 0x1100, renewed, renewed) == enabled && ways.Resets() == (enabled ? 1u : 0u), "a new import miss stamp did not reset the memo once");
+    Require(!ways.Contains(colliding[1], colliding[1] + 0x100, renewed), "a reset import miss memo kept an entry of the previous stamp");
+}
+
+void importMissMemoCommitTests(const Context& context) {
+    constexpr std::size_t unit = 65536;
+    constexpr std::size_t pieces = 8;
+    struct Heap {
+        const Context& context;
+        void* area = nullptr;
+        std::uint8_t* guest = nullptr;
+        std::array<bool, pieces> registered{};
+        bool whole = false;
+        ~Heap() {
+            ClearHostImports(context.device);
+            {
+                GuestAllocations::Mutation mutation;
+                for (std::size_t index = 0; index < pieces; ++index) {
+                    if (registered[index]) mutation.Remove(guest + index * unit);
+                }
+                if (whole) mutation.Remove(guest);
+            }
+#ifdef _WIN32
+            if (area != nullptr) VirtualFree(area, 0, MEM_RELEASE);
+#else
+            if (area != nullptr) munmap(area, (pieces + 1) * unit);
+#endif
+        }
+    } heap{context};
+#ifdef _WIN32
+    heap.area = VirtualAlloc(nullptr, pieces * unit, MEM_RESERVE, PAGE_NOACCESS);
+    Require(heap.area != nullptr, "cannot reserve the import miss memo heap");
+    heap.guest = static_cast<std::uint8_t*>(heap.area);
+#else
+    void* area = mmap(nullptr, (pieces + 1) * unit, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    Require(area != MAP_FAILED, "cannot reserve the import miss memo heap");
+    heap.area = area;
+    heap.guest = reinterpret_cast<std::uint8_t*>((reinterpret_cast<std::uintptr_t>(area) + unit - 1) & ~std::uintptr_t{unit - 1});
+#endif
+    const auto address = reinterpret_cast<std::uint64_t>(heap.guest);
+    const bool enabled = HostImportMissMemo::Enabled();
+    const auto commit = [&](std::size_t index) {
+        auto* piece = heap.guest + index * unit;
+#ifdef _WIN32
+        Require(VirtualAlloc(piece, unit, MEM_COMMIT, PAGE_READWRITE) != nullptr, "cannot commit a piece of the import miss memo heap");
+#else
+        Require(mprotect(piece, unit, PROT_READ | PROT_WRITE) == 0, "cannot commit a piece of the import miss memo heap");
+#endif
+        std::memset(piece, static_cast<int>(0x30 + index), unit);
+    };
+    const auto commitAndMap = [&](std::size_t index) {
+        commit(index);
+        GuestAllocations::Mutation mutation;
+        mutation.Add(heap.guest + index * unit, unit, true, true, true);
+        heap.registered[index] = true;
+    };
+    ClearHostImports(context.device);
+    for (std::size_t index = 0; index < pieces / 2; ++index) commitAndMap(index);
+    const auto lookup = [&] { return HostImportFor(context, address, pieces * unit); };
+    Require(lookup() == nullptr, "a half-committed reserved window was imported whole");
+    Require(lookup() == nullptr, "a half-committed reserved window was imported whole");
+    const auto primed = ImportMissMemoCounters();
+    Require(lookup() == nullptr, "a half-committed reserved window was imported whole");
+    const auto repeated = ImportMissMemoCounters();
+    Require(repeated.hits == primed.hits + (enabled ? 1 : 0) && repeated.stores == primed.stores, "a repeated miss over a half-committed reserved window did not follow the memo switch");
+    for (std::size_t index = pieces / 2; index < pieces; ++index) commitAndMap(index);
+    const auto committed = ImportMissMemoCounters();
+    const auto* import = lookup();
+    Require(import != nullptr && import->base <= address && import->base + import->bytes >= address + pieces * unit, "a miss memoized over a half-committed reserved window hid the window once the rest was committed");
+    Require(ImportMissMemoCounters().hits == committed.hits, "a miss memoized over a half-committed reserved window answered after the rest was committed");
+    ClearHostImports(context.device);
+    {
+        GuestAllocations::Mutation mutation;
+        for (std::size_t index = 0; index < pieces; ++index) {
+            mutation.Remove(heap.guest + index * unit);
+            heap.registered[index] = false;
+        }
+    }
+#ifdef _WIN32
+    Require(VirtualFree(heap.guest + pieces / 2 * unit, pieces / 2 * unit, MEM_DECOMMIT) != 0, "cannot decommit the import miss memo heap tail");
+#else
+    Require(mprotect(heap.guest + pieces / 2 * unit, pieces / 2 * unit, PROT_NONE) == 0, "cannot decommit the import miss memo heap tail");
+#endif
+    {
+        GuestAllocations::Mutation mutation;
+        mutation.Add(heap.guest, pieces * unit, true, true, true);
+        heap.whole = true;
+    }
+    Require(lookup() == nullptr, "a registered window with uncommitted pages was imported");
+    const auto uncommitted = ImportMissMemoCounters();
+    for (int attempt = 0; attempt < 3; ++attempt) Require(lookup() == nullptr, "a registered window with uncommitted pages was imported");
+    const auto retried = ImportMissMemoCounters();
+    Require(retried.hits == uncommitted.hits && retried.misses == uncommitted.misses && retried.stores == uncommitted.stores, "an import that failed on uncommitted pages was taken for a structural miss");
+    std::cout << "import miss memo commit invalidation: ok\n";
+}
+
+bool importMissMemoTests(const Device& device, Recorder& recorder) {
+    const auto& context = device.GetContext();
+    constexpr std::size_t unit = 65536;
+    constexpr std::size_t bytes = 8 * unit;
+    if (context.hostImportAlignment == 0 || context.hostImportAlignment > unit) return false;
+#ifdef _WIN32
+    void* block = VirtualAlloc(nullptr, bytes, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+#else
+    void* block = std::aligned_alloc(unit, bytes);
+#endif
+    Require(block != nullptr, "cannot allocate the import miss memo block");
+    std::memset(block, 0x51, bytes);
+    const auto address = reinterpret_cast<std::uint64_t>(block);
+    const auto missing = address + 6 * unit;
+    const bool enabled = HostImportMissMemo::Enabled();
+    struct Cleanup {
+        const Context& context;
+        Recorder& recorder;
+        void* block;
+        std::array<bool, 8> registered{};
+        ~Cleanup() {
+            recorder.Sync();
+            ClearHostImports(context.device);
+            {
+                GuestAllocations::Mutation mutation;
+                for (std::size_t index = 0; index < registered.size(); ++index) {
+                    if (registered[index]) mutation.Remove(static_cast<std::byte*>(block) + index * unit);
+                }
+            }
+            SetHostImportWindow(0);
+            SetHostImportRangeWindow(64ull << 20u);
+            SetHostImportBudget(0);
+#ifdef _WIN32
+            VirtualFree(block, 0, MEM_RELEASE);
+#else
+            std::free(block);
+#endif
+        }
+    } cleanup{context, recorder, block};
+    ClearHostImports(context.device);
+    SetHostImportWindow(0);
+    SetHostImportRangeWindow(0);
+    SetHostImportBudget(0);
+    {
+        GuestAllocations::Mutation mutation;
+        for (std::size_t index : {0u, 2u, 4u}) {
+            mutation.Add(static_cast<std::byte*>(block) + index * unit, unit, true, true, true);
+            cleanup.registered[index] = true;
+        }
+    }
+    const auto miss = [&](const Context& importing) {
+        Require(HostImportFor(importing, missing, 16) == nullptr, "an unregistered range was imported");
+    };
+    const auto prime = [&] {
+        miss(context);
+        miss(context);
+        const auto before = ImportMissMemoCounters();
+        miss(context);
+        const auto after = ImportMissMemoCounters();
+        Require(after.hits == before.hits + (enabled ? 1 : 0) && after.stores == before.stores, "a repeated import miss did not follow the memo switch");
+    };
+    const auto noHit = [&](const Context& importing, const char* reason) {
+        const auto before = ImportMissMemoCounters();
+        miss(importing);
+        Require(ImportMissMemoCounters().hits == before.hits, reason);
+    };
+    const auto invalidated = [&](const std::function<void()>& change, const char* reason) {
+        prime();
+        change();
+        noHit(context, reason);
+    };
+    prime();
+    const auto generation = GuestAllocations::GuestAllocationsGeneration_nid_postfix();
+    if (HostImportFor(context, address, 16) == nullptr) return false;
+    Require(GuestAllocations::GuestAllocationsGeneration_nid_postfix() == generation, "import creation changed the registry in the memo fixture");
+    noHit(context, "import creation left a structural miss memo standing");
+    const auto positive = ImportMissMemoCounters();
+    Require(HostImportFor(context, address, 16) != nullptr && ImportMissMemoCounters().hits == positive.hits, "the miss memo suppressed an existing import");
+    invalidated([&] { SetHostImportWindow(unit); }, "an import window change left a miss memo standing");
+    invalidated([&] { SetHostImportWindow(0); }, "restoring the import window revived an old miss memo");
+    invalidated([&] { SetHostImportWindow(unit); SetHostImportWindow(0); }, "changing and restoring the import window revived an old miss memo");
+    invalidated([&] { SetHostImportRangeWindow(unit); }, "a range import window change left a miss memo standing");
+    invalidated([&] { SetHostImportRangeWindow(0); }, "restoring the range import window revived an old miss memo");
+    invalidated([&] { SetHostImportRangeWindow(unit); SetHostImportRangeWindow(0); }, "changing and restoring the range import window revived an old miss memo");
+    prime();
+    auto aligned = context;
+    aligned.hostImportAlignment *= 2;
+    noHit(aligned, "an alignment change left a miss memo standing");
+    invalidated([&] {
+        GuestAllocations::Mutation mutation;
+        mutation.Add(static_cast<std::byte*>(block) + 7 * unit, unit, true, true, true);
+        cleanup.registered[7] = true;
+    }, "a registry generation change left a miss memo standing");
+    invalidated([&] { ClearHostImports(context.device); }, "clearing the import table left a miss memo standing");
+    SetHostImportBudget(2 * unit);
+    Require(HostImportFor(context, address, 16) != nullptr, "the eviction fixture did not import its cold range");
+    for (int use = 0; use < 300; ++use) Require(HostImportFor(context, address + 2 * unit, 16) != nullptr, "the eviction fixture did not import its hot range");
+    {
+        GuestBufferMemory memory(context);
+        memory.AddReadable(address + 4 * unit, 32);
+        memory.UploadPrepare(false);
+        prime();
+        const auto before = HostImportsIdentity(context);
+        memory.UploadFinish(false);
+        Require(!HostImportCovers(context, address, 16) && HostImportCovers(context, address + 4 * unit, 16), "the eviction fixture did not replace the cold import");
+        Require(HostImportsIdentity(context).epoch != before.epoch, "eviction did not advance the retirement epoch");
+        noHit(context, "import eviction left a structural miss memo standing");
+        memory.WriteBack();
+    }
+    recorder.Sync();
+    ClearHostImports(context.device);
+    SetHostImportBudget(1);
+    const auto refused = ImportMissMemoCounters();
+    for (int attempt = 0; attempt < 3; ++attempt) Require(HostImportFor(context, address, 16) == nullptr, "the memo fixture did not refuse an import over budget");
+    const auto retried = ImportMissMemoCounters();
+    Require(retried.hits == refused.hits && retried.stores == refused.stores, "a budget refusal was cached as a structural miss");
+    SetHostImportBudget(0);
+    auto oversized = context;
+    oversized.hostImportAlignment = 2 * unit;
+    const auto unaligned = ImportMissMemoCounters();
+    for (int attempt = 0; attempt < 3; ++attempt) Require(HostImportFor(oversized, address, 16) == nullptr, "the memo fixture did not refuse an import with an unaligned size");
+    const auto rejected = ImportMissMemoCounters();
+    Require(rejected.hits == unaligned.hits && rejected.stores == unaligned.stores, "an alignment refusal was cached as a structural miss");
+    prime();
+    {
+        GuestAllocations::Mutation mutation;
+        mutation.Add(reinterpret_cast<void*>(missing), unit, true, true, true);
+        cleanup.registered[6] = true;
+    }
+    Require(HostImportFor(context, missing, 16) != nullptr, "a structural miss memo hid a newly registered import");
+    const auto neighbour = address + 2 * unit;
+    const auto reprotected = address + 4 * unit;
+    const auto missAt = [&](std::uint64_t at, std::uint64_t hits, std::uint64_t stores, const char* reason) {
+        const auto before = ImportMissMemoCounters();
+        Require(HostImportFor(context, at, 16) == nullptr, reason);
+        const auto after = ImportMissMemoCounters();
+        Require(after.hits == before.hits + (enabled ? hits : 0) && after.stores == before.stores + (enabled ? stores : 0), reason);
+    };
+    const auto importedAgain = [&](std::uint64_t at, const char* reason) {
+        Require(HostImportFor(context, neighbour, 16) != nullptr, "the memo fixture lost its neighbouring import");
+        const auto before = ImportMissMemoCounters();
+        Require(HostImportFor(context, at, 16) != nullptr, reason);
+        Require(ImportMissMemoCounters().hits == before.hits, reason);
+    };
+    Require(HostImportFor(context, neighbour, 16) != nullptr && HostImportFor(context, reprotected, 16) != nullptr, "the memo fixture did not import its neighbouring and reprotected ranges");
+    {
+        GuestAllocations::Mutation mutation;
+        mutation.Unmap(reinterpret_cast<const void*>(missing), unit, [](const void*, std::size_t, const void*, bool) {});
+        cleanup.registered[6] = false;
+    }
+    missAt(missing, 0, 1, "an unmapped range was imported or its first miss was not stored");
+    missAt(missing, 1, 0, "a repeated miss on an unmapped range did not hit the memo");
+    {
+        GuestAllocations::Mutation mutation;
+        mutation.Add(reinterpret_cast<void*>(missing), unit, true, true, true);
+        cleanup.registered[6] = true;
+    }
+    importedAgain(missing, "a structural miss memo hid a range mapped again");
+    {
+        GuestAllocations::Mutation mutation;
+        mutation.Protect(reinterpret_cast<const void*>(reprotected), unit, false, false, true, [] {});
+    }
+    missAt(reprotected, 0, 1, "an unreadable range was imported or its first miss was not stored");
+    missAt(reprotected, 1, 0, "a repeated miss on an unreadable range did not hit the memo");
+    missAt(reprotected, 1, 0, "a second repeated miss on an unreadable range did not hit the memo");
+    {
+        GuestAllocations::Mutation mutation;
+        mutation.Protect(reinterpret_cast<const void*>(reprotected), unit, true, true, true, [] {});
+    }
+    importedAgain(reprotected, "a structural miss memo hid a range made readable again");
+    importMissMemoCommitTests(context);
+    std::cout << "import miss memo runtime invalidation: ok\n";
+    return true;
+}
+
 void storageRefreshTests(const Device& device, Recorder& recorder, bool watched) {
     const auto& base = device.GetContext();
     if (base.hostImportAlignment == 0) {
@@ -9960,6 +10300,7 @@ int main(int argc, char** argv) {
             std::cout << "queued write group tests passed\n";
             return 0;
         }
+        if (argc == 2 && std::string_view(argv[1]) == "--import-miss-memo-only") importMissMemoProofTests();
         std::unique_ptr<Device> created;
         try {
             created = std::make_unique<Device>(argc == 2 && (std::string_view(argv[1]) == "--import-watch-other-family-only" || std::string_view(argv[1]) == "--deferred-settle-other-family-only"));
@@ -10273,6 +10614,13 @@ int main(int argc, char** argv) {
             overlappedRangeTests(recorder);
             spaceWriteSyncTests(device, recorder);
             std::cout << "Address space pending write tests passed\n";
+            return 0;
+        }
+        if (argc == 2 && std::string_view(argv[1]) == "--import-miss-memo-only") {
+            if (!importMissMemoTests(device, recorder)) {
+                std::cout << "skipped, import miss memo runtime tests require host imports aligned within 64 KiB\n";
+                return 77;
+            }
             return 0;
         }
         if (argc == 2 && std::string_view(argv[1]) == "--draw-snapshot-cap-only") {
