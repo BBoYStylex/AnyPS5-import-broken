@@ -37,6 +37,11 @@ std::int32_t APS5_VABI sceVrTracker2GetPlayAreaOrientedBoundingBox() {
     return VR_TRACKER2_ERROR_NOT_INITIALIZED;
 }
 
+std::int32_t APS5_VABI sceVrTracker2GetRawCameraMeshSize() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
 std::int32_t APS5_VABI sceVrTracker2GetResult() {
     return VR_TRACKER2_ERROR_NOT_INITIALIZED;
 }
@@ -219,12 +224,6 @@ std::int32_t APS5_VABI VrTracker2ClearWord(void* output) {
 APS5_EXPORT("jRmuXjsknsI", VrTracker2Unknown01);
 std::int32_t APS5_VABI VrTracker2Unknown01() {
     NotImplemented_nid_no_patch("jRmuXjsknsI");
-    return 0;
-}
-
-APS5_EXPORT("NBhWy+Gl0tY", VrTracker2Unknown02);
-std::int32_t APS5_VABI VrTracker2Unknown02() {
-    NotImplemented_nid_no_patch("NBhWy+Gl0tY");
     return 0;
 }
 
