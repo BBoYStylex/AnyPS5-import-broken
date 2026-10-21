@@ -1,3 +1,4 @@
+#include <atomic>
 #include <cerrno>
 #include <chrono>
 #include <cstddef>
@@ -29,6 +30,8 @@
 #include "prx/libSceAgcDriver/Execution/include/HostHdr.hpp"
 
 namespace {
+
+std::atomic<bool> lncUtilInitialized{false};
 
 struct ConsoleTimeZone {
     int minutes;
@@ -337,6 +340,13 @@ int APS5_VABI sceSystemServiceReceiveEvent(SystemServiceEvent* event) {
  return SYSTEM_SERVICE_ERROR_NO_EVENT;
 }
 
+int APS5_VABI sceAppMessagingTryReceiveMsg(void* message) {
+ if (message == nullptr) {
+  return APP_MESSAGING_ERROR_NULL_POINTER;
+ }
+ return APP_MESSAGING_ERROR_NO_MESSAGE;
+}
+
 int APS5_VABI sceSystemServiceReportAbnormalTermination(const void* info) {
  (void)info;
  return SYSTEM_SERVICE_OK;
@@ -408,6 +418,10 @@ int APS5_VABI sceSystemServiceReenableMusicPlayer(void) {
 
 int APS5_VABI sceSystemServiceShowControllerSettings(void) {
  return SYSTEM_SERVICE_OK;
+}
+
+int APS5_VABI sceLncUtilInitialize(void) {
+ return lncUtilInitialized.exchange(true) ? LNC_UTIL_ERROR_ALREADY_INITIALIZED : SYSTEM_SERVICE_OK;
 }
 
 int APS5_VABI sceSystemServiceGetAppIdOfRunningBigApp(void) {

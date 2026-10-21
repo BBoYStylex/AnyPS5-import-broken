@@ -10,10 +10,16 @@ extern "C" int APS5_VABI sceSystemServiceParamGetString(int paramId, char* buf, 
 extern "C" int APS5_VABI sceSystemServiceLaunchApp(const char* titleId, const char* const* arguments, const void* param);
 extern "C" int APS5_VABI sceSystemServiceAddLocalProcessForPsmKit(const char* path, const char* const* arguments, const void* param);
 extern "C" int APS5_VABI sceSystemServiceKillLocalProcessForPsmKit(int handle);
+extern "C" int APS5_VABI sceLncUtilInitialize(void);
+extern "C" int APS5_VABI sceAppMessagingTryReceiveMsg(void* message);
 
 namespace {
 
 constexpr int browserUnavailable = static_cast<int>(0x8002002Du);
+constexpr int lncUtilAlreadyInitialized = static_cast<int>(0x80940018u);
+constexpr int appMessagingNullPointer = static_cast<int>(0x80C50004u);
+constexpr int appMessagingNoMessage = static_cast<int>(0x80C50005u);
+constexpr std::size_t appMessageSize = 8216;
 
 void Require(bool value) { if (!value) std::abort(); }
 
@@ -79,6 +85,15 @@ void TestPlayerDialogParam() {
 }
 
 int main() {
+    Require(sceLncUtilInitialize() == SYSTEM_SERVICE_OK);
+    Require(sceLncUtilInitialize() == lncUtilAlreadyInitialized);
+    Require(sceLncUtilInitialize() == lncUtilAlreadyInitialized);
+    Require(sceAppMessagingTryReceiveMsg(nullptr) == appMessagingNullPointer);
+    alignas(8) unsigned char message[appMessageSize];
+    std::memset(message, 0x5a, sizeof(message));
+    Require(sceAppMessagingTryReceiveMsg(message) == appMessagingNoMessage);
+    Require(sceAppMessagingTryReceiveMsg(message) == appMessagingNoMessage);
+    for (unsigned char byte : message) Require(byte == 0x5a);
     Require(sceSystemServicePowerTick() == SYSTEM_SERVICE_OK);
     Require(sceSystemServicePowerTick() == SYSTEM_SERVICE_OK);
     Require(sceSystemServiceReportAbnormalTermination(nullptr) == SYSTEM_SERVICE_OK);
