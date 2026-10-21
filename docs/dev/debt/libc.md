@@ -2,7 +2,7 @@
 
 ### Unknown function info
 
-- [fesetenv](../../../core/libs/prx/libc/src/Math.cpp) (libSceLibcInternal, implemented in libc, NID `Q-bLp+b-RVY`) uses the 32-byte amd64 environment and x87/MXCSR restore sequence in the [public SDK fenv.h](https://github.com/ps5-payload-dev/sdk/blob/a7685ce8e97ce1f8a4f38253a41d54241c9124f1/include/freebsd/fenv.h). The console layout, behavior and module/library versions are unmeasured. Null pointers and reserved MXCSR bits throw before changing state; console fault behavior for invalid environments is unverified. The separate `__fe_dfl_env` object remains missing and its console initializer is unknown.
+- [fesetenv](../../../core/libs/prx/libc/src/Math.cpp) (libSceLibcInternal, implemented in libc, NID `Q-bLp+b-RVY`) uses the 32-byte amd64 environment and x87/MXCSR restore sequence in the [public SDK fenv.h](https://github.com/ps5-payload-dev/sdk/blob/a7685ce8e97ce1f8a4f38253a41d54241c9124f1/include/freebsd/fenv.h). The console layout, behavior and module/library versions are unmeasured. Null pointers and MXCSR bits unsupported by the current host's `FXSAVE` mask throw before changing state; a zero mask uses the architectural `0xffbf` fallback. Console fault behavior for invalid environments is unverified. The separate `__fe_dfl_env` object remains missing and its console initializer is unknown.
 
 - [strtonum](../../../core/libs/prx/libc/src/StringExtensions.cpp) (libc) is unverified on the console. Its signature, decimal parsing, inclusive bounds, error strings, error precedence and errno preservation follow [FreeBSD 11.4 strtonum.c](https://github.com/freebsd/freebsd-src/blob/8c639945a44588f6cfdddfb057bb5aad88735da0/lib/libc/stdlib/strtonum.c). Parsing uses the host `strtoll` with base 10.
 

@@ -146,13 +146,18 @@ void BoundsAndErrors() {
     *__error_nid_postfix()=123;
     try { setEnvironment(nullptr); } catch(const std::invalid_argument&) { rejected=true; }
     Require(rejected && Same(Read(),original) && *__error_nid_postfix()==123,"null rejected without state or errno change");
-    for(unsigned reserved:{0x10000u,0x80000000u,0xffff0000u}) {
+    alignas(16) std::array<std::uint32_t,128> extended;
+    asm volatile("fxsave %0" : "=m"(extended));
+    const auto supported=extended[7] ? extended[7] : 0xffbfu;
+    for(unsigned bit=0;bit<32;++bit) {
+        const auto reserved=1u<<bit;
+        if((supported&reserved)!=0) continue;
         auto desired=original;
         desired.x87[0]^=0xc00;
         desired.mxcsr|=reserved;
         rejected=false;
         try { setEnvironment(&desired); } catch(const std::invalid_argument&) { rejected=true; }
-        Require(rejected && Same(Read(),original) && *__error_nid_postfix()==123,"unsupported MXCSR rejected before x87 changes");
+        Require(rejected && Same(Read(),original) && *__error_nid_postfix()==123,"host-unsupported MXCSR rejected before x87 changes");
     }
 }
 
