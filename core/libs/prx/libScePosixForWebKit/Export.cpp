@@ -191,10 +191,6 @@ int APS5_VABI __wrap_clock_gettime() {
     return 0;
 }
 
-int APS5_VABI __wrap_fchown() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
 
 int APS5_VABI __wrap_getcwd() {
     NotImplemented_nid_no_patch(__func__);
@@ -206,10 +202,6 @@ int APS5_VABI __wrap_getenv() {
     return 0;
 }
 
-int APS5_VABI __wrap_link() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
 
 int APS5_VABI __wrap_lstat() {
     NotImplemented_nid_no_patch(__func__);
@@ -221,20 +213,8 @@ int APS5_VABI __wrap_mmap() {
     return 0;
 }
 
-int APS5_VABI __wrap_readlink() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
 
-int APS5_VABI __wrap_statvfs() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
 
-int APS5_VABI __wrap_symlink() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
 
 int APS5_VABI clock_gettime_np() {
     NotImplemented_nid_no_patch(__func__);
