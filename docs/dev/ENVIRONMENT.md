@@ -10,7 +10,9 @@ The code reads environment names through `getenv`, `IsEnvironmentSet`, `kibSetti
 | `ANYPS5_LOADEXEC_TEST_ROOT` | string | `core/libs/tests/GuestLoadExecHost.cpp` |  | directory the load-exec host test reads its guest executable from |
 | `ANYPS5_TEST_QUOTED_ARGV0` | presence | `core/libs/tests/GuestLoadExecHost.cpp` |  | makes the load-exec test's first argument one with quotes, a backslash and non-ASCII text |
 | `APS5_EBOOT` | string | `core/libs/tests/GuestSystemExit.cpp` |  | host path of the executable launched for /app0/eboot.bin, defaulting to the running executable |
+| `APS5_NO_SUBMIT_LOOKAHEAD` | presence | `core/libs/prx/libSceAgcDriver/Graphics/src/PipelineLookahead.cpp` |  | keeps the submit lookahead off; a pipeline is then built in the draw that asks for it |
 | `APS5_SKIP_TIMING_TESTS` | presence | `core/libs/tests/PreciseWait.cpp` |  | treats the timing tests' runner as preempted, so they skip without probing the clock |
+| `APS5_SUBMIT_LOOKAHEAD_THREADS` | integer | `core/libs/prx/libSceAgcDriver/Graphics/src/PipelineLookahead.cpp` |  | threads that build the pipelines of a submission ahead of the draw, at most 64; unset uses half the hardware threads, at least one; 0 keeps the lookahead off |
 | `APS5_USBD_DEVICE` | string | `core/libs/tests/GuestUsbd.cpp` |  | selects the USB device a test drives, as vendor:product in hex |
 
 ### core/relinker
