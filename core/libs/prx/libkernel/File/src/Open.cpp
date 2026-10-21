@@ -401,6 +401,21 @@ static int StatNative(const std::filesystem::path& native, bool directory, FileS
     if (error) return SceErrorFromErrno(FilesystemError(error));
 #endif
     const auto status = std::filesystem::status(metadataPath, error);
+#ifdef __APPLE__
+    // Darwin's PATH_MAX equals the guest limit, so a guest path near it no longer fits once the host root is prepended.
+    if (error == std::errc::filename_too_long) {
+        FileStat host{};
+        if (!File::TryFillFileStat(metadataPath, &host)) {
+            if (errno == ENOENT) return SceErrorFromErrno(NotFoundError_nid_no_patch(native));
+            if (errno == ENOTDIR) return SceErrorFromErrno(GuestEnotdir);
+            return SceStatErrorFromErrno(errno);
+        }
+        if (directory && (host.st_mode & 0170000) != 0040000) return SceErrorFromErrno(GuestEnotdir);
+        if (sb == nullptr) return SceErrorFromErrno(GuestEfault);
+        *sb = host;
+        return 0;
+    }
+#endif
     if (error == std::errc::not_a_directory) return SceErrorFromErrno(GuestEnotdir);
     if (error == std::errc::filename_too_long || error == std::errc::too_many_symbolic_link_levels) return SceKernelError(FilesystemError(error));
     if (!std::filesystem::exists(status)) {
