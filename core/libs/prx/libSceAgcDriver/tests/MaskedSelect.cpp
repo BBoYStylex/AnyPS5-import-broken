@@ -1273,6 +1273,114 @@ int main() {
     passed &= run("an optional wave body spanning several blocks preserves inactive values through its own phis", [&] { return optionalPixelRegion(false); });
     passed &= run("an optional wave body spanning several blocks cannot write an inactive lane on any of its paths", [&] { return !optionalPixelRegion(true); });
 
+    const auto nestedOptionalGuard = [&](bool unsafeInner, bool ballotEscape) {
+        Builder b;
+        b.program.Resources().stage = IrShaderStage::Pixel;
+        auto& entry = *b.block;
+        auto& predicate = pixelPredicate(b);
+        auto& condition = b.emit(IrOpcode::LogicalNot, IrType::Bool, {&predicate});
+        auto& base = helperPredicate(b, false);
+        auto& body = b.newBlock();
+        auto& merge = b.newBlock();
+        auto& inner = b.newBlock();
+        auto& join = b.newBlock();
+        entry.AddBranch(&body);
+        entry.AddBranch(&merge);
+        body.AddBranch(&merge);
+        merge.AddBranch(&inner);
+        merge.AddBranch(&join);
+        inner.AddBranch(&join);
+        auto& entryInfo = b.program.Metadata().blockInfo[0u];
+        entryInfo.terminator.kind = TerminatorKind::ConditionalBranch;
+        entryInfo.terminator.condition = BranchCondition::ExecZero;
+        entryInfo.terminator.trueBlock = merge.Id();
+        entryInfo.terminator.falseBlock = body.Id();
+        entryInfo.condition = &condition;
+        b.program.Metadata().blockInfo[1u].terminator.kind = TerminatorKind::Branch;
+        b.program.Metadata().blockInfo[1u].terminator.trueBlock = merge.Id();
+        b.block = &body;
+        auto& taken = b.emit(IrOpcode::SelectU1, IrType::Bool, {&predicate, &b.truth(), &base});
+        b.block = &merge;
+        auto& merged = b.phi(IrType::Bool, entry, base);
+        merged.AddPhiOperand(&body, &taken);
+        auto& innerCondition = b.emit(IrOpcode::LogicalNot, IrType::Bool, {&merged});
+        auto& mergeInfo = b.program.Metadata().blockInfo[2u];
+        mergeInfo.terminator.kind = TerminatorKind::ConditionalBranch;
+        mergeInfo.terminator.condition = BranchCondition::ExecZero;
+        mergeInfo.terminator.trueBlock = join.Id();
+        mergeInfo.terminator.falseBlock = inner.Id();
+        mergeInfo.condition = &innerCondition;
+        b.program.Metadata().blockInfo[3u].terminator.kind = TerminatorKind::Branch;
+        b.program.Metadata().blockInfo[3u].terminator.trueBlock = join.Id();
+        b.block = &inner;
+        auto& written = b.select(merged, b.constant(42u), b.constant(0u));
+        if (unsafeInner) b.emit(IrOpcode::Discard, IrType::Void, {});
+        b.block = &join;
+        auto& joined = b.phi(IrType::U32, merge, b.constant(0u));
+        joined.AddPhiOperand(&inner, &written);
+        if (ballotEscape) {
+            const auto [low, high] = b.ballotWords(merged);
+            b.keep(b.threadBit(*low, *high));
+            b.keep(b.add(*low, 1u));
+        }
+        b.keep(joined);
+        exportUnder(b, b.truth(), true, true);
+        return StencilReplaySafe(b.program);
+    };
+
+    passed &= run("an optional wave body merge may guard another optional wave body", [&] { return nestedOptionalGuard(false, false); });
+    passed &= run("an optional wave body merge cannot guard a body with side effects", [&] { return !nestedOptionalGuard(true, false); });
+    passed &= run("an optional wave body merge cannot feed a ballot escaping the lane's own bit", [&] { return !nestedOptionalGuard(false, true); });
+
+    passed &= run("an optional wave body merge may feed an own-lane ballot read", [&] {
+        Builder b;
+        b.program.Resources().stage = IrShaderStage::Pixel;
+        auto& entry = *b.block;
+        auto& predicate = pixelPredicate(b);
+        auto& condition = b.emit(IrOpcode::LogicalNot, IrType::Bool, {&predicate});
+        auto& base = helperPredicate(b, false);
+        auto& body = b.newBlock();
+        auto& merge = b.newBlock();
+        entry.AddBranch(&body);
+        entry.AddBranch(&merge);
+        body.AddBranch(&merge);
+        auto& entryInfo = b.program.Metadata().blockInfo[0u];
+        entryInfo.terminator.kind = TerminatorKind::ConditionalBranch;
+        entryInfo.terminator.condition = BranchCondition::ExecZero;
+        entryInfo.terminator.trueBlock = merge.Id();
+        entryInfo.terminator.falseBlock = body.Id();
+        entryInfo.condition = &condition;
+        b.program.Metadata().blockInfo[1u].terminator.kind = TerminatorKind::Branch;
+        b.program.Metadata().blockInfo[1u].terminator.trueBlock = merge.Id();
+        b.block = &body;
+        auto& taken = b.emit(IrOpcode::SelectU1, IrType::Bool, {&predicate, &b.truth(), &base});
+        b.block = &merge;
+        auto& merged = b.phi(IrType::Bool, entry, base);
+        merged.AddPhiOperand(&body, &taken);
+        b.keep(b.ballotBit(merged));
+        exportUnder(b, b.truth(), true, true);
+        return StencilReplaySafe(b.program);
+    });
+
+    passed &= run("an active mask may flag a sample with an explicit lod", [&] {
+        Builder b;
+        b.program.Resources().stage = IrShaderStage::Pixel;
+        MemoryInfo memory{};
+        memory.kind = ResourceKind::Image;
+        memory.imageSampleFlags = RdnaImageSampleFlagLevelZero;
+        b.program.Resources().memoryInfo.push_back(memory);
+        auto& active = b.ballotBit(b.truth());
+        auto& address = b.emit(IrOpcode::MakeImageAddress, IrType::ImageAddress, {&b.constant(0u)});
+        auto& image = b.emit(IrOpcode::GetImageResource, IrType::ImageResource, {});
+        auto& sampler = b.emit(IrOpcode::GetSamplerResource, IrType::SamplerResource, {});
+        MemoryFlags flags{0u, 0u};
+        std::uint64_t bits = 0;
+        std::memcpy(&bits, &flags, sizeof(flags));
+        b.emit(IrOpcode::ImageSampleRaw, IrType::U32x4, {&image, &sampler, &address, &active}, bits);
+        exportUnder(b, b.truth(), true, true);
+        return StencilReplaySafe(b.program);
+    });
+
     passed &= run("varying attribute sources cannot be treated as uniform any-active predicates", [&] {
         for (const auto opcode : {IrOpcode::GetAttribute, IrOpcode::GetInterpolationParameter, IrOpcode::GetInterpolationParameterF16, IrOpcode::GetTessellationAttribute}) {
             Builder b;

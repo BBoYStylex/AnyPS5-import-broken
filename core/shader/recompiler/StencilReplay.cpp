@@ -108,7 +108,7 @@ public:
         }
         for (const auto& info : program.Metadata().blockInfo) {
             if (info.terminator.kind != TerminatorKind::ConditionalBranch) continue;
-            if (!control(info)) return false;
+            if (!controlProven(info)) return false;
         }
         for (const auto& [value, mask] : ownMasks) if (helperObserved(value)) return false;
         for (const auto* block : program.BlockOrder()) {
@@ -492,27 +492,88 @@ private:
         return left == right || (left->HasImmediate() && right->HasImmediate() && left->Type() == IrType::U32 && right->Type() == IrType::U32 && left->ImmediateU32() == right->ImmediateU32());
     }
 
-    bool inactiveEquals(const IrValue* value, const IrValue* other, const IrValue* predicate, unsigned depth = 0) {
+    bool inactiveEquals(const IrValue* value, const IrValue* other, const IrValue* predicate, const std::set<const IrBlock*>& region, unsigned depth = 0) {
         if (depth > 32u) return false;
         value = value->Resolve();
         if (sameValue(value, other)) return true;
-        if ((value->Opcode() == IrOpcode::SelectU32 || value->Opcode() == IrOpcode::SelectF32 || value->Opcode() == IrOpcode::SelectU1) && value->ArgumentCount() == 3u && (value->Argument(0)->Resolve() == predicate->Resolve() || GuardImplies(program, value->Argument(0), predicate))) return inactiveEquals(value->Argument(2), other, predicate, depth + 1u);
+        if ((value->Opcode() == IrOpcode::SelectU32 || value->Opcode() == IrOpcode::SelectF32 || value->Opcode() == IrOpcode::SelectU1) && value->ArgumentCount() == 3u && (value->Argument(0)->Resolve() == predicate->Resolve() || GuardImplies(program, value->Argument(0), predicate))) return inactiveEquals(value->Argument(2), other, predicate, region, depth + 1u);
         if (value->IsPhi() && region.contains(value->Parent()) && value->ArgumentCount() != 0u && value->ArgumentCount() == value->PhiBlockCount()) {
-            return std::all_of(value->Arguments().begin(), value->Arguments().end(), [&](const IrValue* argument) { return inactiveEquals(argument, other, predicate, depth + 1u); });
+            return std::all_of(value->Arguments().begin(), value->Arguments().end(), [&](const IrValue* argument) { return inactiveEquals(argument, other, predicate, region, depth + 1u); });
         }
         return false;
     }
 
-    bool quadObserved(const IrValue* value) const {
+    bool explicitLodSample(const IrValue* value) const {
+        if (value->Opcode() == IrOpcode::ImageSampleExplicitLod) return true;
+        if (value->Opcode() != IrOpcode::ImageSampleRaw && value->Opcode() != IrOpcode::ImageGatherRaw) return false;
+        const auto index = value->Flags<MemoryFlags>().index;
+        return index < program.Resources().memoryInfo.size() && ImageSampleExplicitLod(program.Resources().memoryInfo[index].imageSampleFlags, program.Resources().stage);
+    }
+
+    bool ownBitShifted(const IrValue* user, std::size_t operand, std::vector<const IrValue*>& terminals) const {
+        if (user->Opcode() != IrOpcode::ShiftRightLogical32 || user->ArgumentCount() != 2u || operand != 0u) return false;
+        const IrValue* amount = user->Argument(1)->Resolve();
+        if (amount->Opcode() != IrOpcode::BitwiseAnd32) return false;
+        const IrValue* lane = Other(amount, 31u);
+        if (lane == nullptr || lane->Opcode() != IrOpcode::LaneId) return false;
+        for (const auto& use : user->OperandUses()) {
+            const IrValue* isolated = use.user;
+            if (isolated->Opcode() != IrOpcode::BitwiseAnd32 || Other(isolated, 1u) != user) return false;
+            terminals.push_back(isolated);
+        }
+        return true;
+    }
+
+    bool ownBitSelected(const IrValue* user, std::size_t operand, unsigned half, std::vector<const IrValue*>& terminals) const {
+        if (user->Opcode() != IrOpcode::SelectU32 || user->ArgumentCount() != 3u || operand != half + 1u) return false;
+        const IrValue* condition = user->Argument(0)->Resolve();
+        if (condition->Opcode() != IrOpcode::ULessThan32 || condition->ArgumentCount() != 2u || condition->Argument(0)->Resolve()->Opcode() != IrOpcode::LaneId || !Immediate(condition->Argument(1), 32u)) return false;
+        for (const auto& use : user->OperandUses()) if (!ownBitShifted(use.user, use.operand, terminals)) return false;
+        return true;
+    }
+
+    bool ownBitBallot(const IrValue* ballot, std::vector<const IrValue*>& terminals) const {
+        if (ballot->Opcode() != IrOpcode::Ballot || ballot->ArgumentCount() != 1u) return false;
+        for (const auto& use : ballot->OperandUses()) {
+            const IrValue* extract = use.user;
+            if (extract->Opcode() != IrOpcode::CompositeExtractU32x4 || extract->ArgumentCount() != 2u || extract->Argument(0)->Resolve() != ballot) return false;
+            const IrValue* index = extract->Argument(1)->Resolve();
+            if (!index->HasImmediate() || index->ImmediateU32() >= (waveSize == 32u ? 1u : 2u)) return false;
+            const auto half = index->ImmediateU32();
+            for (const auto& euse : extract->OperandUses()) {
+                const IrValue* word = euse.user;
+                if (word->Opcode() == IrOpcode::BitwiseAnd32) {
+                    for (const auto& muse : word->OperandUses()) {
+                        const bool read = waveSize == 64u ? ownBitSelected(muse.user, muse.operand, half, terminals) : ownBitShifted(muse.user, muse.operand, terminals);
+                        if (!read) return false;
+                    }
+                } else {
+                    const bool read = waveSize == 64u ? ownBitSelected(word, euse.operand, half, terminals) : ownBitShifted(word, euse.operand, terminals);
+                    if (!read) return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    bool quadObserved(const IrValue* value) {
         std::set<const IrValue*> visited;
         std::vector<const IrValue*> pending{value};
         while (!pending.empty()) {
             const IrValue* current = pending.back();
             pending.pop_back();
             if (!visited.insert(current).second) continue;
-            for (const auto& info : program.Metadata().blockInfo) if (info.condition && info.condition->Resolve() == current) return true;
+            for (const auto& info : program.Metadata().blockInfo) if (info.condition && info.condition->Resolve() == current && !controlProven(info)) return true;
             for (const auto& use : current->OperandUses()) {
                 const auto opcode = use.user->Opcode();
+                if (opcode == IrOpcode::Ballot) {
+                    std::vector<const IrValue*> terminals;
+                    if (ownBitBallot(use.user, terminals)) {
+                        pending.insert(pending.end(), terminals.begin(), terminals.end());
+                        continue;
+                    }
+                }
+                if (ImageOpcodeInfoOf(opcode).needsSampler && explicitLodSample(use.user)) { pending.push_back(use.user); continue; }
                 if (ImageOpcodeInfoOf(opcode).needsSampler || opcode == IrOpcode::Ballot || opcode == IrOpcode::WqmU64 || opcode == IrOpcode::ReadLane || opcode == IrOpcode::ReadFirstLane || opcode == IrOpcode::DppMoveU32 || opcode == IrOpcode::DppUpdateU32 || opcode == IrOpcode::SwizzleU32 || opcode == IrOpcode::PermuteU32 || opcode == IrOpcode::BpermuteU32 || opcode == IrOpcode::Permlane16U32 || opcode == IrOpcode::WriteLane || SharedAccessOf(opcode) != SharedAccess::None) return true;
                 if (opcode == IrOpcode::SetAttribute || opcode == IrOpcode::Reference || opcode == IrOpcode::ReferenceU32) continue;
                 pending.push_back(use.user);
@@ -535,6 +596,7 @@ private:
             }
             for (const auto& use : current->OperandUses()) {
                 const auto opcode = use.user->Opcode();
+                if (ImageOpcodeInfoOf(opcode).needsSampler && explicitLodSample(use.user)) { pending.push_back(use.user); continue; }
                 if (ImageOpcodeInfoOf(opcode).needsSampler) return true;
                 if (restricted.contains(use.user) || opcode == IrOpcode::SetAttribute || opcode == IrOpcode::Reference || opcode == IrOpcode::ReferenceU32) continue;
                 pending.push_back(use.user);
@@ -544,8 +606,8 @@ private:
     }
 
     bool optionalBody(const IrBlock* branch, const IrBlock* body, const IrBlock* merge, const IrValue* predicate) {
-        region.clear();
         if (body == merge) return false;
+        std::set<const IrBlock*> region;
         std::vector<const IrBlock*> pending{body};
         while (!pending.empty()) {
             const IrBlock* block = pending.back();
@@ -570,8 +632,9 @@ private:
                 else if (region.contains(instruction->PhiBlock(index))) taken.push_back(instruction->Argument(index)->Resolve());
                 else return false;
             }
-            if (!skipped || taken.empty() || quadObserved(instruction)) return false;
-            for (const auto* value : taken) if (!inactiveEquals(value, skipped, predicate)) return false;
+            if (!skipped || taken.empty()) return false;
+            if (quadObserved(instruction)) return false;
+            for (const auto* value : taken) if (!inactiveEquals(value, skipped, predicate, region)) return false;
             merged.insert(instruction);
         }
         for (const auto* block : region) {
@@ -584,6 +647,15 @@ private:
             }
         }
         return !merged.empty();
+    }
+
+    bool controlProven(const BlockInfo& info) {
+        if (const auto found = controlResults.find(info.id); found != controlResults.end()) return found->second;
+        if (!controlVisiting.insert(info.id).second) return false;
+        const bool result = control(info);
+        controlVisiting.erase(info.id);
+        controlResults[info.id] = result;
+        return result;
     }
 
     bool control(const BlockInfo& info) {
@@ -632,7 +704,8 @@ private:
     std::map<std::uint32_t, std::size_t> indices;
     std::map<const IrBlock*, std::size_t> blockIndices;
     std::vector<std::vector<const IrBlock*>> allPaths;
-    std::set<const IrBlock*> region;
+    std::map<std::uint32_t, bool> controlResults;
+    std::set<std::uint32_t> controlVisiting;
 };
 
 std::optional<std::set<std::uint32_t>> Values(const IrProgram& program, const IrValue* value, std::set<const IrValue*>& visiting, unsigned depth, std::optional<unsigned> component = {}, const IrValue* active = nullptr) {
