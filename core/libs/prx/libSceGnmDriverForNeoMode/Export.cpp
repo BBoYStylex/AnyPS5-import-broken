@@ -1,6 +1,7 @@
 #include <cstdint>
 #include <algorithm>
 #include <cstddef>
+#include <initializer_list>
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
 #include "prx/libSceGnmDriverForNeoMode/include/InitSequences.hpp"
@@ -30,6 +31,22 @@ int WriteContextState(std::uint32_t* cmdbuf, std::uint32_t size, std::uint32_t p
 constexpr int Failure = static_cast<int>(0x8EEE00FFu);
 constexpr int NoInterface = static_cast<int>(0x80000000u);
 constexpr int ValidationNotEnabled = static_cast<int>(0x80D13FFFu);
+
+constexpr int CommandFailed = -1;
+constexpr std::uint32_t OpNop = 0x10;
+constexpr std::uint32_t OpSetContextReg = 0x69;
+constexpr std::uint32_t OpSetShReg = 0x76;
+
+std::uint32_t* EmitPacket(std::uint32_t* at, std::uint32_t opcode, std::initializer_list<std::uint32_t> body) {
+    *at++ = 0xc0000000u | ((static_cast<std::uint32_t>(body.size()) - 1) << 16) | (opcode << 8);
+    for (const auto word : body) *at++ = word;
+    return at;
+}
+
+void Nop(std::uint32_t* at, std::uint32_t bodyWords) {
+    at[0] = 0xc0000000u | ((bodyWords - 1) << 16) | (OpNop << 8);
+    at[1] = 0;
+}
 
 } // namespace
 
@@ -526,8 +543,15 @@ int APS5_VABI sceGnmUpdatePsShader350(void) {
     return 0;
 }
 
-int APS5_VABI sceGnmUpdateVsShader(void) {
-    NotImplemented_nid_no_patch(__func__);
+int APS5_VABI sceGnmUpdateVsShader(std::uint32_t* cmdbuf, std::uint32_t size, const std::uint32_t* regs, std::uint32_t modifier) {
+    if (!cmdbuf || size <= 0x1c || !regs || (modifier & 0xfcfffc3fu) != 0 || regs[1] != 0) return CommandFailed;
+    const std::uint32_t rsrc1 = modifier == 0 ? regs[2] : (regs[2] & 0xfcfffc3fu) | modifier;
+    auto* at = EmitPacket(cmdbuf, OpSetShReg, {0x48, regs[0], 0});
+    at = EmitPacket(at, OpSetShReg, {0x4a, rsrc1, regs[3]});
+    at = EmitPacket(at, OpNop, {0xc01e0207u, regs[6]});
+    at = EmitPacket(at, OpNop, {0xc01e01b1u, regs[4]});
+    at = EmitPacket(at, OpNop, {0xc01e01c3u, regs[5]});
+    Nop(at, 11);
     return 0;
 }
 
