@@ -1,0 +1,59 @@
+name: WASM runtime
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/wasm-runtime.yml
+      - CMakeLists.txt
+      - core/libs/**
+      - core/shader/recompiler/**
+      - core/wasm-aot/**
+      - core/wasm-runtime/**
+      - tools/wasm_nid_thunks.py
+      - tools/tests/test_wasm_nid_thunks.py
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/wasm-runtime.yml
+      - CMakeLists.txt
+      - core/libs/**
+      - core/shader/recompiler/**
+      - core/wasm-aot/**
+      - core/wasm-runtime/**
+      - tools/wasm_nid_thunks.py
+      - tools/tests/test_wasm_nid_thunks.py
+
+permissions:
+  contents: read
+
+jobs:
+  emscripten-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          submodules: recursive
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '26'
+      - name: Install native fixture and oracle build dependencies
+        run: sudo apt-get update && sudo apt-get install -y clang libclang-dev cmake pkg-config
+      - name: Build the browser runtime and exercise memory64 helpers
+        shell: bash
+        run: |
+          ANYPS5_TEST_NODE="$(command -v node)"
+          rustup toolchain install 1.98.0 --profile minimal
+          rustup default 1.98.0
+          git clone --depth 1 https://github.com/emscripten-core/emsdk.git "$RUNNER_TEMP/emsdk"
+          "$RUNNER_TEMP/emsdk/emsdk" install 6.0.12
+          "$RUNNER_TEMP/emsdk/emsdk" activate 6.0.12
+          source "$RUNNER_TEMP/emsdk/emsdk_env.sh"
+          emcmake cmake -S . -B build-runtime -DANYPS5_BUILD_WASM_RUNTIME=ON -DCMAKE_BUILD_TYPE=Release -DANYPS5_NODE="$ANYPS5_TEST_NODE"
+          cmake --build build-runtime --target anyps5-runtime-web anyps5-runtime-test anyps5-platform-tests anyps5-math-tests --parallel 2
+          ctest --test-dir build-runtime --output-on-failure
+          python3 -m unittest discover -s tools/tests -p test_wasm_nid_thunks.py
+          export ANYPS5_WASM_RUNTIME_TEST="$PWD/build-runtime/core/wasm-runtime/anyps5-runtime-test.js"
+          export PATH="$(dirname "$ANYPS5_TEST_NODE"):$PATH"
+          cargo test --release --locked --manifest-path core/wasm-aot/Cargo.toml --test runtime -- --nocapture

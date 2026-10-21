@@ -4,7 +4,9 @@
 #include "prx/libSceAgcDriver/Graphics/include/GuestTextureResource.hpp"
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
+#include <span>
 #include <utility>
 #include <vector>
 
@@ -74,6 +76,9 @@ struct SurfaceGeometry {
     bool HasLayer(std::uint32_t level, std::uint32_t layer) const { return imageDepth <= 1 || layer < std::max(imageDepth >> level, 1u); }
 };
 SurfaceGeometry DescribeSurface(const GuestTextureResource& descriptor);
+std::uint32_t ThickSwizzleMode(TextureTileMode tileMode);
+std::uint64_t TiledElementOffset(TextureTileMode tileMode, std::uint32_t bytesPerElement, const TileMipLayout& mip, std::uint32_t pipeBankXor, std::uint32_t slice, std::uint32_t x, std::uint32_t y, bool thick);
+void DetileMip(TextureTileMode tileMode, std::uint32_t bytesPerElement, const TileMipLayout& mip, std::uint32_t pipeBankXor, std::uint32_t slice, std::span<const std::byte> tiled, std::span<std::byte> linear, bool thick);
 bool LevelsFitAllocation(const GuestTextureResource& surface, std::uint32_t levels);
 GuestTextureResource ViewedArrayWindow(const GuestTextureResource& viewed);
 GuestTextureResource ArrayLayerWindow(const GuestTextureResource& viewed, std::uint32_t maxArrayLayers);

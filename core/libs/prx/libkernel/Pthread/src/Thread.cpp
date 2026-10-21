@@ -1,3 +1,6 @@
+#ifdef __EMSCRIPTEN__
+#include "wasm-runtime/Guest.hpp"
+#endif
 #include "../include/Pthread.hpp"
 #include "../include/ThreadLifecycle.hpp"
 #include "../include/WindowsThreadLocal.hpp"
@@ -222,10 +225,23 @@ static bool HostStackLimits(std::uintptr_t* low, std::uintptr_t* high) {
     return *high > *low;
 }
 
+static bool GuestStackLimits(std::uintptr_t* low, std::uintptr_t* high) {
+#ifdef __EMSCRIPTEN__
+    std::uint64_t guestLow = 0;
+    std::uint64_t guestHigh = 0;
+    WasmRuntime::CurrentGuestStack(guestLow, guestHigh);
+    *low = static_cast<std::uintptr_t>(guestLow);
+    *high = static_cast<std::uintptr_t>(guestHigh);
+    return *high > *low;
+#else
+    return HostStackLimits(low, high);
+#endif
+}
+
 static void SetStackFromHost(PthreadPrivate* thread) {
     std::uintptr_t low = 0;
     std::uintptr_t high = 0;
-    if (!HostStackLimits(&low, &high)) throw std::runtime_error("Cannot query the host thread stack");
+    if (!GuestStackLimits(&low, &high)) throw std::runtime_error("Cannot query the guest thread stack");
     thread->stackAddress = reinterpret_cast<void*>(low);
     thread->stackSize = static_cast<std::size_t>(high - low);
 }
@@ -236,7 +252,7 @@ static bool CurrentStack(std::uintptr_t* low, std::uintptr_t* high) {
         *high = *low + CurrentGuestState().current->stackSize;
         return true;
     }
-    return HostStackLimits(low, high);
+    return GuestStackLimits(low, high);
 }
 
 static void RegisterStack(PthreadPrivate* self) {
@@ -402,7 +418,7 @@ PthreadPrivate::~PthreadPrivate() {
 }
 
 static void BindHostCpuClock(PthreadPrivate* self) {
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__EMSCRIPTEN__)
     (void)self;
 #else
     clockid_t clock{};
@@ -622,6 +638,7 @@ void ThreadCancel::EndWait() {
     BeginWait(nullptr);
 }
 
+#ifndef __EMSCRIPTEN__
 extern "C" void* APS5_VABI Aps5CallGuestEntry_nid_no_patch(PthreadEntry entry, void* arg);
 
 asm(".text\n"
@@ -646,6 +663,7 @@ asm(".text\n"
     ret
     .cfi_endproc
 )" APS5_ASM_FUNCTION_END("Aps5CallGuestEntry_nid_no_patch"));
+#endif
 
 static void RunThread(std::unique_ptr<ThreadArgs> args) {
     APS5_LOG_OUT("RunThread entry=0x%llx arg=%p self=%p", static_cast<unsigned long long>(reinterpret_cast<std::uintptr_t>(args->entry)), args->arg, static_cast<void*>(args->self));
@@ -655,6 +673,14 @@ static void RunThread(std::unique_ptr<ThreadArgs> args) {
     BindHostCpuClock(self);
     TimedWait::BindThreadWaitState(&self->waitCount);
     CurrentGuestState().current = self;
+#ifdef __EMSCRIPTEN__
+    WasmRuntime::SetNextThreadStackSize(self->stackSize);
+    std::uint64_t guestLow = 0;
+    std::uint64_t guestHigh = 0;
+    WasmRuntime::CurrentGuestStack(guestLow, guestHigh);
+    self->stackAddress = reinterpret_cast<void*>(static_cast<std::uintptr_t>(guestLow));
+    self->stackSize = static_cast<std::size_t>(guestHigh - guestLow);
+#endif
     RegisterStack(self);
 #ifndef _WIN32
     const sigset_t signalMask = args->signalMask;
@@ -663,7 +689,11 @@ static void RunThread(std::unique_ptr<ThreadArgs> args) {
 #ifndef _WIN32
     pthread_sigmask(SIG_SETMASK, &signalMask, nullptr);
 #endif
+#ifdef __EMSCRIPTEN__
+    finishThread(self, entry(arg));
+#else
     finishThread(self, Aps5CallGuestEntry_nid_no_patch(entry, arg));
+#endif
     CurrentGuestState().current = nullptr;
 }
 
@@ -778,12 +808,14 @@ static void* StartNativeThread(void* opaque) {
     std::unique_ptr<NativeThreadArgs> args(static_cast<NativeThreadArgs*>(opaque));
     auto* self = args->guest->self;
     try {
+#ifndef __EMSCRIPTEN__
         std::uintptr_t low = 0;
         std::uintptr_t high = 0;
         const auto reserve = HostStackReserve();
         if (!HostStackLimits(&low, &high) || high - low < reserve + self->stackSize)
             throw std::runtime_error("Cannot query guest thread stack");
         self->stackAddress = reinterpret_cast<void*>(high - reserve - self->stackSize);
+#endif
         self->threadId = std::this_thread::get_id();
 #if defined(__linux__)
         self->hostTid = static_cast<int>(gettid());

@@ -2,6 +2,7 @@
 #include "prx/libSceAgcDriver/Graphics/include/Context.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/TextureFormat.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/TextureSwizzleEquations.hpp"
+#include <cstring>
 #include <string>
 #include <algorithm>
 #include <bit>
@@ -523,6 +524,138 @@ std::uint64_t ComputeSurfaceSize(const std::vector<TileMipLayout>& mips, std::ui
 
     Require(sliceSize <= UINT64_MAX / arrayLayers, "tiled texture surface size overflows");
     return sliceSize * arrayLayers;
+}
+
+namespace {
+
+const TextureSwizzleEquation* SwizzleEquation(TextureTileMode tileMode, std::uint32_t bytesPerElement, bool thick) {
+    const auto mode = thick ? ThickSwizzleMode(tileMode) : EquationSwizzleMode(tileMode);
+    Require(!thick || mode != 0, "3D textures are only detiled thick from SW_4KB_S, SW_4KB_S_X, SW_64KB_S, SW_64KB_S_X or SW_64KB_D_X");
+    if (mode == 0) return nullptr;
+    const auto* equation = FindTextureSwizzleEquation(mode, bytesPerElement);
+    Require(equation != nullptr, "no swizzle equation for tile mode " + std::to_string(mode) + " at " + std::to_string(bytesPerElement) + " bytes per element");
+    return equation;
+}
+
+std::array<std::uint32_t, 3> BlockLayout(TextureTileMode tileMode, std::uint32_t bytesPerElement, bool thick) {
+    if (!thick) return ThinBlockLayout(tileMode, bytesPerElement);
+    const auto extent = ThickBlockExtent(tileMode, bytesPerElement);
+    return {tileMode == TextureTileMode::kStandard4KB || tileMode == TextureTileMode::kS4KBX ? 4096u : 65536u, extent[0], extent[1]};
+}
+
+class InBlockSwizzle {
+public:
+    InBlockSwizzle(const TextureSwizzleEquation* equation, std::uint32_t bytesPerElement, std::uint32_t blockBytes, std::uint32_t pipeBankXor, std::uint32_t slice)
+        : equation(equation), bytesPerElement(bytesPerElement), blockBytes(blockBytes), pipeBankXor(pipeBankXor), slice(slice) {
+        Require(std::has_single_bit(bytesPerElement) && bytesPerElement <= 16u, "unsupported element size for texture detiling");
+    }
+
+    std::uint32_t Column(std::uint32_t x) const {
+        if (equation != nullptr) return selected(x & 0xfffu, 0xfffu);
+        std::uint32_t offset;
+        switch (bytesPerElement) {
+        case 1: offset = (x & 0x00fu) ^ ((x << 5) & 0x200u) ^ ((x << 6) & 0x800u); break;
+        case 2: offset = ((x << 1) & 0x00eu) ^ ((x << 4) & 0x080u) ^ ((x << 5) & 0x200u) ^ ((x << 6) & 0x800u); break;
+        case 4: offset = ((x << 2) & 0x00cu) ^ ((x << 5) & 0x080u) ^ ((x << 6) & 0x200u) ^ ((x << 7) & 0x800u); break;
+        case 8: offset = ((x << 3) & 0x008u) ^ ((x << 5) & 0x0c0u) ^ ((x << 6) & 0x200u) ^ ((x << 7) & 0x800u); break;
+        default: offset = ((x << 6) & 0x0c0u) ^ ((x << 7) & 0x200u) ^ ((x << 8) & 0x800u); break;
+        }
+        if (blockBytes > 4096u) {
+            switch (bytesPerElement) {
+            case 1:
+            case 2: offset ^= ((x << 7) & 0x2000u) ^ ((x << 8) & 0x8000u); break;
+            case 4:
+            case 8: offset ^= ((x << 8) & 0x2000u) ^ ((x << 9) & 0x8000u); break;
+            default: offset ^= ((x << 9) & 0x2000u) ^ ((x << 10) & 0x8000u); break;
+            }
+        }
+        return offset & (blockBytes - 1u);
+    }
+
+    std::uint32_t Row(std::uint32_t y) const {
+        if (equation != nullptr) return selected(((y << 12) & 0xfff000u) | (slice << 24), 0xffff'f000u) ^ pipeBankXor;
+        std::uint32_t offset;
+        switch (bytesPerElement) {
+        case 1: offset = ((y << 4) & 0x1f0u) ^ ((y << 5) & 0x400u); break;
+        case 2:
+        case 4: offset = ((y << 4) & 0x070u) ^ ((y << 5) & 0x100u) ^ ((y << 6) & 0x400u); break;
+        default: offset = ((y << 4) & 0x030u) ^ ((y << 6) & 0x100u) ^ ((y << 7) & 0x400u); break;
+        }
+        if (blockBytes > 4096u) {
+            switch (bytesPerElement) {
+            case 1: offset ^= ((y << 6) & 0x1000u) ^ ((y << 7) & 0x4000u); break;
+            case 2:
+            case 4: offset ^= ((y << 7) & 0x1000u) ^ ((y << 8) & 0x4000u); break;
+            default: offset ^= ((y << 8) & 0x1000u) ^ ((y << 9) & 0x4000u); break;
+            }
+        }
+        return offset & (blockBytes - 1u);
+    }
+
+private:
+    std::uint32_t selected(std::uint32_t coordinates, std::uint32_t field) const {
+        std::uint32_t offset = 0;
+        for (std::uint32_t bit = 0; bit < 16u; ++bit) offset |= static_cast<std::uint32_t>(std::popcount(coordinates & equation->bits[bit] & field) & 1) << bit;
+        return offset;
+    }
+
+    const TextureSwizzleEquation* equation = nullptr;
+    std::uint32_t bytesPerElement;
+    std::uint32_t blockBytes;
+    std::uint32_t pipeBankXor;
+    std::uint32_t slice;
+};
+
+}
+
+std::uint32_t ThickSwizzleMode(TextureTileMode tileMode) {
+    switch (tileMode) {
+        case TextureTileMode::kStandard4KB: return 0x105u;
+        case TextureTileMode::kS4KBX: return 0x115u;
+        case TextureTileMode::kStandard64KB: return 0x109u;
+        case TextureTileMode::kS64KBX: return 0x119u;
+        case TextureTileMode::kD64KBX: return 0x11au;
+        default: return 0u;
+    }
+}
+
+std::uint64_t TiledElementOffset(TextureTileMode tileMode, std::uint32_t bytesPerElement, const TileMipLayout& mip, std::uint32_t pipeBankXor, std::uint32_t slice, std::uint32_t x, std::uint32_t y, bool thick) {
+    if (tileMode == TextureTileMode::kLinear) return static_cast<std::uint64_t>(y) * mip.pitchBytes + static_cast<std::uint64_t>(x) * bytesPerElement;
+    const auto block = BlockLayout(tileMode, bytesPerElement, thick);
+    const InBlockSwizzle swizzle(SwizzleEquation(tileMode, bytesPerElement, thick), bytesPerElement, block[0], pipeBankXor, slice);
+    const std::uint64_t blockIndex = mip.tail ? 0u : static_cast<std::uint64_t>(y / block[2]) * mip.blocksPerRow + x / block[1];
+    return blockIndex * block[0] + (swizzle.Column(mip.tail ? x + mip.tailX : x) ^ swizzle.Row(mip.tail ? y + mip.tailY : y));
+}
+
+void DetileMip(TextureTileMode tileMode, std::uint32_t bytesPerElement, const TileMipLayout& mip, std::uint32_t pipeBankXor, std::uint32_t slice, std::span<const std::byte> tiled, std::span<std::byte> linear, bool thick) {
+    Require(linear.size() >= mip.linearSize && static_cast<std::uint64_t>(mip.width) * bytesPerElement <= mip.pitchBytes, "texture detiling needs the whole linear mip");
+    if (tileMode == TextureTileMode::kLinear) {
+        const auto rowBytes = static_cast<std::size_t>(mip.width) * bytesPerElement;
+        for (std::uint32_t y = 0; y < mip.height; ++y) {
+            const auto offset = static_cast<std::size_t>(y) * mip.pitchBytes;
+            Require(offset + rowBytes <= tiled.size(), "a linear texture row lies outside the guest surface");
+            std::memcpy(linear.data() + offset, tiled.data() + offset, rowBytes);
+        }
+        return;
+    }
+    const auto block = BlockLayout(tileMode, bytesPerElement, thick);
+    const InBlockSwizzle swizzle(SwizzleEquation(tileMode, bytesPerElement, thick), bytesPerElement, block[0], pipeBankXor, slice);
+    std::vector<std::uint64_t> columnBlocks(mip.width);
+    std::vector<std::uint32_t> columns(mip.width);
+    for (std::uint32_t x = 0; x < mip.width; ++x) {
+        columnBlocks[x] = mip.tail ? 0u : static_cast<std::uint64_t>(x / block[1]) * block[0];
+        columns[x] = swizzle.Column(mip.tail ? x + mip.tailX : x);
+    }
+    for (std::uint32_t y = 0; y < mip.height; ++y) {
+        const std::uint64_t rowBlock = mip.tail ? 0u : static_cast<std::uint64_t>(y / block[2]) * mip.blocksPerRow * block[0];
+        const auto row = swizzle.Row(mip.tail ? y + mip.tailY : y);
+        auto* destination = linear.data() + static_cast<std::size_t>(y) * mip.pitchBytes;
+        for (std::uint32_t x = 0; x < mip.width; ++x) {
+            const auto offset = rowBlock + columnBlocks[x] + (columns[x] ^ row);
+            Require(offset + bytesPerElement <= tiled.size(), "a tiled texture element lies outside the guest surface");
+            std::memcpy(destination + static_cast<std::size_t>(x) * bytesPerElement, tiled.data() + offset, bytesPerElement);
+        }
+    }
 }
 
 }

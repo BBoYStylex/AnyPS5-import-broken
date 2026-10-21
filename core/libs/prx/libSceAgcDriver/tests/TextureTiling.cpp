@@ -76,6 +76,17 @@ void requireThickAddresses(const GuestTextureResource& resource, std::uint32_t b
         }
         address ^= element.pipeBankXor;
         Require(address == element.address, what + ": mip " + std::to_string(element.mip) + " element (" + std::to_string(element.x) + ", " + std::to_string(element.y) + ", " + std::to_string(element.z) + ") detiles from " + std::to_string(address) + " instead of addrlib's " + std::to_string(element.address));
+        Require(geometry.GuestLayerOffset(element.z) + mip.tiledOffset + TiledElementOffset(resource.tileMode, bytesPerElement, mip, element.pipeBankXor, element.z, element.x, element.y, true) == element.address, what + ": TiledElementOffset disagrees with addrlib for mip " + std::to_string(element.mip) + " element (" + std::to_string(element.x) + ", " + std::to_string(element.y) + ", " + std::to_string(element.z) + ")");
+    }
+    std::vector<std::byte> surface(geometry.guestBytes);
+    for (std::size_t index = 0; index < surface.size(); ++index) surface[index] = static_cast<std::byte>((index * 2654435761u) >> 13u);
+    for (const auto& element : expected) {
+        const auto& mip = geometry.mips.at(element.mip);
+        const auto start = geometry.GuestLayerOffset(element.z) + mip.tiledOffset;
+        std::vector<std::byte> linear(mip.linearSize);
+        DetileMip(resource.tileMode, bytesPerElement, mip, element.pipeBankXor, element.z, std::span<const std::byte>(surface).subspan(start), linear, true);
+        const auto* value = linear.data() + static_cast<std::size_t>(element.y) * mip.pitchBytes + static_cast<std::size_t>(element.x) * bytesPerElement;
+        Require(std::equal(value, value + bytesPerElement, surface.data() + element.address), what + ": DetileMip moves mip " + std::to_string(element.mip) + " element (" + std::to_string(element.x) + ", " + std::to_string(element.y) + ", " + std::to_string(element.z) + ") from elsewhere than addrlib's address");
     }
 }
 
@@ -116,6 +127,7 @@ void requireThinAddresses(TextureTileMode tileMode, std::uint32_t format, std::u
             address += (static_cast<std::uint64_t>(element.y / block[2]) * mip.blocksPerRow + element.x / block[1]) * block[0] + equationOffset(*equation, element.x, element.y, element.z);
         }
         Require(address == element.address, what + ": mip " + std::to_string(element.mip) + " element (" + std::to_string(element.x) + ", " + std::to_string(element.y) + ", " + std::to_string(element.z) + ") detiles from " + std::to_string(address) + " instead of addrlib's " + std::to_string(element.address));
+        Require(geometry.GuestLayerOffset(element.z) + mip.tiledOffset + TiledElementOffset(tileMode, bytesPerElement, mip, 0u, element.z, element.x, element.y, false) == element.address, what + ": TiledElementOffset disagrees with addrlib for mip " + std::to_string(element.mip) + " element (" + std::to_string(element.x) + ", " + std::to_string(element.y) + ")");
     }
 }
 
@@ -135,12 +147,39 @@ void requireSliceAddresses(const GuestTextureResource& resource, std::uint32_t b
             address += (static_cast<std::uint64_t>(element.y / block[2]) * mip.blocksPerRow + element.x / block[1]) * block[0] + equationOffset(*equation, element.x, element.y, element.z);
         }
         Require(address == element.address, what + ": mip " + std::to_string(element.mip) + " element (" + std::to_string(element.x) + ", " + std::to_string(element.y) + ", " + std::to_string(element.z) + ") detiles from " + std::to_string(address) + " instead of addrlib's " + std::to_string(element.address));
+        Require(geometry.GuestLayerOffset(element.z) + mip.tiledOffset + TiledElementOffset(resource.tileMode, bytesPerElement, mip, 0u, element.z, element.x, element.y, false) == element.address, what + ": TiledElementOffset disagrees with addrlib for mip " + std::to_string(element.mip) + " element (" + std::to_string(element.x) + ", " + std::to_string(element.y) + ", " + std::to_string(element.z) + ")");
+    }
+}
+
+void requireDetileMatchesElementOffsets() {
+    constexpr std::array modes{TextureTileMode::kLinear, TextureTileMode::kStandard256B, TextureTileMode::kStandard4KB, TextureTileMode::kStandard64KB, TextureTileMode::kZ64KBX, TextureTileMode::kS64KBX, TextureTileMode::kD64KBX, TextureTileMode::kR64KBX, TextureTileMode::kD4KB, TextureTileMode::kD64KB};
+    for (const auto mode : modes) {
+        for (const std::uint32_t bytesPerElement : {1u, 2u, 4u, 8u, 16u}) {
+            if (EquationSwizzleMode(mode) != 0 && FindTextureSwizzleEquation(EquationSwizzleMode(mode), bytesPerElement) == nullptr) continue;
+            const auto pipeBankXor = XorSwizzleMode(mode) != 0 ? 0x300u : 0u;
+            const auto mips = ComputeElementMipLayout(mode, bytesPerElement, 300, 130, 9);
+            for (std::uint32_t level = 0; level < mips.size(); ++level) {
+                const auto& mip = mips[level];
+                std::vector<std::byte> tiled(mip.tiledSize + 65536u);
+                for (std::size_t index = 0; index < tiled.size(); ++index) tiled[index] = static_cast<std::byte>((index * 2654435761u) >> 13u);
+                std::vector<std::byte> linear(mip.linearSize);
+                DetileMip(mode, bytesPerElement, mip, pipeBankXor, 0u, tiled, linear, false);
+                for (std::uint32_t y = 0; y < mip.height; ++y) {
+                    for (std::uint32_t x = 0; x < mip.width; ++x) {
+                        const auto source = TiledElementOffset(mode, bytesPerElement, mip, pipeBankXor, 0u, x, y, false);
+                        const auto* target = linear.data() + static_cast<std::size_t>(y) * mip.pitchBytes + static_cast<std::size_t>(x) * bytesPerElement;
+                        Require(std::equal(target, target + bytesPerElement, tiled.data() + source), "DetileMip moves element (" + std::to_string(x) + ", " + std::to_string(y) + ") of mip " + std::to_string(level) + " from elsewhere than TiledElementOffset (tile mode " + std::to_string(static_cast<int>(mode)) + ", " + std::to_string(bytesPerElement) + " bytes per element)");
+                    }
+                }
+            }
+        }
     }
 }
 
 }
 
 void RunTextureTilingTests() {
+    requireDetileMatchesElementOffsets();
     {
         const auto mips = ComputeMipLayout(TextureTileMode::kLinear, 1, 4, 4, 2);
         Require(mips.size() == 2, "linear mip chain must contain the requested mip count");

@@ -23,6 +23,10 @@
 #else
 #include <string_view>
 #include "prx/libc/include/specifics/linux/HostMapping.hpp"
+#ifdef __EMSCRIPTEN__
+#include <optional>
+#include "wasm-runtime/Host.hpp"
+#endif
 #endif
 
 #ifdef _WIN32
@@ -137,6 +141,34 @@ bool IsRelinkedImage(std::uint64_t address) {
   return search.relinked;
 }
 
+#ifdef __EMSCRIPTEN__
+struct GuestSegment {
+  std::string name;
+  std::uint64_t start;
+  std::uint64_t size;
+};
+
+std::optional<GuestSegment> FindGuestSegment(std::uint64_t address) {
+  struct Search {
+    std::uint64_t address;
+    std::optional<GuestSegment> found;
+  } search{address, std::nullopt};
+  dl_iterate_phdr([](dl_phdr_info* image, std::size_t, void* data) {
+    auto& search = *static_cast<Search*>(data);
+    for (std::uint16_t index = 0; index < image->dlpi_phnum; ++index) {
+      const auto& header = image->dlpi_phdr[index];
+      const auto start = image->dlpi_addr + header.p_vaddr;
+      if (header.p_type != PT_LOAD || search.address < start || search.address - start >= header.p_memsz) continue;
+      const bool named = image->dlpi_name != nullptr && *image->dlpi_name != '\0';
+      search.found = GuestSegment{named ? image->dlpi_name : WasmRuntime::MainImageName(), start, header.p_memsz};
+      return 1;
+    }
+    return 0;
+  }, &search);
+  return search.found;
+}
+#endif
+
 void FillGuestUnwindInfo(std::uint64_t address, ModuleInfoForUnwind* info) {
   ModuleInfoEx module{};
   module.st_size = sizeof(ModuleInfoEx);
@@ -238,6 +270,16 @@ int APS5_VABI sceKernelGetModuleInfoForUnwind(uint64_t addr, int flags, ModuleIn
   info->eh_frame_size = 0;
   info->seg0_addr = reinterpret_cast<std::uint64_t>(image.dli_fbase);
   info->seg0_size = textSize;
+  return 0;
+#elif defined(__EMSCRIPTEN__)
+  const auto segment = FindGuestSegment(addr);
+  if (!segment) return SCE_KERNEL_ERROR_ESRCH;
+  info->st_size = sizeof(ModuleInfoForUnwind);
+  std::strncpy(info->name, segment->name.c_str(), sizeof(info->name) - 1);
+  info->name[sizeof(info->name) - 1] = '\0';
+  info->seg0_addr = segment->start;
+  info->seg0_size = segment->size;
+  FillGuestUnwindInfo(addr, info);
   return 0;
 #else
   const auto mapping = HostMapping::Find(addr, "sceKernelGetModuleInfoForUnwind");

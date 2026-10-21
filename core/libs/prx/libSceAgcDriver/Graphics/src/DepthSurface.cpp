@@ -1379,13 +1379,6 @@ void releaseRetired(const Context& context) {
     }
 }
 
-std::uint32_t expandedHtileWord(std::uint32_t word, bool stencilInHtile, VkImageAspectFlags cleared) {
-    if (!stencilInHtile) return (cleared & VK_IMAGE_ASPECT_DEPTH_BIT) != 0 ? 0xfffc000fu : word;
-    if ((cleared & VK_IMAGE_ASPECT_DEPTH_BIT) != 0) word = (word & 0x3f0u) | 0xfffff00fu;
-    if ((cleared & VK_IMAGE_ASPECT_STENCIL_BIT) != 0) word |= 0x3f0u;
-    return word;
-}
-
 std::mutex& htileReadsMutex() {
     static std::mutex mutex;
     return mutex;
@@ -1487,7 +1480,7 @@ VkImageAspectFlags storeBackClearedHtile(const Context& context, const DepthTarg
                 htileReads()[target.htileAddress] = collected;
                 return 0;
             }
-            if (storeHtileOnGpu(context, *recorder, target.htileAddress, bytes, expandedHtileWord(*landed, target.htileStencil, cleared))) {
+            if (storeHtileOnGpu(context, *recorder, target.htileAddress, bytes, HtileExpandedWord(*landed, target.htileStencil, cleared))) {
                 const auto generation = GuestMemory::CollectWrites(target.htileAddress, bytes);
                 std::lock_guard lock(htileReadsMutex());
                 htileReads()[target.htileAddress] = generation;
@@ -1501,7 +1494,7 @@ VkImageAspectFlags storeBackClearedHtile(const Context& context, const DepthTarg
     for (const auto word : words) cleared &= HtileFillClears(word, target.htileStencil);
     auto generation = collected;
     if (cleared != 0) {
-        for (auto& word : words) word = expandedHtileWord(word, target.htileStencil, cleared);
+        for (auto& word : words) word = HtileExpandedWord(word, target.htileStencil, cleared);
         GuestMemory::Write(target.htileAddress, std::as_bytes(std::span(words)), 4);
         generation = GuestMemory::CollectWrites(target.htileAddress, bytes);
     }
@@ -2057,6 +2050,13 @@ VkImageAspectFlags HtileFillClears(std::uint32_t pattern, bool stencilInHtile) {
     VkImageAspectFlags cleared = (pattern & 0xfu) == 0 ? VK_IMAGE_ASPECT_DEPTH_BIT : 0u;
     if (stencilInHtile && ((pattern >> 8u) & 0x3u) == 0) cleared |= VK_IMAGE_ASPECT_STENCIL_BIT;
     return cleared;
+}
+
+std::uint32_t HtileExpandedWord(std::uint32_t word, bool stencilInHtile, VkImageAspectFlags cleared) {
+    if (!stencilInHtile) return (cleared & VK_IMAGE_ASPECT_DEPTH_BIT) != 0 ? 0xfffc000fu : word;
+    if ((cleared & VK_IMAGE_ASPECT_DEPTH_BIT) != 0) word = (word & 0x3f0u) | 0xfffff00fu;
+    if ((cleared & VK_IMAGE_ASPECT_STENCIL_BIT) != 0) word |= 0x3f0u;
+    return word;
 }
 
 std::uint64_t HtileMetadataBytes(VkExtent2D extent) {

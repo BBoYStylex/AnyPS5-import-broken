@@ -11,6 +11,7 @@
 #include <atomic>
 #include <cstring>
 #include <memory>
+#include <new>
 #include <mutex>
 #include <stdexcept>
 #ifdef _WIN32
@@ -24,6 +25,9 @@
 #include <pthread.h>
 #include <ucontext.h>
 #include <unistd.h>
+#endif
+#ifdef __EMSCRIPTEN__
+#include "wasm-runtime/Guest.hpp"
 #endif
 
 extern "C" Pthread APS5_VABI scePthreadSelf();
@@ -465,6 +469,49 @@ bool RaiseOn(Pthread thread, GuestExceptionHandler handler, int signum) {
     ResumeThread(native);
     return true;
 }
+#elif defined(__EMSCRIPTEN__)
+constexpr std::uint64_t GuestRedZone = 128;
+
+void Deliver(WasmRuntime::GuestCpu& cpu, std::uint64_t& rip, std::uint64_t& rsp) {
+    using namespace WasmRuntime;
+    const auto handler = Handler(RaisedSignal);
+    if (handler == nullptr) GuestFault("sceKernelRaiseException: the handler was removed before the signal was delivered");
+    const std::uint64_t interruptedStack = cpu.gpr[Rsp];
+    const std::uint64_t frame = (interruptedStack - GuestRedZone - sizeof(GuestUcontext)) & ~std::uint64_t{63};
+    auto& ucontext = *new (reinterpret_cast<void*>(static_cast<std::uintptr_t>(frame))) GuestUcontext{};
+    auto& m = ucontext.mcontext;
+    const Register order[] = {Rdi, Rsi, Rdx, Rcx, R8, R9, Rax, Rbx, Rbp, R10, R11, R12, R13, R14, R15};
+    std::uint64_t* fields[] = {&m.rdi, &m.rsi, &m.rdx, &m.rcx, &m.r8, &m.r9, &m.rax, &m.rbx, &m.rbp, &m.r10, &m.r11, &m.r12, &m.r13, &m.r14, &m.r15};
+    for (std::size_t index = 0; index < std::size(order); ++index) *fields[index] = cpu.gpr[order[index]];
+    m.rip = rip;
+    m.rsp = rsp;
+    m.rflags = cpu.rflags;
+    m.fsbase = cpu.fsBase;
+    m.gsbase = cpu.gsBase;
+    m.len = sizeof(GuestMcontext);
+    SetFpWord(m, MxcsrOffset, cpu.mxcsr);
+    SetFpWord(m, MxcsrMaskOffset, DefaultMxcsrMask);
+    cpu.gpr[Rsp] = frame;
+    CallHandler(handler, RaisedSignal, ucontext);
+    cpu.gpr[Rsp] = interruptedStack;
+    for (std::size_t index = 0; index < std::size(order); ++index) cpu.gpr[order[index]] = *fields[index];
+    cpu.rflags = m.rflags;
+    cpu.mxcsr = FpWord(m, MxcsrOffset);
+    rip = m.rip;
+    rsp = m.rsp;
+}
+
+bool RaiseOn(Pthread thread) {
+    using namespace WasmRuntime;
+    if (thread != scePthreadSelf()) return RaiseSignal(thread->hostThread);
+    auto& cpu = CurrentCpu();
+    std::uint64_t rip = 0;
+    std::memcpy(&rip, reinterpret_cast<const void*>(static_cast<std::uintptr_t>(cpu.gpr[Rsp])), sizeof(rip));
+    std::uint64_t rsp = cpu.gpr[Rsp] + 8;
+    Deliver(cpu, rip, rsp);
+    TransferGuest(rip, rsp);
+    return true;
+}
 #else
 constexpr int HostSignal = SIGUSR1;
 constexpr std::size_t FxsaveRegisterBytes = 416;
@@ -656,6 +703,9 @@ int APS5_VABI sceKernelInstallExceptionHandler(int signum, void* handler) {
  if (!Allowed(signum) || handler == nullptr) return SCE_KERNEL_ERROR_EINVAL;
  void* expected = nullptr;
  if (!handlers[signum].compare_exchange_strong(expected, handler, std::memory_order_acq_rel)) return SCE_KERNEL_ERROR_EAGAIN;
+#ifdef __EMSCRIPTEN__
+ WasmRuntime::SetSignalDelivery(Deliver);
+#endif
  return 0;
 }
 

@@ -56,6 +56,15 @@ The code reads environment names through `getenv`, `IsEnvironmentSet`, `kibSetti
 | `APS5_VERIFY_SRT_TAPE` | presence | `core/shader/recompiler/Optimization/src/SrtWalker/SrtTape.cpp` |  | walks a plan's runtime sources a second time through the evaluator, adopts its answers where the two differ and prints the first twenty differences |
 | `APS5_WAVE_LDS_SUBGROUP` | presence | `core/shader/recompiler/SpirvBackend/src/SpirvEmitter.cpp` |  | restores subgroup-scope LDS barriers for single-wave workgroups instead of workgroup scope |
 
+### core/wasm-runtime
+
+| Name | Kind | Source | Default | Description |
+|------|------|--------|---------|-------------|
+| `APS5_CAPTURE_SHADERS` | string | `core/wasm-runtime/gpu/ShaderCapture.cpp` |  | directory the WebAssembly runtime writes the recompile request, registers, pipeline state and WGSL of each shader it compiles to |
+| `APS5_TRACE_NIDS` | presence | `core/wasm-runtime/src/GuestCall.cpp` |  | logs each system library call the WebAssembly runtime bridges, with its first four arguments, return address and result |
+| `APS5_TRACE_SIGNALS` | presence | `core/wasm-runtime/src/Thread.cpp` |  | logs each guest signal the WebAssembly runtime raises and when a thread runs and leaves its handler |
+| `APS5_WEBGPU_NULL` | presence | `core/wasm-runtime/gpu/WebGpuBackend.cpp` |  | makes the WebGPU backend skip all GPU work; shaders are still captured |
+
 ### libSceAgc
 
 | Name | Kind | Source | Default | Description |

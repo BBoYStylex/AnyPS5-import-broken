@@ -1,0 +1,129 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>AnyPS5</title>
+<link rel="icon" href="data:,">
+<style>
+html, body { margin: 0; height: 100%; background: #000; }
+canvas { display: block; width: 100%; height: 100%; object-fit: contain; }
+#status { position: fixed; left: 16px; top: 16px; max-width: min(720px, calc(100% - 32px)); box-sizing: border-box; padding: 12px 14px;
+  background: rgba(0, 0, 0, 0.8); color: #ccc; font: 13px/1.4 system-ui, sans-serif; border: 1px solid #555; border-radius: 6px; cursor: pointer; }
+#status .status-step { color: #fff; font-weight: 600; overflow-wrap: anywhere; }
+#status .status-bar { display: block; width: 100%; margin: 6px 0 2px; }
+#status .status-bar[hidden] { display: none; }
+#status .status-log { margin: 8px 0 0; max-height: 15em; overflow: auto; color: #999; font: 11px/1.35 ui-monospace, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+#status .status-log:empty { display: none; }
+#status.running { opacity: 0.45; }
+#status.running:hover, #status.expanded { opacity: 1; }
+#status.running:not(.expanded) .status-log { display: none; }
+#status.failed { border-color: #d33; }
+#status.failed .status-step { color: #f66; }
+</style>
+</head>
+<body>
+<canvas id="canvas" width="1920" height="1080"></canvas>
+<div id="status"></div>
+<script type="module">
+import { startInput } from './input.mjs';
+import { startAudio } from './audio.mjs';
+import { openStorage } from './storage.mjs';
+import { isFatal, parseDataProgress, startStatus } from './status.mjs';
+
+const status = startStatus(document.getElementById('status'));
+const print = (text) => {
+  console.log(text);
+  status.log(text);
+  if (isFatal(text)) status.fail(text);
+};
+window.addEventListener('error', (event) => status.fail(event.message || String(event.error)));
+window.addEventListener('unhandledrejection', (event) => status.fail(String(event.reason?.stack || event.reason)));
+
+function load(source) {
+  return new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = source;
+    script.onload = resolve;
+    script.onerror = () => reject(new Error('cannot load ' + source));
+    document.body.appendChild(script);
+  });
+}
+
+async function fetchWithProgress(url, onProgress, onDone) {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`${url}: HTTP ${response.status}`);
+  const total = Number(response.headers.get('Content-Length')) || 0;
+  const reader = response.body.getReader();
+  let loaded = 0;
+  const body = new ReadableStream({
+    async pull(controller) {
+      const { done, value } = await reader.read();
+      if (done) {
+        onDone();
+        controller.close();
+        return;
+      }
+      loaded += value.byteLength;
+      onProgress(loaded, total);
+      controller.enqueue(value);
+    },
+    cancel: (reason) => reader.cancel(reason),
+  });
+  return new Response(body, { headers: { 'Content-Type': 'application/wasm' } });
+}
+
+const input = startInput(window);
+const audio = startAudio(window);
+let storage = null;
+globalThis.aps5Platform = {
+  attachInput: (buffer, address) => input.attach(buffer, address),
+  attachAudio: (buffer, address) => audio.attach(buffer, address).catch((error) => print('anyps5 audio: ' + (error.stack || error))),
+  audioStats: () => audio.stats(),
+  commitStorage: () => storage.commit(),
+};
+
+(async () => {
+  if (!crossOriginIsolated) throw new Error('the page is not cross-origin isolated, so SharedArrayBuffer is unavailable: open it through serve.py at http://127.0.0.1 or http://localhost');
+  if (!navigator.gpu) throw new Error('this browser has no WebGPU: use Chrome (on Linux started with --enable-unsafe-webgpu --enable-features=Vulkan)');
+  const parameters = new URLSearchParams(location.search);
+  const game = parameters.get('game') || 'game/game.wasm';
+  const data = parameters.get('data') || 'game/game.data.js';
+  const runtime = parameters.get('runtime') || 'runtime/anyps5-runtime-web.js';
+  let dataDone = false;
+  globalThis.Module = {
+    arguments: [game],
+    canvas: document.getElementById('canvas'),
+    print,
+    printErr: print,
+    setStatus: (text) => {
+      const progress = parseDataProgress(text);
+      if (!progress || dataDone) return;
+      status.progress(progress.loaded, progress.total);
+      if (progress.loaded >= progress.total) {
+        dataDone = true;
+        status.step('Starting the game');
+      }
+    },
+    onRuntimeInitialized: () => status.running(),
+    onAbort: (what) => status.fail('Aborted(' + what + ')'),
+    onExit: (code) => status.fail('the game exited with status ' + code),
+    locateFile: (path, prefix) => path.endsWith('.data') ? new URL(path, new URL(data, location.href)).href : prefix + path,
+    preRun: [() => {
+      FS.mkdir('/data');
+      storage = openStorage(FS, FS.filesystems.IDBFS, ['/_sd', '/_sd_mem'], { add: addRunDependency, remove: removeRunDependency }, print);
+      for (const entry of parameters.getAll('env')) {
+        const separator = entry.indexOf('=');
+        if (separator > 0) ENV[entry.slice(0, separator)] = entry.slice(separator + 1);
+      }
+    }],
+  };
+  status.step('Downloading game code (game.wasm)');
+  const response = await fetchWithProgress(game, (loaded, total) => status.progress(loaded, total), () => status.step('Compiling game code'));
+  globalThis.aps5GameModule = await WebAssembly.compileStreaming(response);
+  status.step('Downloading game data (game.data)');
+  await load(data);
+  await load(runtime);
+})().catch((error) => print('anyps5 loader: ' + (error.stack || error)));
+</script>
+</body>
+</html>
