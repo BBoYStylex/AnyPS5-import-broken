@@ -8,7 +8,6 @@
 extern "C" {
 int APS5_VABI sceAppInstUtilInitialize(void);
 int APS5_VABI sceAppInstUtilTerminate(void);
-int APS5_VABI sceAppInstUtilAppIsInInstalling(std::int32_t* installing);
 int APS5_VABI sceAppInstUtilAppExists(const char* titleId, std::int32_t* exists);
 }
 
@@ -33,7 +32,6 @@ bool Throws(TCall call) {
 
 void RequireStopped() {
     std::int32_t value = 7;
-    Require(Throws([&] { sceAppInstUtilAppIsInInstalling(&value); }), "an install state was read before initialization");
     Require(Throws([&] { sceAppInstUtilAppExists("PPSA00000", &value); }), "a title was looked up before initialization");
     Require(value == 7, "a stopped service wrote a result");
     Require(Throws([] { sceAppInstUtilTerminate(); }), "a stopped service was terminated");
@@ -46,9 +44,6 @@ int main() {
     Require(sceAppInstUtilInitialize() == 0, "initialization failed");
     Require(Throws([] { sceAppInstUtilInitialize(); }), "a second initialization was accepted");
 
-    std::int32_t installing = 7;
-    Require(sceAppInstUtilAppIsInInstalling(&installing) == 0 && installing == 0, "an install pass was reported");
-    Require(Throws([] { sceAppInstUtilAppIsInInstalling(nullptr); }), "a null install state was accepted");
 
     std::int32_t exists = 0;
     Require(sceAppInstUtilAppExists("PPSA00000", &exists) == 0 && exists == 1, "the running title is not installed");

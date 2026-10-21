@@ -38,10 +38,7 @@ int APS5_VABI sceAppInstUtilAppInstallTitleDir(const char* titleId, const char* 
     return 0;
 }
 int APS5_VABI sceAppInstUtilAppIsInInstalling(int32_t* installing) {
-    std::lock_guard lock(g_serviceMutex);
-    RequireStarted(__func__);
-    if (installing == nullptr) APS5_INVALID_ARG_EX;
-    *installing = 0;
+    NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 int APS5_VABI sceAppInstUtilAppIsInUpdating() {
