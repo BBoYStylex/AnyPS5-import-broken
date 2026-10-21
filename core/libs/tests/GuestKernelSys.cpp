@@ -258,7 +258,7 @@ void DirectoryRenameTests(const std::filesystem::path& parent) {
 }
 
 static void SceKernelFlock() {
-    const auto path = (std::filesystem::temp_directory_path() / "anyps5-sce-flock.bin").string();
+    const auto path = "anyps5-sce-flock-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".bin";
     const int first = open_nid_postfix(path.c_str(), 0x602, 0644);
     const int second = open_nid_postfix(path.c_str(), 2, 0);
     Require(first >= 0 && second >= 0);
