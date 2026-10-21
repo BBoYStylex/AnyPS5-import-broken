@@ -1,6 +1,4 @@
-#include <cstdint>
-#include <cstddef>
-#include "SceTypes.hpp"
+#include "prx/libmdbg_syscore/Mdbg.hpp"
 #include "prx/libc/include/General.hpp"
 
 extern "C" {
@@ -10,7 +8,8 @@ int APS5_VABI sceDebugAcquireAndUpdateDebugRegister() {
     return 0;
 }
 
-int APS5_VABI sceDebugAttachProcess() {
+int APS5_VABI sceDebugAttachProcess(int pid) {
+    (void)pid;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -20,7 +19,8 @@ int APS5_VABI sceDebugCancelCoredump() {
     return 0;
 }
 
-int APS5_VABI sceDebugClearStepThread() {
+int APS5_VABI sceDebugClearStepThread(int tid) {
+    (void)tid;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -45,12 +45,19 @@ int APS5_VABI sceDebugCreateScratchDataAreaForPrx() {
     return 0;
 }
 
-int APS5_VABI sceDebugCreateScratchExecutableArea() {
+int APS5_VABI sceDebugCreateScratchExecutableArea(int pid, std::size_t size, std::uint64_t* addressOut) {
+    (void)pid;
+    (void)size;
+    (void)addressOut;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceDebugCreateScratchExecutableAreaForPrx() {
+int APS5_VABI sceDebugCreateScratchExecutableAreaForPrx(int pid, std::size_t size, const char* name, std::uint64_t* addressOut) {
+    (void)pid;
+    (void)size;
+    (void)name;
+    (void)addressOut;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -70,27 +77,38 @@ int APS5_VABI sceDebugDestroyScratchDataArea() {
     return 0;
 }
 
-int APS5_VABI sceDebugDestroyScratchExecutableArea() {
+int APS5_VABI sceDebugDestroyScratchExecutableArea(int pid, std::uint64_t address, std::size_t size) {
+    (void)pid;
+    (void)address;
+    (void)size;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceDebugDetachProcess() {
+int APS5_VABI sceDebugDetachProcess(int pid) {
+    (void)pid;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceDebugGetApplicationIdByTitleId() {
+int APS5_VABI sceDebugGetApplicationIdByTitleId(char* titleId, int* appId) {
+    (void)titleId;
+    (void)appId;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceDebugGetApplicationInfo() {
+int APS5_VABI sceDebugGetApplicationInfo(int appId, SceDebugAppInfo* info) {
+    (void)appId;
+    (void)info;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceDebugGetApplicationList() {
+int APS5_VABI sceDebugGetApplicationList(int* appIds, int maxAppIds, int* actualAppIds) {
+    (void)appIds;
+    (void)maxAppIds;
+    (void)actualAppIds;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -120,7 +138,12 @@ int APS5_VABI sceDebugGetDebugRegisterStatusMap() {
     return 0;
 }
 
-int APS5_VABI sceDebugGetEventList() {
+int APS5_VABI sceDebugGetEventList(int pid, std::uint64_t sid, SceKernelEvent* dataPtr, std::uint64_t a4, std::size_t** actualEvents) {
+    (void)pid;
+    (void)sid;
+    (void)dataPtr;
+    (void)a4;
+    (void)actualEvents;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -185,17 +208,29 @@ int APS5_VABI sceDebugGetJobManagerSequenceList() {
     return 0;
 }
 
-int APS5_VABI sceDebugGetModuleInfo() {
+int APS5_VABI sceDebugGetModuleInfo(int pid, SceDebugModuleId moduleId, SceDebugModuleInfo* moduleInfo) {
+    (void)pid;
+    (void)moduleId;
+    (void)moduleInfo;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceDebugGetModuleList() {
+int APS5_VABI sceDebugGetModuleList(int pid, SceDebugModuleId* moduleIdList, int moduleIdListSize, int* moduleIdCount) {
+    (void)pid;
+    (void)moduleIdList;
+    (void)moduleIdListSize;
+    (void)moduleIdCount;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceDebugGetModuleMetaData() {
+int APS5_VABI sceDebugGetModuleMetaData(int pid, SceDebugModuleId moduleId, void* metaData, std::size_t metaDataSize, std::size_t* actualMetaData) {
+    (void)pid;
+    (void)moduleId;
+    (void)metaData;
+    (void)metaDataSize;
+    (void)actualMetaData;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -230,12 +265,17 @@ int APS5_VABI sceDebugGetProcessEventCntlFlag() {
     return 0;
 }
 
-int APS5_VABI sceDebugGetProcessInfo() {
+int APS5_VABI sceDebugGetProcessInfo(int pid, SceDebugProcessInfo* processInfo) {
+    (void)pid;
+    (void)processInfo;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceDebugGetProcessList() {
+int APS5_VABI sceDebugGetProcessList(int* pidList, int pidListSize, int* pidCount) {
+    (void)pidList;
+    (void)pidListSize;
+    (void)pidCount;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -300,7 +340,10 @@ int APS5_VABI sceDebugGetSystemStatusCount() {
     return 0;
 }
 
-int APS5_VABI sceDebugGetThreadInfo() {
+int APS5_VABI sceDebugGetThreadInfo(int pid, int tid, SceDebugThreadInfo* info) {
+    (void)pid;
+    (void)tid;
+    (void)info;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -310,7 +353,11 @@ int APS5_VABI sceDebugGetThreadInfoByIdent() {
     return 0;
 }
 
-int APS5_VABI sceDebugGetThreadList() {
+int APS5_VABI sceDebugGetThreadList(int pid, int* tidList, int tidListSize, int* tidCount) {
+    (void)pid;
+    (void)tidList;
+    (void)tidListSize;
+    (void)tidCount;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -380,7 +427,10 @@ int APS5_VABI sceDebugGetVirtualMemoryDetailInfoForCoredump() {
     return 0;
 }
 
-int APS5_VABI sceDebugGetVirtualMemoryInfo() {
+int APS5_VABI sceDebugGetVirtualMemoryInfo(int pid, std::uint64_t address, SceDebugVirtualQueryInfo* info) {
+    (void)pid;
+    (void)address;
+    (void)info;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -420,7 +470,8 @@ int APS5_VABI sceDebugGetWorkerThreadListOfUltRuntime() {
     return 0;
 }
 
-int APS5_VABI sceDebugInit() {
+int APS5_VABI sceDebugInit(int a1) {
+    (void)a1;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -560,27 +611,38 @@ int APS5_VABI sceDebugIpmiGetTidListByDump() {
     return 0;
 }
 
-int APS5_VABI sceDebugKillApplication() {
+int APS5_VABI sceDebugKillApplication(int context, int appid) {
+    (void)context;
+    (void)appid;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceDebugKillProcess() {
+int APS5_VABI sceDebugKillProcess(int pid) {
+    (void)pid;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceDebugNoStopChildProcesses() {
+int APS5_VABI sceDebugNoStopChildProcesses(int pid) {
+    (void)pid;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceDebugNoStopOnDLLoad() {
+int APS5_VABI sceDebugNoStopOnDLLoad(int pid) {
+    (void)pid;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceDebugProcessSpawn() {
+int APS5_VABI sceDebugProcessSpawn(int context, void* argv, int flags, std::size_t stackSize, const char* workdir, const char* pathFile) {
+    (void)context;
+    (void)argv;
+    (void)flags;
+    (void)stackSize;
+    (void)workdir;
+    (void)pathFile;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -595,7 +657,12 @@ int APS5_VABI sceDebugReadEventForTest() {
     return 0;
 }
 
-int APS5_VABI sceDebugReadProcessMemory() {
+int APS5_VABI sceDebugReadProcessMemory(int pid, std::uint64_t addrss, std::size_t size, std::uint8_t* data, std::size_t* sizeRead) {
+    (void)pid;
+    (void)addrss;
+    (void)size;
+    (void)data;
+    (void)sizeRead;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -620,7 +687,10 @@ int APS5_VABI sceDebugReadProcessResourceStatData() {
     return 0;
 }
 
-int APS5_VABI sceDebugReadThreadRegister() {
+int APS5_VABI sceDebugReadThreadRegister(int tid, SceDebugRegisterId reg, SceDebugRegister* value) {
+    (void)tid;
+    (void)reg;
+    (void)value;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -635,17 +705,22 @@ int APS5_VABI sceDebugReleaseDebugRegister() {
     return 0;
 }
 
-int APS5_VABI sceDebugResumeApplication() {
+int APS5_VABI sceDebugResumeApplication(int context, int appId) {
+    (void)context;
+    (void)appId;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceDebugResumeProcess() {
+int APS5_VABI sceDebugResumeProcess(int pid, int a2) {
+    (void)pid;
+    (void)a2;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceDebugResumeThread() {
+int APS5_VABI sceDebugResumeThread(int tid) {
+    (void)tid;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -655,37 +730,49 @@ int APS5_VABI sceDebugSetProcessEventCntlFlag() {
     return 0;
 }
 
-int APS5_VABI sceDebugSetStepThread() {
+int APS5_VABI sceDebugSetStepThread(int tid) {
+    (void)tid;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceDebugSpawnApplication() {
+int APS5_VABI sceDebugSpawnApplication(int context, char* titleId, void* argv, int flags, int mountFlags) {
+    (void)context;
+    (void)titleId;
+    (void)argv;
+    (void)flags;
+    (void)mountFlags;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceDebugStopChildProcesses() {
+int APS5_VABI sceDebugStopChildProcesses(int pid) {
+    (void)pid;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceDebugStopOnDLLoad() {
+int APS5_VABI sceDebugStopOnDLLoad(int pid) {
+    (void)pid;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceDebugSuspendApplication() {
+int APS5_VABI sceDebugSuspendApplication(int context, int appid) {
+    (void)context;
+    (void)appid;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceDebugSuspendProcess() {
+int APS5_VABI sceDebugSuspendProcess(int pid) {
+    (void)pid;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceDebugSuspendThread() {
+int APS5_VABI sceDebugSuspendThread(int tid) {
+    (void)tid;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -705,7 +792,12 @@ int APS5_VABI sceDebugTriggerVrCaptureDump() {
     return 0;
 }
 
-int APS5_VABI sceDebugWriteProcessMemory() {
+int APS5_VABI sceDebugWriteProcessMemory(int pid, std::uint64_t address, std::size_t size, std::uint8_t* data, std::size_t* sizeWritten) {
+    (void)pid;
+    (void)address;
+    (void)size;
+    (void)data;
+    (void)sizeWritten;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -715,7 +807,10 @@ int APS5_VABI sceDebugWriteProcessRegister() {
     return 0;
 }
 
-int APS5_VABI sceDebugWriteThreadRegister() {
+int APS5_VABI sceDebugWriteThreadRegister(int tid, SceDebugRegisterId reg, SceDebugRegister value) {
+    (void)tid;
+    (void)reg;
+    (void)value;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
