@@ -12,6 +12,7 @@
 #include "prx/libkernel/File/include/SharedMemory.hpp"
 #include "prx/libkernel/File/include/FileFlags.hpp"
 #include "prx/libkernel/File/include/NativeStat.hpp"
+#include "prx/libkernel/File/include/TrailingSlash.hpp"
 #include "prx/libkernel/File/include/KernelStatfs.hpp"
 #include "prx/libkernel/File/include/DirectoryDescriptor.hpp"
 #include "prx/libkernel/File/include/DescriptorControl.hpp"
@@ -1454,6 +1455,8 @@ int64_t APS5_VABI pwritev_nid_postfix(int d, const KernelIovec* iov, int iovcnt,
 
 int APS5_VABI sceKernelRename(const char* from, const char* to) {
     if (!from) return SceErrorFromErrno(GUEST_EFAULT);
+    if (const int slash = TrailingSlashError_nid_no_patch(from, false)) return SceErrorFromErrno(slash);
+    if (const int slash = TrailingSlashError_nid_no_patch(to, true)) return SceErrorFromErrno(slash);
     const int result = RenameGuestPath_nid_no_patch(from, to);
     return result == 0 ? 0 : SceKernelError(errno);
     if (const int dot = RenameDotError_nid_no_patch(from)) return SceKernelError(dot);
