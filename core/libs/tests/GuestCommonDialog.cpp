@@ -19,6 +19,6 @@ int main() {
     Require(!sceCommonDialogIsUsed());
     Require(sceCommonDialogInitialize() == COMMON_DIALOG_OK);
     Require(!sceCommonDialogIsUsed());
-    Require(sceCommonDialogInitialize() == COMMON_DIALOG_ERROR_ALREADY_INITIALIZED);
+    Require(sceCommonDialogInitialize() == COMMON_DIALOG_ERROR_ALREADY_SYSTEM_INITIALIZED);
     Require(!sceCommonDialogIsUsed());
 }
