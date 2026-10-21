@@ -37,7 +37,7 @@ constexpr std::array<FormatInfo, 82> kFormatInfoTable {{
     {IrBufferFormat::Format16_16Float, true, false, false},
     {IrBufferFormat::Format11_11_10UNorm, true, true, false},
     {IrBufferFormat::Format11_11_10UInt, true, true, false},
-    {IrBufferFormat::Format11_11_10Float, true, false, false},
+    {IrBufferFormat::Format11_11_10Float, true, true, false},
     {IrBufferFormat::Format10_11_11Float, true, true, false},
     {IrBufferFormat::Format10_10_10_2UNorm, true, false, false},
     {IrBufferFormat::Format10_10_10_2SNorm, true, false, false},
@@ -123,7 +123,7 @@ IrTextureNumericClass SampledTextureNumericClass(IrBufferFormat format) {
 }
 
 IrBufferFormat RemapTextureFormat(IrBufferFormat format) {
-    return format == IrBufferFormat::Format11_11_10UNorm || format == IrBufferFormat::Format11_11_10UInt || format == IrBufferFormat::Format10_11_11Float ? IrBufferFormat::Format32UInt : format;
+    return format == IrBufferFormat::Format11_11_10UNorm || format == IrBufferFormat::Format11_11_10UInt || format == IrBufferFormat::Format11_11_10Float || format == IrBufferFormat::Format10_11_11Float ? IrBufferFormat::Format32UInt : format;
 }
 
 std::uint32_t DepthBitsTextureWidth(std::uint32_t word1, std::uint32_t word3) {
