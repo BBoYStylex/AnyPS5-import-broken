@@ -92,6 +92,7 @@ int APS5_VABI sceVideodecDecode(Ctrl*, const InputData*, FrameBuffer*, PictureIn
 int APS5_VABI sceVideodecDeleteDecoder(Ctrl*);
 int APS5_VABI sceVideodecFlush(Ctrl*, FrameBuffer*, PictureInfo*);
 int APS5_VABI sceVideodecReset(Ctrl*);
+int APS5_VABI sceVideodecMapMemory(void);
 }
 
 namespace {
@@ -230,6 +231,16 @@ void testReset() {
     check(!picture.isValid, "a reset decoder produced a picture");
 }
 
+void testUnimplemented() {
+    bool threwMap = false;
+    try {
+        sceVideodecMapMemory();
+    } catch (const std::runtime_error&) {
+        threwMap = true;
+    }
+    check(threwMap, "sceVideodecMapMemory must throw");
+}
+
 }
 
 int main() {
@@ -238,6 +249,7 @@ int main() {
         testDecodeCropped();
         testErrors();
         testReset();
+        testUnimplemented();
         std::puts("Videodec tests passed");
         return 0;
     } catch (const std::exception& error) {
