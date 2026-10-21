@@ -551,13 +551,25 @@ int APS5_VABI sceGnmUnregisterResource(void) {
     return Failure;
 }
 
-int APS5_VABI sceGnmUpdateGsShader(void) {
-    NotImplemented_nid_no_patch(__func__);
+int APS5_VABI sceGnmUpdateGsShader(std::uint32_t* cmdbuf, std::uint32_t size, const std::uint32_t* regs) {
+    if (!cmdbuf || size < 0x1d || !regs || regs[1] != 0) return CommandFailed;
+    auto* at = EmitPacket(cmdbuf, OpSetShReg, {0x88, regs[0], 0});
+    at = EmitPacket(at, OpSetShReg, {0x8a, regs[2], regs[3]});
+    at = EmitPacket(at, OpNop, {0xc01e02e5u, regs[4]});
+    at = EmitPacket(at, OpNop, {0xc01e029bu, regs[5]});
+    at = EmitPacket(at, OpNop, {0xc01e02e4u, regs[6]});
+    Nop(at, 11);
     return 0;
 }
 
-int APS5_VABI sceGnmUpdateHsShader(void) {
-    NotImplemented_nid_no_patch(__func__);
+int APS5_VABI sceGnmUpdateHsShader(std::uint32_t* cmdbuf, std::uint32_t size, const std::uint32_t* regs, std::uint32_t lsHsConfig) {
+    if (!cmdbuf || size <= 0x1c || !regs || regs[1] != 0) return CommandFailed;
+    auto* at = EmitPacket(cmdbuf, OpSetShReg, {0x108, regs[0], 0});
+    at = EmitPacket(at, OpSetShReg, {0x10a, regs[2], regs[3]});
+    at = EmitPacket(at, OpNop, {0xc01e0286u, regs[5], regs[6]});
+    at = EmitPacket(at, OpNop, {0xc01e02dbu, regs[4]});
+    at = EmitPacket(at, OpNop, {0xc01e02d6u, lsHsConfig});
+    Nop(at, 11);
     return 0;
 }
 
