@@ -675,6 +675,16 @@ if(BUILD_TESTING)
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceVoiceChat>")
     endif()
 
+    add_test_executable(guest_fs_internal_for_vsh_signatures_tests tests/GuestFsInternalForVshSignatures.cpp)
+    target_include_directories(guest_fs_internal_for_vsh_signatures_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(guest_fs_internal_for_vsh_signatures_tests PRIVATE libSceFsInternalForVsh libkernel libc)
+    configure_windows_unwind(guest_fs_internal_for_vsh_signatures_tests)
+    add_test(NAME guest_fs_internal_for_vsh_signatures COMMAND guest_fs_internal_for_vsh_signatures_tests)
+    if(WIN32)
+        set_tests_properties(guest_fs_internal_for_vsh_signatures PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceFsInternalForVsh>")
+    endif()
+
     add_test_executable(guest_np_game_intent_tests tests/GuestNpGameIntent.cpp)
     target_include_directories(guest_np_game_intent_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_link_libraries(guest_np_game_intent_tests PRIVATE libSceNpGameIntent libc)
