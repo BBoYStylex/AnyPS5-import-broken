@@ -13,8 +13,35 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
+#include <utility>
 
 namespace AgcDriver::DriverDetail {
+
+DrawVerdict Driver::drawLateTestMergeSplit(QueueState& queue, std::span<const std::uint32_t> packet, const Submission& submission, std::string& rejected) {
+    const auto targets = std::exchange(lateTestSplitTargets, 0u);
+    require(targets != 0 && queue.context.contains(0x8e) && queue.context.contains(0x200), "a late-test merge split needs its target bits, CB_TARGET_MASK and DB_DEPTH_CONTROL");
+    const auto mask = readRegister(queue.context, 0x8e);
+    const auto depthControl = readRegister(queue.context, 0x200);
+    struct Restore {
+        QueueState& queue;
+        std::uint32_t mask;
+        std::uint32_t depthControl;
+        ~Restore() {
+            queue.context[0x8e] = mask;
+            queue.context[0x200] = depthControl;
+        }
+    } restore{queue, mask, depthControl};
+    queue.context[0x8e] = mask & ~targets;
+    const auto depthPass = draw(queue, packet, submission, rejected);
+    require(depthPass != DrawVerdict::Split, "the depth pass of a late-test merge split asked to split again");
+    if (depthPass == DrawVerdict::Rejected) return depthPass;
+    queue.context[0x8e] = mask & targets;
+    queue.context[0x200] = (depthControl & ~0x74u) | (static_cast<std::uint32_t>(VK_COMPARE_OP_EQUAL) << 4u);
+    const auto mergePass = draw(queue, packet, submission, rejected);
+    require(mergePass != DrawVerdict::Split, "the merge pass of a late-test merge split still writes depth or stencil");
+    if (mergePass == DrawVerdict::Rejected) return mergePass;
+    return depthPass == DrawVerdict::Drawn || mergePass == DrawVerdict::Drawn ? DrawVerdict::Drawn : DrawVerdict::Nothing;
+}
 
 DrawVerdict Driver::draw(QueueState& queue, std::span<const std::uint32_t> packet, const Submission& submission, std::string& rejected) {
     PerformanceTimer timing("Driver.Draw");
@@ -186,6 +213,10 @@ DrawVerdict Driver::draw(QueueState& queue, std::span<const std::uint32_t> packe
     }
     resolveDrawDecode(queue, submission, localDevice->graphicsContext(), decode, registerKey, drawKey, profile);
     const auto& graphics = decode->state;
+    if (const auto targets = Graphics::LateTestMergeSplitTargets(graphics); targets != 0) {
+        lateTestSplitTargets = targets;
+        return DrawVerdict::Split;
+    }
     auto pixel = decode->pixel;
     const bool writesPrograms = graphics.stages.mesh || drawParameters.indirect || !userPatches.empty();
     std::vector<DrawProgram> writablePrograms;
