@@ -236,13 +236,13 @@ llvm::Function* LlvmLifter::liftFunctionAtAddress(
                     auto src = (byte == 0x39) ? regSrc : regDst;
                     llvm::Value* v1 = lifterContext.ReadRegister(dst, builder);
                     llvm::Value* v2 = lifterContext.ReadRegister(src, builder);
-                    lifterContext.EvaluateAlu(X86AluOp::Cmp, v1, v2, builder);
+                    static_cast<void>(lifterContext.EvaluateAlu(X86AluOp::Cmp, v1, v2, builder));
                     offset = currentOffset + 2;
                     continue;
                 } else if (byte == 0x85) {
                     llvm::Value* v1 = lifterContext.ReadRegister(regDst, builder);
                     llvm::Value* v2 = lifterContext.ReadRegister(regSrc, builder);
-                    lifterContext.EvaluateAlu(X86AluOp::Test, v1, v2, builder);
+                    static_cast<void>(lifterContext.EvaluateAlu(X86AluOp::Test, v1, v2, builder));
                     offset = currentOffset + 2;
                     continue;
                 }

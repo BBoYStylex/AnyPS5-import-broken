@@ -59,21 +59,15 @@ GraphicsProcessingSummary GraphicsDriver::ProcessAssets(const GraphicsProcessing
 
         std::vector<PipelineConfiguration> configs;
         for (const auto& shader : transpiledShaders) {
-            if (shader.Stage == ConsoleShaderStage::Compute) {
+            if (shader.Stage == VK_SHADER_STAGE_COMPUTE_BIT) {
                 VkPipeline pipeline = pipelineWrapper->CompileComputePipeline(shader.SpirvBytecode, {}, "main");
                 if (pipeline != VK_NULL_HANDLE) {
                     ++summary.PipelinesCompiled;
                 }
             } else {
                 PipelineConfiguration config{};
-                VkShaderStageFlagBits stageBit = VK_SHADER_STAGE_VERTEX_BIT;
-                if (shader.Stage == ConsoleShaderStage::Fragment) {
-                    stageBit = VK_SHADER_STAGE_FRAGMENT_BIT;
-                } else if (shader.Stage == ConsoleShaderStage::Geometry) {
-                    stageBit = VK_SHADER_STAGE_GEOMETRY_BIT;
-                }
                 config.Stages.push_back({
-                    .Stage = stageBit,
+                    .Stage = shader.Stage,
                     .SpirvBytecode = shader.SpirvBytecode,
                     .EntryPoint = "main"
                 });

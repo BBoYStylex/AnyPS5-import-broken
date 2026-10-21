@@ -1,10 +1,13 @@
 #include <runtime/OsSubsystemStubs.hpp>
 
 #if defined(_WIN32)
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 #include <windows.h>
 #include <io.h>
 #include <fcntl.h>
+#include <share.h>
 #else
 #include <pthread.h>
 #include <unistd.h>
@@ -14,7 +17,15 @@
 #include <iostream>
 #include <string>
 
-extern "C" void NotImplemented_nid_no_patch(const char* name);
+#if defined(__GNUC__) || defined(__clang__)
+extern "C" __attribute__((weak)) void NotImplemented_nid_no_patch(const char* name) {
+    static_cast<void>(name);
+}
+#else
+extern "C" void NotImplemented_nid_no_patch(const char* name) {
+    static_cast<void>(name);
+}
+#endif
 
 namespace Aot::Runtime {
 

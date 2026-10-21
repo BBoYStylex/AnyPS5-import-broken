@@ -32,18 +32,25 @@ int main() {
         .SizeBytes = destBuffer.size(),
         .IsGpuExclusive = false
     };
-    assert(streaming.RegisterExternalGpuMemory(gpuResource));
-    assert(streaming.HasExternalGpuMemory(42));
+    bool regOk = streaming.RegisterExternalGpuMemory(gpuResource);
+    assert(regOk);
+    static_cast<void>(regOk);
+    bool hasRes = streaming.HasExternalGpuMemory(42);
+    assert(hasRes);
+    static_cast<void>(hasRes);
+
     uint64_t gpuReqId = streaming.StreamToGpuResource(42, 0, "", 0, 32);
     assert(gpuReqId > 0);
     streaming.WaitForRequest(gpuReqId);
     streaming.UnregisterExternalGpuMemory(42);
-    assert(!streaming.HasExternalGpuMemory(42));
-
-    streaming.Shutdown();
+    bool stillHasRes = streaming.HasExternalGpuMemory(42);
+    assert(!stillHasRes);
+    static_cast<void>(stillHasRes);
 
     Aot::Io::FileStreamQueue queue;
     queue.Flush();
+
+    streaming.Shutdown();
 
     return 0;
 }

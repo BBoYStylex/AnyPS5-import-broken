@@ -38,7 +38,10 @@ void DirectStorageStreaming::Shutdown() {
         return;
     }
 
-    workerRunning.store(false, std::memory_order_release);
+    {
+        std::lock_guard<std::mutex> lock(queueMutex);
+        workerRunning.store(false, std::memory_order_release);
+    }
     queueCondition.notify_all();
 
     for (std::thread& worker : workerThreads) {
@@ -66,11 +69,15 @@ uint64_t DirectStorageStreaming::EnqueueRequest(StreamRequest request) {
         pendingRequests.push(std::move(request));
     }
 
-    queueCondition.notify_one();
+    queueCondition.notify_all();
     return id;
 }
 
 void DirectStorageStreaming::WaitForRequest(uint64_t requestId) {
+    if (requestId == 0) {
+        return;
+    }
+
     std::unique_lock<std::mutex> lock(completionMutex);
     completionCondition.wait(lock, [this, requestId]() {
         return completedRequests.contains(requestId);
@@ -177,7 +184,7 @@ void DirectStorageStreaming::workerThreadLoop() {
 }
 
 bool DirectStorageStreaming::processRequestCpuFallback(const StreamRequest& request) {
-    if (request.TargetDestination == nullptr) {
+    if (request.TargetDestination == nullptr || request.SourceFilePath.empty()) {
         return false;
     }
 
