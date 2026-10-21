@@ -1,6 +1,10 @@
 #include <nid/NidCompute.hpp>
 #include <cstdio>
+#include <cstdlib>
+#include <fstream>
+#include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -29,21 +33,32 @@ Module Load(const std::filesystem::path& path) { return dlopen(path.c_str(), RTL
 Export Resolve(Module module, const std::string& name) { return reinterpret_cast<Export>(dlsym(module, name.c_str())); }
 #endif
 
-void CheckLibrary(const std::filesystem::path& directory, const std::string& library, const std::vector<const char*>& names) {
-    const auto path = directory / (library + ".prx");
-    const auto module = Load(path);
+void CheckLibrary(const std::filesystem::path& directory, const std::filesystem::path& self, const std::string& library, const std::vector<const char*>& names) {
+    const auto module = Load(directory / (library + ".prx"));
     Require(module != nullptr, library + " does not load");
-    std::size_t resolved = 0;
-    for (const auto* name : names) {
+    std::size_t refused = 0;
+    for (std::size_t index = 0; index < names.size(); ++index) {
+        const auto* name = names[index];
         const auto nid = Nid::ComputeNid(name, "");
         const auto exportFunction = Resolve(module, nid);
         Require(exportFunction != nullptr, library + " does not export the NID of " + name);
-        ++resolved;
+        const auto report = std::filesystem::temp_directory_path() / "sdk-export-report.txt";
+        std::filesystem::remove(report);
+        auto command = "\"" + self.string() + "\" \"" + directory.string() + "\" " + library + " " + std::to_string(index) + " \"" + report.string() + "\"";
+#ifdef _WIN32
+        command = "\"" + command + "\"";
+#endif
+        const int status = std::system(command.c_str());
+        std::string text;
+        { std::ifstream file(report); std::getline(file, text); }
+        std::filesystem::remove(report);
+        Require(status != 0 && text.find("loaded") != std::string::npos && text.find("returned") == std::string::npos,
+            library + " exports " + name + " as something other than a pending export");
+        ++refused;
     }
-    Require(resolved == names.size(), library + " did not resolve every export");
-    std::printf("%s: %zu exports resolve\n", library.c_str(), resolved);
+    Require(refused == names.size(), library + " did not refuse every export");
+    std::printf("%s: %zu exports refuse\n", library.c_str(), refused);
 }
-
 
 const std::vector<const char*> libSceGLSlimVSHNames{
 
@@ -652,14 +667,30 @@ const std::vector<const char*> libSceIpmiNames{
 } // namespace
 
 int main(int argc, char** argv) {
+    if (argc == 5) {
+        const std::filesystem::path directory(argv[1]);
+        const std::string library(argv[2]);
+        const auto module = Load(directory / (library + ".prx"));
+        if (module == nullptr) return 2;
+        const auto& names = library == "libSceGLSlimVSH" ? libSceGLSlimVSHNames : libSceIpmiNames;
+        const auto index = std::stoi(argv[3]);
+        const auto nid = Nid::ComputeNid(names[index], "");
+        const auto exportFunction = Resolve(module, nid);
+        if (exportFunction == nullptr) return 2;
+        { std::ofstream file(argv[4]); file << "loaded"; }
+        exportFunction();
+        { std::ofstream file(argv[4], std::ios::app); file << " returned"; }
+        return 0;
+    }
     if (argc != 2) {
         std::fprintf(stderr, "usage: %s <patched libraries directory>\n", argv[0]);
         return 2;
     }
     try {
         const std::filesystem::path directory(argv[1]);
-        CheckLibrary(directory, "libSceGLSlimVSH", libSceGLSlimVSHNames);
-        CheckLibrary(directory, "libSceIpmi", libSceIpmiNames);
+        const std::filesystem::path self = std::filesystem::absolute(argv[0]);
+        CheckLibrary(directory, self, "libSceGLSlimVSH", libSceGLSlimVSHNames);
+        CheckLibrary(directory, self, "libSceIpmi", libSceIpmiNames);
         std::cout << "SDK export coverage passed\n";
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
