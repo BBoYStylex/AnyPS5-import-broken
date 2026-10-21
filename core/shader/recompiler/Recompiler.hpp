@@ -194,6 +194,8 @@ struct ShaderPixelStageInfo {
 
 struct ShaderVertexBufferResource {
     std::array<std::uint32_t, 4> fields;
+
+    bool operator==(const ShaderVertexBufferResource& other) const = default;
 };
 
 struct ShaderVertexResourceDestination {
@@ -484,6 +486,8 @@ struct DescriptorBinding {
     std::vector<std::uint32_t> imageSamplers;
     std::vector<bool> bufferRead;
     std::vector<std::uint32_t> bufferExtent;
+
+    bool operator==(const DescriptorBinding& other) const = default;
 };
 
 struct ImageTableEntryPoison {
@@ -491,6 +495,8 @@ struct ImageTableEntryPoison {
     std::uint32_t dwordCount = 0;
     std::uint32_t resource = 0;
     std::uint32_t reason = 0;
+
+    bool operator==(const ImageTableEntryPoison& other) const = default;
 };
 
 struct VertexAttribute {
@@ -499,6 +505,8 @@ struct VertexAttribute {
     ShaderVertexBufferResource resource;
     std::uint32_t fetchIndex;
     std::uint32_t formatComponents = 0;
+
+    bool operator==(const VertexAttribute& other) const = default;
 };
 
 struct BarycentricEmulationLayout {
@@ -669,6 +677,8 @@ struct CompiledShaderArtifact {
     bool stencilReplaySafe = false;
     std::uint32_t stencilReferenceDword = 0xffffffffu;
     std::uint64_t variantId = 0;
+
+    bool operator==(const CompiledShaderArtifact& other) const = default;
 };
 
 struct ShaderInvocation {
@@ -685,6 +695,8 @@ struct ShaderInvocation {
     std::vector<std::vector<std::pair<std::uint64_t, std::uint64_t>>> imageTableReadRanges;
     std::uint64_t imageTableShader = 0;
     std::uint32_t imageTableFaults = 0;
+
+    bool operator==(const ShaderInvocation& other) const = default;
 };
 
 // What a Vulkan pipeline built from a result depends on besides the fixed-function state and the
