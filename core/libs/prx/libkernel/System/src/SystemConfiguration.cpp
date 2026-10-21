@@ -74,6 +74,10 @@ struct SystemInteger {
 };
 
 constexpr SystemInteger SystemIntegers[] = {
+    {{1, 3}, "kern.osrevision", 199506},
+    {{1, 17}, "kern.posix1version", 200809},
+    {{1, 19}, "kern.job_control", 1},
+    {{1, 20}, "kern.saved_ids", 1},
     {{1, 24}, "kern.osreldate", 1104001},
 };
 
