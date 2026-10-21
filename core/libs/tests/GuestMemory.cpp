@@ -1087,6 +1087,20 @@ static void CheckNoOverwriteRejectsHostOccupiedMapping() {
     Require(sceKernelReleaseDirectMemory(phys, page) == 0);
 }
 
+#ifdef __linux__
+static void CheckCommitInsideReservation() {
+    constexpr std::size_t page = 0x4000;
+    void* reserved = nullptr;
+    Require(sceKernelReserveVirtualRange(&reserved, page * 4, 0, 0) == 0);
+    auto* base = static_cast<unsigned char*>(reserved);
+    GuestArena::GuestArenaCommit_nid_postfix(base + page * 2, page, ReadWriteProtection, page);
+    base[page * 2] = 7;
+    Require(base[page * 2] == 7);
+    GuestArena::GuestArenaCommit_nid_postfix(base, page, ReadWriteProtection, page);
+    Require(sceKernelMunmap(reserved, page * 4) == 0);
+}
+#endif
+
 #ifdef _WIN32
 static DWORD ImageProtection(const void* pointer) {
     MEMORY_BASIC_INFORMATION memory{};
@@ -3237,6 +3251,9 @@ int main(int argc, char** argv) {
     CheckFixedVirtualReservation();
     CheckReservedRangeIsNotCommitted();
     CheckHintInsideReservation();
+#ifdef __linux__
+    CheckCommitInsideReservation();
+#endif
     CheckNoOverwriteRefusesLiveMapping();
     CheckMlock();
     CheckSharedDirectMemoryLifecycle();
