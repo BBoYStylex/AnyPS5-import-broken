@@ -76,6 +76,10 @@ TextureDimension resolveDimension(std::uint32_t raw) {
 
 }
 
+TextureTileMode GcnTileMode(std::uint32_t index) {
+    return resolveGcnTileMode(index);
+}
+
 bool IsNullTextureResource(std::span<const std::uint32_t> words) {
     Require(words.size() == 8, "guest texture descriptor must contain 8 dwords");
     const auto base40 = (static_cast<std::uint64_t>(words[0]) | (static_cast<std::uint64_t>(words[1]) << 32u)) & 0xffffffffffull;

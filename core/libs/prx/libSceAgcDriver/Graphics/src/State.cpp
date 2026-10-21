@@ -400,6 +400,7 @@ void decodeDepth(const Registers& cx, std::uint32_t depthControl, bool testValEx
     if (gcn) {
         const auto size = read(cx, 0x016);
         depth.extent = {((size & 0x7ffu) + 1u) * 8u, (((size >> 11u) & 0x7ffu) + 1u) * 8u};
+        if (zFormat != 0) depth.gcnTileMode = GcnTileMode((read(cx, 0x010) >> 20u) & 7u);
     } else {
         const auto size = read(cx, 0x007);
         depth.extent = {(size & 0x3fffu) + 1u, ((size >> 16u) & 0x3fffu) + 1u};
