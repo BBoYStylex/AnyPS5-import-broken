@@ -105,6 +105,9 @@ int ConnectError() {
 int SendError(int type) {
 #ifdef _WIN32
     if (type == 2 && WSAGetLastError() == WSAENOTCONN) return 39;
+#elif defined(__APPLE__)
+    // After the peer closes, macOS can fail the next stream send with ECONNRESET where FreeBSD reports EPIPE.
+    if (type == 1 && errno == ECONNRESET) return 32;
 #else
     static_cast<void>(type);
 #endif
@@ -1274,7 +1277,17 @@ int APS5_VABI shutdown_nid_postfix(int descriptor, int how) {
     const auto socket = Lookup(descriptor);
     if (!socket) return -1;
     if (how < 0 || how > 2) return Fail(22);
+#ifdef __APPLE__
+    // macOS refuses SHUT_RD with ENOTCONN once the peer has shut down its sending side, although the socket is
+    // still connected (getpeername succeeds) and queued data stays readable; the console accepts it.
+    if (::shutdown(socket->value, how)) {
+        sockaddr_storage peer{};
+        socklen_t peerSize = sizeof(peer);
+        if (!(how == 0 && errno == ENOTCONN && ::getpeername(socket->value, reinterpret_cast<sockaddr*>(&peer), &peerSize) == 0)) return Fail(NativeError());
+    }
+#else
     if (::shutdown(socket->value, how)) return Fail(NativeError());
+#endif
     std::lock_guard lock(socket->modeMutex);
     if (how != 1) socket->receiveShut = true;
     if (how != 0) socket->sendShut = true;
