@@ -25,6 +25,15 @@ uint64_t aps5_sys_mmap(uint64_t address, size_t length, int32_t protection, int3
 int32_t aps5_sys_munmap(uint64_t address, size_t length);
 int32_t aps5_sys_thr_create(uint64_t* outThreadId, void* attributes, void* (*entryPoint)(void*), void* argument);
 void aps5_sys_thr_exit(void* exitValue);
+uint64_t aps5_sys_thr_self();
+int32_t aps5_sys_thr_kill(uint64_t threadId, int32_t signal);
+int32_t aps5_sys_thr_wake(uint64_t threadId);
+int32_t aps5_sys_ioctl(int32_t fileDescriptor, uint64_t request, void* argument);
+int32_t aps5_sys_mprotect(uint64_t address, size_t length, int32_t protection);
+int32_t aps5_sys_regmgr_call(uint32_t category, uint32_t propertyId, void* outBuffer, size_t bufferSize, uint32_t type);
+uint64_t aps5_sys_dmem_allocate(size_t size, uint64_t alignment, uint32_t memoryType, uint64_t* outAddress);
+int32_t aps5_sys_dmem_release(uint64_t address, size_t size);
+int32_t aps5_sys_named_event_create(const char* name, uint32_t attributes, uint64_t* outEventHandle);
 }
 
 #endif
