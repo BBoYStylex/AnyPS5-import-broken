@@ -65,6 +65,36 @@ std::string zeroMessage(std::uint32_t offset, std::uint32_t value, const char* n
     return std::string(name) + " is unsupported" + detail;
 }
 
+VkPolygonMode decodePolygonMode(const Registers& cx, std::uint32_t raster, const State& state, bool pointsOrLines) {
+    const auto mode = (raster >> 3u) & 3u;
+    if (mode == 0) return VK_POLYGON_MODE_FILL;
+    if (mode != 1) throw std::runtime_error("AGC graphics: " + zeroMessage(0x205, raster, "a reserved POLY_MODE"));
+    const auto front = (raster >> 5u) & 7u;
+    const auto back = (raster >> 8u) & 7u;
+    if (front > 2 || back > 2) throw std::runtime_error("AGC graphics: " + zeroMessage(0x205, raster, "a reserved polygon type"));
+    if (pointsOrLines && (state.stages.path == ShaderPath::Vertex || state.stages.mesh.has_value())) return VK_POLYGON_MODE_FILL;
+    const bool frontDrawn = (state.cullMode & VK_CULL_MODE_FRONT_BIT) == 0;
+    const bool backDrawn = (state.cullMode & VK_CULL_MODE_BACK_BIT) == 0;
+    if (!frontDrawn && !backDrawn) return VK_POLYGON_MODE_FILL;
+    if (frontDrawn && backDrawn && front != back) throw std::runtime_error("AGC graphics: " + zeroMessage(0x205, raster, "different front and back polygon modes"));
+    const auto type = frontDrawn ? front : back;
+    if (type == 2) return VK_POLYGON_MODE_FILL;
+    if (state.rectList) throw std::runtime_error("AGC graphics: " + zeroMessage(0x205, raster, "a point or line polygon mode on a rect list"));
+    if ((raster & 0x3800u) != 0) throw std::runtime_error("AGC graphics: " + zeroMessage(0x205, raster, "depth bias with a point or line polygon mode"));
+    if (type == 1) {
+        const auto line = find(cx, 0x282);
+        if (line == cx.end()) throw std::runtime_error("AGC graphics: a line polygon mode needs PA_SU_LINE_CNTL");
+        if ((line->second & 0xffffu) != 8u) throw std::runtime_error("AGC graphics: " + zeroMessage(0x282, line->second, "a line polygon mode wider or narrower than one pixel"));
+        return VK_POLYGON_MODE_LINE;
+    }
+    const auto size = find(cx, 0x280);
+    const auto limits = find(cx, 0x281);
+    if (size == cx.end() || limits == cx.end()) throw std::runtime_error("AGC graphics: a point polygon mode needs PA_SU_POINT_SIZE and PA_SU_POINT_MINMAX");
+    if (size->second != 0x80008u) throw std::runtime_error("AGC graphics: " + zeroMessage(0x280, size->second, "a point polygon mode with a point size other than one pixel"));
+    if ((limits->second & 0xffffu) > 8u || (limits->second >> 16u) < 8u) throw std::runtime_error("AGC graphics: " + zeroMessage(0x281, limits->second, "a point polygon mode whose size limits exclude one pixel"));
+    return VK_POLYGON_MODE_POINT;
+}
+
 std::string tessellationMessage(std::uint32_t config, std::uint32_t parameters, const ShaderRecompiler::TessellationConfiguration& tess) {
     static constexpr std::array<std::string_view, 3> Types{"TESS_ISOLINE", "TESS_TRIANGLE", "TESS_QUAD"};
     static constexpr std::array<std::string_view, 4> Partitionings{"PART_INTEGER", "PART_POW2", "PART_FRAC_ODD", "PART_FRAC_EVEN"};
@@ -949,26 +979,57 @@ ExpandedPlanes outOfPlacePlanes(const Registers& cx) {
     return {(value(0x010) & 3u) != 0 && (view & 0x01000000u) == 0 && base(0x012, 0x01a) != base(0x014, 0x01c), (value(0x011) & 1u) != 0 && (view & 0x02000000u) == 0 && base(0x013, 0x01b) != base(0x015, 0x01d)};
 }
 
-bool passCovers(const Registers& cx, VkExtent2D extent) {
-    const auto xs = std::fabs(readFloat(cx, 0x10f));
-    const auto xo = readFloat(cx, 0x110);
-    const auto ys = std::fabs(readFloat(cx, 0x111));
-    const auto yo = readFloat(cx, 0x112);
-    VkRect2D covered{{0, 0}, {0x7fffu, 0x7fffu}};
-    intersect(covered, cx, 0xc, true);
-    intersect(covered, cx, 0x81, false);
-    intersect(covered, cx, 0x90, false);
-    if ((read(cx, 0x292) & 2u) != 0) intersect(covered, cx, 0x94, false);
-    const auto width = static_cast<float>(extent.width);
-    const auto height = static_cast<float>(extent.height);
-    const bool viewportCovers = xo - xs <= 0.0f && xo + xs >= width && yo - ys <= 0.0f && yo + ys >= height;
-    return viewportCovers && covered.offset.x == 0 && covered.offset.y == 0 && covered.extent.width >= extent.width && covered.extent.height >= extent.height;
-}
-
 }
 
 VkExtent2D SampleLocationGrid(const State& state) {
     return state.sampleLocationGrid ? VkExtent2D{2, 2} : VkExtent2D{1, 1};
+}
+
+std::optional<SampleOrder> SameSetSampleOrder(const State& state) {
+    if (!state.customSampleLocations || !state.sampleLocationGrid || state.samples < 2u || state.samples > 8u) return std::nullopt;
+    SampleOrder order{};
+    for (std::uint32_t pixel = 0; pixel < order.size(); ++pixel) {
+        std::uint32_t word = KeptSampleOrder;
+        std::uint32_t taken = 0;
+        for (std::uint32_t sample = 0; sample < state.samples; ++sample) {
+            std::uint32_t guest = 0;
+            while (guest < state.samples && (((taken >> guest) & 1u) != 0u || state.sampleLocations[pixel * 8u + guest] != state.sampleLocations[sample])) ++guest;
+            if (guest == state.samples) return std::nullopt;
+            taken |= 1u << guest;
+            word = (word & ~(0xfu << (sample * 4u))) | (guest << (sample * 4u));
+        }
+        order[pixel] = word;
+    }
+    return order;
+}
+
+bool ReordersSamples(const SampleOrder& order) {
+    return std::ranges::any_of(order, [](std::uint32_t word) { return word != 0u && word != KeptSampleOrder; });
+}
+
+std::uint32_t InvertSampleOrder(std::uint32_t order) {
+    std::uint32_t inverse = 0;
+    for (std::uint32_t sample = 0; sample < 8u; ++sample) inverse |= sample << (((order >> (sample * 4u)) & 0x7u) * 4u);
+    return inverse;
+}
+
+std::uint32_t HostSampleBits(std::uint32_t guestBits, std::uint32_t order) {
+    std::uint32_t host = 0;
+    for (std::uint32_t sample = 0; sample < 8u; ++sample) host |= ((guestBits >> ((order >> (sample * 4u)) & 0x7u)) & 1u) << sample;
+    return host | (guestBits & ~0xffu);
+}
+
+bool SampleMaskFollowsOrder(const State& state, const SampleOrder& order) {
+    if (!ReordersSamples(order) || !PartialSampleMask(state) || !UniformSampleMask(state)) return false;
+    const auto full = (1u << state.samples) - 1u;
+    const auto mask = state.quadSampleMask[0] & full;
+    return std::ranges::any_of(order, [&](std::uint32_t word) { return (HostSampleBits(mask, word) & full) != mask; });
+}
+
+std::array<std::uint16_t, 4> QuadSampleMasks(const State& state, const SampleOrder& order) {
+    if (!SampleMaskFollowsOrder(state, order)) return QuadSampleMasks(state);
+    const auto mask = static_cast<std::uint16_t>(state.quadSampleMask[0] & ((1u << state.samples) - 1u));
+    return {mask, mask, mask, mask};
 }
 
 std::array<VkSampleLocationEXT, 32> SampleLocations(const State& state) {
@@ -1313,10 +1374,11 @@ State DecodeState(const QueueState& queue, bool vertexWorkgroup) {
     // explicitly; KEEP_TOGETHER_ENABLE (bit 24) only affects primitive distribution across the chip.
     const bool pointsOrLines = result.topology == VK_PRIMITIVE_TOPOLOGY_POINT_LIST || result.topology == VK_PRIMITIVE_TOPOLOGY_LINE_LIST || result.topology == VK_PRIMITIVE_TOPOLOGY_LINE_STRIP || (result.stages.mesh.has_value() && result.stages.mesh->outputPrimitiveSize == 2u);
     const auto lineOffset = (raster & 0x1800u) != 0 && !pointsOrLines ? 0x2000u : 0u;
-    const auto rasterMode = raster & ~0x7u & ~(1u << 24u) & ~0x1800u & ~lineOffset & ~(1u << 19u) & ~(1u << 16u);
-    if (rasterMode != 0 && rasterMode != 0x240u && rasterMode != 0x248u) throw std::runtime_error("AGC graphics: " + zeroMessage(0x205, raster, "polygon mode, depth bias or nonstandard rasterization"));
+    const auto rasterMode = raster & ~0x7u & ~0x7f8u & ~(1u << 24u) & ~0x1800u & ~lineOffset & ~(1u << 19u) & ~(1u << 16u);
+    if (rasterMode != 0) throw std::runtime_error("AGC graphics: " + zeroMessage(0x205, raster, "depth bias or nonstandard rasterization"));
     result.cullMode = ((raster & 1u) != 0 ? VK_CULL_MODE_FRONT_BIT : 0u) | ((raster & 2u) != 0 ? VK_CULL_MODE_BACK_BIT : 0u);
     if (result.rectList) result.cullMode = VK_CULL_MODE_NONE;
+    result.polygonMode = decodePolygonMode(cx, raster, result, pointsOrLines);
     if ((raster & 0x1800u) != 0 && result.depth) decodeDepthBias(cx, raster, result);
     result.frontFace = (raster & 4u) != 0 ? VK_FRONT_FACE_CLOCKWISE : VK_FRONT_FACE_COUNTER_CLOCKWISE;
     result.provokingVertexMode = (raster & (1u << 19u)) != 0 ? VK_PROVOKING_VERTEX_MODE_LAST_VERTEX_EXT : VK_PROVOKING_VERTEX_MODE_FIRST_VERTEX_EXT;
@@ -1838,6 +1900,61 @@ ColorTarget DecodeColorBuffer(const Registers& cx, std::uint32_t slot, bool allo
     return color;
 }
 
+namespace {
+
+bool drawCovers(const Registers& cx, VkExtent2D extent) {
+    const auto viewportControl = read(cx, 0x206);
+    if (viewportControl != 0x43fu) throw std::runtime_error(vteMessage(viewportControl));
+    const auto xs = std::fabs(readFloat(cx, 0x10f));
+    const auto xo = readFloat(cx, 0x110);
+    const auto ys = std::fabs(readFloat(cx, 0x111));
+    const auto yo = readFloat(cx, 0x112);
+    VkRect2D covered{{0, 0}, {0x7fffu, 0x7fffu}};
+    intersect(covered, cx, 0xc, true);
+    intersect(covered, cx, 0x81, false);
+    intersect(covered, cx, 0x90, false);
+    if ((read(cx, 0x292) & 2u) != 0) intersect(covered, cx, 0x94, false);
+    const auto width = static_cast<float>(extent.width);
+    const auto height = static_cast<float>(extent.height);
+    const bool viewportCovers = xo - xs <= 0.0f && xo + xs >= width && yo - ys <= 0.0f && yo + ys >= height;
+    const bool scissorCovers = covered.offset.x == 0 && covered.offset.y == 0 && covered.extent.width >= extent.width && covered.extent.height >= extent.height;
+    return viewportCovers && scissorCovers;
+}
+
+}
+
+std::optional<DepthCopyPass> DecodeDepthCopyPass(const QueueState& queue) {
+    const auto& cx = queue.context;
+    const auto control = find(cx, 0x000);
+    if (control == cx.end() || (control->second & 4u) == 0) return std::nullopt;
+    Require((control->second & ~0xf84u) == 0, "DB depth copy combined with a stencil copy, clear, resummarize or decompress");
+    Require((read(cx, 0x200) & 0xfu) == 0, "DB depth copy with depth or stencil tests");
+    Require((read(cx, 0x010) & 3u) == 3u, "DB depth copy from a depth plane that is not Z_32_FLOAT");
+    Require(ColorWriteMask(cx) == 1u, "DB depth copy into anything but the red channel of color target 0");
+    const auto viewRegister = find(cx, 0x002);
+    const auto view = viewRegister == cx.end() ? 0u : viewRegister->second;
+    Require((read(cx, 0x010) & 0x000f1000u) == 0 && (view & 0x3c000000u) == 0, "DB depth copy from a mipmapped or partially resident depth plane");
+    DepthCopyPass pass{};
+    const auto high = find(cx, 0x01a);
+    pass.depthAddress = (high == cx.end() ? 0ull : static_cast<std::uint64_t>(high->second & 0xffu) << 40u) | (static_cast<std::uint64_t>(read(cx, 0x012)) << 8u);
+    const auto size = read(cx, 0x007);
+    pass.extent = {(size & 0x3fffu) + 1u, ((size >> 16u) & 0x3fffu) + 1u};
+    pass.samples = 1u << ((read(cx, 0x010) >> 2u) & 3u);
+    if (pass.samples != 1u) pass.depthAddress &= ~std::uint64_t{65535u};
+    if (const auto slice = view & 0x1fffu; slice != 0) pass.depthAddress += static_cast<std::uint64_t>(slice) * DepthSliceBytes(pass.extent, 4u);
+    const auto maskLow = find(cx, 0x30e);
+    const auto maskHigh = find(cx, 0x30f);
+    Require((maskLow == cx.end() || maskLow->second == 0xffffffffu) && (maskHigh == cx.end() || maskHigh->second == 0xffffffffu), "DB depth copy with a sample mask is unsupported");
+    pass.sample = (control->second & 0x80u) != 0 ? 0u : (control->second >> 8u) & 0xfu;
+    Require(pass.sample < pass.samples, "DB depth copy of a sample the depth plane does not have");
+    pass.color = DecodeColorBuffer(cx, 0);
+    Require(pass.color.format == VK_FORMAT_R32_SFLOAT && pass.color.samples == 1 && pass.color.mip == 0 && pass.color.layers == 1, "DB depth copy into a color target that is not a single-sample R32 float");
+    Require(pass.color.extent.width == pass.extent.width && pass.color.extent.height == pass.extent.height, "DB depth copy into a color target of another size");
+    Require(pass.color.cmaskAddress == 0, "DB depth copy into a color target with CMASK fast clears is unsupported");
+    Require(drawCovers(cx, pass.extent), "DB depth copy over part of the depth surface");
+    return pass;
+}
+
 std::optional<ColorMetadataPass> DecodeColorMetadataPass(const QueueState& queue) {
     const auto& cx = queue.context;
     const auto control = find(cx, 0x202);
@@ -1869,9 +1986,7 @@ std::optional<ColorMetadataPass> DecodeColorMetadataPass(const QueueState& queue
     const auto samples = resolve && rasterizerSamples && multisampleRaster ? decodeSamples(cx) : 1u;
     if (!resolve) zero(cx, 0x2f8, ~0u, "multisampling or coverage conversion");
     zero(cx, 0x80, ~0u, "window offset");
-    const auto viewportControl = read(cx, 0x206);
-    if (viewportControl != 0x43fu) throw std::runtime_error(vteMessage(viewportControl));
-    const auto requireCovered = [&](const ColorTarget& target) { Require(passCovers(cx, target.extent), "CB metadata pass over part of a color target"); };
+    const auto requireCovered = [&](const ColorTarget& target) { Require(drawCovers(cx, target.extent), "CB metadata pass over part of a color target"); };
     if (resolve) {
         const auto source = DecodeColorBuffer(cx, 0);
         const auto destination = DecodeColorBuffer(cx, 1);
@@ -1938,7 +2053,7 @@ std::optional<DepthExpandPass> DecodeDepthExpandPass(const QueueState& queue) {
     zero(cx, 0x80, ~0u, "window offset");
     if (const auto viewportControl = read(cx, 0x206); viewportControl != 0x43fu) throw std::runtime_error(vteMessage(viewportControl));
     const auto target = depthTargetFor(cx);
-    if (!passCovers(cx, target.extent)) reject("over part of the depth surface");
+    if (!drawCovers(cx, target.extent)) reject("over part of the depth surface");
     const auto slice = static_cast<std::uint64_t>(target.firstSlice);
     DepthExpandPass pass{target, planes.depth ? destination + slice * DepthSliceBytes(target.extent, (zInfo & 3u) == 1u ? 2u : 4u) : 0u};
     if (planes.stencil) pass.stencilDestination = base(0x015, 0x01d) + slice * DepthSliceBytes(target.extent, 1u);
