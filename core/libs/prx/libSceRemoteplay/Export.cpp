@@ -4,6 +4,7 @@
 #include <string>
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
+#include "prx/libSceRemoteplay/include/Remoteplay.hpp"
 
 constexpr int REMOTEPLAY_CONNECTION_STATUS_DISCONNECT = 0;
 
@@ -40,7 +41,7 @@ int APS5_VABI sceRemoteplayClearConnectHistory(void) {
     return 0;
 }
 
-int APS5_VABI sceRemoteplayConfirmDeviceRegist(void) {
+int APS5_VABI sceRemoteplayConfirmDeviceRegist(int* status, int* errorCode) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -50,7 +51,7 @@ int APS5_VABI sceRemoteplayDisconnect(void) {
     return 0;
 }
 
-int APS5_VABI sceRemoteplayGeneratePinCode(void) {
+int APS5_VABI sceRemoteplayGeneratePinCode(std::uint32_t* pinCode) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -155,7 +156,7 @@ int APS5_VABI sceRemoteplayNotifyNpPushWakeup(void) {
     return 0;
 }
 
-int APS5_VABI sceRemoteplayNotifyPinCodeError(void) {
+int APS5_VABI sceRemoteplayNotifyPinCodeError(int errorCode) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
