@@ -6,6 +6,7 @@
 #include <fstream>
 #include <iterator>
 #include <random>
+#include <stdexcept>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -24,6 +25,16 @@ constexpr int SaveDataErrorNotInitialized = -2137063423;
 constexpr int SaveDataErrorNotFound = -2137063416;
 
 int failures = 0;
+
+template <typename TFunction>
+bool ThrowsRuntimeError(TFunction function) {
+    try {
+        function();
+    } catch (const std::runtime_error&) {
+        return true;
+    }
+    return false;
+}
 
 void Check(bool condition, const std::string& what) {
     if (condition) return;
@@ -80,6 +91,9 @@ int main() {
     char unterminated[sizeof(SceSaveDataDirName::data)];
     std::memset(unterminated, 'a', sizeof(unterminated));
     Check(Convert(unterminated, sizeof(unterminated)) == SaveDataErrorParameter, "an unterminated name is rejected");
+    Check(ThrowsRuntimeError([] { sceSaveDataConvert(nullptr); }), "null param throws");
+    SaveDataConvert nullDirParam{};
+    Check(ThrowsRuntimeError([&] { sceSaveDataConvert(&nullDirParam); }), "null dir_name throws");
     Check(sceSaveDataTerminate() == 0, "SaveData terminates");
     Check(sceSaveDataGetConvertProgress(&progress) == SaveDataErrorNotInitialized, "query after terminate fails with not initialized");
 
