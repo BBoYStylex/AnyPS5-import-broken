@@ -20,6 +20,7 @@ constexpr std::uint32_t CustomPopMarker = 0x0c;
 namespace Agc::Marker {
 
 std::uint32_t* Push(CommandBuffer* buf, const char* str, const char* function) {
+    Agc::Command::Require(buf != nullptr, function, "null command buffer");
     const char* text = str ? str : "";
     const std::size_t length = std::strlen(text);
     Agc::Command::Require(length < 0x10000u, function, "marker text too long");
