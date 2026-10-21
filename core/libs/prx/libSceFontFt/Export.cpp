@@ -70,8 +70,7 @@ int APS5_VABI sceFontFtSupportCid() {
 }
 
 int APS5_VABI sceFontFtSupportFontFormats() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return SupportFormat(__func__, {"bdf", "t1cid", "truetype", "cff", "pcf", "pfr", "type1", "type42", "winfonts"});
 }
 
 int APS5_VABI sceFontFtSupportOpenType() {
@@ -95,8 +94,7 @@ int APS5_VABI sceFontFtSupportPfr() {
 }
 
 int APS5_VABI sceFontFtSupportSystemFonts() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return SupportFormat(__func__, {"truetype"});
 }
 
 int APS5_VABI sceFontFtSupportTrueType() {
@@ -104,8 +102,7 @@ int APS5_VABI sceFontFtSupportTrueType() {
 }
 
 int APS5_VABI sceFontFtSupportTrueTypeGx() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return SupportFormat(__func__, {"truetype"});
 }
 
 int APS5_VABI sceFontFtSupportType1() {
