@@ -8,6 +8,7 @@ static void PrintUsage(const char* executableName) {
               << "  -i, --input <path>      Input shader asset package\n"
               << "  -o, --out-dir <dir>     Output directory for transpiled SPIR-V\n"
               << "  -c, --cache <path>      Output Vulkan pipeline cache file\n"
+              << "  -w, --warmup            Pre-compile and warm up pipelines\n"
               << "  -h, --help              Display this help message\n";
 }
 
@@ -28,6 +29,8 @@ int main(int argc, char* argv[]) {
             options.OutputSpirvDirectory = argv[++i];
         } else if ((argument == "-c" || argument == "--cache") && i + 1 < argc) {
             options.OutputCachePath = argv[++i];
+        } else if (argument == "-w" || argument == "--warmup") {
+            options.WarmupPipelines = true;
         } else if (argument == "-h" || argument == "--help") {
             PrintUsage(argv[0]);
             return 0;
@@ -44,7 +47,8 @@ int main(int argc, char* argv[]) {
 
     std::cout << "Shader processing completed:\n"
               << "  Shaders extracted: " << summary.ShadersExtracted << "\n"
-              << "  Shaders transpiled to SPIR-V: " << summary.ShadersTranspiled << "\n";
+              << "  Shaders transpiled to SPIR-V: " << summary.ShadersTranspiled << "\n"
+              << "  Pipelines compiled: " << summary.PipelinesCompiled << "\n";
 
     return 0;
 }

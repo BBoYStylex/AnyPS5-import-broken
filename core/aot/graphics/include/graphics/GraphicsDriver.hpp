@@ -27,9 +27,14 @@ struct GraphicsProcessingSummary {
 class GraphicsDriver {
 public:
     GraphicsDriver();
+    explicit GraphicsDriver(VulkanPipelineWrapper* inPipelineWrapper);
     ~GraphicsDriver();
 
+    void SetPipelineWrapper(VulkanPipelineWrapper* inPipelineWrapper);
     GraphicsProcessingSummary ProcessAssets(const GraphicsProcessingOptions& options);
+
+private:
+    VulkanPipelineWrapper* pipelineWrapper = nullptr;
 };
 
 } // namespace Aot::Graphics

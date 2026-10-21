@@ -1,6 +1,7 @@
 #include <graphics/ConsoleShaderExtractor.hpp>
 #include <graphics/ShaderInstructionDecoder.hpp>
 #include <graphics/ShaderTranspiler.hpp>
+#include <graphics/GraphicsDriver.hpp>
 #include <cassert>
 #include <vector>
 
@@ -29,6 +30,13 @@ int main() {
     auto resultOpt = transpiler.Transpile(pkg);
     assert(resultOpt.has_value());
     assert(resultOpt->SpirvBytecode[0] == 0x07230203);
+
+    Aot::Graphics::GraphicsDriver driver;
+    Aot::Graphics::GraphicsProcessingOptions options{};
+    options.WarmupPipelines = true;
+    auto summary = driver.ProcessAssets(options);
+    assert(summary.ShadersExtracted == 0);
+    assert(summary.ShadersTranspiled == 0);
 
     return 0;
 }

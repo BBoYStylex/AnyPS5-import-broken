@@ -4,7 +4,13 @@
 namespace Aot::Graphics {
 
 GraphicsDriver::GraphicsDriver() = default;
+GraphicsDriver::GraphicsDriver(VulkanPipelineWrapper* inPipelineWrapper)
+    : pipelineWrapper(inPipelineWrapper) {}
 GraphicsDriver::~GraphicsDriver() = default;
+
+void GraphicsDriver::SetPipelineWrapper(VulkanPipelineWrapper* inPipelineWrapper) {
+    pipelineWrapper = inPipelineWrapper;
+}
 
 GraphicsProcessingSummary GraphicsDriver::ProcessAssets(const GraphicsProcessingOptions& options) {
     GraphicsProcessingSummary summary{};
@@ -43,6 +49,46 @@ GraphicsProcessingSummary GraphicsDriver::ProcessAssets(const GraphicsProcessing
             }
 
             transpiledShaders.push_back(std::move(*resultOpt));
+        }
+    }
+
+    if (pipelineWrapper != nullptr && !transpiledShaders.empty()) {
+        if (!options.OutputCachePath.empty()) {
+            pipelineWrapper->InitializePipelineCache(options.OutputCachePath);
+        }
+
+        std::vector<PipelineConfiguration> configs;
+        for (const auto& shader : transpiledShaders) {
+            if (shader.Stage == ConsoleShaderStage::Compute) {
+                VkPipeline pipeline = pipelineWrapper->CompileComputePipeline(shader.SpirvBytecode, {}, "main");
+                if (pipeline != VK_NULL_HANDLE) {
+                    ++summary.PipelinesCompiled;
+                }
+            } else {
+                PipelineConfiguration config{};
+                VkShaderStageFlagBits stageBit = VK_SHADER_STAGE_VERTEX_BIT;
+                if (shader.Stage == ConsoleShaderStage::Fragment) {
+                    stageBit = VK_SHADER_STAGE_FRAGMENT_BIT;
+                } else if (shader.Stage == ConsoleShaderStage::Geometry) {
+                    stageBit = VK_SHADER_STAGE_GEOMETRY_BIT;
+                }
+                config.Stages.push_back({
+                    .Stage = stageBit,
+                    .SpirvBytecode = shader.SpirvBytecode,
+                    .EntryPoint = "main"
+                });
+                config.ViewportExtent = {1920, 1080};
+                configs.push_back(std::move(config));
+            }
+        }
+
+        if (options.WarmupPipelines && !configs.empty()) {
+            pipelineWrapper->WarmupPipelineCache(configs);
+            summary.PipelinesCompiled += configs.size();
+        }
+
+        if (!options.OutputCachePath.empty()) {
+            summary.CacheSaved = pipelineWrapper->SavePipelineCache(options.OutputCachePath);
         }
     }
 
