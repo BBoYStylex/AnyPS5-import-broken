@@ -11,7 +11,10 @@ static constexpr int SCE_NP_COMMUNITY_ERROR_TOO_MANY_OBJECTS = static_cast<int>(
 static constexpr int SCE_NP_COMMUNITY_ERROR_ABORTED = static_cast<int>(0x80550707);
 static constexpr int SCE_NP_COMMUNITY_ERROR_INSUFFICIENT_ARGUMENT = static_cast<int>(0x8055070C);
 static constexpr int SCE_NP_COMMUNITY_ERROR_INVALID_ID = static_cast<int>(0x8055070E);
+static constexpr int SCE_NP_COMMUNITY_ERROR_INVALID_TYPE = static_cast<int>(0x80550711);
 static constexpr int SCE_NP_COMMUNITY_ERROR_TOO_MANY_SLOTID = static_cast<int>(0x80550718);
+static constexpr int SCE_NP_TUS_OPETYPE_EQUAL = 1;
+static constexpr int SCE_NP_TUS_OPETYPE_LESS_OR_EQUAL = 6;
 static constexpr int POLL_FINISHED = 0;
 static constexpr int POLL_RUNNING = 1;
 static constexpr std::size_t MAX_TITLE_CONTEXTS = 32;
@@ -49,6 +52,12 @@ int ValidateNonEmptySlots(const std::int32_t* slotIds, int arrayLen, const void*
 
 bool IsEmpty(const NpOnlineId* user) {
     return !user->data[0];
+}
+
+int ValidateTryAndSet(std::int32_t slotId, std::int32_t opeType, const void* option, int invalidOpeType) {
+    if (option || slotId < 0) return SCE_NP_COMMUNITY_ERROR_INVALID_ARGUMENT;
+    if (opeType < SCE_NP_TUS_OPETYPE_EQUAL || opeType > SCE_NP_TUS_OPETYPE_LESS_OR_EQUAL) return invalidOpeType;
+    return 0;
 }
 
 int StartOffline(int reqId) {
@@ -342,24 +351,35 @@ int APS5_VABI sceNpTusAddAndGetVariableVUserAsync(void) {
     return 0;
 }
 
-int APS5_VABI sceNpTusTryAndSetVariable(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+int APS5_VABI sceNpTusTryAndSetVariableAsync(int reqId, const void* targetNpId, std::int32_t slotId, std::int32_t opeType, std::int64_t variable, const std::int64_t* compareValue, const void* isLastChangedAuthor, const void* isLastChangedDate, void* resultVariable, std::uint64_t resultVariableSize, void* option) {
+    (void)variable;
+    (void)compareValue;
+    (void)isLastChangedAuthor;
+    (void)isLastChangedDate;
+    (void)resultVariableSize;
+    if (!targetNpId || !resultVariable) return SCE_NP_COMMUNITY_ERROR_INSUFFICIENT_ARGUMENT;
+    if (const int error = ValidateTryAndSet(slotId, opeType, option, SCE_NP_COMMUNITY_ERROR_INVALID_ARGUMENT)) return error;
+    return StartOffline(reqId);
 }
 
-int APS5_VABI sceNpTusTryAndSetVariableVUser(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+int APS5_VABI sceNpTusTryAndSetVariable(int reqId, const void* targetNpId, std::int32_t slotId, std::int32_t opeType, std::int64_t variable, const std::int64_t* compareValue, const void* isLastChangedAuthor, const void* isLastChangedDate, void* resultVariable, std::uint64_t resultVariableSize, void* option) {
+    return Complete(reqId, sceNpTusTryAndSetVariableAsync(reqId, targetNpId, slotId, opeType, variable, compareValue, isLastChangedAuthor, isLastChangedDate, resultVariable, resultVariableSize, option));
 }
 
-int APS5_VABI sceNpTusTryAndSetVariableAsync(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+int APS5_VABI sceNpTusTryAndSetVariableVUserAsync(int reqId, const NpOnlineId* targetVirtualUserId, std::int32_t slotId, std::int32_t opeType, std::int64_t variable, const std::int64_t* compareValue, const void* isLastChangedAuthor, const void* isLastChangedDate, void* resultVariable, std::uint64_t resultVariableSize, void* option) {
+    (void)variable;
+    (void)compareValue;
+    (void)isLastChangedAuthor;
+    (void)isLastChangedDate;
+    (void)resultVariableSize;
+    if (!targetVirtualUserId || !resultVariable) return SCE_NP_COMMUNITY_ERROR_INSUFFICIENT_ARGUMENT;
+    if (const int error = ValidateTryAndSet(slotId, opeType, option, SCE_NP_COMMUNITY_ERROR_INVALID_ARGUMENT)) return error;
+    if (IsEmpty(targetVirtualUserId)) return SCE_NP_COMMUNITY_ERROR_INVALID_ARGUMENT;
+    return StartOffline(reqId);
 }
 
-int APS5_VABI sceNpTusTryAndSetVariableVUserAsync(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+int APS5_VABI sceNpTusTryAndSetVariableVUser(int reqId, const NpOnlineId* targetVirtualUserId, std::int32_t slotId, std::int32_t opeType, std::int64_t variable, const std::int64_t* compareValue, const void* isLastChangedAuthor, const void* isLastChangedDate, void* resultVariable, std::uint64_t resultVariableSize, void* option) {
+    return Complete(reqId, sceNpTusTryAndSetVariableVUserAsync(reqId, targetVirtualUserId, slotId, opeType, variable, compareValue, isLastChangedAuthor, isLastChangedDate, resultVariable, resultVariableSize, option));
 }
 
 int APS5_VABI sceNpTusDeleteMultiSlotData(void) {
@@ -742,44 +762,52 @@ int APS5_VABI sceNpTusDeleteMultiSlotDataAAsync(void) {
     return 0;
 }
 
-int APS5_VABI sceNpTusTryAndSetVariableA(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+int APS5_VABI sceNpTusTryAndSetVariableAAsync(int reqId, std::uint64_t targetAccountId, std::int32_t slotId, std::int32_t opeType, std::int64_t variable, const std::int64_t* compareValue, const std::uint64_t* isLastChangedAuthor, const void* isLastChangedDate, void* resultVariable, std::uint64_t resultVariableSize, void* option) {
+    (void)targetAccountId;
+    (void)variable;
+    (void)compareValue;
+    (void)isLastChangedAuthor;
+    (void)isLastChangedDate;
+    (void)resultVariableSize;
+    if (!resultVariable) return SCE_NP_COMMUNITY_ERROR_INSUFFICIENT_ARGUMENT;
+    if (const int error = ValidateTryAndSet(slotId, opeType, option, SCE_NP_COMMUNITY_ERROR_INVALID_TYPE)) return error;
+    return StartOffline(reqId);
 }
 
-int APS5_VABI sceNpTusTryAndSetVariableAAsync(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+int APS5_VABI sceNpTusTryAndSetVariableA(int reqId, std::uint64_t targetAccountId, std::int32_t slotId, std::int32_t opeType, std::int64_t variable, const std::int64_t* compareValue, const std::uint64_t* isLastChangedAuthor, const void* isLastChangedDate, void* resultVariable, std::uint64_t resultVariableSize, void* option) {
+    return Complete(reqId, sceNpTusTryAndSetVariableAAsync(reqId, targetAccountId, slotId, opeType, variable, compareValue, isLastChangedAuthor, isLastChangedDate, resultVariable, resultVariableSize, option));
 }
 
-int APS5_VABI sceNpTusTryAndSetVariableAVUser(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+int APS5_VABI sceNpTusTryAndSetVariableAVUserAsync(int reqId, const NpOnlineId* targetVirtualUserId, std::int32_t slotId, std::int32_t opeType, std::int64_t variable, const std::int64_t* compareValue, const std::uint64_t* isLastChangedAuthor, const void* isLastChangedDate, void* resultVariable, std::uint64_t resultVariableSize, void* option) {
+    (void)variable;
+    (void)compareValue;
+    (void)isLastChangedAuthor;
+    (void)isLastChangedDate;
+    (void)resultVariableSize;
+    if (!targetVirtualUserId || !resultVariable) return SCE_NP_COMMUNITY_ERROR_INSUFFICIENT_ARGUMENT;
+    if (const int error = ValidateTryAndSet(slotId, opeType, option, SCE_NP_COMMUNITY_ERROR_INVALID_TYPE)) return error;
+    if (IsEmpty(targetVirtualUserId)) return SCE_NP_COMMUNITY_ERROR_INVALID_ARGUMENT;
+    return StartOffline(reqId);
 }
 
-int APS5_VABI sceNpTusTryAndSetVariableAVUserAsync(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+int APS5_VABI sceNpTusTryAndSetVariableAVUser(int reqId, const NpOnlineId* targetVirtualUserId, std::int32_t slotId, std::int32_t opeType, std::int64_t variable, const std::int64_t* compareValue, const std::uint64_t* isLastChangedAuthor, const void* isLastChangedDate, void* resultVariable, std::uint64_t resultVariableSize, void* option) {
+    return Complete(reqId, sceNpTusTryAndSetVariableAVUserAsync(reqId, targetVirtualUserId, slotId, opeType, variable, compareValue, isLastChangedAuthor, isLastChangedDate, resultVariable, resultVariableSize, option));
 }
 
-int APS5_VABI sceNpTusTryAndSetVariableForCrossSave(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+int APS5_VABI sceNpTusTryAndSetVariableForCrossSaveAsync(int reqId, std::uint64_t targetAccountId, std::int32_t slotId, std::int32_t opeType, std::int64_t variable, const std::int64_t* compareValue, const std::uint64_t* isLastChangedAuthor, const void* isLastChangedDate, void* resultVariable, std::uint64_t resultVariableSize, void* option) {
+    return sceNpTusTryAndSetVariableAAsync(reqId, targetAccountId, slotId, opeType, variable, compareValue, isLastChangedAuthor, isLastChangedDate, resultVariable, resultVariableSize, option);
 }
 
-int APS5_VABI sceNpTusTryAndSetVariableForCrossSaveAsync(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+int APS5_VABI sceNpTusTryAndSetVariableForCrossSave(int reqId, std::uint64_t targetAccountId, std::int32_t slotId, std::int32_t opeType, std::int64_t variable, const std::int64_t* compareValue, const std::uint64_t* isLastChangedAuthor, const void* isLastChangedDate, void* resultVariable, std::uint64_t resultVariableSize, void* option) {
+    return Complete(reqId, sceNpTusTryAndSetVariableForCrossSaveAsync(reqId, targetAccountId, slotId, opeType, variable, compareValue, isLastChangedAuthor, isLastChangedDate, resultVariable, resultVariableSize, option));
 }
 
-int APS5_VABI sceNpTusTryAndSetVariableForCrossSaveVUser(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+int APS5_VABI sceNpTusTryAndSetVariableForCrossSaveVUserAsync(int reqId, const NpOnlineId* targetVirtualUserId, std::int32_t slotId, std::int32_t opeType, std::int64_t variable, const std::int64_t* compareValue, const std::uint64_t* isLastChangedAuthor, const void* isLastChangedDate, void* resultVariable, std::uint64_t resultVariableSize, void* option) {
+    return sceNpTusTryAndSetVariableAVUserAsync(reqId, targetVirtualUserId, slotId, opeType, variable, compareValue, isLastChangedAuthor, isLastChangedDate, resultVariable, resultVariableSize, option);
 }
 
-int APS5_VABI sceNpTusTryAndSetVariableForCrossSaveVUserAsync(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+int APS5_VABI sceNpTusTryAndSetVariableForCrossSaveVUser(int reqId, const NpOnlineId* targetVirtualUserId, std::int32_t slotId, std::int32_t opeType, std::int64_t variable, const std::int64_t* compareValue, const std::uint64_t* isLastChangedAuthor, const void* isLastChangedDate, void* resultVariable, std::uint64_t resultVariableSize, void* option) {
+    return Complete(reqId, sceNpTusTryAndSetVariableForCrossSaveVUserAsync(reqId, targetVirtualUserId, slotId, opeType, variable, compareValue, isLastChangedAuthor, isLastChangedDate, resultVariable, resultVariableSize, option));
 }
 
 }

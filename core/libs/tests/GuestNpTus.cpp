@@ -34,6 +34,18 @@ int APS5_VABI sceNpTusDeleteMultiSlotVariableAsync(int reqId, const void* target
 int APS5_VABI sceNpTusDeleteMultiSlotVariable(int reqId, const void* targetNpId, const std::int32_t* slotIds, int arrayLen, void* option);
 int APS5_VABI sceNpTusDeleteMultiSlotVariableVUserAsync(int reqId, const NpOnlineId* targetVirtualUserId, const std::int32_t* slotIds, int arrayLen, void* option);
 int APS5_VABI sceNpTusDeleteMultiSlotVariableVUser(int reqId, const NpOnlineId* targetVirtualUserId, const std::int32_t* slotIds, int arrayLen, void* option);
+int APS5_VABI sceNpTusTryAndSetVariableAsync(int reqId, const void* targetNpId, std::int32_t slotId, std::int32_t opeType, std::int64_t variable, const std::int64_t* compareValue, const void* isLastChangedAuthor, const void* isLastChangedDate, void* resultVariable, std::uint64_t resultVariableSize, void* option);
+int APS5_VABI sceNpTusTryAndSetVariable(int reqId, const void* targetNpId, std::int32_t slotId, std::int32_t opeType, std::int64_t variable, const std::int64_t* compareValue, const void* isLastChangedAuthor, const void* isLastChangedDate, void* resultVariable, std::uint64_t resultVariableSize, void* option);
+int APS5_VABI sceNpTusTryAndSetVariableVUserAsync(int reqId, const NpOnlineId* targetVirtualUserId, std::int32_t slotId, std::int32_t opeType, std::int64_t variable, const std::int64_t* compareValue, const void* isLastChangedAuthor, const void* isLastChangedDate, void* resultVariable, std::uint64_t resultVariableSize, void* option);
+int APS5_VABI sceNpTusTryAndSetVariableVUser(int reqId, const NpOnlineId* targetVirtualUserId, std::int32_t slotId, std::int32_t opeType, std::int64_t variable, const std::int64_t* compareValue, const void* isLastChangedAuthor, const void* isLastChangedDate, void* resultVariable, std::uint64_t resultVariableSize, void* option);
+int APS5_VABI sceNpTusTryAndSetVariableAAsync(int reqId, std::uint64_t targetAccountId, std::int32_t slotId, std::int32_t opeType, std::int64_t variable, const std::int64_t* compareValue, const std::uint64_t* isLastChangedAuthor, const void* isLastChangedDate, void* resultVariable, std::uint64_t resultVariableSize, void* option);
+int APS5_VABI sceNpTusTryAndSetVariableA(int reqId, std::uint64_t targetAccountId, std::int32_t slotId, std::int32_t opeType, std::int64_t variable, const std::int64_t* compareValue, const std::uint64_t* isLastChangedAuthor, const void* isLastChangedDate, void* resultVariable, std::uint64_t resultVariableSize, void* option);
+int APS5_VABI sceNpTusTryAndSetVariableAVUserAsync(int reqId, const NpOnlineId* targetVirtualUserId, std::int32_t slotId, std::int32_t opeType, std::int64_t variable, const std::int64_t* compareValue, const std::uint64_t* isLastChangedAuthor, const void* isLastChangedDate, void* resultVariable, std::uint64_t resultVariableSize, void* option);
+int APS5_VABI sceNpTusTryAndSetVariableAVUser(int reqId, const NpOnlineId* targetVirtualUserId, std::int32_t slotId, std::int32_t opeType, std::int64_t variable, const std::int64_t* compareValue, const std::uint64_t* isLastChangedAuthor, const void* isLastChangedDate, void* resultVariable, std::uint64_t resultVariableSize, void* option);
+int APS5_VABI sceNpTusTryAndSetVariableForCrossSaveAsync(int reqId, std::uint64_t targetAccountId, std::int32_t slotId, std::int32_t opeType, std::int64_t variable, const std::int64_t* compareValue, const std::uint64_t* isLastChangedAuthor, const void* isLastChangedDate, void* resultVariable, std::uint64_t resultVariableSize, void* option);
+int APS5_VABI sceNpTusTryAndSetVariableForCrossSave(int reqId, std::uint64_t targetAccountId, std::int32_t slotId, std::int32_t opeType, std::int64_t variable, const std::int64_t* compareValue, const std::uint64_t* isLastChangedAuthor, const void* isLastChangedDate, void* resultVariable, std::uint64_t resultVariableSize, void* option);
+int APS5_VABI sceNpTusTryAndSetVariableForCrossSaveVUserAsync(int reqId, const NpOnlineId* targetVirtualUserId, std::int32_t slotId, std::int32_t opeType, std::int64_t variable, const std::int64_t* compareValue, const std::uint64_t* isLastChangedAuthor, const void* isLastChangedDate, void* resultVariable, std::uint64_t resultVariableSize, void* option);
+int APS5_VABI sceNpTusTryAndSetVariableForCrossSaveVUser(int reqId, const NpOnlineId* targetVirtualUserId, std::int32_t slotId, std::int32_t opeType, std::int64_t variable, const std::int64_t* compareValue, const std::uint64_t* isLastChangedAuthor, const void* isLastChangedDate, void* resultVariable, std::uint64_t resultVariableSize, void* option);
 }
 
 static constexpr int SIGNED_OUT = static_cast<int>(0x80550006);
@@ -42,6 +54,7 @@ static constexpr int TOO_MANY_OBJECTS = static_cast<int>(0x80550706);
 static constexpr int ABORTED = static_cast<int>(0x80550707);
 static constexpr int INSUFFICIENT_ARGUMENT = static_cast<int>(0x8055070C);
 static constexpr int INVALID_ID = static_cast<int>(0x8055070E);
+static constexpr int INVALID_TYPE = static_cast<int>(0x80550711);
 static constexpr int TOO_MANY_SLOTID = static_cast<int>(0x80550718);
 
 static void Require(bool value) { if (!value) std::abort(); }
@@ -178,8 +191,90 @@ static void CheckMultiSlotVariables() {
     for (const std::uint8_t byte : variables) Require(byte == 0x5a);
 }
 
+static void CheckTryAndSetVariables() {
+    const int context = sceNpTusCreateNpTitleCtxA(0, 1);
+    Require(context > 0);
+    const int request = sceNpTusCreateRequest(context);
+    Require(request > 0);
+
+    std::uint8_t variable[64];
+    for (std::uint8_t& byte : variable) byte = 0x5a;
+    const std::int64_t compare = 3;
+    const std::uint64_t author = 1;
+    const NpId npId{};
+    const NpOnlineId user{{'u', 's', 'e', 'r'}, {}};
+    const NpOnlineId empty{};
+
+    Require(sceNpTusTryAndSetVariableAsync(request, nullptr, 0, 1, 5, nullptr, nullptr, nullptr, variable, sizeof(variable), nullptr) == INSUFFICIENT_ARGUMENT);
+    Require(sceNpTusTryAndSetVariableAsync(request, &npId, 0, 1, 5, nullptr, nullptr, nullptr, nullptr, sizeof(variable), nullptr) == INSUFFICIENT_ARGUMENT);
+    Require(sceNpTusTryAndSetVariableAsync(request, &npId, -1, 1, 5, nullptr, nullptr, nullptr, variable, sizeof(variable), nullptr) == INVALID_ARGUMENT);
+    Require(sceNpTusTryAndSetVariableAsync(request, &npId, 0, 1, 5, nullptr, nullptr, nullptr, variable, sizeof(variable), variable) == INVALID_ARGUMENT);
+    Require(sceNpTusTryAndSetVariableAsync(request, &npId, 0, 0, 5, nullptr, nullptr, nullptr, variable, sizeof(variable), nullptr) == INVALID_ARGUMENT);
+    Require(sceNpTusTryAndSetVariableAsync(request, &npId, 0, 7, 5, nullptr, nullptr, nullptr, variable, sizeof(variable), nullptr) == INVALID_ARGUMENT);
+    Require(sceNpTusTryAndSetVariableAsync(request + 1000, &npId, 0, 1, 5, nullptr, nullptr, nullptr, variable, sizeof(variable), nullptr) == INVALID_ID);
+    Require(sceNpTusTryAndSetVariableAsync(request, &npId, 0, 1, 5, &compare, &npId, nullptr, variable, sizeof(variable), nullptr) == 0);
+    RequireFinished(request, SIGNED_OUT);
+    Require(sceNpTusTryAndSetVariableAsync(request, &npId, 3, 6, 5, nullptr, nullptr, nullptr, variable, sizeof(variable), nullptr) == 0);
+    RequireFinished(request, SIGNED_OUT);
+
+    Require(sceNpTusTryAndSetVariableVUserAsync(request, nullptr, 0, 1, 5, nullptr, nullptr, nullptr, variable, sizeof(variable), nullptr) == INSUFFICIENT_ARGUMENT);
+    Require(sceNpTusTryAndSetVariableVUserAsync(request, &user, 0, 1, 5, nullptr, nullptr, nullptr, nullptr, sizeof(variable), nullptr) == INSUFFICIENT_ARGUMENT);
+    Require(sceNpTusTryAndSetVariableVUserAsync(request, &user, -1, 1, 5, nullptr, nullptr, nullptr, variable, sizeof(variable), nullptr) == INVALID_ARGUMENT);
+    Require(sceNpTusTryAndSetVariableVUserAsync(request, &user, 0, 1, 5, nullptr, nullptr, nullptr, variable, sizeof(variable), variable) == INVALID_ARGUMENT);
+    Require(sceNpTusTryAndSetVariableVUserAsync(request, &user, 0, 7, 5, nullptr, nullptr, nullptr, variable, sizeof(variable), nullptr) == INVALID_ARGUMENT);
+    Require(sceNpTusTryAndSetVariableVUserAsync(request, &empty, 0, 1, 5, nullptr, nullptr, nullptr, variable, sizeof(variable), nullptr) == INVALID_ARGUMENT);
+    Require(sceNpTusTryAndSetVariableVUserAsync(request, &user, 0, 1, 5, &compare, &npId, nullptr, variable, sizeof(variable), nullptr) == 0);
+    RequireFinished(request, SIGNED_OUT);
+
+    for (const auto call : {sceNpTusTryAndSetVariableAAsync, sceNpTusTryAndSetVariableForCrossSaveAsync}) {
+        Require(call(request, 0, 0, 1, 5, nullptr, nullptr, nullptr, nullptr, sizeof(variable), nullptr) == INSUFFICIENT_ARGUMENT);
+        Require(call(request, 0, -1, 1, 5, nullptr, nullptr, nullptr, variable, sizeof(variable), nullptr) == INVALID_ARGUMENT);
+        Require(call(request, 0, 0, 1, 5, nullptr, nullptr, nullptr, variable, sizeof(variable), variable) == INVALID_ARGUMENT);
+        Require(call(request, 0, -1, 0, 5, nullptr, nullptr, nullptr, variable, sizeof(variable), nullptr) == INVALID_ARGUMENT);
+        Require(call(request, 0, 0, 0, 5, nullptr, nullptr, nullptr, variable, sizeof(variable), nullptr) == INVALID_TYPE);
+        Require(call(request, 0, 0, 7, 5, nullptr, nullptr, nullptr, variable, sizeof(variable), nullptr) == INVALID_TYPE);
+        Require(call(request + 1000, 0, 0, 1, 5, nullptr, nullptr, nullptr, variable, sizeof(variable), nullptr) == INVALID_ID);
+        Require(call(request, 0, 0, 1, 5, &compare, &author, nullptr, variable, sizeof(variable), nullptr) == 0);
+        RequireFinished(request, SIGNED_OUT);
+    }
+
+    for (const auto call : {sceNpTusTryAndSetVariableAVUserAsync, sceNpTusTryAndSetVariableForCrossSaveVUserAsync}) {
+        Require(call(request, nullptr, 0, 1, 5, nullptr, nullptr, nullptr, variable, sizeof(variable), nullptr) == INSUFFICIENT_ARGUMENT);
+        Require(call(request, &user, 0, 1, 5, nullptr, nullptr, nullptr, nullptr, sizeof(variable), nullptr) == INSUFFICIENT_ARGUMENT);
+        Require(call(request, &user, -1, 1, 5, nullptr, nullptr, nullptr, variable, sizeof(variable), nullptr) == INVALID_ARGUMENT);
+        Require(call(request, &user, 0, 7, 5, nullptr, nullptr, nullptr, variable, sizeof(variable), nullptr) == INVALID_TYPE);
+        Require(call(request, &empty, 0, 7, 5, nullptr, nullptr, nullptr, variable, sizeof(variable), nullptr) == INVALID_TYPE);
+        Require(call(request, &empty, 0, 1, 5, nullptr, nullptr, nullptr, variable, sizeof(variable), nullptr) == INVALID_ARGUMENT);
+        Require(call(request, &user, 0, 1, 5, &compare, &author, nullptr, variable, sizeof(variable), nullptr) == 0);
+        RequireFinished(request, SIGNED_OUT);
+    }
+
+    Require(sceNpTusTryAndSetVariable(request, &npId, 0, 7, 5, nullptr, nullptr, nullptr, variable, sizeof(variable), nullptr) == INVALID_ARGUMENT);
+    Require(sceNpTusTryAndSetVariable(request, &npId, 0, 1, 5, nullptr, nullptr, nullptr, variable, sizeof(variable), nullptr) == SIGNED_OUT);
+    Require(sceNpTusTryAndSetVariable(request + 1000, &npId, 0, 1, 5, nullptr, nullptr, nullptr, variable, sizeof(variable), nullptr) == INVALID_ID);
+    Require(sceNpTusTryAndSetVariableVUser(request, &empty, 0, 1, 5, nullptr, nullptr, nullptr, variable, sizeof(variable), nullptr) == INVALID_ARGUMENT);
+    Require(sceNpTusTryAndSetVariableVUser(request, &user, 0, 1, 5, nullptr, nullptr, nullptr, variable, sizeof(variable), nullptr) == SIGNED_OUT);
+    for (const auto call : {sceNpTusTryAndSetVariableA, sceNpTusTryAndSetVariableForCrossSave}) {
+        Require(call(request, 0, 0, 0, 5, nullptr, nullptr, nullptr, variable, sizeof(variable), nullptr) == INVALID_TYPE);
+        Require(call(request, 0, 0, 1, 5, nullptr, nullptr, nullptr, variable, sizeof(variable), nullptr) == SIGNED_OUT);
+        Require(call(request + 1000, 0, 0, 1, 5, nullptr, nullptr, nullptr, variable, sizeof(variable), nullptr) == INVALID_ID);
+    }
+    for (const auto call : {sceNpTusTryAndSetVariableAVUser, sceNpTusTryAndSetVariableForCrossSaveVUser}) {
+        Require(call(request, &empty, 0, 1, 5, nullptr, nullptr, nullptr, variable, sizeof(variable), nullptr) == INVALID_ARGUMENT);
+        Require(call(request, &user, 0, 1, 5, nullptr, nullptr, nullptr, variable, sizeof(variable), nullptr) == SIGNED_OUT);
+    }
+
+    Require(sceNpTusAbortRequest(request) == 0);
+    Require(sceNpTusTryAndSetVariableA(request, 0, 0, 1, 5, nullptr, nullptr, nullptr, variable, sizeof(variable), nullptr) == ABORTED);
+    Require(sceNpTusTryAndSetVariableVUser(request, &user, 0, 1, 5, nullptr, nullptr, nullptr, variable, sizeof(variable), nullptr) == ABORTED);
+    Require(sceNpTusDeleteNpTitleCtx(context) == 0);
+    Require(sceNpTusTryAndSetVariable(request, &npId, 0, 1, 5, nullptr, nullptr, nullptr, variable, sizeof(variable), nullptr) == INVALID_ID);
+    for (const std::uint8_t byte : variable) Require(byte == 0x5a);
+}
+
 int main() {
     CheckMultiSlotVariables();
+    CheckTryAndSetVariables();
 
     const int context = sceNpTusCreateNpTitleCtxA(0, 1);
     Require(context > 0);
