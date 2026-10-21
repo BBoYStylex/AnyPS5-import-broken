@@ -3,10 +3,13 @@
 #include <cstdint>
 #include <cstdlib>
 #include <initializer_list>
+#include <stdexcept>
 
 extern "C" {
 int APS5_VABI sceConvertKeycodeGetImeKeyboardType(std::int32_t, std::uint32_t*);
 int APS5_VABI sceConvertKeycodeGetCharacter(std::uint16_t, std::uint32_t, std::uint32_t, char16_t*);
+int APS5_VABI sceConvertKeycodeGetVirtualKeycode(std::uint64_t, std::uint64_t, std::uint64_t, std::uint64_t);
+int APS5_VABI sceConvertKeycodeGetCharacterFromKeyboardData(void);
 }
 
 static void Require(bool value) { if (!value) std::abort(); }
@@ -55,5 +58,31 @@ int main() {
         Require(sceConvertKeycodeGetCharacter(0x63, state, 0, character) == 0);
         Require(character[0] == u'.');
     }
+        Require(sceConvertKeycodeGetVirtualKeycode(0, 0, 0, 0) == invalidAddress);
+
+    bool threwKeyboardData = false;
+    try {
+        sceConvertKeycodeGetCharacterFromKeyboardData();
+    } catch (const std::runtime_error&) {
+        threwKeyboardData = true;
+    }
+    Require(threwKeyboardData);
+
+    char16_t outChar[3] = {};
+    bool threwUnsupportedState = false;
+    try {
+        sceConvertKeycodeGetCharacter(0x04, 1u, 0, outChar);
+    } catch (const std::runtime_error&) {
+        threwUnsupportedState = true;
+    }
+    Require(threwUnsupportedState);
+
+    bool threwUnsupportedType = false;
+    try {
+        sceConvertKeycodeGetCharacter(0x04, 0, 1u, outChar);
+    } catch (const std::runtime_error&) {
+        threwUnsupportedType = true;
+    }
+    Require(threwUnsupportedType);
     return 0;
 }
