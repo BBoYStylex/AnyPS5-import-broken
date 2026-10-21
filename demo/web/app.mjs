@@ -80,7 +80,7 @@ function update() {
 }
 
 function lock(value) {
-  for (const id of ["choose", "choose-folder", "change", "target", "save", "intel"]) $(id).disabled = value || !supported || (id === "choose-folder" && !("webkitdirectory" in $("folder")));
+  for (const id of ["choose", "choose-folder", "change", "target", "save", "intel", "language"]) $(id).disabled = value || !supported || (id === "choose-folder" && !("webkitdirectory" in $("folder")));
 }
 
 async function fail(message) {
@@ -109,6 +109,9 @@ async function fail(message) {
   $("drop").hidden = false;
   $("selection").hidden = true;
   $("warnings").hidden = true;
+  $("arabic-badge").hidden = true;
+  $("language").value = "1";
+  $("language-note").textContent = "Detected automatically from param.json when available.";
   $("app-list").replaceChildren();
   $("file").value = "";
   working = false;
@@ -151,7 +154,7 @@ async function onMessage({ data }) {
         name.textContent = input.name;
         const details = document.createElement("span");
         const summary = summaries[index];
-        details.textContent = `${summary.files} files · ${bytes(summary.totalBytes)} expanded · ${summary.modules} modules`;
+        details.textContent = `${summary.files} files · ${bytes(summary.totalBytes)} expanded · ${summary.modules} modules${summary.supportsArabic ? " · Arabic supported" : ""}`;
         item.append(name, details);
         return item;
       }));
@@ -168,6 +171,23 @@ async function onMessage({ data }) {
       $("warnings").hidden = warningItems.length === 0;
       $("status").hidden = true;
       $("cancel").hidden = true;
+      const hasArabic = summaries.some(summary => summary.supportsArabic);
+      const arabicBadge = $("arabic-badge");
+      const languageNote = $("language-note");
+      if (hasArabic) {
+        arabicBadge.hidden = false;
+        arabicBadge.className = "badge";
+        arabicBadge.textContent = "✓ Arabic supported";
+        $("language").value = "21";
+        languageNote.textContent = selectedInputs.length > 1
+          ? "Arabic detected in one or more apps (param.json). Auto-selected ANYPS5_LANGUAGE=21."
+          : "Arabic detected in game metadata (param.json). Auto-selected ANYPS5_LANGUAGE=21.";
+      } else {
+        arabicBadge.hidden = false;
+        arabicBadge.className = "badge muted-badge";
+        arabicBadge.textContent = "Arabic not listed";
+        languageNote.textContent = "Arabic was not found in param.json localized parameters. Defaulting to English US.";
+      }
       lock(false);
       update();
     } else if (data.type === "directory" || data.type === "open-file") {
@@ -214,6 +234,10 @@ async function onMessage({ data }) {
         if (document.querySelector('input[name="target"]:checked').value === "linux") $("result-info").textContent += ` · On Linux, run chmod +x "${data.outputName}" before launching.`;
       }
       $("result-note").textContent = data.apps > 1 ? "Extract the ZIP; each app is in its own folder with its executable, libs and app0 files. On Linux, run chmod +x */*.elf before launching." : "Extract the entire ZIP before launching the executable.";
+      if ($("language").value !== "1") {
+        const runner = document.querySelector('input[name="target"]:checked').value === "windows" ? "run.bat" : "run.sh";
+        $("result-note").textContent += ` Includes ${runner} configured with ANYPS5_LANGUAGE=${$("language").value}.`;
+      }
       $("result-note").hidden = data.mode === "disk";
       outputDirectory = null;
       outputTransaction?.commit();
@@ -243,7 +267,8 @@ async function selectInputs(inputs) {
   working = true;
   logs = [];
   $("log").textContent = "";
-  for (const id of ["error", "done", "download", "warnings", "selection"]) $(id).hidden = true;
+  for (const id of ["error", "done", "download", "warnings", "selection", "arabic-badge"]) $(id).hidden = true;
+  $("language-note").textContent = "Detected automatically from param.json when available.";
   $("acknowledge").checked = false;
   $("status").hidden = false;
   $("cancel").hidden = false;
@@ -290,7 +315,7 @@ $("drop").ondrop = event => {
   if (working) return;
   selectInputs([...event.dataTransfer.files].map(file => ({ name: file.name, file })));
 };
-for (const id of ["save", "target", "acknowledge"]) $(id).addEventListener("change", update);
+for (const id of ["save", "target", "acknowledge", "language"]) $(id).addEventListener("change", update);
 $("cancel").onclick = () => fail("Cancelled. Choose the ZIP or folder again to restart.");
 $("convert").onclick = async () => {
   if ($("convert").disabled) return;
@@ -312,7 +337,7 @@ $("convert").onclick = async () => {
     $("status").hidden = false;
     $("cancel").hidden = false;
     $("error").hidden = true;
-    worker.postMessage({ type: "convert", target, toIntel: $("intel").checked, mode: $("save").value });
+    worker.postMessage({ type: "convert", target, toIntel: $("intel").checked, mode: $("save").value, language: $("language").value });
   } catch (error) {
     if (error.name === "AbortError") { working = false; lock(false); update(); }
     else await fail(error.message);
