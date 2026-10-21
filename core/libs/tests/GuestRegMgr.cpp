@@ -6,6 +6,12 @@
 
 extern "C" {
 std::int32_t APS5_VABI sceRegMgrNonSysGetInt(std::int64_t key, std::int32_t unk, std::int32_t* data);
+int APS5_VABI sceRegMgrGetBin(void);
+int APS5_VABI sceRegMgrSetBin(void);
+int APS5_VABI sceRegMgrCheckError(void);
+int APS5_VABI sceRegMgrGetVersion(void);
+int APS5_VABI sceRegMgrIsChange(void);
+int APS5_VABI sceRegMgrResetVal(void);
 }
 
 static void Require(bool value) { if (!value) std::abort(); }
@@ -24,4 +30,10 @@ int main() {
     std::int32_t value = 0;
     Require(ReportsNotImplemented("sceRegMgrNonSysGetInt", [&] { sceRegMgrNonSysGetInt(0, 0, &value); }));
     Require(ReportsNotImplemented("sceRegMgrNonSysGetInt", [&] { sceRegMgrNonSysGetInt(-1, 1, nullptr); }));
+    Require(ReportsNotImplemented("sceRegMgrGetBin", [] { sceRegMgrGetBin(); }));
+    Require(ReportsNotImplemented("sceRegMgrSetBin", [] { sceRegMgrSetBin(); }));
+    Require(ReportsNotImplemented("sceRegMgrCheckError", [] { sceRegMgrCheckError(); }));
+    Require(ReportsNotImplemented("sceRegMgrGetVersion", [] { sceRegMgrGetVersion(); }));
+    Require(ReportsNotImplemented("sceRegMgrIsChange", [] { sceRegMgrIsChange(); }));
+    Require(ReportsNotImplemented("sceRegMgrResetVal", [] { sceRegMgrResetVal(); }));
 }
