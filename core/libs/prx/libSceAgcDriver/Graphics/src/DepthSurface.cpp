@@ -1774,6 +1774,32 @@ VkImageView DepthSurfaceView(const Context& context, const DepthTarget& target, 
     return surface->view;
 }
 
+SampleOrderTarget DepthSurfaceOrderTarget(const Context& context, const DepthTarget& target) {
+    std::lock_guard gpu(GuestMemory::GpuMutex());
+    std::unique_lock lock(surfacesMutex());
+    for (const auto& candidate : surfaces()) {
+        if (!candidate->active->load(std::memory_order_acquire) || candidate->context.device != context.device || !sameSurface(candidate->target, target)) continue;
+        Require(candidate->sampleable, "the multisampled depth surface whose samples are put in the guest's order cannot be sampled");
+        return {candidate->image, candidate->view, candidate->hostFormat, target.extent, target.samples, DepthSampleOrderMethod(context, target), candidate->owned};
+    }
+    throw std::runtime_error("AGC graphics: the multisampled depth surface whose samples are put in the guest's order is not resident");
+}
+
+DepthSampleLocations DepthSurfaceSampleLocations(const Context& context, const DepthTarget& target) {
+    std::lock_guard gpu(GuestMemory::GpuMutex());
+    std::unique_lock lock(surfacesMutex());
+    for (const auto& candidate : surfaces()) {
+        if (!candidate->active->load(std::memory_order_acquire) || candidate->context.device != context.device || !sameSurface(candidate->target, target)) continue;
+        DepthSampleLocations depth;
+        depth.image = candidate->image;
+        depth.format = candidate->hostFormat;
+        depth.samples = target.samples;
+        depth.keep = candidate->owned;
+        return depth;
+    }
+    throw std::runtime_error("AGC graphics: the depth surface drawn at custom sample locations is not resident");
+}
+
 bool DepthPlanesStale() {
     auto& planes = stalePlanes();
     return planes.begin.load(std::memory_order_acquire) < planes.end.load(std::memory_order_acquire);
