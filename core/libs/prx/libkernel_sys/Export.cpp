@@ -492,6 +492,12 @@ int APS5_VABI mkdirat_nid_postfix(int fd, const char* path, std::uint16_t mode) 
     return 0;
 }
 
+extern "C" int TerminalError_nid_no_patch(int descriptor);
+
+int APS5_VABI tcgetsid_nid_postfix(int fd) {
+    return static_cast<int>(Fail(TerminalError_nid_no_patch(fd)));
+}
+
 int APS5_VABI fchmodat_nid_postfix(int fd, const char* path, int mode, int flag) {
     if (flag != 0 && flag != GuestAtSymlinkNofollow) return static_cast<int>(Fail(GuestEinval));
     if (path == nullptr) return static_cast<int>(Fail(GuestEfault));

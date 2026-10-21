@@ -83,6 +83,8 @@ int ProcessGroupError(int descriptor, const char* pipeMessage) {
 }
 }
 
+extern "C" int TerminalError_nid_no_patch(int descriptor) { return TerminalError(descriptor); }
+
 extern "C" {
 int APS5_VABI cfsetspeed_nid_postfix(void* attributes, std::uint32_t speed) {
     if (attributes == nullptr) throw std::invalid_argument("cfsetspeed: attributes is null");
