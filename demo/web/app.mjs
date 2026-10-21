@@ -10,7 +10,7 @@ const TRANSLATIONS = {
     "brand-sub": "/ المحول",
     "nav-compat": "التوافق ↗",
     "eyebrow": "تحويل محلي",
-    "title": "محول تطبيقات PS5 إلى نظامي Windows&nbsp;و&nbsp;Linux",
+    "title": "محول تطبيقات PS5 لنظامي <span style=\"white-space: nowrap;\">Windows و Linux</span>",
     "panel-title": "تحويل التطبيقات",
     "files-stay": "الملفات تبقى على جهازك",
     "drop-title": "اختر مجلداً أو أسقط ملفات ZIP هنا",
