@@ -290,6 +290,7 @@ private:
         append(key, value.robustBufferAccess2);
         append(key, value.float32FlushToZero);
         append(key, value.float32DenormPreserve);
+        if (value.wgsl) append(key, std::uint64_t{1});
     }
 };
 
