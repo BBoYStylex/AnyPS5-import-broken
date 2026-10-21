@@ -294,6 +294,10 @@ __attribute__((noinline)) static void APS5_VABI RunChecks() {
         Require(sscanf_nid_postfix("abcz", "%l[a-c]", first) == 1 && std::u16string(first) == u"abc");
         Require(sscanf_nid_postfix("ab cd", "%l[^ ]", first) == 1 && std::u16string(first) == u"ab");
         Require(sscanf_nid_postfix("]x", "%l[]x]", first) == 1 && std::u16string(first) == u"]x");
+        Require(sscanf_nid_postfix("\xc3\xa9", "%l[\xc3\xa9]", first) == 1 && std::u16string(first) == u"\u00e9");
+        Require(sscanf_nid_postfix("\xc3\xa7x", "%l[\xc3\xa0-\xc3\xaa]", first) == 1 && std::u16string(first) == u"\u00e7");
+        Require(sscanf_nid_postfix("ab", "%l[^\xc3\xa9]", first) == 1 && std::u16string(first) == u"ab");
+        Require(sscanf_nid_postfix("x\xc3\xa9", "%l[x\xc3\xa9]", first) == 1 && std::u16string(first) == u"x\u00e9");
         char16_t second[8] = {};
         Require(sscanf_nid_postfix("\xc5\xbelu\xc5\xa5 k\xc5\xaf\xc5\x88", "%ls %ls", first, second) == 2);
         Require(std::u16string(first) == u"\u017elu\u0165" && std::u16string(second) == u"k\u016f\u0148");
@@ -323,7 +327,7 @@ __attribute__((noinline)) static void APS5_VABI RunChecks() {
             try { sscanf_nid_postfix(input, format, untouched); } catch (const std::runtime_error&) { return untouched[0] == u'!'; }
             return false;
         };
-        Require(rejects("\xff", "%ls") && rejects("a b", "%2$ls") && rejects("\xc5\xbe", "%l[\xc5\xbe]"));
+        Require(rejects("\xff", "%ls") && rejects("a b", "%2$ls"));
         Require(rejects("\xf0\x9f\x98\x80", "%ls"));
     }
     char narrow[8] = {};
