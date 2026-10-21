@@ -988,7 +988,7 @@ private:
         const bool buffer = handle.Opcode() == IrOpcode::GetBufferResource;
         const bool merged = pointer->Argument(0)->Resolve()->IsPhi();
         const bool pointerKeyed = merged && !buffer;
-        if (!hops.empty() && (buffer || merged)) return false;
+        if (!hops.empty() && buffer) return false;
         std::vector<IrValue*> lowReads;
         std::vector<IrValue*> highReads;
         if (pointerKeyed ? !PointerRecordPairs(pointer->Argument(0), pointer->Argument(1), lowReads, highReads) : merged && !PointerRecordReads(pointer->Argument(0), lowReads)) return false;
