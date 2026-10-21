@@ -126,6 +126,16 @@ bool PrivateStorage(std::uint32_t storageClass) {
     return storageClass == spv::StorageClassFunction || storageClass == spv::StorageClassPrivate;
 }
 
+std::uint32_t MemoryClass(std::uint32_t storageClass) {
+    switch (storageClass) {
+    case spv::StorageClassUniform:
+    case spv::StorageClassPhysicalStorageBuffer:
+        return spv::StorageClassStorageBuffer;
+    default:
+        return storageClass;
+    }
+}
+
 bool AtomicWrite(spv::Op op) {
     const auto raw = static_cast<std::uint32_t>(op);
     return (raw >= spv::OpAtomicExchange && raw <= spv::OpAtomicXor) || op == spv::OpAtomicFlagTestAndSet || op == spv::OpAtomicFMinEXT || op == spv::OpAtomicFMaxEXT ||
@@ -203,11 +213,11 @@ private:
     }
 
     std::uint32_t ClassOf(std::uint32_t pointer) const {
-        if (const auto variable = module.storageClasses.find(pointer); variable != module.storageClasses.end()) return variable->second;
+        if (const auto variable = module.storageClasses.find(pointer); variable != module.storageClasses.end()) return MemoryClass(variable->second);
         const auto type = types.find(pointer);
         if (type == types.end()) return UnknownClass;
         const auto storage = module.pointerClasses.find(type->second);
-        return storage == module.pointerClasses.end() ? UnknownClass : storage->second;
+        return storage == module.pointerClasses.end() ? UnknownClass : MemoryClass(storage->second);
     }
 
     bool Written(std::uint32_t storageClass) const {
@@ -418,6 +428,22 @@ private:
                     const auto& exit = blocks.at(node)->body.back();
                     const auto exitOp = Opcode(exit);
                     if (divergent.contains(node) || ((exitOp == spv::OpBranchConditional || exitOp == spv::OpSwitch) && NonUniform(exit.at(1)))) {
+                        split = true;
+                        break;
+                    }
+                }
+            }
+            if (!split) {
+                const auto continueTarget = mergeOp == spv::OpLoopMerge ? mergeInstruction.at(2) : 0u;
+                for (const auto node : construct) {
+                    const auto& nodeBody = blocks.at(node)->body;
+                    if (nodeBody.empty()) continue;
+                    const auto& exit = nodeBody.back();
+                    const auto exitOp = Opcode(exit);
+                    if ((exitOp != spv::OpBranchConditional && exitOp != spv::OpSwitch) || !NonUniform(exit.at(1))) continue;
+                    if (nodeBody.size() >= 2u && (Opcode(nodeBody[nodeBody.size() - 2u]) == spv::OpSelectionMerge || Opcode(nodeBody[nodeBody.size() - 2u]) == spv::OpLoopMerge)) continue;
+                    const auto& successors = flow.successors.at(node);
+                    if (std::find(successors.begin(), successors.end(), merge) != successors.end() || (continueTarget != 0u && std::find(successors.begin(), successors.end(), continueTarget) != successors.end())) {
                         split = true;
                         break;
                     }
