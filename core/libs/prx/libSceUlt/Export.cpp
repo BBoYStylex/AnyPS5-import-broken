@@ -396,6 +396,24 @@ int APS5_VABI sceUltConditionVariableSignal(void* condition) {
     return ULT_OK;
 }
 
+int APS5_VABI sceUltConditionVariableSignalAll(void* condition) {
+    std::shared_ptr<UltConditionState> state;
+    {
+        std::lock_guard lock(gMutex);
+        const auto it = gConditions.find(condition);
+        if (it == gConditions.end()) return condition == nullptr ? ULT_ERROR_NULL : ULT_ERROR_STATE;
+        state = it->second;
+    }
+    std::lock_guard stateLock(state->_mutex->_mutex);
+    if (!state->_alive || !state->_mutex->_alive) return ULT_ERROR_STATE;
+    for (auto* waiter : state->_queue) {
+        waiter->_signaled = true;
+        waiter->_available.notify_one();
+    }
+    state->_queue.clear();
+    return ULT_OK;
+}
+
 int APS5_VABI sceUltConditionVariableWait(void* condition) {
     std::shared_ptr<UltConditionState> state;
     {
@@ -910,11 +928,6 @@ int APS5_VABI _sceUltUlthreadRuntimeCreate(void* runtime, const char* name, std:
 
 int APS5_VABI _sceUltUlthreadCreate(void* ulthread, const char* name, UltUlthreadEntry entry, std::uint64_t arg, void* context, std::uint64_t sizeContext, void* runtime, const void* optParam, std::uint32_t buildVersion) {
     return sceUltUlthreadCreate(ulthread, name, entry, arg, context, sizeContext, runtime, optParam, buildVersion);
-}
-
-int APS5_VABI sceUltConditionVariableSignalAll() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
 }
 
 int APS5_VABI sceUltGetConditionVariableInfo() {
