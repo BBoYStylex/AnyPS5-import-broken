@@ -81,7 +81,7 @@ constexpr std::array<std::array<float, 4>, 3> Triangles{{
     {-1.0f, -1.0f, 0.5f, 1.0f}, {3.0f, -1.0f, 0.5f, 1.0f}, {-1.0f, 3.0f, 0.5f, 1.0f}
 }};
 
-void Draw(AgcDriver::VulkanDevice& device, std::uint32_t width, std::uint32_t height, std::span<std::byte> pixels, std::span<std::uint32_t> results) {
+void Draw(AgcDriver::VulkanDevice& device, std::uint32_t width, std::uint32_t height, std::span<std::byte> pixels, std::span<std::uint32_t> results, std::uint32_t draws = 1u) {
     const auto pixelCode = PixelCode(width);
     std::fill(pixels.begin(), pixels.end(), std::byte{0});
     std::fill(results.begin(), results.end(), 0u);
@@ -139,7 +139,7 @@ void Draw(AgcDriver::VulkanDevice& device, std::uint32_t width, std::uint32_t he
     state.blends = {state.blend};
     state.blendConstants = {};
     const AgcDriver::Pm4::DrawParameters draw{0, static_cast<std::uint32_t>(Triangles.size()), 0, 1, 0, false};
-    device.Draw(state, draw, shaders);
+    for (std::uint32_t n = 0; n < draws; ++n) device.Draw(state, draw, shaders);
     device.WaitIdle();
 }
 
@@ -153,7 +153,7 @@ int main() {
             std::printf("skipped, subgroup size %u cannot hold a wave32\n", device->Target().subgroupSize);
             return VulkanTestSkipped;
         }
-        Draw(*device, Width, Height, Pixels, Results);
+        Draw(*device, Width, Height, Pixels, Results, 2u);
         for (std::uint32_t pixel = 0; pixel < Width * Height; ++pixel) {
             for (std::uint32_t channel = 0; channel < 4u; ++channel) Require(Pixels[pixel * 4u + channel] == std::byte{255}, "pixel LDS limit: missing color");
             const auto base = pixel * 4u;
@@ -161,7 +161,7 @@ int main() {
             Require(Results[base + 1u] == Last, "pixel LDS limit: dword 8191 expected " + std::to_string(Last) + " got " + std::to_string(Results[base + 1u]));
             Require(Results[base + 2u] == 0u, "pixel LDS limit: dword 8192 wrote " + std::to_string(Results[base + 2u]));
         }
-        std::puts("pixel LDS limit passed: dword 8000 and 8191, 2048 pixels");
+        std::puts("pixel LDS limit passed: dword 8000 and 8191, 2048 pixels, two draws");
         if (device->Target().largePixelFunctionLdsBuffer) {
             bool threw = false;
             try {
