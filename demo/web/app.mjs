@@ -47,6 +47,8 @@ const TRANSLATIONS = {
     "save-note-multi-zip": "يكتب ملف ZIP مضغوطاً يحتوي كل تطبيق في مجلد خاص مباشرة على القرص.",
     "folder-blocked-win": "حفظ في مجلد · غير متاح لنظام Windows (قيود ملفات DLL)",
     "folder-blocked-multi": "حفظ في مجلد · غير متاح للتحويل المجمع",
+    "cpu-compat": "توافق المعالج",
+    "cpu-note": "تحويل تعليمات AMD لتناسب معالجات Intel.",
     "lang-note-detected": "تم اكتشاف دعم اللغة العربية في بيانات اللعبة (param.json). تم تحديد ANYPS5_LANGUAGE=21 تلقائياً.",
     "lang-note-multi": "تم اكتشاف دعم اللغة العربية في أحد التطبيقات (param.json). تم تحديد ANYPS5_LANGUAGE=21 تلقائياً.",
     "lang-note-none": "لم يتم العثور على اللغة العربية في معلمات اللعبة (param.json). اللغة الافتراضية هي الإنجليزية.",
@@ -58,7 +60,8 @@ function applyUiLanguage(lang) {
   const isAr = lang === "ar";
   document.documentElement.lang = isAr ? "ar" : "en";
   document.documentElement.dir = isAr ? "rtl" : "ltr";
-  $("ui-lang").textContent = isAr ? "🌐 English" : "🌐 العربية";
+  $("ui-lang").textContent = isAr ? "EN" : "AR";
+  $("ui-lang").title = isAr ? "Switch to English" : "التبديل إلى العربية";
   for (const el of document.querySelectorAll("[data-i18n]")) {
     const key = el.dataset.i18n;
     if (!el.dataset.en) el.dataset.en = el.innerHTML;
@@ -67,6 +70,7 @@ function applyUiLanguage(lang) {
   }
   update();
 }
+window.applyUiLanguage = applyUiLanguage;
 let worker;
 let selectedInputs = [];
 let summaries = [];
@@ -168,7 +172,7 @@ function update() {
 }
 
 function lock(value) {
-  for (const id of ["choose", "choose-folder", "change", "target", "save", "intel", "language", "ui-lang"]) $(id).disabled = value || !supported || (id === "choose-folder" && !("webkitdirectory" in $("folder")));
+  for (const id of ["choose", "choose-folder", "change", "target", "save", "intel", "language"]) $(id).disabled = value || !supported || (id === "choose-folder" && !("webkitdirectory" in $("folder")));
 }
 
 async function fail(message) {
@@ -264,19 +268,20 @@ async function onMessage({ data }) {
       const isAr = document.documentElement.lang === "ar";
       const hasArabic = summaries.some(summary => summary.supportsArabic);
       const arabicBadge = $("arabic-badge");
+      const arabicStatusText = $("arabic-status-text");
       const languageNote = $("language-note");
       if (hasArabic) {
         arabicBadge.hidden = false;
-        arabicBadge.className = "badge";
-        arabicBadge.textContent = isAr ? "✓ تدعم اللغة العربية" : "✓ Arabic supported";
+        arabicBadge.className = "language-status supported";
+        if (arabicStatusText) arabicStatusText.textContent = isAr ? "تدعم اللغة العربية" : "Arabic supported";
         $("language").value = "21";
         languageNote.textContent = isAr
           ? (selectedInputs.length > 1 ? TRANSLATIONS.ar["lang-note-multi"] : TRANSLATIONS.ar["lang-note-detected"])
           : (selectedInputs.length > 1 ? "Arabic detected in one or more apps (param.json). Auto-selected ANYPS5_LANGUAGE=21." : "Arabic detected in game metadata (param.json). Auto-selected ANYPS5_LANGUAGE=21.");
       } else {
         arabicBadge.hidden = false;
-        arabicBadge.className = "badge muted-badge";
-        arabicBadge.textContent = isAr ? "العربية غير مدرجة" : "Arabic not listed";
+        arabicBadge.className = "language-status not-supported";
+        if (arabicStatusText) arabicStatusText.textContent = isAr ? "العربية غير مدرجة" : "Arabic not listed";
         languageNote.textContent = isAr ? TRANSLATIONS.ar["lang-note-none"] : "Arabic was not found in param.json localized parameters. Defaulting to English US.";
       }
       lock(false);
@@ -446,12 +451,13 @@ $("theme").onclick = () => {
   const dark = document.documentElement.dataset.theme ? document.documentElement.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
   document.documentElement.dataset.theme = dark ? "light" : "dark";
 };
-$("ui-lang").onclick = () => {
+window.toggleUiLang = () => {
   const current = document.documentElement.lang === "ar" ? "ar" : "en";
   const target = current === "ar" ? "en" : "ar";
   try { localStorage.setItem("anyps5_ui_lang", target); } catch {}
   applyUiLanguage(target);
 };
+$("ui-lang").onclick = window.toggleUiLang;
 let savedUiLang = "en";
 try { savedUiLang = localStorage.getItem("anyps5_ui_lang") || "en"; } catch {}
 if (savedUiLang === "ar") applyUiLanguage("ar");
