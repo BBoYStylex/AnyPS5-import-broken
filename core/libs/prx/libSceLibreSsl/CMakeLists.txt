@@ -1,0 +1,15 @@
+add_library(libSceLibreSsl SHARED EXCLUDE_FROM_ALL Export.cpp)
+target_include_directories(libSceLibreSsl PRIVATE ${LIBS_INCLUDE_DIR})
+configure_windows_unwind(libSceLibreSsl)
+
+if(BUILD_TESTING)
+    add_test_executable(guest_libressl_ocsp_strings_tests ${LIBS_INCLUDE_DIR}/tests/GuestLibreSslOcspStrings.cpp)
+    target_include_directories(guest_libressl_ocsp_strings_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_libressl_ocsp_strings_tests PRIVATE libSceLibreSsl)
+    add_test(NAME guest_libressl_ocsp_strings COMMAND guest_libressl_ocsp_strings_tests)
+    set_tests_properties(guest_libressl_ocsp_strings PROPERTIES TIMEOUT 20)
+    if(WIN32)
+        set_tests_properties(guest_libressl_ocsp_strings PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceLibreSsl>")
+    endif()
+endif()

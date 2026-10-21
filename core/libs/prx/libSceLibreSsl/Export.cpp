@@ -3,6 +3,23 @@
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
 
+namespace {
+
+struct OcspString {
+    long status;
+    const char* text;
+};
+
+template<std::size_t Size>
+const char* OcspLookup(const OcspString (&table)[Size], long status) {
+    for (const auto& entry : table) {
+        if (entry.status == status) return entry.text;
+    }
+    return "(UNKNOWN)";
+}
+
+}
+
 extern "C" {
 
 APS5_DUMMY_FUN
@@ -921,9 +938,9 @@ int APS5_VABI OCSP_basic_verify_nid_postfix(void) {
     return 0;
 }
 
-int APS5_VABI OCSP_cert_status_str_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+const char* APS5_VABI OCSP_cert_status_str_nid_postfix(long status) {
+    static constexpr OcspString table[] = {{0, "good"}, {1, "revoked"}, {2, "unknown"}};
+    return OcspLookup(table, status);
 }
 
 int APS5_VABI OCSP_check_validity_nid_postfix(void) {
@@ -931,9 +948,9 @@ int APS5_VABI OCSP_check_validity_nid_postfix(void) {
     return 0;
 }
 
-int APS5_VABI OCSP_crl_reason_str_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+const char* APS5_VABI OCSP_crl_reason_str_nid_postfix(long status) {
+    static constexpr OcspString table[] = {{0, "unspecified"}, {1, "keyCompromise"}, {2, "cACompromise"}, {3, "affiliationChanged"}, {4, "superseded"}, {5, "cessationOfOperation"}, {6, "certificateHold"}, {8, "removeFromCRL"}};
+    return OcspLookup(table, status);
 }
 
 int APS5_VABI OCSP_resp_count_nid_postfix(void) {
@@ -956,9 +973,9 @@ int APS5_VABI OCSP_response_status_nid_postfix(void) {
     return 0;
 }
 
-int APS5_VABI OCSP_response_status_str_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+const char* APS5_VABI OCSP_response_status_str_nid_postfix(long status) {
+    static constexpr OcspString table[] = {{0, "successful"}, {1, "malformedrequest"}, {2, "internalerror"}, {3, "trylater"}, {5, "sigrequired"}, {6, "unauthorized"}};
+    return OcspLookup(table, status);
 }
 
 int APS5_VABI OCSP_single_get0_status_nid_postfix(void) {
