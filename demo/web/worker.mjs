@@ -83,7 +83,10 @@ async function convertInput(item, index, native, libraries, data, destination, d
     const input = await current.conversionInput(data.target, data.toIntel, itemReport);
     const converted = native.Convert(input, itemReport);
     if (!converted.ok) throw new Error(converted.error);
-    const options = inputs.length > 1 ? { prefix: `${batchOutputDirectory(item.name, index)}/`, writer } : {};
+    const options = {
+      ...(inputs.length > 1 ? { prefix: `${batchOutputDirectory(item.name, index)}/`, writer } : { writer }),
+      ...(data.language ? { language: data.language } : {})
+    };
     await packageArchive(current, converted, input.outputName, libraries.file, destination, itemReport, directory, options);
     return input.outputName;
   } catch (error) {

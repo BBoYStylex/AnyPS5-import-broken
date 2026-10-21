@@ -8,3 +8,8 @@
 .app-list li{padding:8px 0;border-top:1px solid var(--line)}
 .app-list strong,.app-list span{display:block;overflow-wrap:anywhere}
 .app-list strong{color:var(--text)}
+.language-settings{grid-column:1/-1}
+.setting-title{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.setting-title>label{font-size:12px;font-weight:600}
+.badge{font-size:11px;font-weight:600;color:var(--on-accent);background:var(--good);padding:2px 8px;border-radius:12px;display:inline-flex;align-items:center;line-height:1.4}
+.badge.muted-badge{background:var(--sunken);color:var(--muted);border:1px solid var(--line)}

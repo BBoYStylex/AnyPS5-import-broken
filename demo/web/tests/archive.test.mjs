@@ -191,6 +191,42 @@ assert.equal((await oversizedIconArchive.conversionInput("linux", false, () => {
 await oversizedIconArchive.close();
 console.log("Oversized Windows-only icons do not block Linux conversion");
 
+const arabicMetadata = new TextEncoder().encode(JSON.stringify({
+  defaultLanguage: "en-US",
+  localizedParameters: { "ar-SA": { titleName: "Arabic Title" } }
+}));
+const arabicArchive = new Archive([
+  { path: "title/program.elf", file: new Blob([new Uint8Array([0x7f, 69, 76, 70])]) },
+  { path: "title/sce_sys/param.json", file: new Blob([arabicMetadata]) }
+]);
+const arabicSummary = await arabicArchive.inspect(() => {});
+assert.equal(arabicSummary.supportsArabic, true);
+assert(arabicSummary.detectedLanguages.includes("ar-SA"));
+const arabicZip = [];
+const arabicLibraries = await zip([["libs/system.prx", new Uint8Array([1, 2, 3])]]);
+await packageArchive(arabicArchive, { executable, modules: [] }, "program.exe", arabicLibraries, new WritableStream({ write(c) { arabicZip.push(c.slice()); } }), () => {}, false, { language: "21" });
+await arabicArchive.close();
+const arabicReader = new ZipReader(new BlobReader(new Blob(arabicZip)));
+const arabicEntries = await arabicReader.getEntries();
+const runBat = arabicEntries.find(entry => entry.filename === "run.bat");
+assert(runBat);
+const runBatContent = new TextDecoder().decode(await runBat.getData(new Uint8ArrayWriter()));
+assert(runBatContent.includes("ANYPS5_LANGUAGE=21"));
+await arabicReader.close();
+
+const nonArabicMetadata = new TextEncoder().encode(JSON.stringify({
+  defaultLanguage: "ja-JP",
+  localizedParameters: { "ja-JP": { titleName: "Title" } }
+}));
+const nonArabicArchive = new Archive([
+  { path: "title/program.elf", file: new Blob([new Uint8Array([0x7f, 69, 76, 70])]) },
+  { path: "title/sce_sys/param.json", file: new Blob([nonArabicMetadata]) }
+]);
+const nonArabicSummary = await nonArabicArchive.inspect(() => {});
+assert.equal(nonArabicSummary.supportsArabic, false);
+await nonArabicArchive.close();
+console.log("Arabic language detection from param.json and runner generation verified");
+
 const workerMessages = [];
 globalThis.self = { postMessage: message => workerMessages.push(message) };
 const worker = await import(site("worker.mjs"));
