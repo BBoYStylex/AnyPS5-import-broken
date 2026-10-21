@@ -29,10 +29,14 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#ifdef __linux__
+#include <sys/uio.h>
+#endif
 #endif
 #include "prx/libc/include/General.hpp"
 #include "prx/libc/include/FilesystemError.hpp"
 #include "prx/libc/include/AppArchive.hpp"
+#include "prx/libc/include/GuestArena.hpp"
 #include "prx/libc/include/ApplicationHeap.hpp"
 
 namespace {
@@ -677,6 +681,38 @@ extern "C" std::filesystem::path ResolveDiskPath_nid_no_patch(const char* path) 
 
 extern "C" std::filesystem::path ResolveArchivedPath_nid_no_patch(const char* path, bool module) {
     return ResolveLocked(path, module, true);
+}
+
+extern "C" bool GuestCopyOut_nid_no_patch(void* destination, const void* source, std::size_t bytes) {
+    if (bytes == 0) return true;
+    const auto start = reinterpret_cast<std::uintptr_t>(destination);
+    if (start == 0 || bytes > UINTPTR_MAX - start) return false;
+    const GuestArena::HostWrite guard(destination, bytes);
+    if (!guard.Open()) return false;
+#ifdef _WIN32
+    for (auto address = start; address < start + bytes;) {
+        MEMORY_BASIC_INFORMATION memory{};
+        if (VirtualQuery(reinterpret_cast<LPCVOID>(address), &memory, sizeof(memory)) != sizeof(memory) || memory.State != MEM_COMMIT ||
+            (memory.Protect & PAGE_GUARD) != 0 ||
+            (memory.Protect & (PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)) == 0) return false;
+        address = reinterpret_cast<std::uintptr_t>(memory.BaseAddress) + memory.RegionSize;
+    }
+    std::memcpy(destination, source, bytes);
+    return true;
+#elif defined(__linux__)
+    iovec local{const_cast<void*>(source), bytes};
+    iovec remote{destination, bytes};
+    const ssize_t copied = ::process_vm_writev(::getpid(), &local, 1, &remote, 1, 0);
+    if (copied < 0) {
+        if (errno == EFAULT) return false;
+        std::memcpy(destination, source, bytes);
+        return true;
+    }
+    return static_cast<std::size_t>(copied) == bytes;
+#else
+    std::memcpy(destination, source, bytes);
+    return true;
+#endif
 }
 
 extern "C" std::filesystem::path ResolvePath_nid_no_patch(const char* path) {

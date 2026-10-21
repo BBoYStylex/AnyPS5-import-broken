@@ -13,6 +13,10 @@
 extern "C" {
 std::int64_t APS5_VABI fstat_nid_disambig1_nid_postfix(int, FileStat*);
 int APS5_VABI sceKernelFstat(int, FileStat*);
+int APS5_VABI sceKernelStat(const char*, FileStat*);
+int APS5_VABI stat_nid_postfix(const char*, FileStat*);
+int APS5_VABI lstat_nid_postfix(const char*, FileStat*);
+int APS5_VABI _fstatfs_nid_postfix(int, void*);
 int APS5_VABI sceKernelOpen(const char*, int, std::uint16_t);
 int APS5_VABI close_nid_postfix(int);
 int APS5_VABI socketpair_nid_postfix(int, int, int, int*);
@@ -37,6 +41,22 @@ static void RequireFailure(int descriptor, int error) {
     Require(sceKernelFstat(descriptor, nullptr) == static_cast<int>(0x80020000u | static_cast<unsigned>(error)));
 }
 
+static void RequireBadPointer(int descriptor, const char* path) {
+    for (const std::uintptr_t address : {std::uintptr_t{1}, ~std::uintptr_t{0xfff}}) {
+        auto* bad = reinterpret_cast<FileStat*>(address);
+        *__error_nid_postfix() = 0;
+        Require(fstat_nid_disambig1_nid_postfix(descriptor, bad) == -1 && *__error_nid_postfix() == GuestEfault);
+        Require(sceKernelFstat(descriptor, bad) == static_cast<int>(0x80020000u | GuestEfault));
+        *__error_nid_postfix() = 0;
+        Require(stat_nid_postfix(path, bad) == -1 && *__error_nid_postfix() == GuestEfault);
+        *__error_nid_postfix() = 0;
+        Require(lstat_nid_postfix(path, bad) == -1 && *__error_nid_postfix() == GuestEfault);
+        Require(sceKernelStat(path, bad) == static_cast<int>(0x80020000u | GuestEfault));
+        *__error_nid_postfix() = 0;
+        Require(_fstatfs_nid_postfix(descriptor, bad) == -1 && *__error_nid_postfix() == GuestEfault);
+    }
+}
+
 int main() {
     const auto root = std::filesystem::temp_directory_path() /
         ("anyps5-fstat-fault-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
@@ -53,6 +73,7 @@ int main() {
     FileStat status{};
     Require(fstat_nid_disambig1_nid_postfix(file, &status) == 0 && status.st_size == 5);
     RequireFailure(file, GuestEfault);
+    RequireBadPointer(file, "/anyps5-fstat-fault-test/file.txt");
 
     int sockets[2];
     Require(socketpair_nid_postfix(1, 1, 0, sockets) == 0);
