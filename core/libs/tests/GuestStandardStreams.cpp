@@ -177,6 +177,29 @@ static void CheckUnlockedStreams() {
     Require(std::filesystem::remove(filename));
 }
 
+static void CheckConcurrentStatusSync() {
+    FileStream stream(std::tmpfile());
+    std::atomic<bool> start = false;
+    const auto write = [&] {
+        while (!start.load(std::memory_order_acquire)) std::this_thread::yield();
+        for (int index = 0; index < 10000; ++index)
+            Require(fputc_nid_postfix('x', &stream) == 'x');
+    };
+    std::thread first(write);
+    std::thread second(write);
+    std::thread third(write);
+    start.store(true, std::memory_order_release);
+    for (int index = 0; index < 10000; ++index)
+        Require(fputc_nid_postfix('x', &stream) == 'x');
+    first.join();
+    second.join();
+    third.join();
+    Require(std::fflush(stream.GetHandle()) == 0);
+    Require(std::fseek(stream.GetHandle(), 0, SEEK_END) == 0);
+    Require(std::ftell(stream.GetHandle()) == 40000);
+    stream.Close();
+}
+
 static void CheckUnlockedQueries() {
     FileStream stream(std::tmpfile());
     Require(feof_unlocked_nid_postfix(&stream) == 0 && ferror_unlocked_nid_postfix(&stream) == 0);
@@ -914,6 +937,7 @@ int main(int argc, char** argv) {
     CheckUnlockedStreamLock(false, feof_unlocked_nid_postfix);
     CheckUnlockedStreamLock(false, ferror_unlocked_nid_postfix);
     CheckTryLock();
+    CheckConcurrentStatusSync();
     CheckUnlockedQueries();
     if (!CheckBinaryModes()) return 1;
 #ifdef _WIN32

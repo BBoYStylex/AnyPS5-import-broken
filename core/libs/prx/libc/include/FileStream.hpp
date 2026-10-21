@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <cstddef>
 #include <type_traits>
+#include <mutex>
 #ifdef _WIN32
 #include <io.h>
 #include "prx/libc/include/FileLock.hpp"
@@ -66,6 +67,7 @@ class FileStream {
     bool _dynamic;
     bool guestError = false;
     bool randomDevice = false;
+    std::mutex _statusMutex;
 
 public:
     explicit FileStream(std::FILE* handle, bool dynamic = false) : _handle(handle), _dynamic(dynamic) {
@@ -202,6 +204,7 @@ public:
     }
     void SyncStatus() {
         if (!_handle) return;
+        std::lock_guard lock(_statusMutex);
         _guest.readRemaining = 0;
         _guest.writeRemaining = 0;
         _guest.flags = static_cast<std::int16_t>((_guest.flags & ~0x60) |
@@ -210,6 +213,7 @@ public:
 
     void SyncUnlockedStatus() {
         if (!_handle) return;
+        std::lock_guard lock(_statusMutex);
         _guest.readRemaining = 0;
         _guest.writeRemaining = 0;
 #ifdef _WIN32
