@@ -2054,11 +2054,12 @@ bool compareBlock(const RefreshBlock& block) {
 constexpr std::size_t HeapMirrorTransferBytes = 16 * 1024 * 1024;
 
 void transferHeapMirror(const Context& context, Buffer& mirror, Buffer& staging, std::size_t offset, std::span<std::byte> bytes, bool toDevice) {
+    Require(GuestMemory::GpuMutex().HeldByThisThread(), "heap mirror transfers require GuestMemory::GpuMutex");
     for (std::size_t at = 0; at < bytes.size();) {
         const auto length = std::min(staging.Bytes().size(), bytes.size() - at);
         auto stagingBytes = staging.Bytes().first(length);
         if (toDevice && stagingBytes.data() != bytes.data() + at) std::memcpy(stagingBytes.data(), bytes.data() + at, length);
-        CommandBatch batch(context, false);
+        CommandBatch batch(context, true);
         const auto commands = batch.Handle();
         if (toDevice) {
             RecordMemoryBarrier(context, commands, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_HOST_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
@@ -2242,7 +2243,7 @@ void compareBlocks(std::span<const RefreshBlock> blocks) {
                 packed += block.length;
                 ++index;
             }
-            CommandBatch batch(mirror.context, false);
+            CommandBatch batch(mirror.context, true);
             const auto commands = batch.Handle();
             RecordMemoryBarrier(mirror.context, commands, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_HOST_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
             auto sourceOffset = VkDeviceSize{0};
@@ -2552,7 +2553,7 @@ std::shared_ptr<ImageMirror> acquireMirror(const Context& context, const std::sh
     } catch (const std::runtime_error& error) {
         if (heap) {
             try {
-                mirror->transferStaging = std::make_shared<Buffer>(context, HeapMirrorTransferBytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+                mirror->transferStaging = std::make_shared<Buffer>(context, std::min(HeapMirrorTransferBytes, static_cast<std::size_t>(mirror->bytes)), VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
                 mirror->buffer = std::make_shared<Buffer>(context, static_cast<std::size_t>(mirror->bytes), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
                 mirror->deviceLocal = true;
                 state.hasDeviceLocal = true;
