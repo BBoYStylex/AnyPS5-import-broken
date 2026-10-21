@@ -36,8 +36,18 @@ namespace LibcDetail {
 std::size_t ReadWideScanCharacter(const char* text, char32_t* point) {
     const std::size_t size = DecodeUtf8(text, point);
     if (size == 0) NotImplemented_nid_no_patch("scanf 16-bit wide conversion of input that is not UTF-8");
-    if (*point > 0xFFFF) NotImplemented_nid_no_patch("scanf 16-bit wide conversion of a character outside the BMP");
     return size;
+}
+
+std::size_t EncodeWideScanCharacter(char32_t point, char16_t* units) {
+    if (point <= 0xFFFF) {
+        units[0] = static_cast<char16_t>(point);
+        return 1;
+    }
+    const char32_t value = point - 0x10000;
+    units[0] = static_cast<char16_t>(0xD800 + (value >> 10));
+    units[1] = static_cast<char16_t>(0xDC00 + (value & 0x3FF));
+    return 2;
 }
 
 bool InWideScanset(const std::string& specifier, char32_t point) {
