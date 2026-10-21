@@ -664,6 +664,24 @@ int APS5_VABI sceSaveDataMount3(const SaveDataMount3* mount, SaveDataMountResult
     return rc;
 }
 
+static int mount2(const SaveDataMount2* mount, SaveDataMountResult* mount_result) {
+    if (mount == nullptr) {
+        throw std::runtime_error("sceSaveDataMount2: null argument");
+    }
+    SaveDataMount3 converted{};
+    converted.user_id = mount->user_id;
+    converted.dir_name = mount->dir_name;
+    converted.blocks = mount->blocks;
+    converted.mount_mode = mount->mount_mode;
+    return mount3(&converted, mount_result);
+}
+
+int APS5_VABI sceSaveDataMount2(const SaveDataMount2* mount, SaveDataMountResult* mount_result) {
+    const int rc = mount2(mount, mount_result);
+    SAVEDATA_TRACE("mount2 user=%d dir=%.*s mode=0x%x blocks=%llu -> 0x%08x point=%.*s status=%u", mount != nullptr ? mount->user_id : -1, static_cast<int>(sizeof(SceSaveDataDirName::data)), mount != nullptr && mount->dir_name != nullptr ? mount->dir_name->data : "(null)", mount != nullptr ? mount->mount_mode : 0u, mount != nullptr ? static_cast<unsigned long long>(mount->blocks) : 0ull, static_cast<unsigned>(rc), static_cast<int>(sizeof(SaveDataMountPoint::data)), mount_result != nullptr ? mount_result->mount_point.data : "", mount_result != nullptr ? mount_result->mount_status : 0u);
+    return rc;
+}
+
 int APS5_VABI sceSaveDataPrepare(const SaveDataMountPoint* mount_point, const SaveDataPrepareParam* param) {
     (void)mount_point;
     (void)param;
