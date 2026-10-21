@@ -42,6 +42,13 @@ public:
     VkShaderModule CreateShaderModule(const std::vector<uint32_t>& spirvBytecode);
     void DestroyShaderModule(VkShaderModule shaderModule);
 
+    VkDescriptorSetLayout CreateStandardDescriptorSetLayout(
+        uint32_t bindingCount,
+        VkDescriptorType descriptorType,
+        VkShaderStageFlags stageFlags
+    );
+    void DestroyDescriptorSetLayout(VkDescriptorSetLayout layout);
+
     VkPipelineLayout CreatePipelineLayout(
         const std::vector<VkDescriptorSetLayout>& descriptorSetLayouts,
         const std::vector<VkPushConstantRange>& pushConstantRanges
@@ -67,6 +74,7 @@ private:
     std::vector<VkPipeline> createdPipelines;
     std::vector<VkPipelineLayout> createdLayouts;
     std::vector<VkShaderModule> createdShaderModules;
+    std::vector<VkDescriptorSetLayout> createdDescriptorSetLayouts;
 };
 
 } // namespace Aot::Graphics

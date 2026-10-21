@@ -26,7 +26,8 @@ VulkanPipelineWrapper::VulkanPipelineWrapper(VulkanPipelineWrapper&& other) noex
       pipelineCache(other.pipelineCache),
       createdPipelines(std::move(other.createdPipelines)),
       createdLayouts(std::move(other.createdLayouts)),
-      createdShaderModules(std::move(other.createdShaderModules)) {
+      createdShaderModules(std::move(other.createdShaderModules)),
+      createdDescriptorSetLayouts(std::move(other.createdDescriptorSetLayouts)) {
     other.pipelineCache = VK_NULL_HANDLE;
 }
 
@@ -39,6 +40,7 @@ VulkanPipelineWrapper& VulkanPipelineWrapper::operator=(VulkanPipelineWrapper&& 
         createdPipelines = std::move(other.createdPipelines);
         createdLayouts = std::move(other.createdLayouts);
         createdShaderModules = std::move(other.createdShaderModules);
+        createdDescriptorSetLayouts = std::move(other.createdDescriptorSetLayouts);
         other.pipelineCache = VK_NULL_HANDLE;
     }
     return *this;
@@ -58,6 +60,13 @@ void VulkanPipelineWrapper::cleanup() {
         }
     }
     createdLayouts.clear();
+
+    for (VkDescriptorSetLayout layout : createdDescriptorSetLayouts) {
+        if (layout != VK_NULL_HANDLE) {
+            vkDestroyDescriptorSetLayout(device, layout, nullptr);
+        }
+    }
+    createdDescriptorSetLayouts.clear();
 
     for (VkShaderModule shaderModule : createdShaderModules) {
         if (shaderModule != VK_NULL_HANDLE) {
@@ -142,7 +151,6 @@ bool VulkanPipelineWrapper::SavePipelineCache(const std::filesystem::path& cache
 
 VkShaderModule VulkanPipelineWrapper::CreateShaderModule(const std::vector<uint32_t>& spirvBytecode) {
     VkShaderModuleCreateInfo createInfo{};
-    createInfo.sType = VK_STRUCTURE_TYPE_SHAPE_MODULE_CREATE_INFO_KHR;
     createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     createInfo.codeSize = spirvBytecode.size() * sizeof(uint32_t);
     createInfo.pCode = spirvBytecode.data();
@@ -160,6 +168,40 @@ void VulkanPipelineWrapper::DestroyShaderModule(VkShaderModule shaderModule) {
     if (shaderModule != VK_NULL_HANDLE) {
         vkDestroyShaderModule(device, shaderModule, nullptr);
         std::erase(createdShaderModules, shaderModule);
+    }
+}
+
+VkDescriptorSetLayout VulkanPipelineWrapper::CreateStandardDescriptorSetLayout(
+    uint32_t bindingCount,
+    VkDescriptorType descriptorType,
+    VkShaderStageFlags stageFlags) {
+    std::vector<VkDescriptorSetLayoutBinding> bindings(bindingCount);
+    for (uint32_t i = 0; i < bindingCount; ++i) {
+        bindings[i].binding = i;
+        bindings[i].descriptorType = descriptorType;
+        bindings[i].descriptorCount = 1;
+        bindings[i].stageFlags = stageFlags;
+        bindings[i].pImmutableSamplers = nullptr;
+    }
+
+    VkDescriptorSetLayoutCreateInfo createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    createInfo.bindingCount = bindingCount;
+    createInfo.pBindings = bindings.empty() ? nullptr : bindings.data();
+
+    VkDescriptorSetLayout layout = VK_NULL_HANDLE;
+    if (vkCreateDescriptorSetLayout(device, &createInfo, nullptr, &layout) != VK_SUCCESS) {
+        return VK_NULL_HANDLE;
+    }
+
+    createdDescriptorSetLayouts.push_back(layout);
+    return layout;
+}
+
+void VulkanPipelineWrapper::DestroyDescriptorSetLayout(VkDescriptorSetLayout layout) {
+    if (layout != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(device, layout, nullptr);
+        std::erase(createdDescriptorSetLayouts, layout);
     }
 }
 
