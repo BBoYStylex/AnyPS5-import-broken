@@ -1,7 +1,12 @@
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
+#include <stdexcept>
+#include <string_view>
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
+#include "prx/libc/include/HostEntropy.hpp"
 
 extern "C" {
 
@@ -1026,29 +1031,37 @@ int APS5_VABI PKCS12_parse_nid_postfix(void) {
     return 0;
 }
 
-int APS5_VABI RAND_add_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+void APS5_VABI RAND_add_nid_postfix(const void* buffer, int size, double entropy) {
+    (void)buffer;
+    (void)size;
+    (void)entropy;
 }
 
-int APS5_VABI RAND_bytes_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+int APS5_VABI RAND_bytes_nid_postfix(unsigned char* buffer, int size) {
+    if (size > 0) {
+        if (buffer == nullptr) APS5_INVALID_ARG_EX;
+        HostEntropy_nid_no_patch(buffer, static_cast<std::size_t>(size));
+    }
+    return 1;
 }
 
-int APS5_VABI RAND_file_name_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+const char* APS5_VABI RAND_file_name_nid_postfix(char* buffer, std::size_t size) {
+    constexpr std::string_view path = "/dev/urandom";
+    if (size == 0) return nullptr;
+    if (buffer == nullptr) APS5_INVALID_ARG_EX;
+    const std::size_t length = std::min(path.size(), size - 1);
+    std::memcpy(buffer, path.data(), length);
+    buffer[length] = '\0';
+    return length == path.size() ? buffer : nullptr;
 }
 
-int APS5_VABI RAND_load_file_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+int APS5_VABI RAND_load_file_nid_postfix(const char* file, long bytes) {
+    (void)file;
+    return bytes == -1 ? 123456 : static_cast<int>(bytes);
 }
 
 int APS5_VABI RAND_status_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return 1;
 }
 
 int APS5_VABI RSA_flags_nid_postfix(void) {
