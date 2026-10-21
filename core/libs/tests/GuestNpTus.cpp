@@ -34,6 +34,20 @@ int APS5_VABI sceNpTusDeleteMultiSlotVariableAsync(int reqId, const void* target
 int APS5_VABI sceNpTusDeleteMultiSlotVariable(int reqId, const void* targetNpId, const std::int32_t* slotIds, int arrayLen, void* option);
 int APS5_VABI sceNpTusDeleteMultiSlotVariableVUserAsync(int reqId, const NpOnlineId* targetVirtualUserId, const std::int32_t* slotIds, int arrayLen, void* option);
 int APS5_VABI sceNpTusDeleteMultiSlotVariableVUser(int reqId, const NpOnlineId* targetVirtualUserId, const std::int32_t* slotIds, int arrayLen, void* option);
+int APS5_VABI sceNpTusGetMultiUserVariableAsync(int reqId, const void* targetNpIdArray, std::int32_t slotId, void* variableArray, std::uint64_t variableArraySize, int arrayLen, void* option);
+int APS5_VABI sceNpTusGetMultiUserVariable(int reqId, const void* targetNpIdArray, std::int32_t slotId, void* variableArray, std::uint64_t variableArraySize, int arrayLen, void* option);
+int APS5_VABI sceNpTusGetFriendsDataStatusAsync(int reqId, std::int32_t slotId, std::int32_t includeSelf, std::int32_t sortType, void* statusArray, std::uint64_t statusArraySize, int arrayLen, void* option);
+int APS5_VABI sceNpTusGetFriendsDataStatus(int reqId, std::int32_t slotId, std::int32_t includeSelf, std::int32_t sortType, void* statusArray, std::uint64_t statusArraySize, int arrayLen, void* option);
+int APS5_VABI sceNpTusGetDataAsync(int reqId, const void* targetNpId, std::int32_t slotId, void* dataStatus, std::uint64_t dataStatusSize, void* data, std::uint64_t recvSize, void* option);
+int APS5_VABI sceNpTusGetDataAAsync(int reqId, std::uint64_t targetAccountId, std::int32_t slotId, void* dataStatus, std::uint64_t dataStatusSize, void* data, std::uint64_t recvSize, void* option);
+int APS5_VABI sceNpTusSetDataAAsync(int reqId, std::uint64_t targetAccountId, std::int32_t slotId, std::uint64_t totalSize, std::uint64_t sendSize, const void* data, const void* info, std::uint64_t infoStructSize, const std::uint64_t* isLastChangedAuthor, const void* isLastChangedDate, void* option);
+int APS5_VABI sceNpTusSetDataAsync(int reqId, const void* targetNpId, std::int32_t slotId, std::uint64_t totalSize, std::uint64_t sendSize, const void* data, const void* info, std::uint64_t infoStructSize, const void* isLastChangedAuthor, const void* isLastChangedDate, void* option);
+int APS5_VABI sceNpTusTryAndSetVariableAsync(int reqId, const void* targetNpId, std::int32_t slotId, std::int32_t opeType, std::int64_t variable, const std::int64_t* compareValue, const void* isLastChangedAuthor, const void* isLastChangedDate, void* resultVariable, std::uint64_t resultVariableSize, void* option);
+int APS5_VABI sceNpTusTryAndSetVariable(int reqId, const void* targetNpId, std::int32_t slotId, std::int32_t opeType, std::int64_t variable, const std::int64_t* compareValue, const void* isLastChangedAuthor, const void* isLastChangedDate, void* resultVariable, std::uint64_t resultVariableSize, void* option);
+int APS5_VABI sceNpTusDeleteMultiSlotDataAsync(int reqId, const void* targetNpId, std::int32_t* slotIds, int arrayLen, void* option);
+int APS5_VABI sceNpTusDeleteMultiSlotData(int reqId, const void* targetNpId, std::int32_t* slotIds, int arrayLen, void* option);
+int APS5_VABI sceNpTusAddAndGetVariableAsync(int reqId, const void* targetNpId, std::int32_t slotId, std::int64_t inVariable, const void* isLastChangedAuthor, const void* isLastChangedDate, void* outVariable, std::uint64_t outVariableSize, void* option);
+int APS5_VABI sceNpTusAddAndGetVariable(int reqId, const void* targetNpId, std::int32_t slotId, std::int64_t inVariable, const void* isLastChangedAuthor, const void* isLastChangedDate, void* outVariable, std::uint64_t outVariableSize, void* option);
 }
 
 static constexpr int SIGNED_OUT = static_cast<int>(0x80550006);
@@ -178,8 +192,96 @@ static void CheckMultiSlotVariables() {
     for (const std::uint8_t byte : variables) Require(byte == 0x5a);
 }
 
+static void CheckDataOperations() {
+    const int context = sceNpTusCreateNpTitleCtxA(0, 1);
+    Require(context > 0);
+    const int request = sceNpTusCreateRequest(context);
+    Require(request > 0);
+
+    const NpId npId{};
+    std::int32_t slots[2] = {0, 3};
+    std::int32_t negative[1] = {-1};
+    std::uint8_t buffer[512];
+    for (std::uint8_t& byte : buffer) byte = 0x5a;
+    std::int64_t compare = 1;
+
+    Require(sceNpTusGetMultiUserVariableAsync(request, nullptr, 0, buffer, sizeof(buffer), 2, nullptr) == INSUFFICIENT_ARGUMENT);
+    Require(sceNpTusGetMultiUserVariableAsync(request, &npId, 0, nullptr, sizeof(buffer), 2, nullptr) == INSUFFICIENT_ARGUMENT);
+    Require(sceNpTusGetMultiUserVariableAsync(request, &npId, -1, buffer, sizeof(buffer), 2, nullptr) == INVALID_ARGUMENT);
+    Require(sceNpTusGetMultiUserVariableAsync(request, &npId, 0, buffer, sizeof(buffer), 2, buffer) == INVALID_ARGUMENT);
+    Require(sceNpTusGetMultiUserVariableAsync(request, &npId, 0, buffer, sizeof(buffer), 2, nullptr) == 0);
+    RequireFinished(request, SIGNED_OUT);
+    Require(sceNpTusGetMultiUserVariable(request, &npId, 0, buffer, sizeof(buffer), 2, nullptr) == SIGNED_OUT);
+    Require(sceNpTusGetMultiUserVariable(request + 1000, &npId, 0, buffer, sizeof(buffer), 2, nullptr) == INVALID_ID);
+
+    Require(sceNpTusGetFriendsDataStatusAsync(request, 0, 0, 1, nullptr, sizeof(buffer), 2, nullptr) == INSUFFICIENT_ARGUMENT);
+    Require(sceNpTusGetFriendsDataStatusAsync(request, 0, 0, 1, buffer, sizeof(buffer), 0, nullptr) == INVALID_ARGUMENT);
+    Require(sceNpTusGetFriendsDataStatusAsync(request, -1, 0, 1, buffer, sizeof(buffer), 2, nullptr) == INVALID_ARGUMENT);
+    Require(sceNpTusGetFriendsDataStatusAsync(request, 0, 0, 1, buffer, sizeof(buffer), 2, nullptr) == 0);
+    RequireFinished(request, SIGNED_OUT);
+    Require(sceNpTusGetFriendsDataStatus(request, 0, 0, 1, buffer, sizeof(buffer), 2, nullptr) == SIGNED_OUT);
+
+    Require(sceNpTusGetDataAsync(request, nullptr, 0, buffer, sizeof(buffer), buffer, sizeof(buffer), nullptr) == 0);
+    RequireFinished(request, SIGNED_OUT);
+    Require(sceNpTusGetDataAsync(request, &npId, 0, nullptr, sizeof(buffer), buffer, sizeof(buffer), nullptr) == INSUFFICIENT_ARGUMENT);
+    Require(sceNpTusGetDataAsync(request, &npId, 0, buffer, 0, buffer, sizeof(buffer), nullptr) == INSUFFICIENT_ARGUMENT);
+    Require(sceNpTusGetDataAsync(request, &npId, -1, buffer, sizeof(buffer), buffer, sizeof(buffer), nullptr) == INVALID_ARGUMENT);
+    Require(sceNpTusGetDataAsync(request, &npId, 0, buffer, sizeof(buffer), buffer, sizeof(buffer), nullptr) == 0);
+    RequireFinished(request, SIGNED_OUT);
+    Require(sceNpTusGetDataAAsync(request, 0, 0, buffer, sizeof(buffer), buffer, sizeof(buffer), nullptr) == 0);
+    RequireFinished(request, SIGNED_OUT);
+
+    Require(sceNpTusSetDataAsync(request, nullptr, 0, 8, 8, buffer, nullptr, 0, nullptr, nullptr, nullptr) == 0);
+    RequireFinished(request, SIGNED_OUT);
+    Require(sceNpTusSetDataAsync(request, &npId, 0, 8, 0, buffer, nullptr, 0, nullptr, nullptr, nullptr) == INSUFFICIENT_ARGUMENT);
+    Require(sceNpTusSetDataAsync(request, &npId, -1, 8, 8, buffer, nullptr, 0, nullptr, nullptr, nullptr) == INVALID_ARGUMENT);
+    Require(sceNpTusSetDataAsync(request, &npId, 0, 4, 8, buffer, nullptr, 0, nullptr, nullptr, nullptr) == INVALID_ARGUMENT);
+    Require(sceNpTusSetDataAsync(request, &npId, 0, 8, 8, buffer, nullptr, 0, nullptr, nullptr, nullptr) == 0);
+    RequireFinished(request, SIGNED_OUT);
+    Require(sceNpTusSetDataAAsync(request, 0, 0, 8, 8, buffer, nullptr, 0, nullptr, nullptr, nullptr) == 0);
+    RequireFinished(request, SIGNED_OUT);
+
+    Require(sceNpTusTryAndSetVariableAsync(request, nullptr, 0, 1, 1, &compare, nullptr, nullptr, buffer, sizeof(buffer), nullptr) == INSUFFICIENT_ARGUMENT);
+    Require(sceNpTusTryAndSetVariableAsync(request, &npId, 0, 1, 1, &compare, nullptr, nullptr, nullptr, sizeof(buffer), nullptr) == INSUFFICIENT_ARGUMENT);
+    Require(sceNpTusTryAndSetVariableAsync(request, &npId, -1, 1, 1, &compare, nullptr, nullptr, buffer, sizeof(buffer), nullptr) == INVALID_ARGUMENT);
+    Require(sceNpTusTryAndSetVariableAsync(request, &npId, 0, 1, 1, &compare, nullptr, nullptr, buffer, sizeof(buffer), nullptr) == 0);
+    RequireFinished(request, SIGNED_OUT);
+    Require(sceNpTusTryAndSetVariable(request, &npId, 0, 1, 1, &compare, nullptr, nullptr, buffer, sizeof(buffer), nullptr) == SIGNED_OUT);
+
+    Require(sceNpTusDeleteMultiSlotDataAsync(request, nullptr, slots, 2, nullptr) == INSUFFICIENT_ARGUMENT);
+    Require(sceNpTusDeleteMultiSlotDataAsync(request, &npId, nullptr, 2, nullptr) == INSUFFICIENT_ARGUMENT);
+    Require(sceNpTusDeleteMultiSlotDataAsync(request, &npId, slots, 0, nullptr) == INSUFFICIENT_ARGUMENT);
+    Require(sceNpTusDeleteMultiSlotDataAsync(request, &npId, negative, 1, nullptr) == INVALID_ARGUMENT);
+    Require(sceNpTusDeleteMultiSlotDataAsync(request, &npId, slots, 65, nullptr) == TOO_MANY_SLOTID);
+    Require(sceNpTusDeleteMultiSlotDataAsync(request, &npId, slots, 2, buffer) == INVALID_ARGUMENT);
+    Require(sceNpTusDeleteMultiSlotDataAsync(request, &npId, slots, 2, nullptr) == 0);
+    RequireFinished(request, SIGNED_OUT);
+    Require(sceNpTusDeleteMultiSlotData(request, &npId, slots, 2, nullptr) == SIGNED_OUT);
+
+    Require(sceNpTusAddAndGetVariableAsync(request, nullptr, 0, 1, nullptr, nullptr, buffer, sizeof(buffer), nullptr) == 0);
+    RequireFinished(request, SIGNED_OUT);
+    Require(sceNpTusAddAndGetVariableAsync(request, &npId, 0, 1, nullptr, nullptr, nullptr, sizeof(buffer), nullptr) == INSUFFICIENT_ARGUMENT);
+    Require(sceNpTusAddAndGetVariableAsync(request, &npId, -1, 1, nullptr, nullptr, buffer, sizeof(buffer), nullptr) == INVALID_ARGUMENT);
+    Require(sceNpTusAddAndGetVariableAsync(request, &npId, 0, 1, nullptr, nullptr, buffer, sizeof(buffer), buffer) == INVALID_ARGUMENT);
+    Require(sceNpTusAddAndGetVariableAsync(request, &npId, 0, 1, nullptr, nullptr, buffer, sizeof(buffer), nullptr) == 0);
+    RequireFinished(request, SIGNED_OUT);
+    Require(sceNpTusAddAndGetVariable(request, &npId, 0, 1, nullptr, nullptr, buffer, sizeof(buffer), nullptr) == SIGNED_OUT);
+
+    Require(sceNpTusAbortRequest(request) == 0);
+    Require(sceNpTusGetMultiUserVariable(request, &npId, 0, buffer, sizeof(buffer), 2, nullptr) == ABORTED);
+    Require(sceNpTusSetDataAsync(request, &npId, 0, 8, 8, buffer, nullptr, 0, nullptr, nullptr, nullptr) == 0);
+    RequireFinished(request, ABORTED);
+
+    Require(sceNpTusDeleteRequest(request) == 0);
+    Require(sceNpTusGetDataAsync(request, &npId, 0, buffer, sizeof(buffer), buffer, sizeof(buffer), nullptr) == INVALID_ID);
+    Require(sceNpTusTryAndSetVariable(request, &npId, 0, 1, 1, &compare, nullptr, nullptr, buffer, sizeof(buffer), nullptr) == INVALID_ID);
+    Require(sceNpTusDeleteNpTitleCtx(context) == 0);
+    for (const std::uint8_t byte : buffer) Require(byte == 0x5a);
+}
+
 int main() {
     CheckMultiSlotVariables();
+    CheckDataOperations();
 
     const int context = sceNpTusCreateNpTitleCtxA(0, 1);
     Require(context > 0);
