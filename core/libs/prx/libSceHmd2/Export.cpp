@@ -50,9 +50,8 @@ std::int32_t GetDeviceInformation(Hmd2::DeviceInformation* info) {
 
 extern "C" {
 
-int APS5_VABI sceHmd2ReprojectionGetStatus() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+std::int32_t APS5_VABI sceHmd2ReprojectionGetStatus() {
+    return Hmd2::ReprojectionNotInitialized;
 }
 
 Hmd2::SizeAlign APS5_VABI sceHmd2ReprojectionQuerySeeThroughBufferSizeAlign() {
@@ -130,19 +129,17 @@ std::int32_t APS5_VABI sceHmd2Open(std::int32_t userId, std::int32_t type, std::
     return DeviceHandle;
 }
 
-int APS5_VABI sceHmd2ReprojectionBeginFrame() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+std::int32_t APS5_VABI sceHmd2ReprojectionBeginFrame(std::int64_t flipArg) {
+    (void)flipArg;
+    return Hmd2::ReprojectionNotInitialized;
 }
 
-int APS5_VABI sceHmd2ReprojectionDisableMirroring() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+std::int32_t APS5_VABI sceHmd2ReprojectionDisableMirroring() {
+    return Hmd2::ReprojectionNotInitialized;
 }
 
-int APS5_VABI sceHmd2ReprojectionDisableVrMode() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+std::int32_t APS5_VABI sceHmd2ReprojectionDisableVrMode() {
+    return Hmd2::ReprojectionNotInitialized;
 }
 
 int APS5_VABI sceHmd2ReprojectionEnableMirroring() {
@@ -187,9 +184,8 @@ int APS5_VABI sceHmd2ReprojectionSetAllowPositionalReprojection() {
     return 0;
 }
 
-int APS5_VABI sceHmd2ReprojectionSetMirroringOption() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+std::int32_t APS5_VABI sceHmd2ReprojectionSetMirroringOption() {
+    return Hmd2::ReprojectionNotInitialized;
 }
 
 int APS5_VABI sceHmd2ReprojectionSetParam() {
