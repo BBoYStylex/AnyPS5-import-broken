@@ -99,6 +99,27 @@ class CiGateTests(unittest.TestCase):
         self.assertGated(wide(workflow(PULL_REQUEST, gated)))
         self.assertUngated(wide(workflow(PULL_REQUEST, "  tests:\n    needs: eligibility\n    runs-on: ubuntu-latest\n")), "tests")
 
+
+    def test_conventions_workflow_uses_current_base_branch(self):
+        workflow = (WORKFLOWS / "conventions.yml").read_text(encoding="utf-8")
+        self.assertIn(
+            "ref: ${{ github.event.pull_request.base.ref }}",
+            workflow,
+        )
+        self.assertIn('BASE_SHA="$(git rev-parse HEAD)"', workflow)
+        self.assertNotIn(
+            "ref: ${{ github.event.pull_request.base.sha }}",
+            workflow,
+        )
+        self.assertNotIn(
+            "BASE_SHA: ${{ github.event.pull_request.base.sha }}",
+            workflow,
+        )
+        self.assertIn(
+            'run: git fetch --no-tags origin "$HEAD_SHA"',
+            workflow,
+        )
+
     def test_repository_workflows_pass(self):
         files = {path.name: path.read_text(encoding="utf-8") for path in WORKFLOWS.glob("*.y*ml")}
         self.assertIn("build.yml", files)
