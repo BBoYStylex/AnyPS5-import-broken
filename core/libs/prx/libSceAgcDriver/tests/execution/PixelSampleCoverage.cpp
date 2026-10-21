@@ -374,8 +374,6 @@ std::string ExpectTruncated(AgcDriver::VulkanDevice& device) {
     return {};
 }
 
-}
-
 std::string ExpectOneFragment(AgcDriver::VulkanDevice& device) {
     if ((AgcDriver::VulkanDeviceTestAccess::Context(device).limits.framebufferDepthSampleCounts & VK_SAMPLE_COUNT_4_BIT) == 0) return "the device has no four-sample depth targets (framebufferDepthSampleCounts)";
     constexpr std::size_t bytes = std::size_t{Width} * Height * 16u;
@@ -419,6 +417,8 @@ std::string ExpectOneFragment(AgcDriver::VulkanDevice& device) {
     Require(withoutSampleZero == 0, "one-fragment coverage: " + std::to_string(withoutSampleZero) + " pixels whose coverage lacks sample 0 were written into the one fragment");
     Require(written[15] != 0 && partial != 0 && untouched != 0, "one-fragment coverage: two half-covering triangles wrote " + std::to_string(written[15]) + " fully covered and " + std::to_string(partial) + " partly covered pixels and left " + std::to_string(untouched) + " untouched");
     return {};
+}
+
 }
 
 int main() {
