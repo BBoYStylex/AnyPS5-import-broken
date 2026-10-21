@@ -65,6 +65,10 @@ void Unwatch(std::uint64_t address, std::size_t bytes);
 void Rewatch(std::span<const std::pair<std::uint64_t, std::uint64_t>> ranges);
 bool ImportWatched(std::uint64_t address, std::size_t bytes, const std::function<bool()>& import, bool staysWatched = true);
 void SetUnwatchHook(void (*hook)(std::uint64_t address, std::size_t bytes));
+#ifdef _WIN32
+using FreshCollectHook = bool (*)(std::uintptr_t address, std::size_t bytes, void (*written)(void*, std::uintptr_t, std::uintptr_t), void* context);
+void SetFreshCollectHook(FreshCollectHook hook);
+#endif
 bool Watched(std::uint64_t address, std::size_t bytes);
 std::uint64_t CollectWrites(std::uint64_t address, std::size_t bytes);
 bool UnchangedSince(std::uint64_t address, std::size_t bytes, std::uint64_t generation);
@@ -197,6 +201,7 @@ unsigned long long CodeOffset(const void* address);
 // calls FlushGpuWrites itself.
 void SetFlushHook(void (*hook)(std::uint64_t address, std::size_t bytes));
 void SetReadGuard(void (*guard)(std::uint64_t address, std::size_t bytes));
+void GuardRead(std::uint64_t address, std::size_t bytes);
 void FlushGpuWrites(std::uint64_t address, std::size_t bytes);
 void PrepareHostWrite(std::uintptr_t address, std::size_t bytes);
 bool StopHostWrites(std::uint32_t boundMs);
