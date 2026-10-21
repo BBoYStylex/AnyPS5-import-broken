@@ -185,4 +185,51 @@ bool MemoryBridge::IsValidGuestAddress(uint64_t guestVirtualAddress) const {
            guestVirtualAddress < (baseGuestAddress + GuestAddressSpaceSize);
 }
 
+uint64_t MemoryBridge::TranslateHostToGuest(const void* hostPointer) const {
+    if (hostBasePointer == nullptr || hostPointer == nullptr) {
+        return 0;
+    }
+    const auto* hostBytes = static_cast<const uint8_t*>(hostPointer);
+    const auto* baseBytes = static_cast<const uint8_t*>(hostBasePointer);
+
+    if (hostBytes < baseBytes || hostBytes >= (baseBytes + GuestAddressSpaceSize)) {
+        return 0;
+    }
+    return baseGuestAddress + (hostBytes - baseBytes);
+}
+
+bool MemoryBridge::QueryMemoryBlock(uint64_t guestVirtualAddress, MemoryBlock& outBlock) const {
+    std::lock_guard<std::mutex> lock(allocationMutex);
+    for (const auto& [baseAddr, block] : activeBlocks) {
+        if (guestVirtualAddress >= block.GuestVirtualAddress &&
+            guestVirtualAddress < (block.GuestVirtualAddress + block.Size)) {
+            outBlock = block;
+            return true;
+        }
+    }
+    return false;
+}
+
+size_t MemoryBridge::GetTotalCommittedBytes() const {
+    std::lock_guard<std::mutex> lock(allocationMutex);
+    size_t total = 0;
+    for (const auto& [baseAddr, block] : activeBlocks) {
+        if (block.Committed) {
+            total += block.Size;
+        }
+    }
+    return total;
+}
+
+size_t MemoryBridge::GetCommittedBytesByPool(MemoryPoolType poolType) const {
+    std::lock_guard<std::mutex> lock(allocationMutex);
+    size_t total = 0;
+    for (const auto& [baseAddr, block] : activeBlocks) {
+        if (block.Committed && block.PoolType == poolType) {
+            total += block.Size;
+        }
+    }
+    return total;
+}
+
 } // namespace Aot::Runtime

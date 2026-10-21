@@ -19,6 +19,17 @@ int main() {
     void* hostPtr = memory.TranslateGuestToHost(addr);
     assert(hostPtr != nullptr);
 
+    uint64_t backToGuest = memory.TranslateHostToGuest(hostPtr);
+    assert(backToGuest == addr);
+
+    Aot::Runtime::MemoryBlock block{};
+    bool queryOk = memory.QueryMemoryBlock(addr, block);
+    assert(queryOk);
+    assert(block.GuestVirtualAddress == addr);
+    assert(block.PoolType == Aot::Runtime::MemoryPoolType::HostRam);
+    assert(memory.GetTotalCommittedBytes() >= 32768);
+    assert(memory.GetCommittedBytesByPool(Aot::Runtime::MemoryPoolType::HostRam) >= 32768);
+
     bool freeOk = memory.Deallocate(addr);
     assert(freeOk);
 

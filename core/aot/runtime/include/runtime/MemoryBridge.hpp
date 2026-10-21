@@ -44,7 +44,11 @@ public:
     bool Deallocate(uint64_t guestVirtualAddress);
 
     void* TranslateGuestToHost(uint64_t guestVirtualAddress) const;
+    [[nodiscard]] uint64_t TranslateHostToGuest(const void* hostPointer) const;
+    [[nodiscard]] bool QueryMemoryBlock(uint64_t guestVirtualAddress, MemoryBlock& outBlock) const;
     [[nodiscard]] bool IsValidGuestAddress(uint64_t guestVirtualAddress) const;
+    [[nodiscard]] size_t GetTotalCommittedBytes() const;
+    [[nodiscard]] size_t GetCommittedBytesByPool(MemoryPoolType poolType) const;
 
 private:
     void* hostBasePointer;
