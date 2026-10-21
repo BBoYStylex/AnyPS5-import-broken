@@ -163,6 +163,10 @@ ShaderStageInputInfo BuildShaderStageInputInfo(ShaderStageKind stage, const Gues
         if (pixel.targetMerge.blendControl != 0u && pixel.targetMerge.packing != ColorExportPacking::Float11_11_10) throw std::runtime_error("ShaderInputInfoBuilder: a blending color target merge into a target other than 11_11_10 float");
         pixelStorage.mergePacking = static_cast<std::uint8_t>(pixel.targetMerge.packing);
         pixelStorage.mergeBlendControl = pixel.targetMerge.blendControl;
+        if ((pixel.targetMerge.layered && (pixel.targetMerge.samples != 1u || pixel.targetMerge.lastSlice < pixel.targetMerge.firstSlice)) || (!pixel.targetMerge.layered && (pixel.targetMerge.firstSlice != 0u || pixel.targetMerge.lastSlice != 0u))) throw std::runtime_error("ShaderInputInfoBuilder: a color target merge into a multisampled array, a slice range that ends before it starts, or slices of an unlayered target");
+        pixelStorage.mergeLayered = pixel.targetMerge.layered;
+        pixelStorage.mergeFirstSlice = pixel.targetMerge.firstSlice;
+        pixelStorage.mergeLastSlice = pixel.targetMerge.lastSlice;
         pixelStorage.mergeDepthStencilWrites = pixel.targetMerge.depthStencilWrites;
         pixelStorage.mergeDepthStencilTests = pixel.targetMerge.depthStencilTests;
         ShaderStageInputInfo result;

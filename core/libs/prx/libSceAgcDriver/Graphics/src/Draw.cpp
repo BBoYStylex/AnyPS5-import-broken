@@ -68,21 +68,6 @@ std::uint64_t DrawRenderPassKey(const Context& context, const State& state, std:
 
 namespace {
 
-GuestTextureResource ArraySurfaceForTarget(const ColorTarget& color) {
-    Require(color.arrayLastSlice != 0, "the color target is not a view of a 2D array");
-    auto surface = SurfaceForTarget(color);
-    surface.baseAddress = color.arrayAddress;
-    surface.width = color.surfaceExtent.width;
-    surface.height = color.surfaceExtent.height;
-    surface.depthOrLastArray = color.arrayLastSlice;
-    surface.dimension = TextureDimension::k2DArray;
-    return surface;
-}
-
-}
-
-namespace {
-
 std::size_t colorKeyCount(const ColorTarget& color, std::size_t bytes) {
     if (color.mipCount != 1 || color.depth != 1 || !color.dccPipeAligned) return DccKeyBytes(bytes);
     return DccKeyCount(ColorTextureTileMode(color.tileMode), color.elementBytes, color.extent.width, color.extent.height, bytes);

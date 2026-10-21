@@ -200,6 +200,9 @@ struct ShaderPixelInputInfo {
     std::uint8_t mergeSamples = 1;
     std::uint8_t mergePacking = 0;
     std::uint32_t mergeBlendControl = 0;
+    bool mergeLayered = false;
+    std::uint32_t mergeFirstSlice = 0;
+    std::uint32_t mergeLastSlice = 0;
     bool mergeDepthStencilWrites = false;
     bool mergeDepthStencilTests = false;
     ShaderStageRuntime stage;

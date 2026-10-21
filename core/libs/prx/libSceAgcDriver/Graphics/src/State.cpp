@@ -1496,10 +1496,10 @@ State DecodeState(const QueueState& queue, bool vertexWorkgroup) {
             Require(nibbles || floating || (exportedMask & packedMask) == packedMask, "partial writes of " + packed + " color target are unsupported");
             if ((exportedMask & packedMask) != packedMask || color.mergeBlend != 0u) {
                 const std::string merged = color.mergeBlend != 0u ? "blending into " : "partial writes of ";
-                if (color.mipCount != 1u || color.depth != 1u || color.layers != 1u || color.arrayLastSlice != 0u) {
+                if (color.depth != 1u || (color.samples > 1u && (color.mipCount != 1u || color.layers != 1u || color.arrayLastSlice != 0u))) {
                     char detail[160];
-                    std::snprintf(detail, sizeof(detail), " (%ux%u, mip %u of %u%s, depth %u slice %u, layers %u, last slice %u)", color.extent.width, color.extent.height, color.mip, color.mipCount, color.mipTail ? " in the tail" : "", color.depth, color.depthSlice, color.layers, color.arrayLastSlice);
-                    Require(false, merged + "a mipmapped, volume or array " + std::string(PackedColorTargetName(color.packing)) + " color target are not implemented" + detail);
+                    std::snprintf(detail, sizeof(detail), " (%ux%u, %u samples, mip %u of %u%s, depth %u slice %u, layers %u, last slice %u)", color.extent.width, color.extent.height, color.samples, color.mip, color.mipCount, color.mipTail ? " in the tail" : "", color.depth, color.depthSlice, color.layers, color.arrayLastSlice);
+                    Require(false, merged + "a volume " + std::string(PackedColorTargetName(color.packing)) + " color target, or a mipmapped or array multisampled one, are not implemented" + detail);
                 }
                 Require(std::ranges::none_of(result.colors, [](const ColorTarget& other) { return other.partialWriteMask != 0; }), merged + "more than one packed color target are not implemented");
                 color.partialWriteMask = PackedWriteMask(color.packing, mapping, exportedMask & packedMask);
@@ -1598,12 +1598,14 @@ std::uint32_t PackedBlendControl(std::uint32_t blendControl) {
 }
 
 GuestTextureResource TargetMergeSurface(const ColorTarget& color) {
-    auto surface = SurfaceForTarget(color);
+    auto surface = color.arrayLastSlice != 0u ? ArraySurfaceForTarget(color) : SurfaceForTarget(color);
     if (color.samples > 1u) {
-        Require(surface.baseAddress == color.surfaceAddress, "a merged multisampled color target does not start at its surface");
+        Require(surface.baseAddress == color.surfaceAddress && surface.dimension == TextureDimension::k2D && surface.mipCount == 1u, "a merged multisampled color target does not start at its single-level surface");
         surface.dimension = TextureDimension::k2DMsaa;
         surface.samples = color.samples;
     }
+    surface.baseLevel = color.mip;
+    surface.lastLevel = color.mip;
     return surface;
 }
 
@@ -1628,6 +1630,9 @@ ShaderRecompiler::TargetMerge ExportTargetMerge(const State& state) {
         merge.samples = static_cast<std::uint8_t>(color.samples);
         merge.packing = color.packing;
         merge.blendControl = color.mergeBlend;
+        merge.layered = color.arrayLastSlice != 0u;
+        merge.firstSlice = merge.layered ? color.arraySlice : 0u;
+        merge.lastSlice = merge.layered ? color.arraySlice + color.layers - 1u : 0u;
         merge.descriptor = EncodeTextureResource(TargetMergeSurface(color));
         merge.depthStencilWrites = DepthStencilWrites(state);
         merge.depthStencilTests = DepthStencilTests(state);
@@ -1741,6 +1746,17 @@ GuestTextureResource SurfaceForTarget(const ColorTarget& color) {
     surface.dccAddress = color.dccAddress;
     surface.dccAlphaOnMsb = color.dccAlphaOnMsb;
     surface.dccPipeAligned = color.dccPipeAligned;
+    return surface;
+}
+
+GuestTextureResource ArraySurfaceForTarget(const ColorTarget& color) {
+    Require(color.arrayLastSlice != 0, "the color target is not a view of a 2D array");
+    auto surface = SurfaceForTarget(color);
+    surface.baseAddress = color.arrayAddress;
+    surface.width = color.surfaceExtent.width;
+    surface.height = color.surfaceExtent.height;
+    surface.depthOrLastArray = color.arrayLastSlice;
+    surface.dimension = TextureDimension::k2DArray;
     return surface;
 }
 

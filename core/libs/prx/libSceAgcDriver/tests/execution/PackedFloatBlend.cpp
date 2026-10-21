@@ -6,6 +6,7 @@
 #include "prx/libSceAgcDriver/Graphics/include/ShaderInputState.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/State.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Texture.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/TextureTiling.hpp"
 #include "prx/libc/include/GuestAllocations.hpp"
 #include "prx/libc/include/GuestArena.hpp"
 #include "prx/libc/include/GuestWriteWatch.hpp"
@@ -49,9 +50,21 @@ constexpr std::uint32_t Float11_11_10Info = 0x4171cu;
 constexpr std::uint32_t TiledAttrib3 = 0x4dc6c000u;
 constexpr std::uint32_t Float32Export = 9;
 constexpr std::uint32_t DepthInput = 0x400u;
+constexpr std::uint32_t LayerExport = (1u << 18u) | (1u << 21u);
 
 alignas(256) constexpr std::array<std::uint32_t, 6> VertexCode{
     0xe0382000, 0x80000005, 0xbf8c3f70, 0xf80008cf, 0x03020100, 0xbf810000,
+};
+
+// Position from the buffer at offset 0, the layer from offset 28 into the render target index.
+alignas(256) constexpr std::array<std::uint32_t, 10> LayeredVertexCode{
+    0xe0382000, 0x80000005, 0xe030201c, 0x80000405, 0xbf8c3f70, 0xf80000cf, 0x03020100, 0xf80008d4, 0x00040000, 0xbf810000,
+};
+
+struct LayeredVertex {
+    std::array<float, 4> position;
+    std::array<float, 3> unused;
+    std::uint32_t layer;
 };
 
 constexpr std::array<std::array<float, 4>, 3> Triangle{{
@@ -253,19 +266,28 @@ AgcDriver::Graphics::ColorTarget DecodeTarget(const Block& block) {
 struct DrawSetup {
     std::uint32_t inputs = 0;
     std::span<const std::array<float, 4>> vertices = Triangle;
+    std::span<const LayeredVertex> layered{};
+    VkExtent2D extent{Width, Height};
+    std::uint32_t scissorWidth = ScissorWidth;
 };
 
 std::uint32_t Draw(AgcDriver::VulkanDevice& device, AgcDriver::Graphics::ColorTarget color, std::uint32_t blendControl, std::uint32_t exportedMask, std::span<const std::uint32_t> pixelCode, const DrawSetup& setup = {}) {
     const auto target = device.Target();
     constexpr std::uint32_t waveSize = 64;
     std::vector<std::uint32_t> vertexUserData(4, 0u);
-    const auto address = reinterpret_cast<std::uintptr_t>(setup.vertices.data());
-    const std::array<std::uint32_t, 4> vertexBuffer{static_cast<std::uint32_t>(address), static_cast<std::uint32_t>((address >> 32u) & 0xffffu) | (16u << 16u), static_cast<std::uint32_t>(setup.vertices.size()), 0x01016facu};
+    const bool layered = !setup.layered.empty();
+    const auto address = layered ? reinterpret_cast<std::uintptr_t>(setup.layered.data()) : reinterpret_cast<std::uintptr_t>(setup.vertices.data());
+    const auto vertexCount = static_cast<std::uint32_t>(layered ? setup.layered.size() : setup.vertices.size());
+    const std::uint32_t stride = layered ? sizeof(LayeredVertex) : 16u;
+    const auto vertexCode = layered ? std::span<const std::uint32_t>(LayeredVertexCode) : std::span<const std::uint32_t>(VertexCode);
+    const std::array<std::uint32_t, 4> vertexBuffer{static_cast<std::uint32_t>(address), static_cast<std::uint32_t>((address >> 32u) & 0xffffu) | (stride << 16u), vertexCount, 0x01016facu};
     std::copy(vertexBuffer.begin(), vertexBuffer.end(), vertexUserData.begin());
-    const std::array<ShaderRecompiler::MemoryRegion, 1> vertexMemory{{{reinterpret_cast<std::uintptr_t>(VertexCode.data()), std::as_bytes(std::span(VertexCode))}}};
+    ShaderRecompiler::ShaderVertexStageInfo vertexInfo{};
+    vertexInfo.paClVsOutCntl = layered ? LayerExport : 0u;
+    const std::array<ShaderRecompiler::MemoryRegion, 1> vertexMemory{{{reinterpret_cast<std::uintptr_t>(vertexCode.data()), std::as_bytes(vertexCode)}}};
     ShaderRecompiler::RecompileRequest vertex{
-        {ShaderStage::Vertex, reinterpret_cast<std::uintptr_t>(VertexCode.data()), VertexCode, 0, {}},
-        {waveSize, 0, vertexUserData, std::nullopt, std::nullopt, ShaderRecompiler::ShaderVertexStageInfo{}, vertexMemory},
+        {ShaderStage::Vertex, reinterpret_cast<std::uintptr_t>(vertexCode.data()), vertexCode, 0, {}},
+        {waveSize, 0, vertexUserData, std::nullopt, std::nullopt, vertexInfo, vertexMemory},
         target,
         {0, 0, 0, 64}
     };
@@ -281,11 +303,13 @@ std::uint32_t Draw(AgcDriver::VulkanDevice& device, AgcDriver::Graphics::ColorTa
     state.colors = {color};
     state.color = color;
     state.hasColorTarget = true;
-    state.renderExtent = {Width, Height};
+    state.renderExtent = setup.extent;
+    state.renderLayers = color.layers;
+    state.layerExports = layered ? LayerExport : 0u;
     state.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-    state.viewport = {0, static_cast<float>(Height), static_cast<float>(Width), -static_cast<float>(Height), 0, 1};
+    state.viewport = {0, static_cast<float>(setup.extent.height), static_cast<float>(setup.extent.width), -static_cast<float>(setup.extent.height), 0, 1};
     state.negativeOneToOne = false;
-    state.scissor = {{0, 0}, {ScissorWidth, Height}};
+    state.scissor = {{0, 0}, {setup.scissorWidth, setup.extent.height}};
     state.cullMode = VK_CULL_MODE_NONE;
     state.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     VkPipelineColorBlendAttachmentState blend{};
@@ -310,8 +334,10 @@ std::uint32_t Draw(AgcDriver::VulkanDevice& device, AgcDriver::Graphics::ColorTa
     fragment.context.pixel = AgcDriver::Graphics::DecodePixelStageInfo(context, AgcDriver::Graphics::ExportMappings(state));
     fragment.context.pixel->targetExportPacking = AgcDriver::Graphics::ExportPackings(state);
     fragment.context.pixel->targetMerge = AgcDriver::Graphics::ExportTargetMerge(state);
+    fragment.context.pixel->layerExported = layered;
     const auto& merge = fragment.context.pixel->targetMerge;
     Require((merge.mask != 0u) == merged && merge.mask == color.partialWriteMask && merge.blendControl == color.mergeBlend && (!merged || merge.packing == ShaderRecompiler::ColorExportPacking::Float11_11_10), "the draw's target merge disagrees with its blend and write mask");
+    Require(!merged || (merge.layered == (color.arrayLastSlice != 0u) && merge.firstSlice == (merge.layered ? color.arraySlice : 0u) && merge.lastSlice == (merge.layered ? color.arraySlice + color.layers - 1u : 0u)), "the draw's target merge does not address the target's array from its first slice");
     const ShaderRecompiler::SrtRuntime runtime{};
     const auto invocation = AgcDriver::DriverDetail::InvocationFor(snapshot, 0, fragment);
     const auto pixelResult = invocation.Materialize(*invocation.Capture(runtime));
@@ -321,7 +347,7 @@ std::uint32_t Draw(AgcDriver::VulkanDevice& device, AgcDriver::Graphics::ColorTa
         {ShaderStage::Vertex, &vertexResult, 0},
         {ShaderStage::Fragment, pixelResult.get(), PixelPushOffset(vertexPush, target)}
     }};
-    const AgcDriver::Pm4::DrawParameters draw{0, static_cast<std::uint32_t>(setup.vertices.size()), 0, 1, 0, false};
+    const AgcDriver::Pm4::DrawParameters draw{0, vertexCount, 0, 1, 0, false};
     device.Draw(state, draw, shaders);
     return color.partialWriteMask;
 }
@@ -412,6 +438,72 @@ void SameDrawOverdraw(AgcDriver::VulkanDevice& device, Block& block, const Color
     ExpectWords(device, block, layout, expected, before, what);
 }
 
+// A 2D array of 11_11_10 float slices of side x side texels with a chain of mips levels.
+struct ArrayShape {
+    std::uint32_t side;
+    std::uint32_t mips;
+    std::uint32_t slices;
+};
+
+std::size_t ArrayBytes(const ArrayShape& shape) {
+    return static_cast<std::size_t>(AgcDriver::Graphics::ComputeSurfaceSize(AgcDriver::Graphics::ComputeElementMipLayout(AgcDriver::Graphics::TextureTileMode::kR64KBX, 4u, shape.side, shape.side, shape.mips), shape.slices));
+}
+
+AgcDriver::Graphics::ColorTarget DecodeArrayTarget(const Block& block, const ArrayShape& shape, std::uint32_t mip, std::uint32_t first, std::uint32_t layers) {
+    AgcDriver::Registers cx;
+    cx[0x318] = static_cast<std::uint32_t>(block.Address() >> 8u);
+    cx[0x31b] = first | ((first + layers - 1u) << 13u) | (mip << 26u);
+    cx[0x31c] = Float11_11_10Info;
+    cx[0x31d] = 0;
+    cx[0x3b0] = ((shape.mips - 1u) << 28u) | ((shape.side - 1u) << 14u) | (shape.side - 1u);
+    cx[0x3b8] = (TiledAttrib3 & ~0x1fffu) | (shape.slices - 1u);
+    cx[0x390] = static_cast<std::uint32_t>(block.Address() >> 40u);
+    cx[0x207] = LayerExport;
+    auto color = AgcDriver::Graphics::DecodeColorBuffer(cx, 0);
+    Require(color.packing == ShaderRecompiler::ColorExportPacking::Float11_11_10 && color.tileMode == ColorTileMode::RenderTarget && color.mip == mip && color.mipCount == shape.mips && color.arraySlice == first && color.layers == layers && color.arrayLastSlice == shape.slices - 1u && color.arrayAddress == block.Address(), "the 11_11_10 float array view did not decode as mip " + std::to_string(mip) + " of slices " + std::to_string(first) + " to " + std::to_string(first + layers - 1u));
+    return color;
+}
+
+// One full-screen triangle per layer of the view (or one triangle, no layer exported), blended into
+// mip `mip` of slices first..first + layers - 1: the drawn mip is whole tile blocks of one texel each, so
+// every word of its covered bytes in each viewed slice is blended and every other word of the array kept.
+void ArrayBlend(AgcDriver::VulkanDevice& device, Block& block, const ArrayShape& shape, std::uint32_t mip, std::uint32_t first, std::uint32_t layers, bool exportsLayer, const Case& draw, std::uint32_t seed, const std::string& what) {
+    const auto color = DecodeArrayTarget(block, shape, mip, first, layers);
+    const auto surface = AgcDriver::Graphics::ArraySurfaceForTarget(color);
+    const auto geometry = AgcDriver::Graphics::DescribeSurface(surface);
+    const auto& level = geometry.mips.at(mip);
+    const auto covered = AgcDriver::Graphics::CoveredMipBytes(surface.tileMode, 4u, level);
+    std::uint64_t coveredBytes = 0;
+    for (const auto& [begin, end] : covered) coveredBytes += end - begin;
+    Require(!level.tail && coveredBytes == 4ull * level.width * level.height && geometry.layers == shape.slices, what + ": the drawn mip is not whole tile blocks of its texels");
+    static std::map<std::uint32_t, std::vector<LayeredVertex>> stacks;
+    auto& vertices = stacks[seed];
+    if (exportsLayer) {
+        for (std::uint32_t layer = 0; layer < layers; ++layer) {
+            for (const auto& corner : Triangle) vertices.push_back({corner, {}, layer});
+        }
+    }
+    const auto before = Fill(block, seed);
+    auto expected = before;
+    const auto wordMask = Draw(device, color, draw.control, draw.mask, Float32Program(draw.rgba), {0u, Triangle, vertices, {level.width, level.height}, level.width});
+    for (std::uint32_t slice = first; slice < first + layers; ++slice) {
+        for (const auto& [begin, end] : covered) {
+            for (auto offset = begin; offset < end; offset += 4u) {
+                auto& word = expected[(geometry.GuestLayerOffset(slice) + level.tiledOffset + offset) / 4u];
+                word = Blended(draw.control, wordMask == 0u ? 0xffffffffu : wordMask, draw.rgba, word);
+            }
+        }
+    }
+    const auto stored = ReadBack(device, block);
+    for (std::size_t index = 0; index < stored.size(); ++index) {
+        if (stored[index] == expected[index]) continue;
+        const auto slice = static_cast<std::uint32_t>(index * 4u / geometry.layerBytes);
+        char detail[192];
+        std::snprintf(detail, sizeof(detail), ": word %zu (slice %u, byte 0x%llx of the slice) holds 0x%08x, expected 0x%08x (it held 0x%08x)", index, slice, static_cast<unsigned long long>(index * 4u - geometry.GuestLayerOffset(slice)), stored[index], expected[index], before[index]);
+        throw std::runtime_error(what + detail);
+    }
+}
+
 }
 
 int main() {
@@ -455,7 +547,18 @@ int main() {
         Sequence(*device, block, layout, color, chain, 60u, "a source-over blend, a plain write, an additive and a subtracting blend drawn back to back");
         SameDrawOverdraw(*device, block, layout, color, 0.25f, 0.75f, 70u);
         SameDrawOverdraw(*device, block, layout, color, 0.75f, 0.25f, 71u);
-        std::printf("11_11_10 float blend tests passed: %zu single blends, %zu partial writes, a back-to-back chain and 2 same-draw overdraws of 16 layers into a %ux%u tiled target, the unscissored pixels kept\n", cases.size(), partials.size(), Width, Height);
+        if (!TargetHasCapability(device->Target(), spv::CapabilityGeometry) && !TargetHasCapability(device->Target(), spv::CapabilityShaderViewportIndexLayerEXT)) {
+            std::puts("layered 11_11_10 float blend tests skipped, the device cannot read gl_Layer in a pixel shader");
+            return 0;
+        }
+        constexpr ArrayShape cube{128u, 8u, 6u};
+        constexpr ArrayShape array{256u, 2u, 4u};
+        Block cubeBlock(ArrayBytes(cube));
+        Block arrayBlock(ArrayBytes(array));
+        ArrayBlend(*device, cubeBlock, cube, 0u, 0u, 6u, true, cases[0], 80u, Describe(cases[0]) + " into mip 0 of all 6 slices of a 128x128 11_11_10 float array of 8 mips, one layer per slice");
+        ArrayBlend(*device, arrayBlock, array, 1u, 1u, 3u, true, cases[1], 81u, Describe(cases[1]) + " into mip 1 of slices 1 to 3 of a 256x256 11_11_10 float array of 2 mips and 4 slices, one layer per slice");
+        ArrayBlend(*device, cubeBlock, cube, 0u, 2u, 1u, false, partials[1], 82u, Describe(partials[1]) + " into mip 0 of slice 2 alone of a 128x128 11_11_10 float array of 8 mips, no layer exported");
+        std::printf("11_11_10 float blend tests passed: %zu single blends, %zu partial writes, a back-to-back chain and 2 same-draw overdraws of 16 layers into a %ux%u tiled target, the unscissored pixels kept, and 3 merges into mips and slices of 2D arrays\n", cases.size(), partials.size(), Width, Height);
         return 0;
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

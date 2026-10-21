@@ -363,6 +363,9 @@ void writePixelInfo(Writer& writer, const ShaderPixelStageInfo& info) {
     writer.WriteBool(info.targetMerge.depthStencilTests);
     writer.WriteU8(static_cast<std::uint8_t>(info.targetMerge.packing));
     writer.WriteU32(info.targetMerge.blendControl);
+    writer.WriteBool(info.targetMerge.layered);
+    writer.WriteU32(info.targetMerge.firstSlice);
+    writer.WriteU32(info.targetMerge.lastSlice);
 }
 
 ShaderPixelStageInfo readPixelInfo(Reader& reader, std::uint32_t version) {
@@ -444,6 +447,11 @@ ShaderPixelStageInfo readPixelInfo(Reader& reader, std::uint32_t version) {
             info.targetMerge.blendControl = reader.ReadU32();
         } else if (info.targetMerge.mask != 0u) {
             info.targetMerge.packing = ColorExportPacking::Unorm4_4_4_4;
+        }
+        if (version >= 42u) {
+            info.targetMerge.layered = reader.ReadBool();
+            info.targetMerge.firstSlice = reader.ReadU32();
+            info.targetMerge.lastSlice = reader.ReadU32();
         }
     }
     if (version < 5u) {
@@ -850,7 +858,7 @@ std::string RequestSerializer::Serialize(const RecompileRequest& request) const 
     std::string buffer;
     Writer writer(buffer);
     writer.WriteU32(0x41505335u);
-    writer.WriteU32(41u);
+    writer.WriteU32(42u);
     writeShaderBinary(writer, request.shader);
     writeGuestContext(writer, request.context);
     writeSpirvTarget(writer, request.target);
@@ -889,7 +897,7 @@ DeserializedRequest RequestSerializer::Deserialize(std::string_view text) const 
     Reader reader(decoded);
     if (reader.ReadU32() != 0x41505335u) throw std::runtime_error("invalid recompile request signature");
     const auto version = reader.ReadU32();
-    if (version < 1u || version > 41u) throw std::runtime_error("unsupported recompile request serialization version");
+    if (version < 1u || version > 42u) throw std::runtime_error("unsupported recompile request serialization version");
     DeserializedRequest result{};
     result.request.shader = readShaderBinary(reader, result.shaderCode, result.shaderHeader);
     result.request.context = readGuestContext(reader, result, version);

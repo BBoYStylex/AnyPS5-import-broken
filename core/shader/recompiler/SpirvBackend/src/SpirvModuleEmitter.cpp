@@ -426,13 +426,19 @@ MergeTexel MergeTargetTexel(SpirvEmitterState& state) {
     const auto& images = state.program.Info().images;
     const auto image = std::ranges::find_if(images, [](const ImageResource& candidate) { return candidate.targetMerge; });
     if (image == images.end()) FailEmit("the color target merge image was not collected");
-    if (InputVariableForKind(state, StageInputKind::FragCoord) == 0u || (pixel.mergeSamples > 1u && InputVariableForKind(state, StageInputKind::SampleId) == 0u)) FailEmit("the color target merge inputs were not declared");
+    if (InputVariableForKind(state, StageInputKind::FragCoord) == 0u || (pixel.mergeSamples > 1u && InputVariableForKind(state, StageInputKind::SampleId) == 0u) || (pixel.mergeLayered && InputVariableForKind(state, StageInputKind::Layer) == 0u)) FailEmit("the color target merge inputs were not declared");
     if (state.mergeWordVariable == 0u || state.mergePendingVariable == 0u) FailEmit("the color target merge variables were not declared");
     const auto position = [&](std::uint32_t component) { return Unary(state, spv::OpConvertFToU, TypeU32(state), Unary(state, spv::OpBitcast, TypeF32(state), EmitBuiltinU32(state, StageInputKind::FragCoord, component))); };
     const auto x = position(0u);
     const auto y = position(1u);
     const auto coord = state.module.AllocateId();
-    state.module.AddFunction(spv::OpCompositeConstruct, TypeU32Vector(state, 2u), coord, x, y);
+    if (pixel.mergeLayered) {
+        const auto slice = state.module.AllocateId();
+        state.module.AddFunction(spv::OpExtInst, TypeU32(state), slice, GlslStd450(state), GLSLstd450UMin, EmitAddU32(state, EmitBuiltinU32(state, StageInputKind::Layer, 0u), ConstantU32(state, pixel.mergeFirstSlice)), ConstantU32(state, pixel.mergeLastSlice));
+        state.module.AddFunction(spv::OpCompositeConstruct, TypeU32Vector(state, 3u), coord, x, y, slice);
+    } else {
+        state.module.AddFunction(spv::OpCompositeConstruct, TypeU32Vector(state, 2u), coord, x, y);
+    }
     return {static_cast<std::uint32_t>(image - images.begin()), coord, pixel.mergeSamples > 1u ? EmitBuiltinU32(state, StageInputKind::SampleId, 0u) : 0u};
 }
 
