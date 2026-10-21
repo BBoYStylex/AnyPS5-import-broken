@@ -56,6 +56,7 @@ int main(int argc, char* argv[]) {
 
     std::cout << "AOT Compilation succeeded:\n"
               << "  Sections parsed: " << statistics.TotalSectionsParsed << "\n"
+              << "  Relocations applied: " << statistics.RelocationsApplied << "\n"
               << "  Functions lifted: " << statistics.FunctionsLifted << "\n"
               << "  Syscall pass applied: " << (statistics.SyscallPassModified ? "yes" : "no") << "\n"
               << "  Output: " << options.OutputObjectPath.string() << "\n";

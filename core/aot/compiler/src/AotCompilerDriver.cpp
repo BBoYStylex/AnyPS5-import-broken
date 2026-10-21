@@ -1,4 +1,5 @@
 #include <compiler/AotCompilerDriver.hpp>
+#include <compiler/ElfRelocationResolver.hpp>
 #include <llvm/MC/TargetRegistry.h>
 #include <llvm/Target/TargetMachine.h>
 #include <llvm/Target/TargetOptions.h>
@@ -22,8 +23,12 @@ CompilationStatistics AotCompilerDriver::Compile(const CompilerOptions& options)
         return stats;
     }
 
-    const ParsedElfBinary& binary = *binaryOpt;
+    ParsedElfBinary binary = *binaryOpt;
     stats.TotalSectionsParsed = binary.Sections.size();
+
+    ElfRelocationResolver relocationResolver;
+    relocationResolver.LoadSymbolsAndRelocations(binary, {});
+    stats.RelocationsApplied = relocationResolver.ApplyRelocations(binary, binary.BaseVirtualAddress);
 
     LlvmLifter lifter;
     std::string moduleName = options.InputExecutablePath.stem().string();

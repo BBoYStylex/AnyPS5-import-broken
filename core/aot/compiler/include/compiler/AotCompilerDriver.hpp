@@ -25,6 +25,7 @@ struct CompilationStatistics {
     size_t CodeSectionsLifted = 0;
     size_t FunctionsLifted = 0;
     size_t InstructionsLifted = 0;
+    size_t RelocationsApplied = 0;
     bool SyscallPassModified = false;
     bool Success = false;
 };
