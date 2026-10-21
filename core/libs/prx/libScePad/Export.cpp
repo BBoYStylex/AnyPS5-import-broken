@@ -7,6 +7,7 @@
 #include <thread>
 
 #include "SceTypes.hpp"
+#include "prx/libc/include/General.hpp"
 #include "prx//libc/include/General.hpp"
 #include "prx/libScePad/include/Pad.hpp"
 #include "prx/libScePad/include/PadState.hpp"
