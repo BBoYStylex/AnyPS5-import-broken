@@ -1,7 +1,12 @@
 #include "prx/libSceAgcDriver/Execution/include/Driver/Driver.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver/Diagnostics.hpp"
+#include <array>
+#include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <mutex>
 #include <set>
 #include <stdexcept>
@@ -14,9 +19,52 @@ double TraceMs() {
     return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - origin).count();
 }
 
-std::uint64_t SkippedShader() {
-    static const std::uint64_t skipped = [] { const char* text = std::getenv("APS5_SKIP_SHADER"); return text ? std::strtoull(text, nullptr, 16) : 0ull; }();
-    return skipped;
+namespace {
+
+constexpr std::size_t MaxSkippedShaders = 256;
+std::array<std::atomic<std::uint64_t>, MaxSkippedShaders> skippedShaders{};
+std::atomic<std::size_t> skippedShaderCount{0};
+
+void ReloadSkippedShaders(const char* path) {
+    static std::mutex reload;
+    static std::filesystem::file_time_type seen{};
+    const std::unique_lock lock(reload, std::try_to_lock);
+    if (!lock.owns_lock()) return;
+    std::error_code error;
+    const auto stamp = std::filesystem::last_write_time(path, error);
+    if (error || stamp == seen) return;
+    seen = stamp;
+    std::ifstream file(path);
+    std::size_t count = 0;
+    skippedShaderCount.store(0, std::memory_order_release);
+    for (std::string word; count < MaxSkippedShaders && file >> word;) {
+        if (word.starts_with('#')) {
+            std::getline(file, word);
+            continue;
+        }
+        if (const auto address = std::strtoull(word.c_str(), nullptr, 16); address != 0) skippedShaders[count++].store(address, std::memory_order_relaxed);
+    }
+    skippedShaderCount.store(count, std::memory_order_release);
+    std::fprintf(stderr, "[skip-shader] %zu programs listed in %s\n", count, path);
+}
+
+}
+
+bool SkippedShader(std::uint64_t address) {
+    static const std::uint64_t single = [] { const char* text = std::getenv("APS5_SKIP_SHADER"); return text ? std::strtoull(text, nullptr, 16) : 0ull; }();
+    static const char* const file = std::getenv("APS5_SKIP_SHADER_FILE");
+    if (address == 0) return false;
+    if (address == single) return true;
+    if (file == nullptr) return false;
+    static std::atomic<std::chrono::steady_clock::rep> nextCheck{0};
+    const auto now = std::chrono::steady_clock::now().time_since_epoch();
+    auto due = nextCheck.load(std::memory_order_relaxed);
+    if (now.count() >= due && nextCheck.compare_exchange_strong(due, std::chrono::duration_cast<std::chrono::steady_clock::duration>(now + std::chrono::milliseconds(500)).count(), std::memory_order_relaxed)) ReloadSkippedShaders(file);
+    const auto count = skippedShaderCount.load(std::memory_order_acquire);
+    for (std::size_t index = 0; index < count; ++index) {
+        if (skippedShaders[index].load(std::memory_order_relaxed) == address) return true;
+    }
+    return false;
 }
 
 bool SkipRefusedDraws() {
