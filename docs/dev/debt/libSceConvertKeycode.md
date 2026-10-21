@@ -1,9 +1,6 @@
 # libSceConvertKeycode technical debt
 
-### Unknown function info
-
-- [sceConvertKeycodeGetCharacter](../../../core/libs/prx/libSceConvertKeycode/Export.cpp) (libSceConvertKeycode) - the signature `(uint16_t keycode, uint32_t, uint32_t keyboardType, char16_t* character)` is inferred from PPSA12361, which passes a 16-bit keycode, 0, the type from `sceConvertKeycodeGetImeKeyboardType` and a pointer it reads one UTF-16 unit from when the result is 0. The meaning of the second argument is unknown; a value other than 0 throws, and so does a keyboard type other than 0.
-
 ### Functional
 
-- [sceConvertKeycodeGetCharacter](../../../core/libs/prx/libSceConvertKeycode/Export.cpp) (libSceConvertKeycode) takes the keycode as a USB HID keyboard usage and returns the unshifted character of the US layout for letters, digits, punctuation, space and the keypad. A keycode without a character returns 0 with the character 0; whether the console returns an error instead is not measured.
+- [sceConvertKeycodeGetVirtualKeycode](../../../core/libs/prx/libSceConvertKeycode/Export.cpp) and `sceConvertKeycodeGetCharacter`: layouts 31–39 throw until the guest platform and compiled SDK version are exposed. `GetVirtualKeycode` also throws for version-dependent Y/Z mappings in layouts 2, 3 and 12. Mapping tables and modifier behavior are recovered; no SDK version is guessed.
+- [sceConvertKeycodeGetImeKeyboardType](../../../core/libs/prx/libSceConvertKeycode/Export.cpp): user keyboard language and Japanese/Chinese keyboard variants are not exposed by the current UserService implementation. Valid-user queries throw instead of returning a fabricated keyboard type. The confirmed language/variant mapping and SDK compatibility rules still need integration with those settings.
