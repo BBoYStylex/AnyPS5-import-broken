@@ -293,6 +293,13 @@ bool materializeCmaskClear(const Context& context, const ColorTarget& color, con
     const auto bytes = layout.Bytes();
     Require(color.cmaskBytes == bytes, "CMASK size differs from the color target's CMASK layout");
     if (cmaskProved(color.cmaskAddress, bytes)) return false;
+    if (color.coverageSamples > color.samples) {
+        const auto collected = GuestMemory::CollectWrites(color.cmaskAddress, bytes);
+        std::vector<std::uint32_t> cleared;
+        Require(readCmask(color, layout, cleared) == CmaskState::Expanded, "materializing a CMASK fast clear of a one-fragment color target is not implemented");
+        proveCmask(color.cmaskAddress, bytes, collected);
+        return false;
+    }
     auto* recorder = Recorder::Active();
     if (resident != nullptr && context.detiler != nullptr && recorder != nullptr && GuestMemory::GpuMutex().HeldByThisThread()) {
         const auto* import = HostImportFor(context, color.cmaskAddress, bytes);
@@ -309,7 +316,6 @@ bool materializeCmaskClear(const Context& context, const ColorTarget& color, con
         proveCmask(color.cmaskAddress, bytes, collected);
         return false;
     }
-    Require(color.coverageSamples == color.samples, "materializing a CMASK fast clear of a one-fragment color target is not implemented");
     Require(color.dccAddress == 0, "CMASK fast clear of a DCC color target, whose clear belongs in its DCC keys");
     const auto texel = clearTexel(color, DccKeys::ClearRegister);
     const char* refusal = nullptr;
