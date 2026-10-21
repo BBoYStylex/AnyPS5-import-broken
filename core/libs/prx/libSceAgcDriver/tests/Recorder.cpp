@@ -9607,11 +9607,16 @@ void guardedKeyStoreTests(const Device& device, Recorder& recorder) {
     recorder.Sync();
     const auto* import = HostImportFor(context, address, bytes);
     Require(import != nullptr, "the key store block lost its import");
+    HostImport leadImport{};
+    leadImport.base = keysAddress - 0x40;
+    leadImport.address = 0x500001000ull;
+    leadImport.lead = 0x1000;
+    Require(HostImportDeviceAddress(leadImport, keysAddress) == leadImport.address + 0x40 && HostImportDeviceAddress(*import, keysAddress) == import->address + (keysAddress - import->base), "the device address of a key range in an import with a lead does not point at the keys");
     const bool guarded = std::getenv("APS5_NO_GUARDED_KEY_STORE") == nullptr;
     {
         const auto commands = recorder.Commands();
         RecordMemoryBarrier(context, commands, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT | VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_HOST_WRITE_BIT | VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
-        context.Function<PFN_vkCmdFillBuffer>("vkCmdFillBuffer")(commands, import->buffer, keysAddress - import->base, keyCount, 0x11111111u);
+        context.Function<PFN_vkCmdFillBuffer>("vkCmdFillBuffer")(commands, import->buffer, HostImportOffset(*import, keysAddress), keyCount, 0x11111111u);
         RecordMemoryBarrier(context, commands, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
         recorder.NotePendingFill(keysAddress, keyCount, 0x11);
     }
