@@ -113,7 +113,7 @@ int APS5_VABI sceUltReaderWriterLockDestroy(void* rwlock) {
     if (state._readers != 0 || state._writing || state._waiters != 0) {
         return ULT_ERROR_BUSY;
     }
-    state._alive = false;
+    state->_alive = false;
     gLocks.erase(it);
     return ULT_OK;
 }
