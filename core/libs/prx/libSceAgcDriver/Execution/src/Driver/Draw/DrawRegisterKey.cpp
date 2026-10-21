@@ -241,7 +241,7 @@ bool Driver::sameDecode(const DrawDecode& a, const DrawDecode& b) {
     const auto sameTess = [](const std::optional<ShaderRecompiler::TessellationConfiguration>& x, const std::optional<ShaderRecompiler::TessellationConfiguration>& y) {
         if (x.has_value() != y.has_value()) return false;
         if (!x) return true;
-        return x->inputControlPoints == y->inputControlPoints && x->outputControlPoints == y->outputControlPoints && x->domain == y->domain && x->partitioning == y->partitioning && x->outputTopology == y->outputTopology && x->patchesPerGroup == y->patchesPerGroup && x->primitiveGroupSize == y->primitiveGroupSize && x->breakAtInstance == y->breakAtInstance;
+        return x->inputControlPoints == y->inputControlPoints && x->outputControlPoints == y->outputControlPoints && x->domain == y->domain && x->partitioning == y->partitioning && x->outputTopology == y->outputTopology && x->patchesPerGroup == y->patchesPerGroup && x->primitiveGroupSize == y->primitiveGroupSize && x->breakAtInstance == y->breakAtInstance && x->mergedHull == y->mergedHull;
     };
     if (s.stages.path != t.stages.path || s.stages.registerValue != t.stages.registerValue || s.stages.vertexWaveSize != t.stages.vertexWaveSize || s.stages.fragmentWaveSize != t.stages.fragmentWaveSize || !sameMesh(s.stages.mesh, t.stages.mesh) || !sameTess(s.stages.tessellation, t.stages.tessellation)) return false;
     if (!sameColor(s.color, t.color) || s.colors.size() != t.colors.size() || s.blends.size() != t.blends.size()) return false;
@@ -262,7 +262,7 @@ bool Driver::sameDecode(const DrawDecode& a, const DrawDecode& b) {
         const auto& y = b.programs[i];
         if (x.binary.stage != y.binary.stage || x.binary.codeAddress != y.binary.codeAddress || x.userDataBase != y.userDataBase || x.firstUserSgpr != y.firstUserSgpr || x.userData != y.userData || x.snapshot != y.snapshot || x.codeOffset != y.codeOffset || x.tailContinuation != y.tailContinuation) return false;
     }
-    if (p.targetExportPacking != q.targetExportPacking || p.dualSourceBlend != q.dualSourceBlend || p.reversedBlend != q.reversedBlend || p.alphaToCoverage != q.alphaToCoverage || p.rasterPrimitive != q.rasterPrimitive || p.ditheredAlphaToCoverage != q.ditheredAlphaToCoverage || p.quadPixelMask != q.quadPixelMask || p.quadSampleMask != q.quadSampleMask || p.iteratesSamples != q.iteratesSamples || p.positionLocation != q.positionLocation || p.sampleLocations != q.sampleLocations) return false;
+    if (p.targetExportPacking != q.targetExportPacking || p.dualSourceBlend != q.dualSourceBlend || p.reversedBlend != q.reversedBlend || p.alphaToCoverage != q.alphaToCoverage || p.rasterPrimitive != q.rasterPrimitive || p.ditheredAlphaToCoverage != q.ditheredAlphaToCoverage || p.quadPixelMask != q.quadPixelMask || p.quadSampleMask != q.quadSampleMask || p.iteratesSamples != q.iteratesSamples || p.positionLocation != q.positionLocation || p.sampleLocations != q.sampleLocations || p.sampleOrder != q.sampleOrder) return false;
     if (s.samples != t.samples || s.mergedCoverage != t.mergedCoverage || s.quadSampleMask != t.quadSampleMask || s.pixelEarlyZ != t.pixelEarlyZ) return false;
     return true;
 }

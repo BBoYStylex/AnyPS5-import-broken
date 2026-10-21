@@ -175,9 +175,8 @@ int APS5_VABI sceNpPollAsync(int req_id, int* result) {
 }
 
 void APS5_VABI sceNpRegisterGamePresenceCallback(void* callback, void* userdata) {
- (void)callback;
- (void)userdata;
- NotImplemented_nid_no_patch(__func__);
+    (void)callback;
+    (void)userdata;
 }
 
 int APS5_VABI sceNpRegisterNpReachabilityStateCallback(void* callback, void* userdata) {
@@ -313,6 +312,12 @@ int APS5_VABI sceNpUnknown_8weiQyIdI3A(int userId, void* buffer) {
 
 APS5_EXPORT("WxLcN76q19o", sceNpUnknown_WxLcN76q19o);
 int APS5_VABI sceNpUnknown_WxLcN76q19o(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+
+int APS5_VABI sceNpCheckCallbackForLib() {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }

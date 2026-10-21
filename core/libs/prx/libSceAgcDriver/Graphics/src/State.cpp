@@ -194,8 +194,9 @@ constexpr std::uint32_t PixelShaderIteratesSamples = 0x10000u;
 constexpr std::uint32_t PixelSampleCoverageInput = 0x4000u;
 constexpr std::uint32_t PixelSampleRateInputs = 0x2011u;
 constexpr std::uint32_t ScreenOffsetMask = ~0x01ff01ffu;
-// Bits 26/27 (ZCLIP_NEAR/FAR_DISABLE) become depth clamping; bit 19 selects the [0, 1] clip space.
-constexpr std::uint32_t ClipControlMask = ~(0x80000u | 0x01000000u | 0x0c000000u);
+// Bits 26/27 (ZCLIP_NEAR/FAR_DISABLE) become depth clamping; bit 19 selects the [0, 1] clip space;
+// bit 16 disables clipping.
+constexpr std::uint32_t ClipControlMask = ~(0x10000u | 0x80000u | 0x01000000u | 0x0c000000u);
 
 bool zFormatSupported(std::uint32_t format) {
     return format == 0u || format == 1u || format == 2u || format == 3u || format == 9u;
@@ -923,6 +924,53 @@ void intersect(VkRect2D& result, const Registers& registers, std::uint32_t offse
 
 VkExtent2D SampleLocationGrid(const State& state) {
     return state.sampleLocationGrid ? VkExtent2D{2, 2} : VkExtent2D{1, 1};
+}
+
+std::optional<SampleOrder> SameSetSampleOrder(const State& state) {
+    if (!state.customSampleLocations || !state.sampleLocationGrid || state.samples < 2u || state.samples > 8u) return std::nullopt;
+    SampleOrder order{};
+    for (std::uint32_t pixel = 0; pixel < order.size(); ++pixel) {
+        std::uint32_t word = KeptSampleOrder;
+        std::uint32_t taken = 0;
+        for (std::uint32_t sample = 0; sample < state.samples; ++sample) {
+            std::uint32_t guest = 0;
+            while (guest < state.samples && (((taken >> guest) & 1u) != 0u || state.sampleLocations[pixel * 8u + guest] != state.sampleLocations[sample])) ++guest;
+            if (guest == state.samples) return std::nullopt;
+            taken |= 1u << guest;
+            word = (word & ~(0xfu << (sample * 4u))) | (guest << (sample * 4u));
+        }
+        order[pixel] = word;
+    }
+    return order;
+}
+
+bool ReordersSamples(const SampleOrder& order) {
+    return std::ranges::any_of(order, [](std::uint32_t word) { return word != 0u && word != KeptSampleOrder; });
+}
+
+std::uint32_t InvertSampleOrder(std::uint32_t order) {
+    std::uint32_t inverse = 0;
+    for (std::uint32_t sample = 0; sample < 8u; ++sample) inverse |= sample << (((order >> (sample * 4u)) & 0x7u) * 4u);
+    return inverse;
+}
+
+std::uint32_t HostSampleBits(std::uint32_t guestBits, std::uint32_t order) {
+    std::uint32_t host = 0;
+    for (std::uint32_t sample = 0; sample < 8u; ++sample) host |= ((guestBits >> ((order >> (sample * 4u)) & 0x7u)) & 1u) << sample;
+    return host | (guestBits & ~0xffu);
+}
+
+bool SampleMaskFollowsOrder(const State& state, const SampleOrder& order) {
+    if (!ReordersSamples(order) || !PartialSampleMask(state) || !UniformSampleMask(state)) return false;
+    const auto full = (1u << state.samples) - 1u;
+    const auto mask = state.quadSampleMask[0] & full;
+    return std::ranges::any_of(order, [&](std::uint32_t word) { return (HostSampleBits(mask, word) & full) != mask; });
+}
+
+std::array<std::uint16_t, 4> QuadSampleMasks(const State& state, const SampleOrder& order) {
+    if (!SampleMaskFollowsOrder(state, order)) return QuadSampleMasks(state);
+    const auto mask = static_cast<std::uint16_t>(state.quadSampleMask[0] & ((1u << state.samples) - 1u));
+    return {mask, mask, mask, mask};
 }
 
 std::array<VkSampleLocationEXT, 32> SampleLocations(const State& state) {
@@ -1978,7 +2026,9 @@ std::string NullPixelProgramRejection(const QueueState& queue) {
     const auto targetMask = find(queue.context, 0x8e);
     const auto shaderMask = find(queue.context, 0x8f);
     if (targetMask == queue.context.end() || shaderMask == queue.context.end()) return "AGC graphics: a draw without a pixel program needs CB_TARGET_MASK and CB_SHADER_MASK";
-    if (ColorWriteMask(queue.context) != 0) return "AGC graphics: a draw without a pixel program writes color";
+    const auto colorControl = find(queue.context, 0x202);
+    const bool colorDisabled = colorControl != queue.context.end() && ((colorControl->second >> 4u) & 7u) == 0u;
+    if (!colorDisabled && ColorWriteMask(queue.context) != 0) return "AGC graphics: a draw without a pixel program writes color";
     return {};
 }
 
