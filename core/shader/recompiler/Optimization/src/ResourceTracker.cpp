@@ -703,7 +703,13 @@ private:
         if (address && immediateU32(offset, descriptorOffset)) {
             return TryMakeIndirectColumn(handle, *heapHandle, sampler, words, descriptorOffset, first, plan);
         }
-        if (!MatchAffineOffset(offset, key, stride, addend)) {
+        std::uint32_t fixedOffset = 0;
+        const bool fixed = !address && !buffer && immediateU32(offset, fixedOffset);
+        if (fixed) {
+            key = &m_builder.Constant(0u);
+            stride = width * static_cast<std::uint32_t>(sizeof(std::uint32_t));
+            addend = fixedOffset;
+        } else if (!MatchAffineOffset(offset, key, stride, addend)) {
             if (!MatchMaskedOffset(offset, key, stride)) {
                 return false;
             }
@@ -711,7 +717,9 @@ private:
         }
         DescriptorSource heapSource;
         std::uint32_t heapIndex = 0;
-        if (!MakeRuntimeSource(*heapHandle, address ? IrOpcode::GetAddressResource : IrOpcode::GetBufferResource, address ? 2u : 4u, heapIndex, heapSource)) {
+        if (MakeRuntimeSource(*heapHandle, address ? IrOpcode::GetAddressResource : IrOpcode::GetBufferResource, address ? 2u : 4u, heapIndex, heapSource)) {
+            if (fixed) return false;
+        } else {
             if (address || buffer || heapHandle->Opcode() != IrOpcode::GetBufferResource || !std::ranges::all_of(heapHandle->Uses(), [&](const IrValue* use) { return std::ranges::find(plan.reads, use) != plan.reads.end(); })) return false;
             const auto sameHandle = [&](const IrValue* user) {
                 if (user->Opcode() != handle.Opcode() || user->ArgumentCount() != handle.ArgumentCount()) return false;
