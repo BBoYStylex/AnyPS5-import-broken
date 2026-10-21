@@ -1020,6 +1020,45 @@ void testOneDevice() {
     check(next.Serial() == 2, "the GPU work and the flip used more than one device");
 }
 
+void testFreshHandleCalls() {
+    static_assert(sizeof(VideoOutFlipStatus) == 128);
+    const int handle = sceVideoOutOpen(255, 0, 0, nullptr);
+    std::array<std::byte, 128> raw;
+    raw.fill(std::byte{0xaa});
+    check(sceVideoOutGetFlipStatus(handle, reinterpret_cast<VideoOutFlipStatus*>(raw.data())) == 0, "the flip status of a fresh handle was not returned");
+    std::array<std::byte, 128> expected{};
+    std::fill_n(expected.begin() + 24, 8, std::byte{0xff});
+    std::fill_n(expected.begin() + 56, 4, std::byte{0xff});
+    check(raw == expected, "a fresh handle's flip status differs from the measured bytes");
+    check(sceVideoOutGetFlipStatus(handle, nullptr) == VIDEO_OUT_ERROR_INVALID_ADDRESS, "a null flip status output was accepted");
+    check(sceVideoOutIsFlipPending(handle) == 0, "a fresh handle reported a pending flip");
+
+    const std::uint32_t image[64 * 64] = {};
+    check(sceVideoOutCursorEnable(handle, 0, nullptr) == VIDEO_OUT_ERROR_INVALID_ADDRESS, "a cursor was enabled without an image address");
+    check(sceVideoOutCursorSetPosition(handle, 0, 100, 100) == 0, "the cursor position was refused");
+    check(sceVideoOutCursorSetImageAddress(handle, 0, nullptr) == VIDEO_OUT_ERROR_INVALID_ADDRESS, "a null cursor image address was accepted");
+    check(sceVideoOutCursorDisable(handle, 0) == 0, "the cursor was not disabled");
+    check(expectFailure([&] { sceVideoOutCursorEnable(handle, 0, image); }).find("not implemented") != std::string::npos, "a cursor image was accepted");
+    check(expectFailure([&] { sceVideoOutCursorSetImageAddress(handle, 0, image); }).find("not implemented") != std::string::npos, "a cursor image address was accepted");
+    check(expectFailure([&] { sceVideoOutCursorDisable(handle, 1); }).find("not implemented") != std::string::npos, "an unmeasured cursor index was accepted");
+    check(expectFailure([&] { sceVideoOutCursorSetPosition(handle, 1, 0, 0); }).find("not implemented") != std::string::npos, "an unmeasured cursor index was positioned");
+    check(expectFailure([&] { sceVideoOutCursorDisable(-1, 1); }).find("not implemented") != std::string::npos, "an unmeasured cursor index was answered for an invalid handle");
+
+    std::array<std::byte, 128> untouched;
+    untouched.fill(std::byte{0xaa});
+    check(sceVideoOutGetFlipStatus(-1, reinterpret_cast<VideoOutFlipStatus*>(untouched.data())) == VIDEO_OUT_ERROR_INVALID_HANDLE, "an invalid handle's flip status was returned");
+    check(std::all_of(untouched.begin(), untouched.end(), [](std::byte value) { return value == std::byte{0xaa}; }), "an invalid handle's flip status wrote the output");
+    check(expectFailure([&] { sceVideoOutGetFlipStatus(-1, nullptr); }).find("not measured") != std::string::npos, "a null output with an invalid handle was answered");
+    check(sceVideoOutIsFlipPending(-1) == VIDEO_OUT_ERROR_INVALID_HANDLE, "an invalid handle's pending flip was reported");
+    check(sceVideoOutCursorEnable(-1, 0, nullptr) == VIDEO_OUT_ERROR_INVALID_HANDLE, "an invalid handle was checked after the cursor image address");
+    check(sceVideoOutCursorEnable(-1, 0, image) == VIDEO_OUT_ERROR_INVALID_HANDLE, "a cursor was enabled on an invalid handle");
+    check(sceVideoOutCursorSetPosition(-1, 0, 100, 100) == VIDEO_OUT_ERROR_INVALID_HANDLE, "an invalid handle's cursor was positioned");
+    check(sceVideoOutCursorSetImageAddress(-1, 0, nullptr) == VIDEO_OUT_ERROR_INVALID_HANDLE, "an invalid handle's cursor image was set");
+    check(sceVideoOutCursorDisable(-1, 0) == VIDEO_OUT_ERROR_INVALID_HANDLE, "an invalid handle's cursor was disabled");
+    check(sceVideoOutClose(handle) == 0, "the fresh handle was not closed");
+    LibcRunShutdown_nid_postfix();
+}
+
 }
 
 int main(int argc, char** argv) {
@@ -1045,6 +1084,7 @@ int main(int argc, char** argv) {
         else if (argc == 2 && std::string(argv[1]) == "unregistered") testUnregisteredBuffer();
         else if (argc == 2 && std::string(argv[1]) == "ps4") testPs4Buffers();
         else if (argc == 2 && std::string(argv[1]) == "cpuflip") testCpuFlipOrder();
+        else if (argc == 2 && std::string(argv[1]) == "fresh") testFreshHandleCalls();
         else testLifetime(argc == 2 && std::string(argv[1]) == "reopen");
         std::puts("VideoOut flip tests passed");
         return 0;
