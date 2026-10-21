@@ -227,6 +227,7 @@ private:
         append(key, value.targetMerge.lastSlice);
         append(key, value.targetMerge.depthStencilWrites);
         append(key, value.targetMerge.depthStencilTests);
+        append(key, value.sampleOrder);
     }
 
     static void append(std::vector<std::uint64_t>& key, const ShaderVertexResourceDestination& value) {
