@@ -487,6 +487,15 @@ int* errno_slot() {
 extern "C" int* APS5_VABI __error_nid_postfix();
 extern "C" std::size_t NetCtlHostDnsServers_nid_no_patch(std::uint32_t* servers, std::size_t capacity);
 
+std::mutex g_dnsLock;
+bool g_dnsOverridden = false;
+NetDnsInfo g_dnsOverride{};
+NetDns6Info g_dns6Override{};
+
+bool IsZeroAddress(const NetIpv6Address& address) {
+    return std::all_of(std::begin(address.bytes), std::end(address.bytes), [](std::uint8_t byte) { return byte == 0; });
+}
+
 void set_errno(int err) {
     *errno_slot() = err;
     *__error_nid_postfix() = err;
@@ -2244,7 +2253,10 @@ int APS5_VABI sceNetGetInterfaceStats(NetInterfaceStats* stats, std::uint32_t fl
 }
 
 int APS5_VABI sceNetSetDnsInfo(const NetDnsInfo* info, std::uint32_t flags) {
-    NotImplemented_nid_no_patch(__func__);
+    if (flags != 0 || (info && info->primaryAddress == 0)) return fail(NET_EINVAL);
+    std::lock_guard lock(g_dnsLock);
+    g_dnsOverridden = info != nullptr;
+    g_dnsOverride = info ? *info : NetDnsInfo{};
     return 0;
 }
 
@@ -2298,7 +2310,9 @@ int APS5_VABI sceNetGetSockInfo6(std::int32_t socket, NetSockInfo6* info, std::u
 }
 
 int APS5_VABI sceNetSetDns6Info(const NetDns6Info* info, std::uint32_t flags) {
-    NotImplemented_nid_no_patch(__func__);
+    if (flags != 0 || (info && IsZeroAddress(info->primaryAddress))) return fail(NET_EINVAL);
+    std::lock_guard lock(g_dnsLock);
+    g_dns6Override = info ? *info : NetDns6Info{};
     return 0;
 }
 
@@ -2369,6 +2383,13 @@ int APS5_VABI sceNetGetAppMemInfo(NetAppMemoryInfo* info, std::uint32_t flags) {
 int APS5_VABI sceNetGetDnsInfo(NetDnsInfo* info, std::uint32_t flags) {
     if (flags != 0) throw std::runtime_error("sceNetGetDnsInfo: flags " + std::to_string(flags) + " are not supported");
     if (!info) throw std::runtime_error("sceNetGetDnsInfo: a null info is not supported");
+    {
+        std::lock_guard lock(g_dnsLock);
+        if (g_dnsOverridden) {
+            *info = g_dnsOverride;
+            return info->secondaryAddress == 0 ? 1 : 2;
+        }
+    }
     std::array<std::uint32_t, 2> servers{};
     const std::size_t count = std::min(NetCtlHostDnsServers_nid_no_patch(servers.data(), servers.size()), servers.size());
     std::memcpy(info, servers.data(), sizeof(servers));
@@ -2591,8 +2612,11 @@ int APS5_VABI sceNetInetPtonWithScopeId(std::int32_t family, const char* text, v
 }
 
 int APS5_VABI sceNetGetDns6Info(NetDns6Info* info, std::uint32_t flags) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    if (!info || flags != 0) return fail(NET_EINVAL);
+    std::lock_guard lock(g_dnsLock);
+    *info = g_dns6Override;
+    if (IsZeroAddress(info->primaryAddress)) return 0;
+    return IsZeroAddress(info->secondaryAddress) ? 1 : 2;
 }
 
 int APS5_VABI sceNetSetDns6InfoToKernel(const NetDns6Info* info, std::uint32_t flags) {
