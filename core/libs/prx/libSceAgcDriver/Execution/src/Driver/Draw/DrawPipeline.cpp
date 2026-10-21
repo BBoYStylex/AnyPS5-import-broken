@@ -79,12 +79,21 @@ void DrawPipeline::rethrowFailure() {
 }
 
 void DrawPipeline::Enqueue(Commit commit, std::vector<Range> writes, std::uint64_t labelAddress, std::vector<std::byte> labelBytes, std::vector<Range> reads) {
+    enqueue({std::move(commit), std::move(writes), labelAddress, std::move(labelBytes), std::move(reads)});
+}
+
+void DrawPipeline::EnqueueStore(Commit commit, std::uint64_t address, std::vector<std::byte> bytes) {
+    const auto end = address + bytes.size();
+    enqueue({std::move(commit), {{address, end}}, address, std::move(bytes), {}, true});
+}
+
+void DrawPipeline::enqueue(Item item) {
     static const bool profile = std::getenv("APS5_PROFILE_DRAW") != nullptr;
     std::unique_lock lock(mutex);
     rethrowFailure();
     if (closing) {
         lock.unlock();
-        commit();
+        item.commit();
         return;
     }
     if (items.size() >= Depth()) {
@@ -98,8 +107,8 @@ void DrawPipeline::Enqueue(Commit commit, std::vector<Range> writes, std::uint64
     }
     depthSum += items.size();
     ++enqueued;
-    heldReadRanges.fetch_add(reads.size(), std::memory_order_relaxed);
-    items.push_back({std::move(commit), std::move(writes), labelAddress, std::move(labelBytes), std::move(reads)});
+    heldReadRanges.fetch_add(item.reads.size(), std::memory_order_relaxed);
+    items.push_back(std::move(item));
     outstanding.fetch_add(1, std::memory_order_release);
     if (!thread.joinable()) {
         thread = std::thread([this] { run(); });
@@ -202,6 +211,7 @@ void DrawPipeline::Stop() {
 
 void DrawPipeline::Drain(DrainReason reason, std::uint32_t opcode) {
     drainRequests[std::min<std::uint32_t>(opcode, 0x100)].fetch_add(1, std::memory_order_relaxed);
+    reasonRequests[static_cast<std::size_t>(reason)].fetch_add(1, std::memory_order_relaxed);
     if (!Busy()) return;
     if (GuestMemory::GpuMutex().HeldByThisThread()) throw std::runtime_error("draw pipeline drain under the GPU lock (reason " + std::to_string(static_cast<unsigned>(reason)) + ", opcode " + std::to_string(opcode) + ")");
     const auto start = std::chrono::steady_clock::now();
@@ -242,6 +252,10 @@ void DrawPipeline::ReleaseRunningReads() {
     if (!items.empty()) items.front().reads.clear();
 }
 
+std::uint64_t DrawPipeline::DrainRequestsByReason(DrainReason reason) {
+    return Queue0().reasonRequests[static_cast<std::size_t>(reason)].load(std::memory_order_relaxed);
+}
+
 std::optional<std::uint64_t> DrawPipeline::PendingLabel(std::uint64_t address, std::size_t bytes) {
     if (bytes == 0 || bytes > 8) return std::nullopt;
     const auto end = address + bytes;
@@ -255,6 +269,24 @@ std::optional<std::uint64_t> DrawPipeline::PendingLabel(std::uint64_t address, s
         return value;
     }
     return std::nullopt;
+}
+
+DrawPipeline::QueuedWrite DrawPipeline::StoredBytes(std::uint64_t address, std::size_t bytes, std::span<std::byte> out) {
+    const auto end = address + bytes;
+    auto answer = QueuedWrite::None;
+    std::lock_guard lock(mutex);
+    for (auto item = items.rbegin(); item != items.rend(); ++item) {
+        if (std::none_of(item->writes.begin(), item->writes.end(), [&](const Range& range) { return address < range.second && range.first < end; })) continue;
+        if (!item->store) return QueuedWrite::Unknown;
+        if (out.empty()) {
+            answer = QueuedWrite::Stored;
+            continue;
+        }
+        if (out.size() != bytes || address < item->labelAddress || end > item->labelAddress + item->labelBytes.size()) return QueuedWrite::Unknown;
+        std::memcpy(out.data(), item->labelBytes.data() + (address - item->labelAddress), bytes);
+        return QueuedWrite::Stored;
+    }
+    return answer;
 }
 
 bool DrawPipeline::Overlaps(std::uint64_t address, std::size_t bytes) {

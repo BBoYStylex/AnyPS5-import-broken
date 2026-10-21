@@ -330,7 +330,7 @@ bool Driver::enqueueDmaPacket(std::span<const std::uint32_t> packet, std::uint32
                 Graphics::NoteDepthMetadataFill(fillAddress, fillBytes, pattern);
                 Graphics::NoteColorMetadataFill(fillAddress, fillBytes, pattern);
             }
-            commitDmaStore(queue, address, bytes);
+            commitStore(queue, address, bytes);
         }, {{address, address + size}});
         return true;
     }
@@ -353,12 +353,31 @@ bool Driver::enqueueDmaPacket(std::span<const std::uint32_t> packet, std::uint32
         }
         std::vector<std::byte> bytes(copy.bytes);
         GuestMemory::Read(copy.source, bytes, 1);
-        commitDmaStore(queue, copy.destination, bytes);
+        commitStore(queue, copy.destination, bytes);
     }, {{copy->destination, copy->destination + copy->bytes}}, 0, {}, {{copy->source, copy->source + copy->bytes}});
     return true;
 }
 
-void Driver::commitDmaStore(std::uint32_t queue, std::uint64_t address, std::span<const std::byte> bytes) {
+bool Driver::enqueueConstantRamDump(std::span<const std::uint32_t> packet, std::uint32_t opcode, std::uint32_t queue, const QueueState& state) {
+    static const bool enabled = std::getenv("APS5_PIPELINE_DRAIN_DUMPS") == nullptr && std::getenv("APS5_CPU_STORES") == nullptr;
+    if (!enabled || opcode != 0x83 || queue != 0 || !DrawPipeline::Active() || !deferredLabels().labels.empty()) return false;
+    constexpr std::size_t gpuStoreLimit = 65536;
+    const auto store = Pm4::ResolveStore(packet, state, gpuStoreLimit);
+    if (!store.has_value()) return false;
+    const auto stored = store->Bytes();
+    if (stored.empty()) return true;
+    if (!GuestMemory::Accessible(reinterpret_cast<const void*>(store->address), stored.size(), true)) return false;
+    const auto address = store->address;
+    std::vector<std::byte> bytes(stored.begin(), stored.end());
+    auto queued = bytes;
+    DrawPipeline::Queue0().EnqueueStore([this, queue, address, bytes = std::move(bytes)] {
+        GuestMemory::SetCurrentPacket(0x83, queue);
+        commitStore(queue, address, bytes);
+    }, address, std::move(queued));
+    return true;
+}
+
+void Driver::commitStore(std::uint32_t queue, std::uint64_t address, std::span<const std::byte> bytes) {
     constexpr std::size_t gpuStoreLimit = 65536;
     GuestMemory::TagGpuLockSite(GuestMemory::GpuLockSite::Label);
     std::lock_guard gpuLock(GuestMemory::GpuMutex());
