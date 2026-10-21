@@ -384,7 +384,7 @@ int APS5_VABI chroot_nid_postfix(const char* path) {
     throw std::runtime_error(std::string("chroot: changing the root directory to ") + path + " is not supported, the guest path resolver keeps a fixed root");
 }
 
-int APS5_VABI symlink_nid_postfix(const char* target, const char* created) {
+static int CreateSymlinkAt(const char* target, int dirfd, const char* created) {
     if (target == nullptr || created == nullptr) return static_cast<int>(Fail(GuestEfault));
     if (*target == '\0' || *created == '\0') return static_cast<int>(Fail(GuestEnoent));
     const std::filesystem::path contents(target);
@@ -399,7 +399,15 @@ int APS5_VABI symlink_nid_postfix(const char* target, const char* created) {
         }
     }
     std::filesystem::path native;
-    if (const int error = ResolvePathError_nid_no_patch(created, native)) return static_cast<int>(Fail(error));
+    if (std::strlen(created) >= GuestPathMax || HasLongComponent(created)) return static_cast<int>(Fail(GuestEnametoolong));
+    if (dirfd == GuestAtFdcwd || *created == '/') {
+        if (const int error = ResolvePathError_nid_no_patch(created, native)) return static_cast<int>(Fail(error));
+    } else {
+        int error = 0;
+        const char* base = GetDirectoryDescriptorPath_nid_no_patch(dirfd, &error);
+        if (!base) return static_cast<int>(Fail(error));
+        native = std::filesystem::path(base) / std::filesystem::path(reinterpret_cast<const char8_t*>(created));
+    }
     std::error_code error;
 #ifdef _WIN32
     if (GetFileAttributesW(native.wstring().c_str()) != INVALID_FILE_ATTRIBUTES) return static_cast<int>(Fail(GuestEexist));
@@ -430,6 +438,16 @@ int APS5_VABI symlink_nid_postfix(const char* target, const char* created) {
 }
 
 int APS5_VABI open_nid_postfix(const char* path, int flags, int mode);
+
+int APS5_VABI symlink_nid_postfix(const char* target, const char* created) {
+    return CreateSymlinkAt(target, GuestAtFdcwd, created);
+}
+
+int APS5_VABI symlinkat_nid_postfix(const char* target, int directory, const char* created) {
+    if (target == nullptr) return static_cast<int>(Fail(GuestEfault));
+    if (std::strlen(target) >= GuestPathMax) return static_cast<int>(Fail(GuestEnametoolong));
+    return CreateSymlinkAt(target, directory, created);
+}
 
 int APS5_VABI openat_nid_postfix(int fd, const char* path, int flags, ...) {
     int mode = 0;
