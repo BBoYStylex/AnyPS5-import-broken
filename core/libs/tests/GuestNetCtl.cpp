@@ -48,6 +48,10 @@ int APS5_VABI sceNetCtlRegisterCallbackV6(NetCtlCallback, void*, int*);
 void APS5_VABI sceNetCtlTerm(void);
 int APS5_VABI sceNetCtlUnregisterCallback(int);
 int APS5_VABI sceNetCtlUnregisterCallbackV6(int);
+int APS5_VABI sceNetCtlRegisterCallbackForNpToolkit(void);
+int APS5_VABI sceNetCtlUnregisterCallbackForNpToolkit(void);
+int APS5_VABI sceNetCtlCheckCallbackForNpToolkit(void);
+int APS5_VABI sceNetCtlClearEventForNpToolkit(void);
 }
 
 namespace {
@@ -337,4 +341,36 @@ int main() {
     Require(sceNetCtlGetNatInfo(nullptr) == kErrInvalidAddr);
     NetCtlNatInfo nat_info{};
     Require(sceNetCtlGetNatInfo(&nat_info) == kErrNotConnected);
+
+    bool threwNpToolkit = false;
+    try {
+        sceNetCtlRegisterCallbackForNpToolkit();
+    } catch (const std::runtime_error&) {
+        threwNpToolkit = true;
+    }
+    Require(threwNpToolkit);
+
+    bool threwUnreg = false;
+    try {
+        sceNetCtlUnregisterCallbackForNpToolkit();
+    } catch (const std::runtime_error&) {
+        threwUnreg = true;
+    }
+    Require(threwUnreg);
+
+    bool threwCheck = false;
+    try {
+        sceNetCtlCheckCallbackForNpToolkit();
+    } catch (const std::runtime_error&) {
+        threwCheck = true;
+    }
+    Require(threwCheck);
+
+    bool threwClear = false;
+    try {
+        sceNetCtlClearEventForNpToolkit();
+    } catch (const std::runtime_error&) {
+        threwClear = true;
+    }
+    Require(threwClear);
 }
