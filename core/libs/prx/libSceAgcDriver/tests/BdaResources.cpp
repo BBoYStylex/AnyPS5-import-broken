@@ -781,6 +781,10 @@ private:
             active->calls.push_back({imported->pHostPointer, info->allocationSize});
             if (active->onImport) {
                 auto callback = std::move(active->onImport);
+#ifdef __APPLE__
+                // libc++ leaves a moved-from std::function callable; clear it so the hook stays one-shot.
+                active->onImport = nullptr;
+#endif
                 callback();
             }
             if (active->failure != VK_SUCCESS) return active->failure;
