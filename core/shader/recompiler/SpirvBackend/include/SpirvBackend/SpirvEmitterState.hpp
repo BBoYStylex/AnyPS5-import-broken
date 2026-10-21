@@ -221,6 +221,9 @@ struct SpirvEmitterState {
     std::uint32_t pixelValidMaskVariable = 0;
     std::uint32_t quadPixelUncovered = 0;
     std::uint32_t sampleMaskInputVariable = 0;
+#ifdef __APPLE__
+    std::uint32_t sampleMaskCopy = 0;
+#endif
     std::uint32_t quadSampleCoverage = 0;
     std::uint32_t sampleOrderWord = 0;
     std::uint32_t subgroupLocalInvocationIdVariable = 0;
