@@ -3,6 +3,7 @@
 #include "prx/libc/include/General.hpp"
 
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -203,6 +204,19 @@ std::uint64_t APS5_VABI FT_Get_First_Char_nid_postfix(GuestFaceRec* face, std::u
 std::uint64_t APS5_VABI FT_Get_Next_Char_nid_postfix(GuestFaceRec* face, std::uint64_t charcode, std::uint32_t* glyphIndex) {
     const GuestFace* owner = FaceOf(face);
     return FT_Get_Next_Char(owner ? owner->host : nullptr, static_cast<FT_ULong>(static_cast<std::uint32_t>(charcode)), glyphIndex);
+}
+
+int APS5_VABI FT_Outline_Copy_nid_postfix(const GuestOutline* source, GuestOutline* target) {
+    if (!source || !target) return FT_Err_Invalid_Outline;
+    if (source->n_points != target->n_points || source->n_contours != target->n_contours) return FT_Err_Invalid_Argument;
+    if (source == target) return FT_Err_Ok;
+    if (source->n_points) {
+        std::memmove(target->points, source->points, source->n_points * sizeof(GuestVector));
+        std::memmove(target->tags, source->tags, source->n_points * sizeof(unsigned char));
+    }
+    if (source->n_contours) std::memmove(target->contours, source->contours, source->n_contours * sizeof(std::uint16_t));
+    target->flags = (source->flags & ~FT_OUTLINE_OWNER) | (target->flags & FT_OUTLINE_OWNER);
+    return FT_Err_Ok;
 }
 
 }
