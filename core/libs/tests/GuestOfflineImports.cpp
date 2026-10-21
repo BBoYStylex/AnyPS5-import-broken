@@ -23,6 +23,11 @@ int APS5_VABI sceNpEntitlementAccessRequestUnifiedEntitlementInfo();
 int APS5_VABI sceNpEntitlementAccessPollUnifiedEntitlementInfo();
 int APS5_VABI sceNpEntitlementAccessRequestServiceEntitlementInfo();
 int APS5_VABI sceNpEntitlementAccessPollServiceEntitlementInfo();
+int APS5_VABI sceNpEntitlementAccessRequestConsumeEntitlement(
+    std::int32_t, std::uint32_t, const void*, const void*, std::int32_t, std::int64_t*);
+int APS5_VABI sceNpEntitlementAccessRequestConsumableEntitlementInfo(
+    std::int32_t, std::uint32_t, const NpUnifiedEntitlementLabel*, std::int64_t*);
+int APS5_VABI sceNpEntitlementAccessPollConsumableEntitlementInfo(std::int64_t, std::int32_t*, void*);
 int APS5_VABI sceRudpInit_nid_postfix(void*, int);
 int APS5_VABI sceRudpActivate();
 int APS5_VABI sceRudpGetStatus(void*, std::size_t);
@@ -87,6 +92,21 @@ int main() {
     Require(sceNpEntitlementAccessPollUnifiedEntitlementInfo() == signedOut);
     Require(sceNpEntitlementAccessRequestServiceEntitlementInfo() == signedOut);
     Require(sceNpEntitlementAccessPollServiceEntitlementInfo() == signedOut);
+
+    std::array<unsigned char, 72> transactionId{};
+    std::int64_t requestId = 0x5a5a5a5a5a5a5a5a;
+    std::int32_t result = 0x5a5a5a5a;
+    std::array<unsigned char, 64> info;
+    info.fill(0xa5);
+    const auto originalInfo = info;
+    Require(sceNpEntitlementAccessRequestConsumeEntitlement(1, 0, &label, transactionId.data(), 1, &requestId) == signedOut);
+    Require(sceNpEntitlementAccessRequestConsumeEntitlement(1, 0, nullptr, nullptr, 1, nullptr) == signedOut);
+    Require(sceNpEntitlementAccessRequestConsumableEntitlementInfo(1, 0, &label, &requestId) == signedOut);
+    Require(sceNpEntitlementAccessRequestConsumableEntitlementInfo(1, 0, nullptr, nullptr) == signedOut);
+    Require(requestId == 0x5a5a5a5a5a5a5a5a);
+    Require(sceNpEntitlementAccessPollConsumableEntitlementInfo(1, &result, info.data()) == signedOut);
+    Require(sceNpEntitlementAccessPollConsumableEntitlementInfo(1, nullptr, nullptr) == signedOut);
+    Require(result == 0x5a5a5a5a && info == originalInfo);
 
     Require(sceRudpActivate() == 0);
     std::array<unsigned char, 248> status;
