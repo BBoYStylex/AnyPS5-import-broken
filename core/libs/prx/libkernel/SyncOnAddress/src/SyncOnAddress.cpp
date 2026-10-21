@@ -55,7 +55,7 @@ struct UserSemaphore {
 };
 
 struct AddressWaiter {
-    TimedWait::Condition condition;
+    TimedWait::SingleWaiterCondition condition;
     bool woken = false;
 };
 
@@ -69,15 +69,11 @@ bool IsAlignedAddress(std::uintptr_t address) {
 
 template <class TFunction>
 void DeferringDelivery(TFunction function) {
-#ifdef _WIN32
     {
         TimedWait::DeliveryDeferral deferral;
         function();
     }
     TimedWait::DeliverDeferred();
-#else
-    function();
-#endif
 }
 
 template <class TReady>
