@@ -1690,6 +1690,13 @@ struct AppContentBootParam {
 
 struct AppContentMountPoint { char data[16]; };
 
+struct ContentExportInitParam {
+    void* malloc_func;
+    void* free_func;
+    void* user_data;
+};
+static_assert(sizeof(ContentExportInitParam) == 24);
+
 struct ContentExportInitParam2 {
     void* malloc_func;
     void* free_func;
