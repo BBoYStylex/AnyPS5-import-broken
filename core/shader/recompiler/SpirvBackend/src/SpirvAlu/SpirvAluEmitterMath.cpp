@@ -1422,7 +1422,13 @@ std::uint32_t EmitFPSub32(SpirvEmitterState& state, std::uint32_t arg0, std::uin
 }
 
 std::uint32_t EmitFPMul32(SpirvEmitterState& state, std::uint32_t arg0, std::uint32_t arg1) {
+#ifdef __APPLE__
+    // MoltenVK writes an uncontracted multiply as fma(a, b, +0), which turns a -0 product into +0. Adding -0 is
+    // exact for every product and keeps its sign.
+    return Exact(state, EmitExt(state, TypeF32(state), GLSLstd450Fma, {arg0, arg1, ConstantF32(state, 0x80000000u)}));
+#else
     return Exact(state, EmitNative<spv::OpFMul, IrType::F32>(state, arg0, arg1));
+#endif
 }
 
 std::uint32_t EmitAddU32(SpirvEmitterState& state, std::uint32_t arg0, std::uint32_t arg1) {
