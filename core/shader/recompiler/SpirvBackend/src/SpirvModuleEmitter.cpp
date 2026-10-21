@@ -1074,6 +1074,13 @@ void EmitPixelEntryPoint(SpirvEmitterState& state) {
         }
         EmitLabel(state, done);
     }
+#ifdef __APPLE__
+    if (state.stencilRefOutput != 0u) {
+        const auto value = state.module.AllocateId();
+        state.module.AddFunction(spv::OpLoad, TypeI32(state), value, state.stencilRefVariable);
+        state.module.AddFunction(spv::OpStore, state.stencilRefOutput, value);
+    }
+#endif
     state.module.AddFunction(spv::OpReturn);
     state.module.AddFunction(spv::OpFunctionEnd);
 }
@@ -1519,6 +1526,14 @@ void EmitProgram(SpirvEmitterState& state) {
             state.sampleMaskCopy = state.module.DefineGlobalVariable(TypePointer(state, spv::StorageClassPrivate, TypeI32(state)), spv::StorageClassPrivate);
             if (state.spirvVersion >= 0x00010400u) state.interfaceVariables.push_back(state.sampleMaskCopy);
             state.module.AddName(state.sampleMaskCopy, "sample_mask_in");
+        }
+        // The same split makes SPIRV-Cross declare the stencil output as int in the entry point but pass it to the guest
+        // function as uint&, which Metal rejects; the guest writes a private copy the entry point stores after the call.
+        if (state.stencilRefVariable != 0u && !state.stencilReplay) {
+            state.stencilRefOutput = state.stencilRefVariable;
+            state.stencilRefVariable = state.module.DefineGlobalVariable(TypePointer(state, spv::StorageClassPrivate, TypeI32(state)), spv::StorageClassPrivate);
+            if (state.spirvVersion >= 0x00010400u) state.interfaceVariables.push_back(state.stencilRefVariable);
+            state.module.AddName(state.stencilRefVariable, "stencil_ref_out");
         }
 #endif
     }
