@@ -1070,14 +1070,19 @@ void ShaderStageTests() {
         Require(AgcDriver::Graphics::DecodeState(lines).stages.mesh->provokingVertex == 2 && AgcDriver::Graphics::DecodeShaderStages(lines).mesh->provokingVertex == 2, "a last-vertex geometry draw does not take its flat inputs and layer from the third vertex of each output triangle");
         lines.context[0x29b] = 1;
         Require(AgcDriver::Graphics::DecodeState(lines).stages.mesh->provokingVertex == 1, "a last-vertex geometry draw does not take its flat inputs and layer from the second vertex of each output line");
+        lines.context[0x29b] = 0;
+        state = AgcDriver::Graphics::DecodeState(lines);
+        mesh = *state.stages.mesh;
+        Require(mesh.outputPrimitiveSize == 1 && mesh.maxPrimitives == 255 && AgcDriver::Graphics::RasterPrimitiveOf(state) == ShaderRecompiler::RasterPrimitive::Point, "a point-list subgroup did not decode as points");
+        Require(mesh.provokingVertex == 0, "a point draw has provoking vertex 0");
         lines.context[0x205] = raster;
         lines.context[0x29b] = 1;
         lines.context[0x2ce] = 1;
         expectFailure([&] { AgcDriver::Graphics::DecodeState(lines); }, "unsupported geometry input or output assembly");
         lines.context[0x2ce] = 5;
-        for (const auto output : {0u, 3u, 0x80000001u, 0x101u}) {
+        for (const auto output : {3u, 0x80000001u, 0x101u}) {
             lines.context[0x29b] = output;
-            expectFailure([&] { AgcDriver::Graphics::DecodeState(lines); }, "VGT_GS_OUT_PRIM_TYPE other than a triangle strip, or a line strip from a geometry program, is unsupported");
+            expectFailure([&] { AgcDriver::Graphics::DecodeState(lines); }, "VGT_GS_OUT_PRIM_TYPE other than a triangle strip, or a point list or line strip from a geometry program, is unsupported");
         }
         lines.userConfig[0x242] = 4;
         lines.context[0x205] = 0x2a40;
@@ -1231,7 +1236,9 @@ void NggVertexWorkgroupTests() {
     }
     queue.context[0x2d5] = 0x12010;
     queue.context[0x29b] = 1;
-    expectFailure([&] { AgcDriver::Graphics::DecodeState(queue, true); }, "VGT_GS_OUT_PRIM_TYPE other than a triangle strip, or a line strip from a geometry program, is unsupported");
+        expectFailure([&] { AgcDriver::Graphics::DecodeState(queue, true); }, "VGT_GS_OUT_PRIM_TYPE other than a triangle strip, or a point list or line strip from a geometry program, is unsupported");
+    queue.context[0x29b] = 0;
+    expectFailure([&] { AgcDriver::Graphics::DecodeState(queue, true); }, "VGT_GS_OUT_PRIM_TYPE other than a triangle strip, or a point list or line strip from a geometry program, is unsupported");
 }
 
 constexpr std::array<std::uint8_t, 8> IdentityExports{0xe4u, 0xe4u, 0xe4u, 0xe4u, 0xe4u, 0xe4u, 0xe4u, 0xe4u};
@@ -2736,6 +2743,65 @@ void DepthBoundsBiasTests() {
 }
 
 alignas(256) std::array<std::uint8_t, 4> dccKeys{};
+
+void depthCopyPassTests() {
+    using AgcDriver::Graphics::DecodeDepthCopyPass;
+    auto queue = makeState();
+    queue.context[0x0] = 0;
+    Require(!DecodeDepthCopyPass(queue).has_value(), "a draw without DEPTH_COPY decoded as a DB depth copy");
+    queue.context[0x000] = 0x84;
+    queue.context[0x010] = 0x80000187;
+    queue.context[0x011] = 0x20000180;
+    queue.context[0x012] = 0x00001000;
+    queue.context[0x007] = 0x0003003f;
+    queue.context[0x31c] = 0x40710;
+    queue.context[0x8e] = 1;
+    auto pass = DecodeDepthCopyPass(queue);
+    Require(pass.has_value() && pass->depthAddress == 0x100000 && pass->samples == 2 && pass->sample == 0 && pass->extent.width == 64 && pass->extent.height == 4, "a centroid DB depth copy of a two-sample depth plane decoded differently");
+    Require(pass->color.format == VK_FORMAT_R32_SFLOAT && pass->color.samples == 1 && pass->color.address == reinterpret_cast<std::uintptr_t>(colorMemory.data()), "the DB depth copy target decoded differently");
+    queue.context[0x000] = 0x104;
+    Require(DecodeDepthCopyPass(queue)->sample == 1, "COPY_SAMPLE without COPY_CENTROID did not select the sample");
+    queue.context[0x000] = 0x204;
+    expectFailure([&] { (void)DecodeDepthCopyPass(queue); }, "a sample the depth plane does not have");
+    queue.context[0x000] = 0x8c;
+    expectFailure([&] { (void)DecodeDepthCopyPass(queue); }, "stencil copy");
+    queue.context[0x000] = 0x84;
+    queue.context[0x30e] = 0xfffffffe;
+    expectFailure([&] { (void)DecodeDepthCopyPass(queue); }, "sample mask");
+    queue.context[0x30e] = 0xffffffff;
+    queue.context[0x200] = 2;
+    expectFailure([&] { (void)DecodeDepthCopyPass(queue); }, "depth or stencil tests");
+    queue.context[0x200] = 0;
+    queue.context[0x010] = 0x80000185;
+    expectFailure([&] { (void)DecodeDepthCopyPass(queue); }, "Z_32_FLOAT");
+    queue.context[0x010] = 0x80000187;
+    queue.context[0x8e] = 0xf;
+    expectFailure([&] { (void)DecodeDepthCopyPass(queue); }, "red channel");
+    queue.context[0x8e] = 1;
+    queue.context[0x31c] = 0x28028;
+    expectFailure([&] { (void)DecodeDepthCopyPass(queue); }, "single-sample R32 float");
+    queue.context[0x31c] = 0x40710;
+    queue.context[0x10f] = std::bit_cast<std::uint32_t>(16.0f);
+    expectFailure([&] { (void)DecodeDepthCopyPass(queue); }, "over part of the depth surface");
+    queue.context[0x10f] = std::bit_cast<std::uint32_t>(32.0f);
+    queue.context[0x010] = 0x80001187;
+    expectFailure([&] { (void)DecodeDepthCopyPass(queue); }, "mipmapped or partially resident");
+    queue.context[0x010] = 0x80000187;
+    queue.context[0x012] = 0x00001003;
+    pass = DecodeDepthCopyPass(queue);
+    Require(pass.has_value() && pass->depthAddress == 0x100000, "a DB depth copy kept the pipe-bank XOR of a two-sample depth plane in its address");
+    queue.context[0x012] = 0x00001000;
+    queue.context[0x002] = 1u | (1u << 13u);
+    pass = DecodeDepthCopyPass(queue);
+    Require(pass.has_value() && pass->depthAddress == 0x100000 + AgcDriver::Graphics::DepthSliceBytes({64, 4}, 4u), "a DB depth copy of slice 1 did not address the slice the depth surface registers");
+    queue.context[0x002] = 0;
+    Require(DecodeDepthCopyPass(queue).has_value(), "the restored DB depth copy was refused");
+    queue.context[0x010] = 0x80000183;
+    pass = DecodeDepthCopyPass(queue);
+    Require(pass.has_value() && pass->samples == 1 && pass->sample == 0, "a centroid DB depth copy of a one-sample depth plane decoded differently");
+    queue.context[0x000] = 0x104;
+    expectFailure([&] { (void)DecodeDepthCopyPass(queue); }, "a sample the depth plane does not have");
+}
 
 void metadataPassTests() {
     using AgcDriver::Graphics::ColorMetadataPass;
@@ -11016,6 +11082,7 @@ int main(int argc, char** argv) {
         DualSourceBlendTests();
         ReversedBlendShaderTests();
         metadataPassTests();
+        depthCopyPassTests();
         cmaskTests();
         uint16ExportTests();
         uint8x2TargetTests();
