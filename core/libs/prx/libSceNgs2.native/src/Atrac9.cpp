@@ -288,7 +288,19 @@ static bool AddAtrac9Range(Ngs2WaveformInfo& info, std::uint64_t begin, std::uin
     return true;
 }
 
-static int ParseAtrac9Loop(const RiffChunks& chunks, Ngs2WaveformInfo& info) {
+static bool AddPcmRange(Ngs2WaveformInfo& info, std::uint64_t begin, std::uint32_t samples, std::uint32_t repeats) {
+    if (samples == 0) return true;
+    const std::uint64_t offset = begin * info.audio_frame_size;
+    const std::uint64_t bytes = static_cast<std::uint64_t>(samples) * info.audio_frame_size;
+    if (offset > info.data_size || bytes > info.data_size - offset) return false;
+    auto& block = info.block[info.num_blocks++];
+    block = {info.data_offset + offset, bytes, repeats, 0, samples, 0, 0};
+    return true;
+}
+
+using AddLoopRange = bool (*)(Ngs2WaveformInfo&, std::uint64_t, std::uint32_t, std::uint32_t);
+
+static int ParseLoop(const RiffChunks& chunks, Ngs2WaveformInfo& info, AddLoopRange addRange) {
     if (chunks.sampler == nullptr) return SCE_NGS2_OK;
     if (chunks.samplerSize < 36) return SCE_NGS2_ERROR_INVALID_WAVEFORM_DATA;
     const auto count = ReadLe32(chunks.sampler + 28);
@@ -308,9 +320,9 @@ static int ParseAtrac9Loop(const RiffChunks& chunks, Ngs2WaveformInfo& info) {
     info.loop_end_position = static_cast<std::uint32_t>(end - skip);
     info.num_blocks = 0;
     info.block[0] = {};
-    if (!AddAtrac9Range(info, skip, info.loop_begin_position, 0) ||
-        !AddAtrac9Range(info, begin, static_cast<std::uint32_t>(end - begin), plays == 0 ? UINT32_MAX : plays - 1) ||
-        !AddAtrac9Range(info, end, static_cast<std::uint32_t>(waveformEnd - end), 0))
+    if (!addRange(info, skip, info.loop_begin_position, 0) ||
+        !addRange(info, begin, static_cast<std::uint32_t>(end - begin), plays == 0 ? UINT32_MAX : plays - 1) ||
+        !addRange(info, end, static_cast<std::uint32_t>(waveformEnd - end), 0))
         return SCE_NGS2_ERROR_INVALID_WAVEFORM_DATA;
     return SCE_NGS2_OK;
 }
@@ -341,7 +353,7 @@ static int ParseAtrac9(const RiffChunks& chunks, Ngs2WaveformInfo& info) {
     info.block[0].data_size = chunks.dataSize;
     info.block[0].num_skip_samples = ReadLe32(chunks.fact + 8);
     info.block[0].num_samples = info.num_samples;
-    return ParseAtrac9Loop(chunks, info);
+    return ParseLoop(chunks, info, AddAtrac9Range);
 }
 
 static std::uint32_t PcmWaveformType(std::uint32_t bits, bool floating) {
@@ -361,7 +373,6 @@ static int ParsePcm(const RiffChunks& chunks, std::size_t size, Ngs2WaveformInfo
     if (channels == 0 || channels > NGS2_MAX_CHANNELS || sampleRate == 0 || sampleRate > MAX_SAMPLE_RATE || ReadLe16(format + 12) != bytesPerFrame) {
         return SCE_NGS2_ERROR_INVALID_WAVEFORM_FORMAT;
     }
-    if (chunks.sampler != nullptr && chunks.samplerSize >= 32 && ReadLe32(chunks.sampler + 28) != 0) throw std::runtime_error("NGS2: parsing looped waveforms is not implemented");
     if (chunks.dataSize > size - chunks.dataOffset || chunks.dataSize % bytesPerFrame != 0) return SCE_NGS2_ERROR_INVALID_WAVEFORM_DATA;
     const std::size_t dataSize = chunks.dataSize;
     info.format = {type, channels, sampleRate, 0, 0, 0};
@@ -377,7 +388,7 @@ static int ParsePcm(const RiffChunks& chunks, std::size_t size, Ngs2WaveformInfo
     info.block[0].data_offset = chunks.dataOffset;
     info.block[0].data_size = dataSize;
     info.block[0].num_samples = info.num_samples;
-    return SCE_NGS2_OK;
+    return ParseLoop(chunks, info, AddPcmRange);
 }
 
 static int ParseWaveform(const RiffChunks& chunks, std::size_t size, Ngs2WaveformInfo& info) {
