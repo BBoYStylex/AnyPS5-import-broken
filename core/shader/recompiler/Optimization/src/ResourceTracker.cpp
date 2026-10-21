@@ -733,24 +733,62 @@ private:
         return EquivalentValue(m_program.Resources(), first.Argument(0), second.Argument(0)) && MatchAffineOffset(first.Argument(1), firstKey, firstStride, firstAddend) && MatchAffineOffset(second.Argument(1), secondKey, secondStride, secondAddend) && firstStride == secondStride && firstAddend == secondAddend;
     }
 
+    static bool LaneIndex(const IrValue* value) {
+        std::vector<const IrValue*> pending{value};
+        std::unordered_set<const IrValue*> seen;
+        while (!pending.empty()) {
+            const IrValue* current = pending.back()->Resolve();
+            pending.pop_back();
+            if (!seen.insert(current).second || (current->HasImmediate() && current->Type() == IrType::U32)) continue;
+            switch (current->Opcode()) {
+                case IrOpcode::FindILsb32:
+                case IrOpcode::FindUMsb32:
+                case IrOpcode::ReadFirstLane: continue;
+                case IrOpcode::BitwiseAnd32:
+                case IrOpcode::IAdd32:
+                case IrOpcode::ISub32:
+                    if (current->ArgumentCount() != 2u) return false;
+                    pending.push_back(current->Argument(0));
+                    pending.push_back(current->Argument(1));
+                    continue;
+                case IrOpcode::SelectU32:
+                    if (current->ArgumentCount() != 3u) return false;
+                    pending.push_back(current->Argument(1));
+                    pending.push_back(current->Argument(2));
+                    continue;
+                default: return false;
+            }
+        }
+        return true;
+    }
+
+    static bool LaneBit(const IrValue& value) {
+        if (value.Opcode() != IrOpcode::ShiftLeftLogical32 || value.ArgumentCount() != 2u) return false;
+        const IrValue* one = value.Argument(0)->Resolve();
+        return one->HasImmediate() && one->Type() == IrType::U32 && one->ImmediateU32() == 1u && LaneIndex(value.Argument(1));
+    }
+
     static bool LaneMaskOperand(const IrValue* value) {
         const IrValue* root = value->Resolve();
         std::vector<const IrValue*> pending{root};
         std::unordered_set<const IrValue*> seen;
-        bool word = false;
+        bool lane = false;
         while (!pending.empty()) {
             const IrValue* current = pending.back()->Resolve();
             pending.pop_back();
             if (!seen.insert(current).second) continue;
-            if (LaneMaskWord(*current)) {
-                word = true;
+            if (LaneMaskWord(*current) || LaneBit(*current)) {
+                lane = true;
                 continue;
             }
             if (current != root && current->HasImmediate() && current->Type() == IrType::U32) continue;
-            if (!current->IsPhi() && (current->Opcode() != IrOpcode::BitwiseAnd32 || current->ArgumentCount() != 2u)) return false;
+            const auto opcode = current->Opcode();
+            const bool combines = (opcode == IrOpcode::BitwiseAnd32 || opcode == IrOpcode::BitwiseOr32) && current->ArgumentCount() == 2u;
+            const bool inverts = opcode == IrOpcode::BitwiseNot32 && current->ArgumentCount() == 1u;
+            if (!current->IsPhi() && !combines && !inverts) return false;
             for (std::size_t index = 0; index < current->ArgumentCount(); ++index) pending.push_back(current->Argument(index));
         }
-        return word;
+        return lane;
     }
 
     bool PointerRecordReads(IrValue* value, bool pointerKeyed, std::vector<IrValue*>& reads) const {
@@ -766,7 +804,7 @@ private:
                 continue;
             }
             if (current->HasImmediate() && current->Type() == IrType::U32) continue;
-            if (pointerKeyed && LaneMaskWord(*current)) continue;
+            if (pointerKeyed && LaneMaskOperand(current)) continue;
             if (pointerKeyed && current->Opcode() == IrOpcode::BitwiseAnd32 && current->ArgumentCount() == 2u) {
                 const bool left = LaneMaskOperand(current->Argument(0));
                 const bool right = LaneMaskOperand(current->Argument(1));
