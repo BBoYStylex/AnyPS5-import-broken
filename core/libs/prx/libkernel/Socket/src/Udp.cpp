@@ -102,22 +102,9 @@ int ConnectError() {
 #endif
     return NativeError();
 }
-#ifdef __APPLE__
-// macOS FIONREAD on a datagram socket counts the queued address records too (35 for one 19-byte datagram);
-// SO_NREAD gives the next datagram's data size, as the console and Linux report.
-void QueuedDatagramBytes(NativeSocket native, int type, int& count) {
-    if (type != 2) return;
-    int next = 0;
-    socklen_t length = sizeof(next);
-    if (getsockopt(native, SOL_SOCKET, SO_NREAD, &next, &length) == 0) count = next;
-}
-#endif
 int SendError(int type) {
 #ifdef _WIN32
     if (type == 2 && WSAGetLastError() == WSAENOTCONN) return 39;
-#elif defined(__APPLE__)
-    // After the peer closes, macOS can fail the next stream send with ECONNRESET where FreeBSD reports EPIPE.
-    if (type == 1 && errno == ECONNRESET) return 32;
 #else
     static_cast<void>(type);
 #endif
@@ -450,16 +437,14 @@ bool GuestSockets::WaitAny(const std::vector<Interest>& interests, std::uint64_t
     if (pipes && (timeout < 0 || timeout > 1)) timeout = 1;
     if (WSAPoll(entries.data(), static_cast<ULONG>(entries.size()), timeout) == SOCKET_ERROR)
         throw std::runtime_error("equeue wait: WSAPoll failed, guest errno " + std::to_string(NativeError()));
-#else
-#ifdef __APPLE__
-    const int timeout = deadlineNanos == 0 ? -1 : static_cast<int>(std::min<std::uint64_t>((remaining + 999999) / 1000000, INT_MAX));
-    if (::poll(entries.data(), static_cast<nfds_t>(entries.size()), timeout) < 0 && errno != EINTR)
+#elif defined(__APPLE__)
+    const int timeout = deadlineNanos != 0 ? static_cast<int>(std::min<std::uint64_t>((remaining + 999999) / 1000000, INT_MAX)) : -1;
+    if (::poll(entries.data(), entries.size(), timeout) < 0 && errno != EINTR)
         throw std::runtime_error("equeue wait: poll failed, guest errno " + std::to_string(NativeError()));
 #else
     timespec timeout{static_cast<time_t>(remaining / 1000000000), static_cast<long>(remaining % 1000000000)};
     if (::ppoll(entries.data(), entries.size(), deadlineNanos != 0 ? &timeout : nullptr, nullptr) < 0 && errno != EINTR)
         throw std::runtime_error("equeue wait: ppoll failed, guest errno " + std::to_string(NativeError()));
-#endif
 #endif
     char drained[16];
     while (recv(waker, drained, sizeof(drained), 0) > 0) {}
@@ -782,17 +767,23 @@ int NativePair(int type, NativeSocket (&pair)[2]) {
 #else
 int NativePair(int type, NativeSocket (&pair)[2]) {
 #ifdef __APPLE__
-    // macOS has no AF_UNIX SOCK_SEQPACKET (EPROTONOSUPPORT); a datagram pair keeps the same record boundaries and
-    // MSG_TRUNC reporting for the connected pair.
-    const int nativeType = type == 1 ? SOCK_STREAM : SOCK_DGRAM;
-#else
-    const int nativeType = type == 1 ? SOCK_STREAM : type == 2 ? SOCK_DGRAM : SOCK_SEQPACKET;
+    if (type == 5) throw std::runtime_error("socketpair: SOCK_SEQPACKET is not supported on macOS");
 #endif
+    const int nativeType = type == 1 ? SOCK_STREAM : type == 2 ? SOCK_DGRAM : SOCK_SEQPACKET;
     int native[2];
     if (::socketpair(AF_UNIX, nativeType, 0, native)) return NativeError();
     pair[0] = native[0];
     pair[1] = native[1];
     return 0;
+}
+int QueuedBytes(const Socket& socket, int& count) {
+#ifdef __APPLE__
+    if (socket.type == 2) {
+        socklen_t size = sizeof(count);
+        return ::getsockopt(socket.value, SOL_SOCKET, SO_NREAD, &count, &size);
+    }
+#endif
+    return ::ioctl(socket.value, FIONREAD, &count);
 }
 #endif
 int UnnamedAddress(void* address, std::uint32_t* length) {
@@ -824,14 +815,7 @@ int GuestSockets::Stat(int descriptor, FileStat* status) {
     if (ioctlsocket(socket->value, FIONREAD, &count) == 0) available = static_cast<std::int64_t>(count);
 #else
     int count = 0;
-#ifdef __APPLE__
-    if (::ioctl(socket->value, FIONREAD, &count) == 0) {
-        QueuedDatagramBytes(socket->value, socket->type, count);
-        available = count;
-    }
-#else
-    if (::ioctl(socket->value, FIONREAD, &count) == 0) available = count;
-#endif
+    if (QueuedBytes(*socket, count) == 0) available = count;
 #endif
     int sendBuffer = 0;
     socklen_t length = sizeof(sendBuffer);
@@ -877,14 +861,9 @@ bool GuestSockets::Ready(int descriptor, bool write, std::int64_t* data, bool* e
 #elif defined(__APPLE__)
     pollfd entry{socket->value, static_cast<short>(write ? POLLOUT : POLLIN), 0};
     if (::poll(&entry, 1, 0) <= 0) return false;
-    if (!write && (entry.revents & POLLIN)) {
-        // macOS has no POLLRDHUP: a readable stream socket whose peek returns 0 bytes was shut down by the peer.
-        int type = 0;
-        socklen_t typeLength = sizeof(type);
-        char probe = 0;
-        if (getsockopt(socket->value, SOL_SOCKET, SO_TYPE, &type, &typeLength) == 0 && type == SOCK_STREAM &&
-            ::recv(socket->value, &probe, 1, MSG_PEEK | MSG_DONTWAIT) == 0)
-            entry.revents |= POLLHUP;
+    if (!write && socket->type == 1 && (entry.revents & POLLIN)) {
+        char byte;
+        if (::recv(socket->value, &byte, 1, MSG_PEEK | MSG_DONTWAIT) == 0) entry.revents |= POLLHUP;
     }
 #else
     pollfd entry{socket->value, static_cast<short>(write ? POLLOUT : (POLLIN | POLLRDHUP)), 0};
@@ -909,14 +888,7 @@ bool GuestSockets::Ready(int descriptor, bool write, std::int64_t* data, bool* e
         if (ioctlsocket(socket->value, FIONREAD, &available) == 0) *data = static_cast<std::int64_t>(available);
 #else
         int available = 0;
-#ifdef __APPLE__
-        if (::ioctl(socket->value, FIONREAD, &available) == 0) {
-            QueuedDatagramBytes(socket->value, socket->type, available);
-            *data = available;
-        }
-#else
-        if (::ioctl(socket->value, FIONREAD, &available) == 0) *data = available;
-#endif
+        if (QueuedBytes(*socket, available) == 0) *data = available;
 #endif
     }
     return true;
@@ -1302,17 +1274,7 @@ int APS5_VABI shutdown_nid_postfix(int descriptor, int how) {
     const auto socket = Lookup(descriptor);
     if (!socket) return -1;
     if (how < 0 || how > 2) return Fail(22);
-#ifdef __APPLE__
-    // macOS refuses SHUT_RD with ENOTCONN once the peer has shut down its sending side, although the socket is
-    // still connected (getpeername succeeds) and queued data stays readable; the console accepts it.
-    if (::shutdown(socket->value, how)) {
-        sockaddr_storage peer{};
-        socklen_t peerSize = sizeof(peer);
-        if (!(how == 0 && errno == ENOTCONN && ::getpeername(socket->value, reinterpret_cast<sockaddr*>(&peer), &peerSize) == 0)) return Fail(NativeError());
-    }
-#else
     if (::shutdown(socket->value, how)) return Fail(NativeError());
-#endif
     std::lock_guard lock(socket->modeMutex);
     if (how != 1) socket->receiveShut = true;
     if (how != 0) socket->sendShut = true;
@@ -1362,10 +1324,7 @@ int APS5_VABI ioctl_nid_postfix(int descriptor, std::uint64_t request, void* arg
     const auto result = ioctlsocket(socket->value, request == 0x8004667e ? FIONBIO : FIONREAD, &value);
 #else
     int nativeValue = static_cast<int>(value);
-    const auto result = ::ioctl(socket->value, request == 0x8004667e ? FIONBIO : FIONREAD, &nativeValue);
-#ifdef __APPLE__
-    if (result == 0 && request == 0x4004667f) QueuedDatagramBytes(socket->value, socket->type, nativeValue);
-#endif
+    const auto result = request == 0x8004667e ? ::ioctl(socket->value, FIONBIO, &nativeValue) : QueuedBytes(*socket, nativeValue);
     value = static_cast<unsigned long>(nativeValue);
 #endif
     if (result) return Fail(NativeError());
@@ -1395,31 +1354,6 @@ std::int64_t APS5_VABI sendto_nid_postfix(int descriptor, const void* buffer, st
         if (native.ss_family != (socket->family == 2 ? AF_INET : AF_INET6)) return Fail(47);
         result = static_cast<int>(::sendto(socket->value, static_cast<const char*>(buffer), static_cast<int>(length), SocketSendFlags(*socket, flags),
             reinterpret_cast<sockaddr*>(&native), size));
-#ifdef __APPLE__
-        // macOS refuses an address on a connected datagram socket (EISCONN), which the console accepts; when the
-        // address is the connected peer, the datagram goes to the same place without it.
-        if (result < 0 && errno == EISCONN) {
-            sockaddr_storage peer{};
-            socklen_t peerSize = sizeof(peer);
-            bool samePeer = ::getpeername(socket->value, reinterpret_cast<sockaddr*>(&peer), &peerSize) == 0 && peer.ss_family == native.ss_family;
-            if (samePeer && native.ss_family == AF_INET) {
-                const auto& to = reinterpret_cast<const sockaddr_in&>(native);
-                const auto& connected = reinterpret_cast<const sockaddr_in&>(peer);
-                samePeer = to.sin_port == connected.sin_port && to.sin_addr.s_addr == connected.sin_addr.s_addr;
-            } else if (samePeer && native.ss_family == AF_INET6) {
-                const auto& to = reinterpret_cast<const sockaddr_in6&>(native);
-                const auto& connected = reinterpret_cast<const sockaddr_in6&>(peer);
-                samePeer = to.sin6_port == connected.sin6_port && std::memcmp(&to.sin6_addr, &connected.sin6_addr, sizeof(to.sin6_addr)) == 0;
-            } else {
-                samePeer = false;
-            }
-            if (samePeer) {
-                result = static_cast<int>(::send(socket->value, static_cast<const char*>(buffer), static_cast<int>(length), SocketSendFlags(*socket, flags)));
-            } else {
-                errno = EISCONN;
-            }
-        }
-#endif
     }
     return result < 0 ? Fail(SendError(socket->type)) : result;
 }
@@ -1825,45 +1759,6 @@ int APS5_VABI poll_nid_postfix(GuestPollDescriptor* descriptors, std::uint32_t c
             return ready;
         }
     }
-#elif defined(__APPLE__)
-    // macOS poll() neither reports POLLPRI for pending TCP urgent data nor wakes for it. SIOCATMARK reports it without
-    // consuming it (a MSG_OOB | MSG_PEEK on macOS uses the urgent byte up, so the guest's recv(MSG_OOB) would fail),
-    // but only once the urgent byte is the next one to read. While a socket waits for it, the wait is cut into short
-    // slices and re-checked.
-    const auto urgentPending = [&](std::size_t i) {
-        int atMark = 0;
-        return (native[i].events & POLLPRI) && ::ioctl(native[i].fd, SIOCATMARK, &atMark) == 0 && atMark != 0;
-    };
-    bool watchesUrgent = false;
-    for (std::size_t i = 0; i < socketCount; ++i)
-        if (native[i].events & POLLPRI) watchesUrgent = true;
-    const int wait = ready ? 0 : timeout;
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(wait < 0 ? 0 : wait);
-    for (;;) {
-        bool urgent = false;
-        for (std::size_t i = 0; i < socketCount; ++i)
-            if (urgentPending(i)) urgent = true;
-        int slice = wait;
-        if (urgent) {
-            slice = 0;
-        } else if (watchesUrgent && wait != 0) {
-            const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now()).count();
-            slice = wait < 0 ? 10 : static_cast<int>(std::clamp<long long>(left, 0, 10));
-        }
-        for (auto& request : native) request.revents = 0;
-        const int result = ::poll(native.data(), static_cast<nfds_t>(native.size()), slice);
-        if (result < 0) return Fail(NativeError());
-        for (std::size_t i = 0; i < socketCount; ++i) {
-            if (urgentPending(i)) {
-                native[i].revents = static_cast<short>(native[i].revents | POLLPRI);
-                urgent = true;
-            }
-        }
-        if (result > 0 || urgent || !watchesUrgent || wait == 0) break;
-        if (wait > 0 && std::chrono::steady_clock::now() >= deadline) break;
-    }
-    for (std::size_t i = 0; i < native.size(); ++i) collect(i, i >= socketCount);
-    return ready;
 #else
     const int wait = ready ? 0 : timeout;
     const int result = ::poll(native.data(), static_cast<nfds_t>(native.size()), wait);
