@@ -597,7 +597,7 @@ void OversizedVertexBuffer(AgcDriver::VulkanDevice& device) {
     Require(Builds() == before, "address draw reuse: a draw whose vertex buffer descriptor reaches past its allocation built its resources again");
 }
 
-void ThrowingProof(AgcDriver::VulkanDevice& device) {
+void ThrowingProof(AgcDriver::VulkanDevice& device, bool addressTable) {
     const auto context = AgcDriver::VulkanDeviceTestAccess::ContextOf(device);
     if ((context.limits.framebufferColorSampleCounts & VK_SAMPLE_COUNT_4_BIT) == 0) {
         std::puts("address draw reuse: a throwing reuse proof not tested, the device has no 4x color targets");
@@ -629,12 +629,16 @@ void ThrowingProof(AgcDriver::VulkanDevice& device) {
     image.guestDescriptor = {static_cast<std::uint32_t>(address >> 8u), static_cast<std::uint32_t>((address >> 40u) & 0xffu) | (format32UInt << 20u) | (((Width - 1u) & 3u) << 30u), ((Width - 1u) >> 2u) | ((Height - 1u) << 14u), 0xfacu | (type2D << 28u), 0u, 0u, 0u, 0u};
     ShaderRecompiler::RecompileResult vertex;
     ShaderRecompiler::RecompileResult fragment;
-    fragment.bdaAbiVersion = ShaderRecompiler::BdaAbi::Version;
-    fragment.bindings = {
-        {ShaderRecompiler::DescriptorKind::StorageBuffer, ShaderRecompiler::DescriptorRole::BdaPagetable, 0, static_cast<std::uint32_t>(ShaderRecompiler::RuntimeAbi::Binding::BdaPagetable), 1, {}, false},
-        {ShaderRecompiler::DescriptorKind::StorageBuffer, ShaderRecompiler::DescriptorRole::FaultBuffer, 0, static_cast<std::uint32_t>(ShaderRecompiler::RuntimeAbi::Binding::FaultBuffer), 1, {}, false},
-        image,
-    };
+    if (addressTable) {
+        fragment.bdaAbiVersion = ShaderRecompiler::BdaAbi::Version;
+        fragment.bindings = {
+            {ShaderRecompiler::DescriptorKind::StorageBuffer, ShaderRecompiler::DescriptorRole::BdaPagetable, 0, static_cast<std::uint32_t>(ShaderRecompiler::RuntimeAbi::Binding::BdaPagetable), 1, {}, false},
+            {ShaderRecompiler::DescriptorKind::StorageBuffer, ShaderRecompiler::DescriptorRole::FaultBuffer, 0, static_cast<std::uint32_t>(ShaderRecompiler::RuntimeAbi::Binding::FaultBuffer), 1, {}, false},
+            image,
+        };
+    } else {
+        fragment.bindings = {image};
+    }
     const std::array<AgcDriver::Graphics::CompiledShader, 2> stages{{{ShaderStage::Vertex, &vertex, 0}, {ShaderStage::Fragment, &fragment, 0}}};
     AgcDriver::Graphics::ColorTarget target{};
     target.address = address;
@@ -648,7 +652,7 @@ void ThrowingProof(AgcDriver::VulkanDevice& device) {
     target.samples = 4;
     std::lock_guard gpu(AgcDriver::GuestMemory::GpuMutex());
     AgcDriver::Graphics::ShaderResources resources(context, stages, AgcDriver::Graphics::ColorTarget{}, 0, 0, 0, {});
-    Require(resources.UsesAddressTable() && resources.Reusable(), "address draw reuse: an address-based draw build that samples an image is not reusable");
+    Require(resources.UsesAddressTable() == addressTable && resources.Reusable(), addressTable ? "address draw reuse: an address-based draw build that samples an image is not reusable" : "address draw reuse: a draw build that samples an image without the address table is not reusable");
     resources.EndUse();
     Require(AgcDriver::Graphics::MultisampleTargetView(context, target) != VK_NULL_HANDLE, "address draw reuse: the multisampled target over the sampled image has no view");
     device.SubmitRecorded(true);
@@ -660,6 +664,11 @@ void ThrowingProof(AgcDriver::VulkanDevice& device) {
         reused = resources.Revalidate(stages, nullptr, {});
     } catch (const std::runtime_error&) {
         threw = true;
+    }
+    if (!addressTable) {
+        Require(threw && !reused, "address draw reuse: a draw build without the address table whose sampled image's memory became a multisampled target was reused");
+        resources.WriteBack();
+        return;
     }
     Require(!threw, "address draw reuse: the reuse proof of an address-based draw build whose sampled image's memory became a multisampled target threw instead of refusing the reuse");
     Require(!reused, "address draw reuse: an address-based draw build whose sampled image's memory became a multisampled target was reused");
@@ -789,7 +798,8 @@ int main(int argc, char** argv) {
                 scene.Wait();
             }
             OversizedVertexBuffer(*device);
-            ThrowingProof(*device);
+            ThrowingProof(*device, true);
+            ThrowingProof(*device, false);
         }
         DecodeCacheHit();
         AgcDriverShutdown_nid_postfix();
