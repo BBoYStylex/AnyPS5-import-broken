@@ -781,6 +781,7 @@ if(BUILD_TESTING)
     if(WIN32)
         set_tests_properties(guest_mdbg_syscore PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libmdbg_syscore>")
+    endif()
     add_test_executable(guest_system_service_signatures_tests tests/GuestSystemServiceSignatures.cpp)
     target_include_directories(guest_system_service_signatures_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_link_libraries(guest_system_service_signatures_tests PRIVATE libSceSystemService libc)
