@@ -13,6 +13,7 @@
 #include "prx/libc/include/GuestWriteWatch.hpp"
 #include "../NarrowConstantStoreFixture.hpp"
 #include "Recompiler.hpp"
+#include "ShaderDiskCache.hpp"
 #include "Optimization/ResourceProgram.hpp"
 #include "VulkanTestDevice.hpp"
 #ifdef _WIN32
@@ -360,6 +361,14 @@ void HeldModuleTests() {
         for (std::size_t index = 0; index < results.size(); ++index) device->Dispatch(results[index], 1, 1, 1, {}, reinterpret_cast<std::uintptr_t>(codes[index].data()));
         device->WaitIdle();
         AgcDriver::Graphics::FlushPipelineJournal();
+        std::uint64_t encoded = 0;
+        for (const auto& result : results) {
+            std::vector<std::byte> bytes;
+            ShaderRecompiler::ShaderDiskCache::EncodeResult(result, bytes);
+            encoded += bytes.size();
+        }
+        const auto journalBytes = std::filesystem::file_size(AgcDriver::Graphics::PipelineJournalPath());
+        Require(journalBytes < encoded, "the journal is " + std::to_string(journalBytes) + " bytes with 16 of its modules alone encoding to " + std::to_string(encoded) + " bytes, so it does not store them compressed");
     }
     SetEnvironment("APS5_PIPELINE_JOURNAL_THREADS", "1");
     const auto before = Snapshot();
