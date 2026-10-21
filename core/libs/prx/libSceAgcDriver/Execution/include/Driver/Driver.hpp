@@ -386,9 +386,10 @@ private:
     std::unordered_map<std::uint64_t, DrawRelocationTrial> drawRelocationTrials;
     DrawRelocationCounters drawRelocationCounters;
     std::mutex drawCacheMutex;
-    std::uint64_t drawCacheHits = 0, drawCacheEvictions = 0, drawCacheByteEvictions = 0, drawCacheVariants = 0, drawCacheVariantBytes = 0;
+    std::uint64_t drawCacheHits = 0, drawCacheEvictions = 0, drawCacheVariants = 0, drawCacheVariantBytes = 0;
     std::optional<DrawKeySightings> drawKeySightings;
     std::optional<DrawKeySightings> drawShapeSightings;
+    std::uint64_t drawCacheByteEvictions = 0;
 
     DrawEntryCounters drawEntryCounters;
 
