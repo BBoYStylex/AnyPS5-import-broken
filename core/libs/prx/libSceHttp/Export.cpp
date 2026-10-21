@@ -116,6 +116,13 @@ static void MarkDestroyed(HttpEpoll& epoll) {
     epoll.wake.NotifyAll();
 }
 
+static int CheckContext(int httpCtxId) {
+    std::lock_guard lock(g_stateMutex);
+    if (g_contexts.empty()) return ERROR_BEFORE_INIT;
+    if (!g_contexts.contains(httpCtxId)) return ERROR_INVALID_ID;
+    return 0;
+}
+
 extern "C" {
 
 int APS5_VABI sceHttpAbortRequest(int request_id) {
@@ -757,24 +764,24 @@ int APS5_VABI sceHttpCookieImport(void) {
     return 0;
 }
 
-int APS5_VABI sceHttpSetCookieTotalMaxSize(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+int APS5_VABI sceHttpSetCookieTotalMaxSize(int httpCtxId, uint32_t size) {
+    (void)size;
+    return CheckContext(httpCtxId);
 }
 
-int APS5_VABI sceHttpSetCookieMaxSize(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+int APS5_VABI sceHttpSetCookieMaxSize(int httpCtxId, uint32_t size) {
+    (void)size;
+    return CheckContext(httpCtxId);
 }
 
-int APS5_VABI sceHttpSetCookieMaxNum(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+int APS5_VABI sceHttpSetCookieMaxNum(int httpCtxId, uint32_t num) {
+    (void)num;
+    return CheckContext(httpCtxId);
 }
 
-int APS5_VABI sceHttpSetCookieMaxNumPerDomain(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+int APS5_VABI sceHttpSetCookieMaxNumPerDomain(int httpCtxId, uint32_t num) {
+    (void)num;
+    return CheckContext(httpCtxId);
 }
 
 int APS5_VABI sceHttpGetCookieStats(void) {

@@ -29,6 +29,10 @@ int APS5_VABI sceHttpInit_nid_postfix(int, int, std::uint64_t);
 int APS5_VABI sceHttpTerm_nid_postfix(int);
 int APS5_VABI sceHttpAuthCacheFlush(int);
 int APS5_VABI sceHttpCookieFlush(int);
+int APS5_VABI sceHttpSetCookieMaxNum(int, std::uint32_t);
+int APS5_VABI sceHttpSetCookieMaxNumPerDomain(int, std::uint32_t);
+int APS5_VABI sceHttpSetCookieMaxSize(int, std::uint32_t);
+int APS5_VABI sceHttpSetCookieTotalMaxSize(int, std::uint32_t);
 int APS5_VABI sceHttpReadData(int, void*, std::size_t);
 int APS5_VABI sceHttpCreateRequest2(int, const char*, const char*, std::uint64_t);
 int APS5_VABI sceHttpsEnableOption(int, std::uint32_t);
@@ -295,6 +299,14 @@ int main() {
     const auto flushCaches = [](int id, int expected) {
         Require(sceHttpAuthCacheFlush(id) == expected);
         Require(sceHttpCookieFlush(id) == expected);
+        Require(sceHttpSetCookieMaxNum(id, 0) == expected);
+        Require(sceHttpSetCookieMaxNum(id, UINT32_MAX) == expected);
+        Require(sceHttpSetCookieMaxNumPerDomain(id, 0) == expected);
+        Require(sceHttpSetCookieMaxNumPerDomain(id, UINT32_MAX) == expected);
+        Require(sceHttpSetCookieMaxSize(id, 0) == expected);
+        Require(sceHttpSetCookieMaxSize(id, UINT32_MAX) == expected);
+        Require(sceHttpSetCookieTotalMaxSize(id, 0) == expected);
+        Require(sceHttpSetCookieTotalMaxSize(id, UINT32_MAX) == expected);
     };
     flushCaches(0, beforeInit);
     flushCaches(-1, beforeInit);

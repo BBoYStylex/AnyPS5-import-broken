@@ -3,6 +3,7 @@
 ### Silent stubs
 
 - [libSceHttp](../../../core/libs/prx/libSceHttp/Export.cpp) - no request reaches the network, so `sceHttpSetResponseHeaderMaxSize` has no response header to limit, `sceHttpSetRecvBlockSize` (`(int id, u32 blockSize)` as in [shadPS4](https://github.com/shadps4-emu/shadPS4/blob/main/src/core/libraries/network/http.h)) no response body to read in blocks and `sceHttpRedirectCacheFlush` no redirect to forget; `sceHttpsUnloadCert` returns success like `sceHttpsLoadCert`, which keeps no certificate; `sceHttpSetRedirectCallback` and `sceHttpSetCookieRecvCallback` accept callbacks that are never called, `sceHttpsSetSslVersion` has no TLS connection to configure and `sceHttpsGetSslError` reports error 0 with detail 0; `sceHttpSetAuthInfoCallback` accepts a callback that is never called, as no server asks for authentication; `sceHttpsGetCaList` and `sceHttpsFreeCaList` report an empty CA list (`certs` null, `certsNum` 0) and return 0, as no CA store is kept, and a null list returns `ERROR_INVALID_VALUE`; unlike shadPS4 they do not check that `http_ctx_id` is a live context nor that the library is initialised, and `sceHttpsFreeCaList` also nulls `certs`, which shadPS4 leaves untouched. The signatures and the `{ void* certs; int certsNum; }` layout follow [shadPS4](https://github.com/shadps4-emu/shadPS4/blob/main/src/core/libraries/network/http.h) (PS4), not confirmed on a PS5 title
+- [sceHttpSetCookieMaxNum, sceHttpSetCookieMaxNumPerDomain, sceHttpSetCookieMaxSize, sceHttpSetCookieTotalMaxSize](../../../core/libs/prx/libSceHttp/Export.cpp) (libSceHttp) - accept any `uint32_t` and discard it, because the offline backend stores no cookies and `sceHttpAddCookie` still throws. The `(int libhttpCtxId, uint32_t value)` signatures follow the [Orbital IDA type database](https://github.com/AlexAltea/orbital/blob/b321fcdbd700cc02da1cb1ad25412781d5ec73c6/tools/ida/db_types.json). A null, unknown or terminated context returns the same errors as `sceHttpCookieFlush`, which is assumed, not measured; the console's limit ranges, defaults and errors for out-of-range values are unknown. Unverified on hardware
 
 ### Unknown function info
 
@@ -47,10 +48,6 @@
 - [sceHttpSetCookieSendCallback](../../../core/libs/prx/libSceHttp/Export.cpp) (libSceHttp) - unknown signature
 - [sceHttpCookieExport](../../../core/libs/prx/libSceHttp/Export.cpp) (libSceHttp) - unknown signature
 - [sceHttpCookieImport](../../../core/libs/prx/libSceHttp/Export.cpp) (libSceHttp) - unknown signature
-- [sceHttpSetCookieTotalMaxSize](../../../core/libs/prx/libSceHttp/Export.cpp) (libSceHttp) - unknown signature
-- [sceHttpSetCookieMaxSize](../../../core/libs/prx/libSceHttp/Export.cpp) (libSceHttp) - unknown signature
-- [sceHttpSetCookieMaxNum](../../../core/libs/prx/libSceHttp/Export.cpp) (libSceHttp) - unknown signature
-- [sceHttpSetCookieMaxNumPerDomain](../../../core/libs/prx/libSceHttp/Export.cpp) (libSceHttp) - unknown signature
 - [sceHttpGetCookieStats](../../../core/libs/prx/libSceHttp/Export.cpp) (libSceHttp) - unknown signature
 - [sceHttpsEnableOptionPrivate](../../../core/libs/prx/libSceHttp/Export.cpp) (libSceHttp) - unknown signature
 - [sceHttpsDisableOptionPrivate](../../../core/libs/prx/libSceHttp/Export.cpp) (libSceHttp) - unknown signature
