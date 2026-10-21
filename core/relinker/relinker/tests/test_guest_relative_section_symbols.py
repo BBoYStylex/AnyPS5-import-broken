@@ -10,7 +10,7 @@ from test_guest_intel_trampolines import main_fixture
 from test_guest_none_relocations import FUNCTION, TARGET, UNCHANGED, change_tag, check_output, module
 
 
-def fixture(sce=False, index=1, lifecycle=False, info=3, value=0):
+def fixture(sce=False, index=1, lifecycle=False, info=3, value=0, section=0):
     image = module([(0, 0xffffffff00000000, -1), (TARGET, (index << 32) | 8, FUNCTION),
                     (TARGET + 8, 8, FUNCTION)], sce=sce, lifecycle=lifecycle)
     if index == 1:
@@ -19,7 +19,7 @@ def fixture(sce=False, index=1, lifecycle=False, info=3, value=0):
     struct.pack_into("<I", image, 0x2244, count)
     if sce:
         change_tag(image, 4, count * 24, 0x6100003f)
-    struct.pack_into("<IBBHQQ", image, 0x2280 + index * 24, 0, info, 0, 0, value, 0)
+    struct.pack_into("<IBBHQQ", image, 0x2280 + index * 24, 0, info, 0, section, value, 0)
     return image
 
 
@@ -65,10 +65,11 @@ def main():
                         executed = subprocess.run([sys.executable, __file__, "--load", str(artifact)],
                                                   capture_output=True, text=True, timeout=10)
                         assert executed.returncode == 0, (executed.returncode, executed.stdout, executed.stderr)
-            for name, info, value, error in (("valued-section", 3, 16, "RELATIVE relocation has a symbol"),
-                                             ("notype", 0, 0, "RELATIVE relocation has a symbol"),
-                                             ("global-section", 0x13, 0, "Unsupported symbol attributes")):
-                result, artifact, output = convert(f"{sce}-{name}", "linux", fixture(sce, info=info, value=value))
+            for name, info, value, section, error in (("valued-section", 3, 16, 0, "RELATIVE relocation has a symbol"),
+                                                     ("valued-defined-section", 3, FUNCTION, 1, "RELATIVE relocation has a symbol"),
+                                                     ("notype", 0, 0, 0, "RELATIVE relocation has a symbol"),
+                                                     ("global-section", 0x13, 0, 0, "Unsupported symbol attributes")):
+                result, artifact, output = convert(f"{sce}-{name}", "linux", fixture(sce, info=info, value=value, section=section))
                 assert result.returncode == 2 and error in result.stderr, (name, result.stderr)
                 assert not artifact.exists() and not output.exists(), name
             image = fixture(sce)

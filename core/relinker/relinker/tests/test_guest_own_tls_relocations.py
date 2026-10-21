@@ -11,15 +11,16 @@ from test_guest_symbol_names import dynamic_tags, file_offset
 
 DTPMOD64 = 16
 DTPOFF64 = 17
+TPOFF64 = 18
 TEMPLATE = 0x2780
 
 
-def fixture(sce=False, tls=True, info=3, value=0, kind=DTPMOD64, addend=0):
+def fixture(sce=False, tls=True, info=3, value=0, kind=DTPMOD64, addend=0, section=0):
     image = module([(TARGET, (3 << 32) | kind, addend)], sce=sce)
     struct.pack_into("<I", image, 0x2244, 4)
     if sce:
         change_tag(image, 4, 4 * 24, 0x6100003f)
-    struct.pack_into("<IBBHQQ", image, 0x2280 + 3 * 24, 0, info, 0, 0, value, 0)
+    struct.pack_into("<IBBHQQ", image, 0x2280 + 3 * 24, 0, info, 0, section, value, 0)
     if tls:
         count, = struct.unpack_from("<H", image, 56)
         struct.pack_into("<H", image, 56, count + 1)
@@ -64,7 +65,9 @@ def main():
             for name, image in (("no-tls", fixture(sce, tls=False)),
                                 ("valued-section", fixture(sce, value=8)),
                                 ("notype", fixture(sce, info=0)),
-                                ("dtpmod-addend", fixture(sce, addend=4))):
+                                ("dtpmod-addend", fixture(sce, addend=4)),
+                                ("tpoff", fixture(sce, kind=TPOFF64)),
+                                ("absolute-section", fixture(sce, section=0xfff1))):
                 result, artifact, output = convert(f"{sce}-{name}", "linux", image)
                 assert result.returncode == 2 and "Invalid guest TLS relocation" in result.stderr, (sce, name, result.stderr)
                 assert not artifact.exists() and not output.exists(), name

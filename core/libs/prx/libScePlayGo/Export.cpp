@@ -2,6 +2,7 @@
 #include <cstddef>
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -21,8 +22,10 @@ static constexpr int8_t PLAYGO_LOCUS_LOCAL_FAST = 3;
 static constexpr uint64_t PLAYGO_LANGUAGE_MASK_ALL = ~0ull;
 static constexpr uint64_t PLAYGO_OPTIONAL_CHUNK_MASK_ALL = ~0ull;
 static constexpr int32_t PLAYGO_INSTALL_SPEED_FULL = 2;
+static constexpr uint32_t PLAYGO_SCENARIO_CHUNK_COUNT = 1000;
 
 static int32_t g_installSpeed = PLAYGO_INSTALL_SPEED_FULL;
+static uint64_t g_languageMask = PLAYGO_LANGUAGE_MASK_ALL;
 
 static constexpr int SCE_PLAYGO_ERROR_BAD_CHUNK_ID = static_cast<int>(0x80B2000C);
 static constexpr int SCE_PLAYGO_ERROR_BAD_SIZE = static_cast<int>(0x80B2000B);
@@ -39,8 +42,8 @@ static bool ReadPackageChunks(ChunkTable& table) {
     std::ifstream file(ResolvePath_nid_no_patch("/app0/sce_sys/playgo-chunk.dat"), std::ios::binary);
     char header[CountOffset + sizeof(uint16_t)]{};
     if (!file) return false;
-    const auto unreadable = [] { return std::runtime_error("scePlayGo: sce_sys/playgo-chunk.dat is not a chunk table this library reads (expected a plgx header with a nonzero chunk count)"); };
-    if (!file.read(header, sizeof(header)) || std::memcmp(header, "plgx", 4) != 0) throw unreadable();
+    const auto unreadable = [] { return std::runtime_error("scePlayGo: sce_sys/playgo-chunk.dat is not a chunk table this library reads (expected a plgx or plgo header with a nonzero chunk count)"); };
+    if (!file.read(header, sizeof(header)) || (std::memcmp(header, "plgx", 4) != 0 && std::memcmp(header, "plgo", 4) != 0)) throw unreadable();
     uint16_t count = 0;
     std::memcpy(&count, header + CountOffset, sizeof(count));
     if (count == 0) throw unreadable();
@@ -67,6 +70,7 @@ static const ChunkTable& Chunks() {
             if (ReadPackageChunks(table)) return table;
             table.scenario = std::ifstream(ResolvePath_nid_no_patch("/app0/sce_sys/playgo-scenario.json")).good();
             if (!table.scenario) RejectUnreadablePlayGoFiles();
+            else for (uint32_t id = 1; id < PLAYGO_SCENARIO_CHUNK_COUNT; ++id) table.ids.insert(static_cast<uint16_t>(id));
             return table;
         }
         table.defined = true;
@@ -86,11 +90,30 @@ static const ChunkTable& Chunks() {
     return chunks;
 }
 
+enum class UnlistedChunkAnswer { Stop, Installed, Absent };
+
+static UnlistedChunkAnswer UnlistedChunks() {
+    static const UnlistedChunkAnswer answer = [] {
+        const char* text = std::getenv("APS5_PLAYGO_UNLISTED_CHUNKS");
+        if (text == nullptr || text[0] == '\0') return UnlistedChunkAnswer::Stop;
+        const std::string value(text);
+        if (value == "installed") return UnlistedChunkAnswer::Installed;
+        if (value == "absent") return UnlistedChunkAnswer::Absent;
+        throw std::runtime_error("scePlayGo: APS5_PLAYGO_UNLISTED_CHUNKS must be installed or absent, not \"" + value + "\"");
+    }();
+    return answer;
+}
+
 static bool IsKnownChunk(uint16_t id) {
     const auto& chunks = Chunks();
     if (chunks.defined) return chunks.ids.contains(id);
     if (chunks.scenario || id == 0) return true;
-    throw std::runtime_error("scePlayGo: sce_sys/playgo-chunk.dat and sce_sys/playgo-scenario.json are missing, so chunk ID " + std::to_string(id) + " cannot be checked");
+    switch (UnlistedChunks()) {
+    case UnlistedChunkAnswer::Installed: return true;
+    case UnlistedChunkAnswer::Absent: return false;
+    case UnlistedChunkAnswer::Stop: break;
+    }
+    throw std::runtime_error("scePlayGo: sce_sys/playgo-chunk.dat and sce_sys/playgo-scenario.json are missing, so chunk ID " + std::to_string(id) + " cannot be checked; set APS5_PLAYGO_UNLISTED_CHUNKS=installed or =absent to answer for this dump");
 }
 
 static int ValidateChunks(const uint16_t* chunk_ids, uint32_t number_of_entries) {
@@ -147,7 +170,7 @@ int APS5_VABI scePlayGoGetInstallSpeed(int handle, int32_t* out_speed) {
 int APS5_VABI scePlayGoGetLanguageMask(int handle, uint64_t* out_language_mask) {
     if (handle != PLAYGO_HANDLE) return SCE_PLAYGO_ERROR_BAD_HANDLE;
     if (!out_language_mask) return SCE_PLAYGO_ERROR_BAD_POINTER;
-    *out_language_mask = PLAYGO_LANGUAGE_MASK_ALL;
+    *out_language_mask = g_languageMask;
     return 0;
 }
 
@@ -237,6 +260,22 @@ int APS5_VABI scePlayGoSetToDoList(int handle, const PlayGoToDo* todo_list, uint
 }
 
 int APS5_VABI scePlayGoTerminate(void) {
+    return 0;
+}
+
+int APS5_VABI scePlayGoRequestNextChunk() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI scePlayGoSetLanguageMask(int handle, uint64_t language_mask) {
+    if (handle != PLAYGO_HANDLE) return SCE_PLAYGO_ERROR_BAD_HANDLE;
+    g_languageMask = language_mask;
+    return 0;
+}
+
+int APS5_VABI scePlayGoSnapshot() {
+    NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 

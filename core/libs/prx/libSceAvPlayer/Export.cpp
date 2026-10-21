@@ -112,7 +112,7 @@ int APS5_VABI sceAvPlayerInitEx(const AvPlayerInitDataEx* init_ex, AvPlayerInter
         init.auto_start = init_ex->auto_start;
     }
     init.default_language = init_ex->default_language;
-    *handle = new Player(init, VideoBufferCount(init.num_output_video_framebuffers));
+    *handle = new Player(init, VideoBufferCount(init.num_output_video_framebuffers), init_ex->this_size >= Ps5InitDataExSize);
     return SCE_OK;
 }
 
@@ -189,6 +189,14 @@ int APS5_VABI sceAvPlayerStop(AvPlayerInternal* h) {
 int APS5_VABI sceAvPlayerStreamCount(AvPlayerInternal* h) {
     if (!h) return SCE_AVPLAYER_ERROR_INVALID_PARAMS;
     return ToPlayer(h)->StreamCount();
+}
+
+}
+
+namespace AvPlayer {
+
+void SetAvPlayerClockForTest_nid_no_patch(AvPlayerInternal* h, double milliseconds) {
+    if (h) ToPlayer(h)->SetClockTimeForTest(milliseconds);
 }
 
 }

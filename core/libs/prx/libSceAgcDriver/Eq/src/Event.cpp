@@ -11,7 +11,6 @@
 #include "prx/libc/include/General.hpp"
 #include "prx/libkernel/Equeue/Equeue.hpp"
 
-
 namespace {
 
 constexpr int16_t EvfiltGraphicsCore = -14;
@@ -66,17 +65,20 @@ int DeleteEvent(KernelEqueue eq, std::uintptr_t ident, const char* caller) {
 
 }
 
-void AgcDriverDeliverEopInterrupt(std::uint32_t queue) {
+bool AgcDriverDeliverEopInterrupt(std::uint32_t queue) {
     std::vector<Registration> registrations;
     {
         std::lock_guard lock(g_mutex);
         registrations = g_registrations;
     }
+    bool delivered = false;
     for (const auto& registration : registrations) {
         if (registration.queue == queue) {
             EqueueTriggerEvent_nid_postfix(registration.eq, registration.ident, EvfiltGraphicsCore, nullptr);
+            delivered = true;
         }
     }
+    return delivered;
 }
 
 extern "C" {

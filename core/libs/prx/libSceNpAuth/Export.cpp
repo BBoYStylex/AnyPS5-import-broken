@@ -103,6 +103,14 @@ int APS5_VABI sceNpAuthGetIdTokenV3(int req_id, const void* param, void* id_toke
  return SCE_NP_ERROR_SIGNED_OUT;
 }
 
+int APS5_VABI sceNpAuthGetAuthorizationCode(int req_id, const void* param, void* auth_code) {
+ return sceNpAuthGetAuthorizationCodeV3(req_id, param, auth_code, nullptr);
+}
+
+int APS5_VABI sceNpAuthGetIdToken(int req_id, const void* param, void* id_token) {
+ return sceNpAuthGetIdTokenV3(req_id, param, id_token);
+}
+
 int APS5_VABI sceNpAuthPollAsync(int req_id, int* result) {
  std::lock_guard lock(g_requestMutex);
  auto it = g_requests.find(req_id);
@@ -136,13 +144,12 @@ int APS5_VABI sceNpAuthWaitAsync(int req_id, int* result) {
  return NP_POLL_ASYNC_FINISHED;
 }
 
+int APS5_VABI sceNpAuthGetAuthorizationCodeA(int req_id, const void* param, void* auth_code, int* issuer_id) {
+    return sceNpAuthGetAuthorizationCodeV3(req_id, param, auth_code, issuer_id);
 }
 
-extern "C" {
-
-int APS5_VABI sceNpAuthGetAuthorizationCode() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+int APS5_VABI sceNpAuthGetIdTokenA(int req_id, const void* param, void* token) {
+    return sceNpAuthGetIdTokenV3(req_id, param, token);
 }
 
 }
