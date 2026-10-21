@@ -23,11 +23,19 @@ int APS5_VABI ksem_trywait_nid_postfix(std::intptr_t id);
 int APS5_VABI ksem_timedwait_nid_postfix(std::intptr_t id, const void* abstime);
 int APS5_VABI ksem_getvalue_nid_postfix(std::intptr_t id, int* value);
 int APS5_VABI ksem_destroy_nid_postfix(std::intptr_t id);
+int APS5_VABI ksem_open_nid_postfix(std::intptr_t* idp, const char* name, int oflag, unsigned int mode, unsigned int value);
+int APS5_VABI ksem_close_nid_postfix(std::intptr_t id);
+int APS5_VABI ksem_unlink_nid_postfix(const char* name);
 }
 
 namespace {
 
+constexpr int Enoent = 2;
 constexpr int Efault = 14;
+constexpr int Eexist = 17;
+constexpr int Enametoolong = 63;
+constexpr int OCreat = 0x0200;
+constexpr int OExcl = 0x0800;
 constexpr int Ebusy = 16;
 constexpr int Einval = 22;
 constexpr int Eagain = 35;
@@ -134,6 +142,41 @@ void Identifiers() {
     std::filesystem::remove(path);
 }
 
+void Named() {
+    const std::string name = "/anyps5-ksem-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+    std::intptr_t first = -1;
+    std::intptr_t second = -1;
+    Require(ksem_open_nid_postfix(&first, name.c_str(), 0, 0600, 1) == -1 && Error() == Enoent);
+    Require(ksem_open_nid_postfix(&first, "relative", OCreat, 0600, 1) == -1 && Error() == Einval);
+    Require(ksem_open_nid_postfix(&first, name.c_str(), OCreat | 0x1, 0600, 1) == -1 && Error() == Einval);
+    Require(ksem_open_nid_postfix(&first, name.c_str(), OCreat, 0600, 0x80000000u) == -1 && Error() == Einval);
+    Require(ksem_open_nid_postfix(&first, nullptr, OCreat, 0600, 1) == -1 && Error() == Efault);
+    const std::string longName = "/" + std::string(1100, 'a');
+    Require(ksem_open_nid_postfix(&first, longName.c_str(), OCreat, 0600, 1) == -1 && Error() == Enametoolong);
+    Require(ksem_open_nid_postfix(&first, name.c_str(), OCreat, 0600, 1) == 0 && first >= 0);
+    Require(ksem_open_nid_postfix(&second, name.c_str(), OCreat | OExcl, 0600, 1) == -1 && Error() == Eexist);
+    Require(ksem_open_nid_postfix(&second, name.c_str(), OCreat, 0600, 9) == 0 && second >= 0 && second != first);
+    Require(Value(second) == 1);
+    Require(ksem_post_nid_postfix(first) == 0 && Value(second) == 2);
+    Require(ksem_destroy_nid_postfix(first) == -1 && Error() == Einval);
+    std::intptr_t unnamed = -1;
+    Require(ksem_init_nid_postfix(&unnamed, 0) == 0);
+    Require(ksem_close_nid_postfix(unnamed) == -1 && Error() == Einval);
+    Require(ksem_destroy_nid_postfix(unnamed) == 0);
+    Require(ksem_unlink_nid_postfix(name.c_str()) == 0);
+    Require(ksem_unlink_nid_postfix(name.c_str()) == -1 && Error() == Enoent);
+    Require(ksem_unlink_nid_postfix(nullptr) == -1 && Error() == Efault);
+    std::intptr_t third = -1;
+    Require(ksem_open_nid_postfix(&third, name.c_str(), 0, 0600, 0) == -1 && Error() == Enoent);
+    Require(ksem_trywait_nid_postfix(first) == 0 && Value(second) == 1);
+    Require(ksem_close_nid_postfix(first) == 0);
+    Require(ksem_post_nid_postfix(first) == -1 && Error() == Einval);
+    Require(Value(second) == 1);
+    Require(ksem_close_nid_postfix(second) == 0);
+    Require(ksem_open_nid_postfix(&third, name.c_str(), OCreat, 0600, 5) == 0 && Value(third) == 5);
+    Require(ksem_close_nid_postfix(third) == 0 && ksem_unlink_nid_postfix(name.c_str()) == 0);
+}
+
 }
 
 int main() {
@@ -141,6 +184,7 @@ int main() {
     Timed();
     Blocking();
     Identifiers();
-    std::puts("ksem unnamed semaphores passed");
+    Named();
+    std::puts("ksem unnamed and named semaphores passed");
     return 0;
 }
