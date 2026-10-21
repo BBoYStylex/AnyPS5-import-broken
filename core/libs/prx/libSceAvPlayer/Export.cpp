@@ -190,6 +190,15 @@ int APS5_VABI sceAvPlayerStreamCount(AvPlayerInternal* h) {
     if (!h) return SCE_AVPLAYER_ERROR_INVALID_PARAMS;
     return ToPlayer(h)->StreamCount();
 }
+int APS5_VABI sceAvPlayerPrintf(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceAvPlayerVprintf(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
 
 }
 #pragma GCC visibility pop

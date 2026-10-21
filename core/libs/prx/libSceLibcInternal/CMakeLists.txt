@@ -1,5 +1,4 @@
 add_library(libSceLibcInternal SHARED EXCLUDE_FROM_ALL Export.cpp FileTime.cpp Getopt.cpp SignalList.cpp Spawn.cpp UserContext.cpp)
-target_sources(libSceLibcInternal PRIVATE Export.Discovery.cpp)
 target_include_directories(libSceLibcInternal PRIVATE ${LIBS_INCLUDE_DIR})
 set_source_files_properties(UserContext.cpp PROPERTIES COMPILE_OPTIONS -fno-omit-frame-pointer)
 target_link_libraries(libSceLibcInternal PRIVATE ${CMAKE_DL_LIBS})

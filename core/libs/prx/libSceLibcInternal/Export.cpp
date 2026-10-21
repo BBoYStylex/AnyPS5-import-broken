@@ -140,4 +140,10 @@ unsigned int APS5_VABI GuestAlarm_nid_no_patch(unsigned int seconds);
 unsigned int APS5_VABI alarm_nid_postfix(unsigned int seconds) {
     return GuestAlarm_nid_no_patch(seconds);
 }
+
+int APS5_VABI fegetexcept_nid_postfix(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
 }
