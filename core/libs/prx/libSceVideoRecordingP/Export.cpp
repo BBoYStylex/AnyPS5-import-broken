@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cstdint>
 #include <cstddef>
 #include "SceTypes.hpp"
@@ -36,12 +37,63 @@ int APS5_VABI sceVideoRecordingCloseByHandle(int handle, int discard) {
 }
 
 int APS5_VABI sceVideoRecordingCopyBGRAtoNV12(void* dst, const void* src, uint32_t width, uint32_t height) {
- (void)dst;
- (void)src;
- (void)width;
- (void)height;
- NotImplemented_nid_no_patch(__func__);
- return 0;
+    if (dst == nullptr || src == nullptr || width == 0 || height == 0 || (width % 2) != 0 || (height % 2) != 0) {
+        APS5_INVALID_ARG_EX;
+    }
+    const auto* srcBytes = static_cast<const uint8_t*>(src);
+    auto* dstY = static_cast<uint8_t*>(dst);
+    auto* dstUV = dstY + (static_cast<size_t>(width) * height);
+    const size_t srcStride = static_cast<size_t>(width) * 4;
+
+    for (uint32_t y = 0; y < height; y += 2) {
+        const auto* row0 = srcBytes + (static_cast<size_t>(y) * srcStride);
+        const auto* row1 = row0 + srcStride;
+        auto* yOut0 = dstY + (static_cast<size_t>(y) * width);
+        auto* yOut1 = yOut0 + width;
+        auto* uvOut = dstUV + (static_cast<size_t>(y / 2) * width);
+
+        for (uint32_t x = 0; x < width; x += 2) {
+            const size_t px00 = static_cast<size_t>(x) * 4;
+            const size_t px01 = px00 + 4;
+
+            const int32_t b00 = row0[px00];
+            const int32_t g00 = row0[px00 + 1];
+            const int32_t r00 = row0[px00 + 2];
+
+            const int32_t b01 = row0[px01];
+            const int32_t g01 = row0[px01 + 1];
+            const int32_t r01 = row0[px01 + 2];
+
+            const int32_t b10 = row1[px00];
+            const int32_t g10 = row1[px00 + 1];
+            const int32_t r10 = row1[px00 + 2];
+
+            const int32_t b11 = row1[px01];
+            const int32_t g11 = row1[px01 + 1];
+            const int32_t r11 = row1[px01 + 2];
+
+            const int32_t y00 = ((66 * r00 + 129 * g00 + 25 * b00 + 128) >> 8) + 16;
+            const int32_t y01 = ((66 * r01 + 129 * g01 + 25 * b01 + 128) >> 8) + 16;
+            const int32_t y10 = ((66 * r10 + 129 * g10 + 25 * b10 + 128) >> 8) + 16;
+            const int32_t y11 = ((66 * r11 + 129 * g11 + 25 * b11 + 128) >> 8) + 16;
+
+            yOut0[x] = static_cast<uint8_t>(std::clamp(y00, 0, 255));
+            yOut0[x + 1] = static_cast<uint8_t>(std::clamp(y01, 0, 255));
+            yOut1[x] = static_cast<uint8_t>(std::clamp(y10, 0, 255));
+            yOut1[x + 1] = static_cast<uint8_t>(std::clamp(y11, 0, 255));
+
+            const int32_t rAvg = (r00 + r01 + r10 + r11 + 2) >> 2;
+            const int32_t gAvg = (g00 + g01 + g10 + g11 + 2) >> 2;
+            const int32_t bAvg = (b00 + b01 + b10 + b11 + 2) >> 2;
+
+            const int32_t u = ((-38 * rAvg - 74 * gAvg + 112 * bAvg + 128) >> 8) + 128;
+            const int32_t v = ((112 * rAvg - 94 * gAvg - 18 * bAvg + 128) >> 8) + 128;
+
+            uvOut[x] = static_cast<uint8_t>(std::clamp(u, 0, 255));
+            uvOut[x + 1] = static_cast<uint8_t>(std::clamp(v, 0, 255));
+        }
+    }
+    return 0;
 }
 
 int APS5_VABI sceVideoRecordingGetInfo(int32_t info, void* data, size_t size) {
