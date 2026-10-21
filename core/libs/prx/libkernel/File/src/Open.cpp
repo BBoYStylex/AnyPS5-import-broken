@@ -1,5 +1,6 @@
 #include "prx/libkernel/File/include/FileFlags.hpp"
 #include "prx/libkernel/File/include/NativeStat.hpp"
+#include "prx/libkernel/File/include/TrailingSlash.hpp"
 #include "prx/libc/include/General.hpp"
 #include "prx/libc/include/FilesystemError.hpp"
 #include "prx/libc/include/GuestArena.hpp"
@@ -275,6 +276,11 @@ int APS5_VABI sceKernelOpen(const char* path, int flags, std::uint16_t mode) {
     }
     std::filesystem::path native;
     const bool module = (flags & (SCE_KERNEL_O_ACCMODE | SCE_KERNEL_O_CREAT)) == SCE_KERNEL_O_RDONLY;
+    if (const int slash = TrailingSlashError_nid_no_patch(path, (flags & SCE_KERNEL_O_CREAT) != 0, module, true)) {
+        const int result = SceKernelError(slash);
+        APS5_LOG_ERR("open failed path=%s trailingSlashError=%d result=0x%08X", path != nullptr ? path : "<null>", slash, static_cast<unsigned>(result));
+        return result;
+    }
     if (const int error = ResolvePathError_nid_no_patch(path, native, module, true)) {
         const int result = SceKernelError(error);
         APS5_LOG_ERR("open failed path=%s resolveError=%d result=0x%08X", path != nullptr ? path : "<null>", error, static_cast<unsigned>(result));
@@ -423,6 +429,7 @@ int StatInDirectory_nid_no_patch(int directory, const char* path, FileStat* sb, 
 int APS5_VABI sceKernelUnlink(const char* path) {
     if (path == nullptr) return SceErrorFromErrno(GuestEfault);
     if (*path == '\0') return SceErrorFromErrno(2);
+    if (const int slash = TrailingSlashError_nid_no_patch(path, false)) return SceErrorFromErrno(slash);
     std::filesystem::path native;
     if (const int error = ResolvePathError_nid_no_patch(path, native)) return SceKernelError(error);
     constexpr int GuestEperm = 1;
