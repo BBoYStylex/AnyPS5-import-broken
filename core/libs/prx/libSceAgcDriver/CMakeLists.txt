@@ -369,7 +369,9 @@ target_link_libraries(libSceAgcDriver PRIVATE
 if(APS5_ENABLE_TRACY)
     target_link_libraries(libSceAgcDriver PUBLIC TracyClient)
 endif()
-target_link_options(libSceAgcDriver PRIVATE LINKER:--exclude-libs,$<TARGET_FILE_NAME:decoder_png>)
+if(MINGW OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_options(libSceAgcDriver PRIVATE LINKER:--exclude-libs,$<TARGET_FILE_NAME:decoder_png>)
+endif()
 
 if(BUILD_TESTING)
     add_test_executable(agc_driver_draw_program_trace_tests
@@ -726,6 +728,21 @@ configure_windows_unwind(agc_draw_inputs_in_place_driver_tests)
 if(BUILD_TESTING)
     set_target_properties(agc_draw_inputs_in_place_driver_tests PROPERTIES EXCLUDE_FROM_ALL OFF)
     add_test(NAME agc_draw_inputs_in_place_driver COMMAND agc_draw_inputs_in_place_driver_tests)
+endif()
+
+add_test_executable(agc_subgroup_barrier_tests EXCLUDE_FROM_ALL tests/SubgroupBarrier.cpp)
+target_include_directories(agc_subgroup_barrier_tests PRIVATE ${LIBS_INCLUDE_DIR} ${ANYPS5_VULKAN_HEADERS_INCLUDE_DIR})
+target_link_libraries(agc_subgroup_barrier_tests PRIVATE shader_recompiler_agc_driver libc)
+set_target_properties(agc_subgroup_barrier_tests PROPERTIES CXX_EXTENSIONS OFF)
+configure_windows_unwind(agc_subgroup_barrier_tests)
+if(BUILD_TESTING)
+    set_target_properties(agc_subgroup_barrier_tests PROPERTIES EXCLUDE_FROM_ALL OFF)
+    add_test(NAME agc_subgroup_barrier COMMAND agc_subgroup_barrier_tests)
+    set_tests_properties(agc_subgroup_barrier PROPERTIES ENVIRONMENT "ANYPS5_NO_SHADER_CACHE=1")
+    if(WIN32)
+        set_tests_properties(agc_subgroup_barrier PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+    endif()
 endif()
 
 add_test_executable(agc_device_fault_tests EXCLUDE_FROM_ALL tests/DeviceFault.cpp)
@@ -2145,6 +2162,27 @@ if(BUILD_TESTING)
                 "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
         endif()
     endforeach()
+    add_test(NAME agc_driver_guarded_direct_root COMMAND agc_driver_guarded_null_pointer_tests --direct-root-only)
+    set_tests_properties(agc_driver_guarded_direct_root PROPERTIES
+        ENVIRONMENT "ANYPS5_NO_SHADER_CACHE=1" SKIP_RETURN_CODE 77 TIMEOUT 30 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    if(WIN32)
+        set_tests_properties(agc_driver_guarded_direct_root PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+    endif()
+    add_test(NAME agc_driver_bda_device_selection_cpu COMMAND agc_driver_bda_device_tests --device-selection-cpu)
+    set_tests_properties(agc_driver_bda_device_selection_cpu PROPERTIES
+            ENVIRONMENT "ANYPS5_NO_SHADER_CACHE=1" WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    if(WIN32)
+        set_tests_properties(agc_driver_bda_device_selection_cpu PROPERTIES ENVIRONMENT_MODIFICATION
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+    endif()
+    add_test(NAME agc_driver_draw_unsupported_buffer_type_skip_refused COMMAND agc_driver_draw_unsupported_buffer_type_tests --skip-refused)
+    set_tests_properties(agc_driver_draw_unsupported_buffer_type_skip_refused PROPERTIES
+        ENVIRONMENT "ANYPS5_NO_SHADER_CACHE=1;APS5_SKIP_REFUSED_DRAWS=1" SKIP_RETURN_CODE 77 TIMEOUT 30 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    if(WIN32)
+        set_tests_properties(agc_driver_draw_unsupported_buffer_type_skip_refused PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+    endif()
     add_test(NAME agc_driver_sparse_indirect_indices_unreadable COMMAND agc_driver_sparse_indirect_indices_tests --unreadable)
     set_tests_properties(agc_driver_sparse_indirect_indices agc_driver_sparse_indirect_indices_unreadable PROPERTIES
         ENVIRONMENT "ANYPS5_NO_SHADER_CACHE=1" SKIP_RETURN_CODE 77 TIMEOUT 30 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
@@ -2787,7 +2825,24 @@ add_executable(agc_pm4_replay EXCLUDE_FROM_ALL
 target_include_directories(agc_pm4_replay PRIVATE ${LIBS_INCLUDE_DIR})
 target_link_libraries(agc_pm4_replay PRIVATE libSceAgcDriver libc)
 set_target_properties(agc_pm4_replay PROPERTIES CXX_EXTENSIONS OFF)
+if(MINGW)
+    target_link_options(agc_pm4_replay PRIVATE -municode)
+endif()
 configure_windows_unwind(agc_pm4_replay)
+
+if(MINGW)
+    get_filename_component(replayCompilerDirectory "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    foreach(replayTool IN ITEMS agc_shader_replay agc_pm4_replay)
+        add_custom_command(TARGET ${replayTool} POST_BUILD
+                COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${replayCompilerDirectory}/libgcc_s_seh-1.dll"
+                "${replayCompilerDirectory}/libstdc++-6.dll"
+                "${replayCompilerDirectory}/libwinpthread-1.dll"
+                "$<TARGET_FILE_DIR:${replayTool}>"
+                VERBATIM
+        )
+    endforeach()
+endif()
 
 if(BUILD_TESTING)
     add_test_executable(agc_driver_pm4_replay_tests tests/Pm4Replay.cpp tools/Pm4Analysis.cpp)

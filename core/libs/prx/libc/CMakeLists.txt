@@ -140,6 +140,16 @@ if(BUILD_TESTING)
         set_tests_properties(guest_fopen_errors PROPERTIES TIMEOUT 20)
     endif()
 
+    add_test_executable(guest_index_tests ${LIBS_INCLUDE_DIR}/tests/GuestIndex.cpp)
+    target_include_directories(guest_index_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_index_tests PRIVATE libc ${CMAKE_DL_LIBS})
+    configure_windows_unwind(guest_index_tests)
+    add_test(NAME guest_index COMMAND guest_index_tests $<TARGET_FILE:libc>)
+    if(WIN32)
+        set_tests_properties(guest_index PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+    endif()
+
     add_test_executable(guest_allocating_strings_tests ${LIBS_INCLUDE_DIR}/tests/GuestAllocatingStrings.cpp)
     target_include_directories(guest_allocating_strings_tests PRIVATE ${LIBS_INCLUDE_DIR})
     target_link_libraries(guest_allocating_strings_tests PRIVATE libc)
@@ -642,7 +652,7 @@ if(BUILD_TESTING)
                 "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
         endif()
         set_tests_properties(guest_call_trace_abort PROPERTIES TIMEOUT 20 PASS_REGULAR_EXPRESSION
-            "last traced system library calls[^~]*#1 thread [0-9]+ libTraced.prx Integers from [^~]*guest_call_trace_tests${CMAKE_EXECUTABLE_SUFFIX}[^~]*#2 thread [0-9]+ libOther.prx Blocks from[^~]*most called traced imports \\(2 calls in total\\):[^~]* 1 libTraced.prx Integers[^~]* 1 libOther.prx Blocks")
+            "last traced system library calls[^~]*#1 thread [0-9]+ libTraced.prx Integers from [^~]*guest_call_trace_tests${CMAKE_EXECUTABLE_SUFFIX}[^~]*#2 thread [0-9]+ libOther.prx Blocks from[^~]*last traced calls of thread [0-9]+:[^~]*#1 libTraced.prx Integers from[^~]*#2 libOther.prx Blocks from[^~]*most called traced imports \\(2 calls in total\\):[^~]* 1 libTraced.prx Integers[^~]* 1 libOther.prx Blocks")
         if(NOT WIN32)
             add_test(NAME guest_call_trace_abort_race COMMAND guest_call_trace_tests abort-race)
             set_tests_properties(guest_call_trace_abort_race PROPERTIES TIMEOUT 20 PASS_REGULAR_EXPRESSION
