@@ -99,20 +99,25 @@ std::vector<GuestArtifact> GuestModuleBuilder::Build(const std::filesystem::path
     std::set<std::string> outputNames;
     for (const auto& path : paths) {
         auto image = std::move(discovered.at(path));
-        if (image.OutputName.find_first_of("$\r\n") != std::string::npos) throw Domain::RelinkerException("Unsupported guest filename: " + image.OutputName);
+        const auto fail = [&](const std::string& message) {
+            Domain::RelinkerException error(message);
+            error.InputPath = Io::Utf8Path(path);
+            throw error;
+        };
+        if (image.OutputName.find_first_of("$\r\n") != std::string::npos) fail("Unsupported guest filename: " + image.OutputName);
         std::string folded = image.OutputName;
         if (windows) {
             for (auto& value : folded) {
-                if (static_cast<unsigned char>(value) >= 128 || value == ':' || value == '$') throw Domain::RelinkerException("Unsupported Windows guest filename: " + image.OutputName);
+                if (static_cast<unsigned char>(value) >= 128 || value == ':' || value == '$') fail("Unsupported Windows guest filename: " + image.OutputName);
                 if (value >= 'A' && value <= 'Z') value = static_cast<char>(value + ('a' - 'A'));
             }
         }
-        if (!outputNames.insert(folded).second) throw Domain::RelinkerException("Conflicting guest output filename: " + image.OutputName);
+        if (!outputNames.insert(folded).second) fail("Conflicting guest output filename: " + image.OutputName);
         for (const auto& symbol : image.Symbols) {
             if (symbol.Section == 0 || symbol.Section == AbsoluteSection || (symbol.Info >> 4) == 0 || symbol.Visibility == 1 || symbol.Visibility == 2) continue;
             auto& providers = exports[symbol.Name];
             const bool repeated = !providers.empty() && providers.back().Provider == images.size();
-            if (!windows && repeated) throw Domain::RelinkerException("Duplicate guest export after stripping #: " + symbol.Name + " in " + Io::Utf8Path(path) + " and " + Io::Utf8Path(images[providers.front().Provider].SourcePath));
+            if (!windows && repeated) fail("Duplicate guest export after stripping #: " + symbol.Name + " in " + Io::Utf8Path(path) + " and " + Io::Utf8Path(images[providers.front().Provider].SourcePath));
             if (!repeated) providers.push_back({images.size(), static_cast<std::uint8_t>(symbol.Info & 15)});
             if (!windows && providers.size() > 1)
                 for (const auto& provider : providers) sharedExports[symbol.Name].insert(provider.Provider);
@@ -266,9 +271,13 @@ std::vector<GuestArtifact> GuestModuleBuilder::Build(const std::filesystem::path
     const auto isRuntime = [&](const std::size_t index) {
         return std::find(runtimeDirectories.begin(), runtimeDirectories.end(), images[index].SourcePath.parent_path().lexically_normal()) != runtimeDirectories.end();
     };
+    const auto standardDirectory = [&](const std::size_t index) {
+        const auto directory = images[index].SourcePath.parent_path().lexically_normal();
+        return directory == (root / "sce_module").lexically_normal() || directory == (root / "sce_modules").lexically_normal() || directory == (root / "prx").lexically_normal();
+    };
     for (const auto& name : neededNames) {
         const auto found = findGuest(name);
-        if (found != guestNames.end()) require(found->second);
+        if (found != guestNames.end() && (!windows || standardDirectory(found->second))) require(found->second);
     }
     for (const auto provider : executableProviders) require(provider);
     for (std::size_t index = 0; index < images.size(); ++index) {

@@ -6,6 +6,7 @@
 #include <domain/Types.hpp>
 #include <io/FileReader.hpp>
 #include <io/NativePath.hpp>
+#include <io/FileIdentity.hpp>
 #include <elfpatcher/linux/LinuxDesktopEntryWriter.hpp>
 #include <io/FileWriter.hpp>
 #include <relinker/output/CallRegistryWriter.hpp>
@@ -17,8 +18,6 @@
 #include <memory>
 #include <random>
 #include <string>
-#include <system_error>
-#include <tuple>
 #include <vector>
 
 #ifdef _WIN32
@@ -41,6 +40,7 @@ struct ConvertedExecutable {
 ConvertedExecutable Convert(const Cli::Args& args, const std::string& inputPath, const std::string& absPath, const bool mainExecutable, const std::string& targetName, const std::vector<Relinker::GamePatch::PatchEntry>& patches, Cli::ConsoleProgress& progress) {
     Io::FileReader fileReader;
     Relinker::ConversionInput input;
+    Relinker::ElfReader(fileReader.ReadPrefix(inputPath, 0x40)).ValidateMagic();
     input.Executable = fileReader.Read(inputPath);
     input.InputPath = std::filesystem::absolute(Io::NativePath(inputPath)).lexically_normal();
     input.OutputPath = Io::NativePath(absPath);
@@ -117,26 +117,8 @@ private:
     std::filesystem::path directory;
 };
 
-#ifdef _WIN32
-std::tuple<DWORD, DWORD, DWORD> FileIdentity(const std::filesystem::path& path) {
-    const auto handle = CreateFileW(path.c_str(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
-    if (handle == INVALID_HANDLE_VALUE)
-        throw std::filesystem::filesystem_error("Cannot open file identity", path, std::error_code(static_cast<int>(GetLastError()), std::system_category()));
-    BY_HANDLE_FILE_INFORMATION information{};
-    const bool read = GetFileInformationByHandle(handle, &information) != 0;
-    const auto error = GetLastError();
-    CloseHandle(handle);
-    if (!read) throw std::filesystem::filesystem_error("Cannot read file identity", path, std::error_code(static_cast<int>(error), std::system_category()));
-    return {information.dwVolumeSerialNumber, information.nFileIndexHigh, information.nFileIndexLow};
-}
-#endif
-
 bool SameOutputFile(const std::filesystem::path& first, const std::filesystem::path& second) {
-#ifdef _WIN32
-    return FileIdentity(first) == FileIdentity(second);
-#else
-    return std::filesystem::equivalent(first, second);
-#endif
+    return Io::SameFile(first, second);
 }
 
 bool SameOutputDestination(const std::filesystem::path& first, const std::filesystem::path& second) {
@@ -305,10 +287,10 @@ int Run(const int argc, char* argv[]) {
             const auto relative = ExecutableRelative(executable);
             const auto input = ResolveExtraExecutable(moduleRoot, moduleDirectories, relative, executable);
             const auto output = Relinker::GamePatch::OutputExecutablePath(Io::NativePath(absPath), executable);
-            if (std::filesystem::equivalent(Io::NativePath(args.inputPath), input)) throw Domain::RelinkerException("Executable is converted twice: " + executable);
+            if (Io::SameFile(Io::NativePath(args.inputPath), input)) throw Domain::RelinkerException("Executable is converted twice: " + executable);
             if (output.lexically_normal() == Io::NativePath(absPath).lexically_normal()) throw Domain::RelinkerException("Executable outputs collide: " + Io::Utf8Path(output));
             for (const auto& extra : extraExecutables) {
-                if (std::filesystem::equivalent(extra.Input, input)) throw Domain::RelinkerException("Executable is converted twice: " + executable);
+                if (Io::SameFile(extra.Input, input)) throw Domain::RelinkerException("Executable is converted twice: " + executable);
                 if (extra.Output.lexically_normal() == output.lexically_normal()) throw Domain::RelinkerException("Executable outputs collide: " + Io::Utf8Path(output));
             }
             extraExecutables.push_back({executable, relative, input, output});
