@@ -251,12 +251,15 @@ static void* APS5_VABI Worker(void* arg) {
     Require(QueryPage(below).raw == belowBefore);
     static_cast<volatile unsigned char*>(start)[0] = 3;
     const auto outside = reinterpret_cast<std::uintptr_t>(start) & ~(Page - 1);
-#ifdef __linux__
-    constexpr int StraddleResult = -1;
+    if (outside >= Page) {
+        const int straddle = mprotect_nid_postfix(reinterpret_cast<void*>(outside - Page), 2 * Page, 3);
+        Require(QueryPage(below).raw == belowBefore);
+#ifndef __linux__
+        Require(straddle == 0);
 #else
-    constexpr int StraddleResult = 0;
+        (void)straddle;
 #endif
-    if (outside >= Page) Require(mprotect_nid_postfix(reinterpret_cast<void*>(outside - Page), 2 * Page, 3) == StraddleResult);
+    }
     const auto stackBytes = reinterpret_cast<std::uintptr_t>(end) - reinterpret_cast<std::uintptr_t>(start);
     Require(mprotect_nid_postfix(start, stackBytes, 0xc2) == 0);
     Require(QueryPage(low).writable);
