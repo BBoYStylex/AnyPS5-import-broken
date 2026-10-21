@@ -1943,7 +1943,7 @@ ColorTarget DecodeColorBuffer(const Registers& cx, std::uint32_t slot, bool allo
     }
     if (color.coverageSamples > color.samples && (info & 0x4000u) != 0) {
         const auto fmaskHigh = find(cx, 0x3a0 + slot);
-        color.fmaskAddress = ((fmaskHigh == cx.end() ? 0ull : static_cast<std::uint64_t>(fmaskHigh->second & 0xffu)) << 40u) | (static_cast<std::uint64_t>(read(cx, 0x321 + stride)) << 8u);
+        color.fmaskAddress = (((fmaskHigh == cx.end() ? 0ull : static_cast<std::uint64_t>(fmaskHigh->second & 0xffu)) << 40u) | (static_cast<std::uint64_t>(read(cx, 0x321 + stride)) << 8u)) & ~0xffffull;
         Require(color.fmaskAddress != 0, "a compressed one-fragment color target without an FMASK address is unsupported");
     }
     if ((info & 0x10000000u) != 0) {

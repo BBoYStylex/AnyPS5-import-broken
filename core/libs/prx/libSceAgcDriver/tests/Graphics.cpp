@@ -4287,9 +4287,11 @@ void multisampledDepthTests() {
     queue.context[0x321] = 0x00c3a1b2u;
     queue.context[0x3a0] = 0x01u;
     state = DecodeState(queue);
-    Require(state.colors.size() == 1 && state.colors[0].fmaskAddress == ((1ull << 40u) | (0x00c3a1b2ull << 8u)), "a compressed one-fragment color target did not decode its FMASK address");
+    Require(state.colors.size() == 1 && state.colors[0].fmaskAddress == ((1ull << 40u) | 0xc3a10000ull), "a compressed one-fragment color target did not decode its FMASK address");
     queue.context[0x321] = 0u;
     queue.context[0x3a0] = 0u;
+    expectFailure([&] { DecodeState(queue); }, "a compressed one-fragment color target without an FMASK address is unsupported");
+    queue.context[0x321] = 0xa5u;
     expectFailure([&] { DecodeState(queue); }, "a compressed one-fragment color target without an FMASK address is unsupported");
     queue = oneFragment();
     Require(DecodeState(queue).colors[0].fmaskAddress == 0u, "an uncompressed one-fragment color target noted an FMASK address");
