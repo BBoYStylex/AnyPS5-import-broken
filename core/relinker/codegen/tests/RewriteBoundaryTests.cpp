@@ -20,8 +20,12 @@ int main() {
             const auto result = rewriter.Rewrite(code, {0, {0x90}});
             Require(result.Bytes == std::vector<std::uint8_t>{0x90, 0xC3});
         }
+        bool rejected = false;
+        try { (void)rewriter.Rewrite({0xEB, 0x01, 0xB8, 0x11, 0x22, 0x33, 0x44, 0xC3}, {2, {0x90}}); }
+        catch (const std::exception&) { rejected = true; }
+        Require(rejected);
         const auto result = rewriter.Rewrite({0x90, 0x90, 0xC3}, {1, {0x90, 0x90}});
         Require(result.Bytes == std::vector<std::uint8_t>{0x90, 0x90, 0x90, 0xC3});
-        std::cout << "18 rewrite boundary cases passed\n";
+        std::cout << "19 rewrite boundary cases passed\n";
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }
