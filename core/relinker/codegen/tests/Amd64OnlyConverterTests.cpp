@@ -22,6 +22,7 @@
 #include <elfpatcher/linux/LinuxElfPatcher.hpp>
 #include <io/ByteWriter.hpp>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <cstring>
 #include <cstdint>
@@ -1952,6 +1953,45 @@ void mcommitExecution() {
     }
     munmap(code, 4096);
 }
+
+void scalarCompareExecution() {
+    const auto matcher = Codegen::MakeAmd64OnlyInstructionMatcher(Codegen::Amd64OnlyTarget::Rosetta);
+    const Bytes site = {0xF3, 0x0F, 0xC2, 0xC1, 0x05};
+    const auto match = matcher->Match(site.data(), site.size());
+    require(match && match->Lowering == Codegen::Amd64OnlyLowering::Trampoline, "scalar compare stub was not produced");
+    auto body = match->StubBody;
+    body[match->ReturnBranchOffset] = 0xC3;
+    void* code = mmap(nullptr, 4096, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    require(code != MAP_FAILED, "cannot map executable memory for the stub");
+    std::memcpy(code, body.data(), body.size());
+    struct Case {
+        float left;
+        float right;
+        std::uint32_t mask;
+        const char* name;
+    };
+    for (const auto& item : std::vector<Case>{{309.0f, 309.0f, 0xFFFFFFFFu, "309 is not less than 309"},
+                                              {309.0f, 310.0f, 0u, "309 is less than 310"}}) {
+        alignas(16) float left[4] = {item.left, 1.0f, 2.0f, 3.0f};
+        alignas(16) float right[4] = {item.right, 0.0f, 0.0f, 0.0f};
+        alignas(16) std::uint32_t result[4] = {};
+        asm volatile(
+            "movaps (%[left]), %%xmm0\n\t"
+            "movaps (%[right]), %%xmm1\n\t"
+            "sub $128, %%rsp\n\t"
+            "call *%[code]\n\t"
+            "add $128, %%rsp\n\t"
+            "movaps %%xmm0, (%[result])\n\t"
+            :
+            : [left] "r"(left), [right] "r"(right), [result] "r"(result), [code] "r"(code)
+            : "memory", "xmm0", "xmm1");
+        require(result[0] == item.mask, item.name);
+        require(result[1] == std::bit_cast<std::uint32_t>(1.0f) && result[2] == std::bit_cast<std::uint32_t>(2.0f)
+                    && result[3] == std::bit_cast<std::uint32_t>(3.0f),
+                "scalar compare stub changed the upper lanes of its destination");
+    }
+    munmap(code, 4096);
+}
 #else
 void reciprocalExecution() {}
 void registerFormExecution() {}
@@ -1996,6 +2036,7 @@ void rdtscpExecution() {
 }
 #else
 void rdtscpExecution() {}
+void scalarCompareExecution() {}
 #endif
 
 void scannerZeroTail() {
@@ -2055,6 +2096,7 @@ int main() {
         rosettaLegacyScalarCompares();
         converterRosettaLegacyScalarCompare();
         rdtscpExecution();
+        scalarCompareExecution();
         wideStoreSplit();
         converterWideStoreWindows();
         converterClaimedFollower();
