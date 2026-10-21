@@ -22,6 +22,13 @@ struct MqAttr {
     std::int64_t reserved[4];
 };
 
+struct Sigevent {
+    int notify;
+    int signo;
+    std::int64_t value;
+    std::int64_t extra[6];
+};
+
 struct Timespec {
     std::int64_t seconds;
     std::int64_t nanoseconds;
@@ -38,12 +45,14 @@ int APS5_VABI kmq_unlink_nid_postfix(const char* path);
 int APS5_VABI kmq_setattr_nid_postfix(int descriptor, const MqAttr* attr, MqAttr* oattr);
 int APS5_VABI kmq_timedsend_nid_postfix(int descriptor, const char* message, std::size_t length, unsigned int priority, const Timespec* abstime);
 std::int64_t APS5_VABI kmq_timedreceive_nid_postfix(int descriptor, char* buffer, std::size_t length, unsigned int* priority, const Timespec* abstime);
+int APS5_VABI kmq_notify_nid_postfix(int descriptor, const Sigevent* event);
 }
 
 namespace {
 
 constexpr int Enoent = 2;
 constexpr int Ebadf = 9;
+constexpr int Ebusy = 16;
 constexpr int Efault = 14;
 constexpr int Eexist = 17;
 constexpr int Einval = 22;
@@ -196,6 +205,38 @@ void Access() {
     std::filesystem::remove(path);
 }
 
+void Notify() {
+    const auto name = Name("notify");
+    const MqAttr sixteen{0, 10, 16, 0, {}};
+    const int first = kmq_open_nid_postfix(name.c_str(), ORdwr | OCreat, 0600, &sixteen);
+    const int second = kmq_open_nid_postfix(name.c_str(), ORdwr, 0600, nullptr);
+    Require(first >= 0 && second >= 0);
+    const Sigevent none{0, 0, 0, {}};
+    const Sigevent thread{2, 0, 0, {}};
+    const Sigevent noSignal{1, 0, 0, {}};
+    const Sigevent badSignal{1, 129, 0, {}};
+    Require(kmq_notify_nid_postfix(first, &thread) == -1 && Error() == Einval);
+    Require(kmq_notify_nid_postfix(first, &noSignal) == -1 && Error() == Einval);
+    Require(kmq_notify_nid_postfix(-1, &badSignal) == -1 && Error() == Einval);
+    Require(kmq_notify_nid_postfix(-1, nullptr) == -1 && Error() == Ebadf);
+    Require(kmq_notify_nid_postfix(-1, &none) == -1 && Error() == Ebadf);
+    Require(kmq_notify_nid_postfix(first, &none) == 0);
+    Require(kmq_notify_nid_postfix(first, &none) == -1 && Error() == Ebusy);
+    Require(kmq_notify_nid_postfix(second, &none) == -1 && Error() == Ebusy);
+    Require(kmq_notify_nid_postfix(second, nullptr) == 0);
+    Require(kmq_notify_nid_postfix(second, &none) == -1 && Error() == Ebusy);
+    Require(kmq_timedsend_nid_postfix(first, "ring", 4, 0, nullptr) == 0);
+    Require(kmq_notify_nid_postfix(second, &none) == 0);
+    Require(kmq_notify_nid_postfix(second, &none) == 0);
+    Require(Receive(first) == "ring");
+    Require(kmq_notify_nid_postfix(first, &none) == 0);
+    Require(kmq_notify_nid_postfix(first, nullptr) == 0);
+    Require(kmq_notify_nid_postfix(second, &none) == 0);
+    Require(close_nid_postfix(second) == 0);
+    Require(kmq_notify_nid_postfix(first, &none) == 0);
+    Require(close_nid_postfix(first) == 0 && kmq_unlink_nid_postfix(name.c_str()) == 0);
+}
+
 }
 
 int main() {
@@ -203,6 +244,7 @@ int main() {
     Messages();
     Waiting();
     Access();
+    Notify();
     std::puts("message queues passed");
     return 0;
 }
