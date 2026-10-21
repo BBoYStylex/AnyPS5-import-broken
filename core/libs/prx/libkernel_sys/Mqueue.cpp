@@ -26,6 +26,7 @@ namespace {
 constexpr int GuestEnoent = 2;
 constexpr int GuestEbadf = 9;
 constexpr int GuestEfault = 14;
+constexpr int GuestEbusy = 16;
 constexpr int GuestEexist = 17;
 constexpr int GuestEinval = 22;
 constexpr int GuestEnfile = 23;
@@ -47,6 +48,10 @@ constexpr std::int64_t DefaultMessages = 10;
 constexpr std::int64_t DefaultMessageSize = 1024;
 constexpr unsigned PriorityMax = 64;
 constexpr std::size_t NameBytes = 256;
+constexpr int SigevNone = 0;
+constexpr int SigevSignal = 1;
+constexpr int SigevThreadId = 4;
+constexpr int SignalMax = 128;
 
 struct GuestMqAttr {
     std::int64_t flags;
@@ -54,6 +59,11 @@ struct GuestMqAttr {
     std::int64_t msgsize;
     std::int64_t curmsgs;
     std::int64_t reserved[4];
+};
+
+struct GuestSigevent {
+    int notify;
+    int signo;
 };
 
 struct GuestTimespec {
@@ -73,6 +83,8 @@ struct Queue {
     std::int64_t maxmsg = DefaultMessages;
     std::int64_t msgsize = DefaultMessageSize;
     std::vector<Message> messages;
+    unsigned receivers = 0;
+    int notifier = -1;
 };
 
 struct Open {
@@ -105,8 +117,16 @@ int ReserveDescriptor() {
 }
 
 void DescriptorClosed(int descriptor) {
-    std::lock_guard lock(g_mqueueLock);
-    g_opens.erase(descriptor);
+    std::shared_ptr<Open> closed;
+    {
+        std::lock_guard lock(g_mqueueLock);
+        const auto found = g_opens.find(descriptor);
+        if (found == g_opens.end()) return;
+        closed = std::move(found->second);
+        g_opens.erase(found);
+    }
+    std::lock_guard lock(closed->queue->lock);
+    if (closed->queue->notifier == descriptor) closed->queue->notifier = -1;
 }
 
 const bool g_observerRegistered = [] {
@@ -214,7 +234,8 @@ int APS5_VABI kmq_timedsend_nid_postfix(int descriptor, const char* message, std
     auto position = queue.messages.begin();
     while (position != queue.messages.end() && position->priority >= priority) ++position;
     queue.messages.insert(position, std::move(entry));
-    queue.readable.notify_one();
+    if (queue.receivers != 0) queue.readable.notify_one();
+    else queue.notifier = -1;
     return 0;
 }
 
@@ -225,14 +246,38 @@ std::int64_t APS5_VABI kmq_timedreceive_nid_postfix(int descriptor, char* buffer
     if (length < static_cast<std::size_t>(queue.msgsize)) return Fail(GuestEmsgsize);
     std::unique_lock lock(queue.lock);
     const auto available = [&] { return !queue.messages.empty(); };
-    if (const int error = WaitFor(*open, lock, queue.readable, abstime, available)) return Fail(error);
+    ++queue.receivers;
+    const int error = WaitFor(*open, lock, queue.readable, abstime, available);
+    --queue.receivers;
+    if (error != 0) return Fail(error);
     Message entry = std::move(queue.messages.front());
     queue.messages.erase(queue.messages.begin());
     queue.writable.notify_one();
+    if (queue.receivers == 0 && !queue.messages.empty()) queue.notifier = -1;
     lock.unlock();
     if (!entry.bytes.empty()) std::memcpy(buffer, entry.bytes.data(), entry.bytes.size());
     if (priority != nullptr) *priority = entry.priority;
     return static_cast<std::int64_t>(entry.bytes.size());
+}
+
+int APS5_VABI kmq_notify_nid_postfix(int descriptor, const GuestSigevent* event) {
+    if (event != nullptr) {
+        if (event->notify != SigevNone && event->notify != SigevSignal && event->notify != SigevThreadId) return Fail(GuestEinval);
+        if (event->notify != SigevNone && (event->signo <= 0 || event->signo > SignalMax)) return Fail(GuestEinval);
+    }
+    const auto open = Find(descriptor);
+    if (!open) return Fail(GuestEbadf);
+    auto& queue = *open->queue;
+    std::lock_guard lock(queue.lock);
+    if (event == nullptr) {
+        if (queue.notifier == descriptor) queue.notifier = -1;
+        return 0;
+    }
+    if (queue.notifier != -1) return Fail(GuestEbusy);
+    if (event->notify != SigevNone) NotImplemented_nid_no_patch("kmq_notify delivering a signal");
+    queue.notifier = descriptor;
+    if (queue.receivers == 0 && !queue.messages.empty()) queue.notifier = -1;
+    return 0;
 }
 
 }
