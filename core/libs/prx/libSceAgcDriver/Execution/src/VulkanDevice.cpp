@@ -3686,6 +3686,12 @@ std::uint32_t VulkanDevice::VendorId() const {
     return state->properties.vendorID;
 }
 
+bool VulkanDevice::SupportsImageFormat(VkFormat format, VkImageUsageFlags usage) const {
+    VkImageFormatProperties properties{};
+    const auto query = state->InstanceFunction<PFN_vkGetPhysicalDeviceImageFormatProperties>("vkGetPhysicalDeviceImageFormatProperties");
+    return query(state->physical, format, VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_OPTIMAL, usage, 0, &properties) == VK_SUCCESS;
+}
+
 ShaderRecompiler::SpirvTarget VulkanDevice::Target() const {
     require(state->shaderProfile != nullptr, "shader device profile is unavailable");
     auto target = state->shaderProfile->Target();
