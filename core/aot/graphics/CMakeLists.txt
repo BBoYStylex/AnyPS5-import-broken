@@ -1,5 +1,6 @@
 add_library(aot_graphics STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ConsoleShaderExtractor.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ShaderInstructionDecoder.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ShaderTranspiler.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/VulkanPipelineWrapper.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/GraphicsDriver.cpp
