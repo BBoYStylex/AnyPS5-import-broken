@@ -13,6 +13,7 @@
 #include <cstring>
 #include <limits>
 #include <map>
+#include <set>
 #include <span>
 #include <string>
 #include <tuple>
@@ -804,10 +805,9 @@ private:
         return lane;
     }
 
-    bool PointerRecordReads(IrValue* value, bool pointerKeyed, std::vector<IrValue*>& reads) const {
+    bool PointerRecordReads(IrValue* value, std::vector<IrValue*>& reads) const {
         std::vector<IrValue*> pending{value};
         std::unordered_set<const IrValue*> seen;
-        std::uint32_t originOffset = 0;
         while (!pending.empty()) {
             auto* current = pending.back()->Resolve();
             pending.pop_back();
@@ -817,23 +817,67 @@ private:
                 continue;
             }
             if (current->HasImmediate() && current->Type() == IrType::U32) continue;
-            if (pointerKeyed && LaneMaskOperand(current)) continue;
-            if (pointerKeyed && current->Opcode() == IrOpcode::BitwiseAnd32 && current->ArgumentCount() == 2u) {
-                const bool left = LaneMaskOperand(current->Argument(0));
-                const bool right = LaneMaskOperand(current->Argument(1));
-                if (!left && !right) return false;
-                if (!left) pending.push_back(current->Argument(0));
-                if (!right) pending.push_back(current->Argument(1));
-                continue;
-            }
             std::uint32_t memory = 0;
             const MemoryInfo* info = ScalarReadMemory(*current, memory);
             if (info == nullptr || !MemoryIndexBelongsTo(memory, *current)) return false;
-            if (!reads.empty() && (pointerKeyed ? info->offset != originOffset || !SameRecordColumn(*reads.back(), *current) : !EquivalentValue(m_program.Resources(), reads.back(), current))) return false;
+            if (!reads.empty() && !EquivalentValue(m_program.Resources(), reads.back(), current)) return false;
             reads.push_back(current);
-            originOffset = info->offset;
         }
         return !reads.empty();
+    }
+
+    static bool PointerFreeWord(const IrValue& word) {
+        return (word.HasImmediate() && word.Type() == IrType::U32) || LaneMaskOperand(&word);
+    }
+
+    static IrValue* MaskedRecordWord(const IrValue& word) {
+        if (word.Opcode() != IrOpcode::BitwiseAnd32 || word.ArgumentCount() != 2u) return nullptr;
+        const bool left = LaneMaskOperand(word.Argument(0));
+        if (left == LaneMaskOperand(word.Argument(1))) return nullptr;
+        return word.Argument(left ? 1u : 0u);
+    }
+
+    bool PointerRecordRead(IrValue& read, std::vector<IrValue*>& reads) const {
+        std::uint32_t memory = 0;
+        const MemoryInfo* info = ScalarReadMemory(read, memory);
+        if (info == nullptr || !MemoryIndexBelongsTo(memory, read)) return false;
+        if (std::ranges::find(reads, &read) != reads.end()) return true;
+        if (!reads.empty() && (ScalarReadMemory(*reads.back(), memory)->offset != info->offset || !SameRecordColumn(*reads.back(), read))) return false;
+        reads.push_back(&read);
+        return true;
+    }
+
+    bool PointerRecordPairs(IrValue* low, IrValue* high, std::vector<IrValue*>& lowReads, std::vector<IrValue*>& highReads) const {
+        std::vector<std::pair<IrValue*, IrValue*>> pending{{low, high}};
+        std::set<std::pair<const IrValue*, const IrValue*>> seen;
+        while (!pending.empty()) {
+            auto* lowWord = pending.back().first->Resolve();
+            auto* highWord = pending.back().second->Resolve();
+            pending.pop_back();
+            if (!seen.emplace(lowWord, highWord).second || PointerFreeWord(*lowWord)) continue;
+            if (lowWord->IsPhi()) {
+                const bool paired = highWord->IsPhi() && highWord->Parent() == lowWord->Parent();
+                for (std::size_t index = 0; index < lowWord->ArgumentCount(); ++index) {
+                    IrValue* edge = paired ? PhiIncoming(*highWord, lowWord->PhiBlock(index)) : highWord;
+                    if (edge == nullptr) return false;
+                    pending.emplace_back(lowWord->Argument(index), edge);
+                }
+                continue;
+            }
+            if (IrValue* word = MaskedRecordWord(*lowWord)) {
+                pending.emplace_back(word, highWord);
+                continue;
+            }
+            if (!PointerRecordRead(*lowWord, lowReads)) return false;
+            if (highWord->IsPhi()) {
+                for (std::size_t index = 0; index < highWord->ArgumentCount(); ++index) pending.emplace_back(lowWord, highWord->Argument(index));
+            } else if (IrValue* word = MaskedRecordWord(*highWord)) {
+                pending.emplace_back(lowWord, word);
+            } else if (!PointerFreeWord(*highWord) && !PointerRecordRead(*highWord, highReads)) {
+                return false;
+            }
+        }
+        return !lowReads.empty() && !highReads.empty();
     }
 
     bool Precedes(const IrValue* value, const IrValue& use) const {
@@ -903,11 +947,10 @@ private:
         const bool pointerKeyed = merged && !buffer;
         if (!hops.empty() && (buffer || merged)) return false;
         std::vector<IrValue*> lowReads;
-        if (merged && !PointerRecordReads(pointer->Argument(0), pointerKeyed, lowReads)) return false;
+        std::vector<IrValue*> highReads;
+        if (pointerKeyed ? !PointerRecordPairs(pointer->Argument(0), pointer->Argument(1), lowReads, highReads) : merged && !PointerRecordReads(pointer->Argument(0), lowReads)) return false;
         auto* low = merged ? lowReads.back() : pointer->Argument(0)->Resolve();
         auto* high = pointer->Argument(1)->Resolve();
-        std::vector<IrValue*> highReads;
-        if (pointerKeyed && !PointerRecordReads(high, true, highReads)) return false;
         std::uint32_t first = 0;
         for (std::uint32_t dword = 0; dword < 2u; dword++) {
             IrValue* read = dword == 0u ? low : pointerKeyed ? highReads.back() : high;
