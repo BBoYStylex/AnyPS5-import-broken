@@ -2,6 +2,8 @@
 #include "ThreadOwned.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver/Driver.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver/Synchronization/DeferredLabels.hpp"
+#include "prx/libSceAgcDriver/Execution/include/GuestMemory.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/PipelineLookahead.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Pm4.hpp"
 #include "prx/libSceAgcDriver/Execution/include/VideoOutput.hpp"
 #include <algorithm>
@@ -28,6 +30,21 @@ std::size_t& Driver::currentPacketOffset() {
 bool& Driver::resolvingAhead() {
     static thread_local bool resolving = false;
     return resolving;
+}
+
+bool& Driver::resolvingForPipelines() {
+    static thread_local bool pipelinesOnly = false;
+    return pipelinesOnly;
+}
+
+std::size_t& Driver::resolvedUpTo() {
+    static thread_local std::size_t reached = 0;
+    return reached;
+}
+
+bool Driver::submitLookahead() {
+    static const bool enabled = Graphics::SubmitLookaheadEnabled();
+    return enabled;
 }
 
 bool& Driver::gateOpened() {
@@ -104,9 +121,20 @@ bool OverlapsLabel(std::span<const ShaderRecompiler::MemoryRegion> regions, cons
 
 void Driver::resolveGroupAhead(const Submission& submission, const QueueState& live, std::size_t from) {
     static const bool allQueues = std::getenv("APS5_GROUP_CAPTURE_ALL_QUEUES") != nullptr;
-    if (!allQueues && submission.queue == 0) return;
+    const bool pipelines = submitLookahead();
+    const bool adopt = allQueues || submission.queue != 0;
+    if (!adopt && !pipelines) return;
     auto& resolved = resolvedAhead();
-    if (resolved.contains(from) || device.Load() == nullptr) return;
+    if (from < resolvedUpTo()) return;
+    if (adopt && resolved.contains(from)) return;
+    std::shared_ptr<VulkanDevice> localDevice = device.Load();
+    if (localDevice == nullptr) {
+        if (!pipelines) return;
+        GuestMemory::TagGpuLockSite(GuestMemory::GpuLockSite::Draw);
+        std::lock_guard createLock(GuestMemory::GpuMutex());
+        if (device == nullptr) device = std::make_shared<VulkanDevice>();
+        localDevice = device;
+    }
     auto& stats = groupCaptureStats();
     const auto begin = std::chrono::steady_clock::now();
     ++stats.runs;
@@ -117,14 +145,19 @@ void Driver::resolveGroupAhead(const Submission& submission, const QueueState& l
     for (const auto& label : deferredLabels().labels) NoteLabel(labels, label.address, std::span<const std::byte>(label.bytes).first(label.size));
     struct Resolving {
         std::size_t offset;
-        Resolving() : offset(currentPacketOffset()) { resolvingAhead() = true; }
+        explicit Resolving(bool pipelinesOnly) : offset(currentPacketOffset()) {
+            resolvingAhead() = true;
+            resolvingForPipelines() = pipelinesOnly;
+        }
         ~Resolving() {
             resolvingAhead() = false;
+            resolvingForPipelines() = false;
             currentPacketOffset() = offset;
         }
-    } resolving;
+    } resolving(!adopt);
     const auto& commands = submission.commands;
-    for (std::size_t cursor = from; cursor < commands.size();) {
+    std::size_t cursor = from;
+    while (cursor < commands.size()) {
         const auto header = commands[cursor];
         if (Pm4::FillerPacket(header)) {
             ++cursor;
@@ -135,12 +168,17 @@ void Driver::resolveGroupAhead(const Submission& submission, const QueueState& l
         const auto packet = std::span(commands).subspan(cursor, count);
         const auto opcode = (header >> 8u) & 0xffu;
         const auto next = cursor + count;
-        if (header == FlipPacketHeader || header == RenderingWaitPacketHeader || opcode == 0x22 || (Pm4::Predicated(header) && scratch.predication.operation != 0)) break;
+        if (header == FlipPacketHeader || header == RenderingWaitPacketHeader || opcode == 0x22) {
+            if (adopt) break;
+            cursor = next;
+            continue;
+        }
+        if (adopt && Pm4::Predicated(header) && scratch.predication.operation != 0) break;
         if (opcode == 0x3c || opcode == 0x93) {
-            if (!Pm4::WaitSatisfiedUnchecked(packet) && !WrittenByRun(packet, labels)) break;
+            if (adopt && !Pm4::WaitSatisfiedUnchecked(packet) && !WrittenByRun(packet, labels)) break;
         } else if (opcode == 0x15 || opcode == 0x16) {
             if (resolved.contains(cursor)) break;
-            if (opcode == 0x16) {
+            if (adopt && opcode == 0x16) {
                 std::uint64_t arguments = 0;
                 try {
                     arguments = Pm4::DispatchArgumentAddress(packet, scratch);
@@ -156,45 +194,85 @@ void Driver::resolveGroupAhead(const Submission& submission, const QueueState& l
                 }
             }
             currentPacketOffset() = cursor;
+            bool failed = false;
             try {
                 if (opcode == 0x15) dispatch(scratch, packet, submission);
                 else dispatchIndirect(scratch, packet, submission);
                 Pm4::NoteDispatchRegisters(packet, scratch);
             } catch (const std::exception&) {
                 ++stats.failures;
-                break;
+                failed = true;
+            }
+            if (failed) {
+                if (adopt) break;
+                cursor = next;
+                continue;
             }
             if (const auto found = resolved.find(cursor); found != resolved.end()) {
-                if (OverlapsLabel(found->second.captured, labels)) {
-                    resolved.erase(found);
-                    ++stats.labelOverlaps;
-                    break;
+                if (pipelines && found->second.compiledResult != nullptr) {
+                    localDevice->BuildComputePipelineAhead(found->second.compiledResult);
+                    ++stats.computeAhead;
                 }
-                if (OverlapsRange(found->second.captured, writes, found->second.registeredShader)) {
+                if (!adopt) {
                     resolved.erase(found);
-                    ++stats.writtenBefore;
-                    break;
+                } else {
+                    if (OverlapsLabel(found->second.captured, labels)) {
+                        resolved.erase(found);
+                        ++stats.labelOverlaps;
+                        break;
+                    }
+                    if (OverlapsRange(found->second.captured, writes, found->second.registeredShader)) {
+                        resolved.erase(found);
+                        ++stats.writtenBefore;
+                        break;
+                    }
+                    if (found->second.compiledResult != nullptr) appendWrittenRanges(*found->second.compiledResult, writes);
+                    if (found->second.compiledResult == nullptr || WritesThroughPointers(*found->second.compiledResult)) unknownWrites = true;
                 }
-                if (found->second.compiledResult != nullptr) appendWrittenRanges(*found->second.compiledResult, writes);
-                if (found->second.compiledResult == nullptr || WritesThroughPointers(*found->second.compiledResult)) unknownWrites = true;
-            } else {
+            } else if (adopt) {
                 unknownWrites = true;
             }
+        } else if (Pm4::DrawOpcode(opcode)) {
+            if (!pipelines) break;
+            currentPacketOffset() = cursor;
+            const auto drawBegin = std::chrono::steady_clock::now();
+            try {
+                std::string rejected;
+                draw(scratch, packet, submission, rejected);
+                ++stats.drawsAhead;
+            } catch (const std::exception&) {
+                ++stats.drawFailures;
+            }
+            stats.drawMs += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - drawBegin).count();
+            if (adopt) unknownWrites = true;
         } else if (opcode == 0x37 || opcode == 0x49) {
             const auto label = Pm4::DecodeLabelWrite(packet);
-            if (!label) break;
-            NoteLabel(labels, label->address, label->Bytes());
-            writes.emplace_back(label->address, label->address + label->Bytes().size());
-        } else if (opcode != 0x3f && opcode != 0x42 && opcode != 0x46 && opcode != 0x58) {
-            if (Pm4::AccessesMemory(header)) break;
+            if (!label) {
+                if (adopt) break;
+            } else {
+                NoteLabel(labels, label->address, label->Bytes());
+                writes.emplace_back(label->address, label->address + label->Bytes().size());
+            }
+        } else if (Pm4::IndirectRegisterOpcode(opcode)) {
             try {
-                Pm4::Execute(packet, scratch);
+                Pm4::ExecuteIndirectRegisters(packet, submission.registerLists.at(cursor), scratch);
             } catch (const std::exception&) {
-                break;
+                if (adopt) break;
+            }
+        } else if (opcode != 0x3f && opcode != 0x42 && opcode != 0x46 && opcode != 0x58) {
+            if (Pm4::AccessesMemory(header)) {
+                if (adopt) break;
+            } else {
+                try {
+                    Pm4::Execute(packet, scratch);
+                } catch (const std::exception&) {
+                    if (adopt) break;
+                }
             }
         }
         cursor = next;
     }
+    resolvedUpTo() = std::max(resolvedUpTo(), cursor);
     const auto ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - begin).count();
     stats.resolveMs += ms;
     stats.resolveMaxMs = std::max(stats.resolveMaxMs, ms);
@@ -211,6 +289,9 @@ void Driver::reportGroupCapture(std::uint32_t queue) {
                                          queue, static_cast<unsigned long long>(stats.runs), static_cast<unsigned long long>(stats.resolved), static_cast<unsigned long long>(stats.resolvedHits), stats.resolveMs, stats.resolveMaxMs,
                                          static_cast<unsigned long long>(stats.adopted), stats.adopted != 0 ? stats.ageMs / static_cast<double>(stats.adopted) : 0.0, stats.ageMaxMs, static_cast<unsigned long long>(stats.addressMismatches), static_cast<unsigned long long>(stats.keyMismatches),
                                          static_cast<unsigned long long>(stats.failures), static_cast<unsigned long long>(stats.stale), static_cast<unsigned long long>(stats.labelOverlaps), static_cast<unsigned long long>(stats.writtenBefore), static_cast<unsigned long long>(stats.deviceRejects), static_cast<unsigned long long>(stats.argumentMismatches));
+    if (stats.drawsAhead != 0 || stats.drawFailures != 0) {
+        AgcDriver::ProfilePrint_nid_no_patch("[lookahead] queue 0x%x (10 s): %llu draws decoded ahead in %.1f ms (%llu failed), %llu graphics and %llu compute pipelines handed to the pool\n", queue, static_cast<unsigned long long>(stats.drawsAhead), stats.drawMs, static_cast<unsigned long long>(stats.drawFailures), static_cast<unsigned long long>(stats.graphicsAhead), static_cast<unsigned long long>(stats.computeAhead));
+    }
     stats = GroupCaptureStats{};
     stats.reported = now;
 }

@@ -2148,6 +2148,33 @@ std::optional<std::string> KnownValidationFailure(const Context& context, std::s
     return std::nullopt;
 }
 
+std::shared_ptr<Pipeline> BuildDrawPipelineAhead(const Context& context, const State& state, std::span<const CompiledShader> shaders, bool& created) {
+    created = false;
+    Require(!shaders.empty() && shaders.front().program != nullptr, "a draw pipeline built ahead needs its stages");
+    Require(context.descriptorCache != nullptr, "a draw pipeline built ahead needs the descriptor cache");
+    static const bool residentTargets = std::getenv("APS5_NO_RESIDENT_TARGETS") == nullptr;
+    static const bool drawTransitions = std::getenv("APS5_DRAW_TRANSITIONS") != nullptr;
+    const bool anyMultisampled = std::any_of(state.colors.begin(), state.colors.end(), [](const ColorTarget& color) { return color.samples > 1; });
+    const auto resident = [&](const ColorTarget& color) {
+        return color.samples <= 1 && residentTargets && context.detiler != nullptr && color.tileMode != ColorTileMode::Linear;
+    };
+    bool memoized = false;
+    bool hit = false;
+    const auto fragmentOutputs = CachedFragmentOutputs(context, shaders, state, memoized, hit);
+    auto masked = maskedState(state, fragmentOutputs);
+    for (std::size_t index = 0; index < state.colors.size(); ++index) {
+        if (!resident(state.colors[index]) || AttachmentProxyFormat(context, state.colors[index].format) == VK_FORMAT_UNDEFINED) continue;
+        if (!masked.has_value()) masked = state;
+        masked->colors[index].format = AttachmentProxyFormat(context, state.colors[index].format);
+        masked->blends.at(state.colors[index].exportIndex).colorWriteMask &= VK_COLOR_COMPONENT_R_BIT;
+    }
+    const State& pipelineState = masked.has_value() ? *masked : state;
+    const auto vertexInput = BuildVertexInputLayout(context, shaders.front().program->vertexAttributes);
+    const auto layouts = DescribeSetLayouts(context, shaders);
+    const bool recordable = !anyMultisampled && RecordDraws() && context.recorder != nullptr && DumpTargetLimit() == 0 && std::all_of(state.colors.begin(), state.colors.end(), [&](const ColorTarget& color) { return resident(color); });
+    return CachedPipeline(context, pipelineState, vertexInput, layouts.View(), shaders, recordable && !drawTransitions ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, &created);
+}
+
 void Draw(const Context& context, const State& state, const Pm4::DrawParameters& draw, std::span<const CompiledShader> shaders, std::span<const GuestMemorySnapshot> snapshots, std::shared_ptr<const DrawRecipe>* recipeOut) {
     std::vector<std::uint32_t> stencilReferences;
     for (const auto& shader : shaders) {

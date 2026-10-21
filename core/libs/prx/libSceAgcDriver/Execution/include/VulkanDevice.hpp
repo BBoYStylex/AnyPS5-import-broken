@@ -49,6 +49,14 @@ public:
     void SavePipelineCache();
     // Compute pipelines this device built, by dispatches and by the journal replay (tests).
     std::uint64_t ComputePipelinesCreated() const;
+    struct AheadStage {
+        ShaderRecompiler::ShaderStage stage;
+        std::shared_ptr<const ShaderRecompiler::RecompileResult> program;
+        std::uint32_t pushConstantOffset;
+    };
+    void BuildDrawPipelineAhead(const Graphics::State& graphics, std::vector<AheadStage> stages);
+    void BuildComputePipelineAhead(std::shared_ptr<const ShaderRecompiler::RecompileResult> shader);
+    static std::uint64_t DispatchPipelineBuilds();
     ~VulkanDevice();
     VulkanDevice(const VulkanDevice&) = delete;
     VulkanDevice& operator=(const VulkanDevice&) = delete;

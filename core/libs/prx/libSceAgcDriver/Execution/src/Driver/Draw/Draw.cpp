@@ -38,7 +38,7 @@ DrawVerdict Driver::draw(QueueState& queue, std::span<const std::uint32_t> packe
     auto drawParameters = Pm4::ResolveDraw(packet, queue);
     const bool pipelined = DrawPipeline::Active();
     static const bool pipelinedIndirect = std::getenv("APS5_NO_PIPELINED_INDIRECT") == nullptr;
-    if (pipelined && drawParameters.indirect) {
+    if (!resolvingAhead() && pipelined && drawParameters.indirect) {
         const auto& indirect = *drawParameters.indirect;
         auto& pipeline = DrawPipeline::Queue0();
         const bool overlaps = pipeline.Busy() && (pipeline.Overlaps(indirect.arguments, static_cast<std::size_t>(std::max<std::uint64_t>(indirect.RangeBytes(), indirect.recordBytes))) || (indirect.countIndirect && pipeline.Overlaps(indirect.countAddress, 4)));
@@ -58,9 +58,10 @@ DrawVerdict Driver::draw(QueueState& queue, std::span<const std::uint32_t> packe
     static const std::uint64_t dumpSlot1 = [] { const char* text = std::getenv("APS5_DUMP_DRAW_SLOT1"); return text ? std::strtoull(text, nullptr, 16) : 0ull; }();
 
     static const bool lockedPrepare = std::getenv("APS5_LOCKED_DRAW_PREPARE") != nullptr;
+    const bool resolving = resolvingAhead();
     std::unique_lock gpuLock(GuestMemory::GpuMutex(), std::defer_lock);
     std::shared_ptr<VulkanDevice> localDevice;
-    if (lockedPrepare) {
+    if (lockedPrepare && !resolving) {
 
         GuestMemory::TagGpuLockSite(GuestMemory::GpuLockSite::Draw);
         gpuLock.lock();
@@ -164,6 +165,10 @@ DrawVerdict Driver::draw(QueueState& queue, std::span<const std::uint32_t> packe
         decode = nullptr;
     }
     if (dataEntry != nullptr && !DecodeProgramsCurrent(*dataEntry->decode, *submission.shaders)) dataEntry = nullptr;
+    if (resolving && resolvingForPipelines() && entry != nullptr) {
+        ++groupCaptureStats().drawsSeen;
+        return DrawVerdict::Nothing;
+    }
     phaseTiming.Phase(DrawRowKeyLookupValidate);
 
     if (dataEntry != nullptr) {
@@ -285,6 +290,10 @@ DrawVerdict Driver::draw(QueueState& queue, std::span<const std::uint32_t> packe
     bool verifyHit = false;
     const bool stageEntries = useDrawEntries && !(graphics.stages.tessellation && !drawParameters.indirect && drawParameters.instanceCount > 1u);
     lookupDraw(submission, localDevice, graphics, pixel, programs, roles, vertexInfos, stageEntries, registerKey, profile, drawKey, entry, matched, matchedRegions, drawHit, verifyHit, phaseTiming, phaseMs, dataEntry, dataCandidates, stageData);
+    if (resolving && resolvingForPipelines() && entry != nullptr) {
+        ++groupCaptureStats().drawsSeen;
+        return DrawVerdict::Nothing;
+    }
     for (std::size_t i = 0; i < matched.size(); ++i) {
         if (matched[i] == nullptr || matched[i]->shaderDataPatches.empty()) continue;
         applyShaderDataPatches(*matched[i]);
@@ -440,8 +449,8 @@ DrawVerdict Driver::draw(QueueState& queue, std::span<const std::uint32_t> packe
         for (const auto& read : reads) memory.push_back({read.address, read.Bytes()});
     }
 
-    if (pipelined && !deferredLabels().labels.empty()) DrawPipeline::Queue0().Drain(DrawPipeline::DrainReason::Labels);
-    if (recordQueuedLabelsAfterCapture(submission.queue, memory)) return draw(queue, packet, submission, rejected);
+    if (!resolving && pipelined && !deferredLabels().labels.empty()) DrawPipeline::Queue0().Drain(DrawPipeline::DrainReason::Labels);
+    if (!resolving && recordQueuedLabelsAfterCapture(submission.queue, memory)) return draw(queue, packet, submission, rejected);
 
     bool rectListBuilt = false;
 
@@ -503,6 +512,18 @@ DrawVerdict Driver::draw(QueueState& queue, std::span<const std::uint32_t> packe
     };
     snapshot();
     timing.Mark("post_compile_prepare");
+    if (resolving) {
+        if ((drawParameters.indirect && indirectCpu) || localDevice->KnownDrawRejection(graphics, stages)) return DrawVerdict::Nothing;
+        std::vector<VulkanDevice::AheadStage> ahead;
+        ahead.reserve(stages.size());
+        for (const auto& stage : stages) {
+            if (stage.program == nullptr) return DrawVerdict::Nothing;
+            ahead.push_back({stage.stage, std::make_shared<const ShaderRecompiler::RecompileResult>(*stage.program), stage.pushConstantOffset});
+        }
+        localDevice->BuildDrawPipelineAhead(graphics, std::move(ahead));
+        ++groupCaptureStats().graphicsAhead;
+        return DrawVerdict::Drawn;
+    }
     const auto lockForDraw = [&] {
         if (gpuLock.owns_lock()) return;
         phaseTiming.Phase(DrawRowVectors);

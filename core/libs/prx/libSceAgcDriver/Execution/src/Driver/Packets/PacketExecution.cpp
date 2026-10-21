@@ -222,10 +222,16 @@ void Driver::execute(const Submission& submission) {
         bumpEpoch(&EpochBumps::submissions);
     }
     clearResolvedAhead();
+    resolvedUpTo() = 0;
     gateOpened() = true;
     struct ClearAhead {
         ~ClearAhead() { clearResolvedAhead(); }
     } clearAhead;
+    if (submitLookahead()) {
+        gateOpened() = false;
+        std::shared_lock lookaheadUse(deviceReplacement);
+        timed(&WorkerProfile::drawMs, [&] { resolveGroupAhead(submission, queue, 0); });
+    }
     for (std::size_t cursor = 0; cursor < submission.commands.size();) {
         if (packetEpoch()) bumpEpoch(&EpochBumps::packets);
         CheckFailure();
@@ -421,6 +427,10 @@ void Driver::execute(const Submission& submission) {
             }
         } else if (drawPacket) {
             landPendingWaits(submission.queue);
+            if (gateOpened()) {
+                gateOpened() = false;
+                timed(&WorkerProfile::drawMs, [&] { resolveGroupAhead(submission, queue, cursor); });
+            }
             packetCounters.CountDraw();
             drawnSinceSeal() = true;
             bool drawn = false;
