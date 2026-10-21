@@ -494,6 +494,44 @@ auto native_transfer(const NativeSocketHandle& socket, int flags, bool send, TOp
     return operation(0);
 #endif
 }
+#ifdef __APPLE__
+
+// macOS ignores MSG_DONTWAIT for a stream send on a blocking socket and waits for the whole buffer to drain. A
+// DONTWAIT send there offers only the free send-buffer space: the bytes it may queue now, or -1 when none fit.
+std::int64_t dontwait_send_length(const NativeSocketHandle& socket, int flags, std::size_t length) {
+    if (!socket.stream || (flags & NET_MSG_DONTWAIT) == 0 || socket.nonblock.load()) return static_cast<std::int64_t>(length);
+    int capacity = 0;
+    int queued = 0;
+    socklen_t size = sizeof(capacity);
+    if (getsockopt(socket.value, SOL_SOCKET, SO_SNDBUF, &capacity, &size) != 0) return static_cast<std::int64_t>(length);
+    size = sizeof(queued);
+    if (getsockopt(socket.value, SOL_SOCKET, SO_NWRITE, &queued, &size) != 0) return static_cast<std::int64_t>(length);
+    const std::int64_t room = static_cast<std::int64_t>(capacity) - queued;
+    if (room <= 0) return length == 0 ? 0 : -1;
+    return std::min(room, static_cast<std::int64_t>(length));
+}
+
+// A blocking stream send that fails part-way (shutdown, abort) returns only an error on macOS, losing the bytes it
+// already queued. Sending in chunks keeps the count, so a failure after progress reports those bytes as a short send.
+template <typename TSend>
+std::int64_t chunked_stream_send(const NativeSocketHandle& socket, int flags, const char* data, std::size_t length, TSend sendChunk) {
+    if (!socket.stream || (flags & NET_MSG_DONTWAIT) != 0 || socket.nonblock.load()) return sendChunk(data, length);
+    constexpr std::size_t Chunk = 65536;
+    std::size_t transferred = 0;
+    do {
+        const std::size_t request = std::min(Chunk, length - transferred);
+        const auto result = sendChunk(data + transferred, request);
+        if (result < 0) {
+            if (errno == EINTR) continue;
+            return transferred > 0 ? static_cast<std::int64_t>(transferred) : -1;
+        }
+        transferred += static_cast<std::size_t>(result);
+        // A short chunk means a send timeout or signal ended the wait; report what was queued, as one host send would.
+        if (static_cast<std::size_t>(result) < request) break;
+    } while (transferred < length);
+    return static_cast<std::int64_t>(transferred);
+}
+#endif
 
 #ifdef _WIN32
 int TransferSocketForKernel(KernelSocketPoll::NativeOwner* owner, bool send, void* buffer, int length) {
@@ -1161,9 +1199,18 @@ int64_t APS5_VABI sceNetSend(int s, const void* buf, size_t len, int flags) {
         if (it == g_socks.end()) return fail(NET_EBADF);
         socket = it->second;
     }
+#ifdef __APPLE__
+    const auto room = dontwait_send_length(*socket.native, flags, len);
+    if (room < 0) return fail(NET_EAGAIN);
+    len = static_cast<size_t>(room);
+    const auto result = chunked_stream_send(*socket.native, flags, static_cast<const char*>(buf), len, [&](const char* data, std::size_t size) {
+        return ::send(socket.native->value, data, size, NATIVE_SEND_FLAGS | native_message_flags(flags));
+    });
+#else
     const int result = native_transfer(*socket.native, flags, true, [&](int offset) {
         return ::send(socket.native->value, offset ? static_cast<const char*>(buf) + offset : static_cast<const char*>(buf), static_cast<int>(len) - offset, NATIVE_SEND_FLAGS | native_message_flags(flags));
     }, true, static_cast<int>(len));
+#endif
     return result >= 0 ? result : fail(native_error());
 }
 
@@ -1178,6 +1225,27 @@ int64_t APS5_VABI sceNetSendto(int s, const void* buf, size_t len, int flags, co
         if (it == g_socks.end()) return fail(NET_EBADF);
         socket = it->second;
     }
+#ifdef __APPLE__
+    const auto room = dontwait_send_length(*socket.native, flags, len);
+    if (room < 0) return fail(NET_EAGAIN);
+    len = static_cast<size_t>(room);
+    std::int64_t result;
+    if (!to) {
+        if (tolen != 0) return fail(NET_EINVAL);
+        result = chunked_stream_send(*socket.native, flags, static_cast<const char*>(buf), len, [&](const char* data, std::size_t size) {
+            return ::send(socket.native->value, data, size, NATIVE_SEND_FLAGS | native_message_flags(flags));
+        });
+    } else {
+        sockaddr_storage destination{};
+        NativeLength destination_length = 0;
+        if (!guest_to_native_address(to, tolen, destination, destination_length)) return fail(NET_EINVAL);
+        if (destination.ss_family != (socket.family == NET_AF_INET ? AF_INET : AF_INET6)) return fail(NET_EAFNOSUPPORT);
+        result = chunked_stream_send(*socket.native, flags, static_cast<const char*>(buf), len, [&](const char* data, std::size_t size) {
+            return ::sendto(socket.native->value, data, size, NATIVE_SEND_FLAGS | native_message_flags(flags),
+                reinterpret_cast<const sockaddr*>(&destination), destination_length);
+        });
+    }
+#else
     int result;
     if (!to) {
         if (tolen != 0) return fail(NET_EINVAL);
@@ -1194,6 +1262,7 @@ int64_t APS5_VABI sceNetSendto(int s, const void* buf, size_t len, int flags, co
                 reinterpret_cast<const sockaddr*>(&destination), destination_length);
         }, true, static_cast<int>(len));
     }
+#endif
     if (result < 0) return fail(native_error());
 #if defined(_WIN32) || defined(__APPLE__)
     note_local_address(s, socket);
