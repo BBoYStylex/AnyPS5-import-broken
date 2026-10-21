@@ -50,6 +50,7 @@ extern "C" int APS5_VABI stat_nid_postfix(const char* path, FileStat* sb);
 namespace {
 
 constexpr int sceInvalidArgument = static_cast<int>(0x80020016u);
+constexpr int errnoOperationNotPermitted = 1;
 constexpr int errnoNoSuchProcess = 3;
 constexpr int errnoNoChild = 10;
 constexpr int errnoBadAddress = 14;
@@ -254,7 +255,7 @@ int APS5_VABI getsid_nid_postfix(int pid) {
 }
 
 int APS5_VABI setpgid_nid_postfix(int pid, int pgid) {
-    if (pid < 0 || pgid < 0) {
+    if (pgid < 0) {
         *__error_nid_postfix() = errnoInvalidArgument;
         return -1;
     }
@@ -263,9 +264,8 @@ int APS5_VABI setpgid_nid_postfix(int pid, int pgid) {
         *__error_nid_postfix() = errnoNoSuchProcess;
         return -1;
     }
-    if (pgid != 0 && pgid != self)
-        throw std::runtime_error("setpgid: unsupported process group " + std::to_string(pgid));
-    return 0;
+    *__error_nid_postfix() = errnoOperationNotPermitted;
+    return -1;
 }
 
 int APS5_VABI setpgrp_nid_postfix(int pid, int pgrp) {
