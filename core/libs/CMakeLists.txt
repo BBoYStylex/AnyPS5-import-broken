@@ -186,6 +186,8 @@ foreach(LIB_DIR ${LIBS_DIRS})
     endif()
 endforeach()
 
+target_link_libraries(libSceUsbStorageDialog PRIVATE libSceUserService)
+
 if(APS5_ENABLE_TRACY)
     set_target_properties(TracyClient PROPERTIES
             RUNTIME_OUTPUT_DIRECTORY ${UNPATCHED_DIR}
@@ -392,7 +394,7 @@ if(BUILD_TESTING)
 
     add_test_executable(guest_offline_imports_tests tests/GuestOfflineImports.cpp)
     target_include_directories(guest_offline_imports_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-    target_link_libraries(guest_offline_imports_tests PRIVATE libSceHttp libSceNpEntitlementAccess libSceRudp libc)
+    target_link_libraries(guest_offline_imports_tests PRIVATE libSceHttp libSceNpEntitlementAccess libSceRudp libSceVideoRecordingP libc)
     configure_windows_unwind(guest_offline_imports_tests)
     add_test(NAME guest_offline_imports COMMAND guest_offline_imports_tests)
     if(Python3_Interpreter_FOUND)
@@ -416,7 +418,7 @@ if(BUILD_TESTING)
 
     add_test_executable(guest_usb_storage_dialog_tests tests/GuestUsbStorageDialog.cpp)
     target_include_directories(guest_usb_storage_dialog_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-    target_link_libraries(guest_usb_storage_dialog_tests PRIVATE libSceUsbStorageDialog libc)
+    target_link_libraries(guest_usb_storage_dialog_tests PRIVATE libSceUsbStorageDialog libSceUserService libc)
     configure_windows_unwind(guest_usb_storage_dialog_tests)
     add_test(NAME guest_usb_storage_dialog COMMAND guest_usb_storage_dialog_tests)
     if(WIN32)
@@ -721,5 +723,23 @@ if(BUILD_TESTING)
     if(WIN32)
         set_tests_properties(guest_vorbis_dec PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceVorbisDec>")
+    endif()
+
+    add_test_executable(sdk_missing_exports_tests tests/SdkMissingExports.cpp
+        nid/src/NidCompute.cpp nid/src/Sha1.cpp)
+    target_include_directories(sdk_missing_exports_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/nid/include)
+    configure_windows_unwind(sdk_missing_exports_tests)
+    if(MINGW)
+        target_compile_options(sdk_missing_exports_tests PRIVATE -fasynchronous-unwind-tables)
+        target_link_options(sdk_missing_exports_tests PRIVATE -static -static-libgcc -static-libstdc++)
+    endif()
+    add_custom_target(sdk_missing_exports_libraries DEPENDS
+        ${PATCHED_DIR}/libSceGLSlimVSH.prx ${PATCHED_DIR}/libSceIpmi.prx
+        ${PATCHED_DIR}/libc.prx ${PATCHED_DIR}/libkernel.prx)
+    add_dependencies(sdk_missing_exports_tests sdk_missing_exports_libraries)
+    add_test(NAME sdk_missing_exports COMMAND sdk_missing_exports_tests ${PATCHED_DIR})
+    if(WIN32)
+        set_tests_properties(sdk_missing_exports PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${PATCHED_DIR}")
     endif()
 endif()
