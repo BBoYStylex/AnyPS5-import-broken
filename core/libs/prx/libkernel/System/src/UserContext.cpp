@@ -118,7 +118,7 @@ asm(".text\n"
     "    mov %rsp, %rsi\n"
     "    call " APS5_ASM_SYMBOL("Aps5GetcontextFinish_nid_no_patch") "\n"
     APS5_CONTEXT_RETURN
-    APS5_ASM_FUNCTION("Aps5Swapcontext_nid_no_patch")
+    APS5_ASM_FUNCTION("swapcontext_nid_postfix")
     APS5_CONTEXT_CAPTURE
     "    mov %rsp, %rdx\n"
     "    call " APS5_ASM_SYMBOL("Aps5SwapcontextFinish_nid_no_patch") "\n"

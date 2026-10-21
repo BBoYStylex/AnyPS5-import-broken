@@ -1,5 +1,4 @@
 #include "SceTypes.hpp"
-#include "prx/libc/include/general/AsmMacros.hpp"
 #include "prx/libc/include/General.hpp"
 
 extern "C" {
@@ -2538,10 +2537,6 @@ int APS5_VABI statfs_nid_postfix(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
-
-asm(".text\n"
-    APS5_ASM_FUNCTION("swapcontext_nid_postfix")
-    "    jmp " APS5_ASM_SYMBOL("Aps5Swapcontext_nid_no_patch") "\n");
 
 int APS5_VABI swapon_nid_postfix(void) {
     NotImplemented_nid_no_patch(__func__);
