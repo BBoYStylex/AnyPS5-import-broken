@@ -26,6 +26,9 @@ enum Id : std::uint32_t {
     True,
     Main,
     Helper,
+    StoragePointer,
+    Storage,
+    PhysicalPointer,
     First = 100u,
 };
 
@@ -53,6 +56,9 @@ public:
         emit(spv::OpTypePointer, {WorkgroupArrayPointer, spv::StorageClassWorkgroup, WorkgroupArrayType});
         emit(spv::OpVariable, {WorkgroupArrayPointer, Exchange, spv::StorageClassWorkgroup});
         emit(spv::OpTypePointer, {FunctionPointer, spv::StorageClassFunction, Uint});
+        emit(spv::OpTypePointer, {StoragePointer, spv::StorageClassStorageBuffer, Uint});
+        emit(spv::OpVariable, {StoragePointer, Storage, spv::StorageClassStorageBuffer});
+        emit(spv::OpTypePointer, {PhysicalPointer, spv::StorageClassPhysicalStorageBuffer, Uint});
     }
 
     void emit(spv::Op op, std::initializer_list<std::uint32_t> operands) {
@@ -179,6 +185,28 @@ Module early(bool perLane, spv::Op exit) {
     return module;
 }
 
+Module unmergedContinue(bool perLane) {
+    Module module;
+    module.function(Main);
+    module.emit(spv::OpLabel, {First});
+    module.lane(First + 1u);
+    module.emit(spv::OpULessThan, {Bool, First + 2u, perLane ? First + 1u : Two, Three});
+    module.emit(spv::OpBranch, {First + 10u});
+    module.emit(spv::OpLabel, {First + 10u});
+    module.emit(spv::OpLoopMerge, {First + 13u, First + 12u, spv::LoopControlMaskNone});
+    module.emit(spv::OpBranch, {First + 11u});
+    module.emit(spv::OpLabel, {First + 11u});
+    module.emit(spv::OpBranchConditional, {First + 2u, First + 12u, First + 14u});
+    module.emit(spv::OpLabel, {First + 14u});
+    module.barrier();
+    module.emit(spv::OpBranch, {First + 12u});
+    module.emit(spv::OpLabel, {First + 12u});
+    module.emit(spv::OpBranchConditional, {True, First + 10u, First + 13u});
+    module.emit(spv::OpLabel, {First + 13u});
+    module.end();
+    return module;
+}
+
 Module joined(const std::function<void(Module&)>& condition) {
     Module module;
     module.function(Main);
@@ -214,6 +242,8 @@ int main() {
     expect("a barrier after a per-lane return", early(true, spv::OpReturn), true);
     expect("a barrier after a per-lane continue", early(true, spv::OpBranch), true);
     expect("a barrier after a uniform return", early(false, spv::OpReturn), false);
+    expect("a barrier after a per-lane continue without a selection merge", unmergedContinue(true), true);
+    expect("a barrier after a uniform continue without a selection merge", unmergedContinue(false), false);
     expect("a call reaching a barrier under a constant comparison", call(false), false);
     expect("a barrier under a phi joining a per-lane selection", joined([](Module& module) {
         laneSplit(module, First + 4u);
@@ -263,6 +293,16 @@ int main() {
         module.emit(spv::OpBranch, {First + 4u});
         module.emit(spv::OpLabel, {First + 4u});
         module.emit(spv::OpLoad, {Uint, First + 6u, First + 5u});
+        module.emit(spv::OpIEqual, {Bool, First + 8u, First + 6u, Two});
+    }), true);
+    expect("a barrier under a buffer word read at a uniform index", joined([](Module& module) {
+        module.emit(spv::OpLoad, {Uint, First + 6u, Storage});
+        module.emit(spv::OpIEqual, {Bool, First + 8u, First + 6u, Two});
+    }), false);
+    expect("a barrier under a buffer word read at a uniform index after a store through a device address", joined([](Module& module) {
+        module.emit(spv::OpConvertUToPtr, {PhysicalPointer, First + 10u, Two});
+        module.emit(spv::OpStore, {First + 10u, Three});
+        module.emit(spv::OpLoad, {Uint, First + 6u, Storage});
         module.emit(spv::OpIEqual, {Bool, First + 8u, First + 6u, Two});
     }), true);
     expect("a barrier under a workgroup word read at a lane index", joined([](Module& module) {
