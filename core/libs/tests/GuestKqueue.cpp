@@ -1,6 +1,5 @@
 #include "SceTypes.hpp"
 #include <algorithm>
-#include <atomic>
 #include <cctype>
 #include <chrono>
 #include <cstdint>
@@ -8,7 +7,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
-#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -1104,7 +1102,7 @@ static void DeniedParentWatch() {
 }
 #endif
 
-#ifndef _WIN32
+#ifdef __linux__
 static std::size_t InotifyWatchCount() {
     std::size_t count = 0;
     std::error_code error;
@@ -1125,7 +1123,7 @@ static void VnodeOneshotWatchStops() {
     int marker = 0;
     KernelEvent events[4]{};
     const auto ident = static_cast<std::uintptr_t>(file);
-#ifndef _WIN32
+#ifdef __linux__
     const auto watchesBefore = InotifyWatchCount();
 #endif
     Require(Apply(kq, Change(ident, EvfiltVnode, EvAdd | EvOneshot, NoteDelete | NoteWrite, 0, &marker)) == 0);
@@ -1137,7 +1135,7 @@ static void VnodeOneshotWatchStops() {
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
     Require(Poll(kq, events, 4) == 0);
     RequireFailure(Apply(kq, Change(ident, EvfiltVnode, EvDelete)), GuestEnoent);
-#ifndef _WIN32
+#ifdef __linux__
     // The retired oneshot releases its host watch rather than leaving it running: the inotify
     // descriptor count returns to what it was before the watch (each retired oneshot used to
     // leak its detached watch thread).
