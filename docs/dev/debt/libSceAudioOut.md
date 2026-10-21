@@ -1,5 +1,9 @@
 # libSceAudioOut technical debt
 
+### Silent stubs
+
+- [sceAudioOutSetMainOutput](../../../core/libs/prx/libSceAudioOut/src/AudioOut.cpp) (libSceAudioOut) - returns 0 and does nothing, as the console function does on firmware 12.70: [PS5-Audio-Passthrough-Research](https://github.com/sainsaji/PS5-Audio-Passthrough-Research/blob/cf3c921d79bf00db4847f31b68a7bd95a8037cd7/docs/FINDINGS.md#L25) reads that export as `xor eax,eax; ret`. The export reads no argument, so its parameters stay unknown; other firmware versions are unverified
+
 ### Unknown function info
 
 - [sceAudioOut2ContextAdvance and sceAudioOut2ContextPush](../../../core/libs/prx/libSceAudioOut/src/AudioOut2Context.cpp) (libSceAudioOut) - with an SDL device, Advance snapshots each port's PCM and gain; Push consumes completed grains in order and a blocking Push waits for Advance when none is ready. Inferred from PPSA26358, which rewrites the same 512-frame, 12-channel float buffer on a producer thread and pushes on another thread. Console buffer ownership, snapshot timing and empty-queue errors are unverified. Completed grains remain queued until Push consumes them, so memory use grows with an unconsumed PCM backlog. The console backlog limit is unverified. A nonblocking Push without a completed grain throws; this is a runtime restriction, not a console measurement. Context destruction concurrent with active calls remains unsupported. Without an SDL device the existing wall-clock path remains.
@@ -53,7 +57,6 @@
 - [sceAudioOutSetCaesarVolume](../../../core/libs/prx/libSceAudioOut/src/Unimplemented.cpp) (libSceAudioOut) - unknown signature
 - [sceAudioOutSetHeadphoneOutMode](../../../core/libs/prx/libSceAudioOut/src/Unimplemented.cpp) (libSceAudioOut) - unknown signature
 - [sceAudioOutGetFocusEnablePid](../../../core/libs/prx/libSceAudioOut/src/Unimplemented.cpp) (libSceAudioOut) - unknown signature
-- [sceAudioOutSetMainOutput](../../../core/libs/prx/libSceAudioOut/src/Unimplemented.cpp) (libSceAudioOut) - unknown signature
 - [sceAudioOutSetVolumeDown](../../../core/libs/prx/libSceAudioOut/src/Unimplemented.cpp) (libSceAudioOut) - unknown signature
 - [sceAudioOutSetChatBalance](../../../core/libs/prx/libSceAudioOut/src/Unimplemented.cpp) (libSceAudioOut) - unknown signature
 - [sceAudioOutSetRecMode](../../../core/libs/prx/libSceAudioOut/src/Unimplemented.cpp) (libSceAudioOut) - unknown signature
