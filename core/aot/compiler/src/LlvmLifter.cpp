@@ -3,6 +3,7 @@
 #include <llvm/IR/InlineAsm.h>
 #include <llvm/IR/Verifier.h>
 #include <llvm/Support/TargetSelect.h>
+#include <cstring>
 
 namespace Aot::Compiler {
 
@@ -101,7 +102,17 @@ llvm::Function* LlvmLifter::liftFunctionAtAddress(
 
         if (byte == 0x90) {
             offset += 1;
-        } else if (byte == 0x0F && (offset + 1 < byteCount) && codeBytes[offset + 1] == 0x05) {
+            continue;
+        }
+
+        if (byte == 0xC3) {
+            llvm::Value* retVal = lifterContext.ReadRegister(X86Register::Rax, builder);
+            builder.CreateRet(retVal);
+            offset += 1;
+            break;
+        }
+
+        if (byte == 0x0F && (offset + 1 < byteCount) && codeBytes[offset + 1] == 0x05) {
             llvm::FunctionType* asmType = llvm::FunctionType::get(
                 llvm::Type::getInt64Ty(context),
                 {llvm::Type::getInt32Ty(context)},
@@ -118,19 +129,127 @@ llvm::Function* LlvmLifter::liftFunctionAtAddress(
             llvm::Value* result = builder.CreateCall(inlineAsm, {sysId});
             lifterContext.WriteRegister(X86Register::Rax, result, builder);
             offset += 2;
-        } else if (byte == 0x48 && (offset + 2 < byteCount) && codeBytes[offset + 1] == 0x31 && codeBytes[offset + 2] == 0xC0) {
-            llvm::Value* raxVal = lifterContext.ReadRegister(X86Register::Rax, builder);
-            llvm::Value* res = lifterContext.EvaluateAlu(X86AluOp::Xor, raxVal, raxVal, builder);
-            lifterContext.WriteRegister(X86Register::Rax, res, builder);
-            offset += 3;
-        } else if (byte == 0xC3) {
-            llvm::Value* retVal = lifterContext.ReadRegister(X86Register::Rax, builder);
-            builder.CreateRet(retVal);
-            offset += 1;
-            break;
-        } else {
-            offset += 1;
+            continue;
         }
+
+        bool rexW = false;
+        bool rexR = false;
+        bool rexB = false;
+
+        size_t currentOffset = offset;
+        if ((byte & 0xF0) == 0x40) {
+            rexW = (byte & 0x08) != 0;
+            rexR = (byte & 0x04) != 0;
+            rexB = (byte & 0x01) != 0;
+            currentOffset++;
+            if (currentOffset >= byteCount) {
+                offset++;
+                continue;
+            }
+            byte = codeBytes[currentOffset];
+        }
+
+        if ((byte & 0xF8) == 0xB8) {
+            uint8_t regIndex = (byte & 0x07) + (rexB ? 8 : 0);
+            if (rexW && currentOffset + 8 < byteCount) {
+                uint64_t imm = 0;
+                std::memcpy(&imm, &codeBytes[currentOffset + 1], sizeof(uint64_t));
+                lifterContext.WriteRegister(static_cast<X86Register>(regIndex), builder.getInt64(imm), builder);
+                offset = currentOffset + 9;
+                continue;
+            } else if (!rexW && currentOffset + 4 < byteCount) {
+                uint32_t imm = 0;
+                std::memcpy(&imm, &codeBytes[currentOffset + 1], sizeof(uint32_t));
+                lifterContext.WriteRegister(static_cast<X86Register>(regIndex), builder.getInt64(imm), builder);
+                offset = currentOffset + 5;
+                continue;
+            }
+        }
+
+        if (currentOffset + 1 < byteCount) {
+            uint8_t modrm = codeBytes[currentOffset + 1];
+            uint8_t mod = (modrm >> 6) & 0x03;
+            uint8_t regField = ((modrm >> 3) & 0x07) + (rexR ? 8 : 0);
+            uint8_t rmField = (modrm & 0x07) + (rexB ? 8 : 0);
+
+            if (mod == 3) {
+                auto regDst = static_cast<X86Register>(rmField);
+                auto regSrc = static_cast<X86Register>(regField);
+
+                if (byte == 0x89) {
+                    llvm::Value* srcVal = lifterContext.ReadRegister(regSrc, builder);
+                    lifterContext.WriteRegister(regDst, srcVal, builder);
+                    offset = currentOffset + 2;
+                    continue;
+                } else if (byte == 0x8B) {
+                    llvm::Value* srcVal = lifterContext.ReadRegister(regDst, builder);
+                    lifterContext.WriteRegister(regSrc, srcVal, builder);
+                    offset = currentOffset + 2;
+                    continue;
+                } else if (byte == 0x01 || byte == 0x03) {
+                    auto dst = (byte == 0x01) ? regDst : regSrc;
+                    auto src = (byte == 0x01) ? regSrc : regDst;
+                    llvm::Value* v1 = lifterContext.ReadRegister(dst, builder);
+                    llvm::Value* v2 = lifterContext.ReadRegister(src, builder);
+                    llvm::Value* res = lifterContext.EvaluateAlu(X86AluOp::Add, v1, v2, builder);
+                    lifterContext.WriteRegister(dst, res, builder);
+                    offset = currentOffset + 2;
+                    continue;
+                } else if (byte == 0x29 || byte == 0x2B) {
+                    auto dst = (byte == 0x29) ? regDst : regSrc;
+                    auto src = (byte == 0x29) ? regSrc : regDst;
+                    llvm::Value* v1 = lifterContext.ReadRegister(dst, builder);
+                    llvm::Value* v2 = lifterContext.ReadRegister(src, builder);
+                    llvm::Value* res = lifterContext.EvaluateAlu(X86AluOp::Sub, v1, v2, builder);
+                    lifterContext.WriteRegister(dst, res, builder);
+                    offset = currentOffset + 2;
+                    continue;
+                } else if (byte == 0x31 || byte == 0x33) {
+                    auto dst = (byte == 0x31) ? regDst : regSrc;
+                    auto src = (byte == 0x31) ? regSrc : regDst;
+                    llvm::Value* v1 = lifterContext.ReadRegister(dst, builder);
+                    llvm::Value* v2 = lifterContext.ReadRegister(src, builder);
+                    llvm::Value* res = lifterContext.EvaluateAlu(X86AluOp::Xor, v1, v2, builder);
+                    lifterContext.WriteRegister(dst, res, builder);
+                    offset = currentOffset + 2;
+                    continue;
+                } else if (byte == 0x21 || byte == 0x23) {
+                    auto dst = (byte == 0x21) ? regDst : regSrc;
+                    auto src = (byte == 0x21) ? regSrc : regDst;
+                    llvm::Value* v1 = lifterContext.ReadRegister(dst, builder);
+                    llvm::Value* v2 = lifterContext.ReadRegister(src, builder);
+                    llvm::Value* res = lifterContext.EvaluateAlu(X86AluOp::And, v1, v2, builder);
+                    lifterContext.WriteRegister(dst, res, builder);
+                    offset = currentOffset + 2;
+                    continue;
+                } else if (byte == 0x09 || byte == 0x0B) {
+                    auto dst = (byte == 0x09) ? regDst : regSrc;
+                    auto src = (byte == 0x09) ? regSrc : regDst;
+                    llvm::Value* v1 = lifterContext.ReadRegister(dst, builder);
+                    llvm::Value* v2 = lifterContext.ReadRegister(src, builder);
+                    llvm::Value* res = lifterContext.EvaluateAlu(X86AluOp::Or, v1, v2, builder);
+                    lifterContext.WriteRegister(dst, res, builder);
+                    offset = currentOffset + 2;
+                    continue;
+                } else if (byte == 0x39 || byte == 0x3B) {
+                    auto dst = (byte == 0x39) ? regDst : regSrc;
+                    auto src = (byte == 0x39) ? regSrc : regDst;
+                    llvm::Value* v1 = lifterContext.ReadRegister(dst, builder);
+                    llvm::Value* v2 = lifterContext.ReadRegister(src, builder);
+                    lifterContext.EvaluateAlu(X86AluOp::Cmp, v1, v2, builder);
+                    offset = currentOffset + 2;
+                    continue;
+                } else if (byte == 0x85) {
+                    llvm::Value* v1 = lifterContext.ReadRegister(regDst, builder);
+                    llvm::Value* v2 = lifterContext.ReadRegister(regSrc, builder);
+                    lifterContext.EvaluateAlu(X86AluOp::Test, v1, v2, builder);
+                    offset = currentOffset + 2;
+                    continue;
+                }
+            }
+        }
+
+        offset += 1;
     }
 
     if (entryBlock->getTerminator() == nullptr) {

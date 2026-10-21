@@ -50,5 +50,23 @@ int main() {
     auto stats = driver.Compile(options);
     assert(!stats.Success);
 
+    Aot::Compiler::ElfSection codeSection{};
+    codeSection.Name = ".text";
+    codeSection.Flags = 0x6;
+    codeSection.Data = {
+        0x48, 0xB8, 0x42, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x48, 0x31, 0xD2,
+        0x48, 0x01, 0xD0,
+        0xC3
+    };
+
+    Aot::Compiler::ParsedElfBinary binary{};
+    binary.Sections.push_back(codeSection);
+
+    Aot::Compiler::LlvmLifter lifter;
+    auto lifted = lifter.LiftBinary(binary, "test_module");
+    assert(lifted.Module != nullptr);
+    assert(lifted.LiftedFunctionCount == 1);
+
     return 0;
 }

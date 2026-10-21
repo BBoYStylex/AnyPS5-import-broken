@@ -36,7 +36,11 @@ enum class X86AluOp : uint8_t {
     Or,
     Shl,
     Shr,
-    Sar
+    Sar,
+    Cmp,
+    Test,
+    Not,
+    Neg
 };
 
 class X86LifterContext {
@@ -56,11 +60,15 @@ public:
     void UpdateFlags(llvm::Value* result, llvm::IRBuilder<>& builder);
     [[nodiscard]] llvm::Value* ReadZeroFlag(llvm::IRBuilder<>& builder) const;
     [[nodiscard]] llvm::Value* ReadSignFlag(llvm::IRBuilder<>& builder) const;
+    [[nodiscard]] llvm::Value* ReadCarryFlag(llvm::IRBuilder<>& builder) const;
+    [[nodiscard]] llvm::Value* ReadOverflowFlag(llvm::IRBuilder<>& builder) const;
 
 private:
     std::array<llvm::AllocaInst*, static_cast<size_t>(X86Register::Count)> registerAllocas;
     llvm::AllocaInst* flagZeroAlloca;
     llvm::AllocaInst* flagSignAlloca;
+    llvm::AllocaInst* flagCarryAlloca;
+    llvm::AllocaInst* flagOverflowAlloca;
 };
 
 } // namespace Aot::Compiler
