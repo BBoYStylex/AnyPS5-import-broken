@@ -77,6 +77,15 @@ void Shutdown();
 [[nodiscard]] unsigned Writers();
 [[nodiscard]] Counters Totals();
 
+struct StoredSpecialization {
+    std::vector<std::uint32_t> spirv;
+    std::vector<std::uint32_t> bindings;
+    bool pushData = false;
+};
+[[nodiscard]] std::uint64_t ContentHash(std::span<const std::byte> bytes, std::uint64_t seed);
+[[nodiscard]] bool LoadSpecialized(std::span<const std::byte> key, StoredSpecialization& module);
+void StoreSpecialized(std::span<const std::byte> key, const StoredSpecialization& module);
+
 }
 
 #endif

@@ -1942,4 +1942,54 @@ Counters Totals() {
     return store().Totals();
 }
 
+namespace {
+
+std::vector<std::byte> specializedKey(std::span<const std::byte> key) {
+    std::vector<std::byte> full(key.begin(), key.end());
+    const auto& switches = switchKey();
+    full.insert(full.end(), switches.begin(), switches.end());
+    return full;
+}
+
+std::filesystem::path specializedPath(std::span<const std::byte> key) {
+    return EntryDirectory() / "specialized" / EntryName(key);
+}
+
+}
+
+std::uint64_t ContentHash(std::span<const std::byte> bytes, std::uint64_t seed) {
+    return HashBytes(bytes, seed);
+}
+
+bool LoadSpecialized(std::span<const std::byte> key, StoredSpecialization& module) {
+    if (!Enabled()) return false;
+    const auto full = specializedKey(key);
+    std::vector<std::byte> file;
+    if (!ReadWholeFile(specializedPath(full), file)) return false;
+    std::span<const std::byte> payload;
+    if (unwrapEntry(file, full, payload) != LoadStatus::Loaded) return false;
+    Reader reader(payload);
+    StoredSpecialization decoded;
+    reader.Value(decoded.pushData);
+    reader.Values(decoded.bindings);
+    reader.Values(decoded.spirv);
+    if (!reader.Done() || decoded.spirv.size() < 5u) return false;
+    module = std::move(decoded);
+    return true;
+}
+
+void StoreSpecialized(std::span<const std::byte> key, const StoredSpecialization& module) {
+    if (!Enabled()) return;
+    const auto full = specializedKey(key);
+    std::vector<std::byte> payload;
+    payload.reserve(module.spirv.size() * sizeof(std::uint32_t) + module.bindings.size() * sizeof(std::uint32_t) + 32u);
+    Writer writer(payload);
+    writer.Value(module.pushData);
+    writer.Values(std::span<const std::uint32_t>(module.bindings));
+    writer.Values(std::span<const std::uint32_t>(module.spirv));
+    const auto file = wrapEntry(full, payload);
+    static std::atomic<int> failures{0};
+    if (!WriteFileAtomically(specializedPath(full), file) && failures.fetch_add(1, std::memory_order_relaxed) < 4) std::fprintf(stderr, "[shader-disk-cache] cannot write %s\n", specializedPath(full).string().c_str());
+}
+
 }
