@@ -236,7 +236,7 @@ set(ANYPS5_WASM_libSceAgcDriver_INCLUDES
 )
 anyps5_wasm_library(libSceAgcDriver)
 anyps5_wasm_library(libSceAgc)
-anyps5_wasm_library(libSceAudioOut EXCLUDE AudioOutSdl.cpp AudioOut2Context.cpp AudioOut2Mastering.cpp AudioOut2Port.cpp AudioOut2SpeakerArray.cpp AudioOut2System.cpp AudioOut2User.cpp)
+anyps5_wasm_library(libSceAudioOut EXCLUDE AudioOutSdl.cpp AudioOut2Context.cpp AudioOut2Low.cpp AudioOut2Mastering.cpp AudioOut2Port.cpp AudioOut2SpeakerArray.cpp AudioOut2System.cpp AudioOut2User.cpp)
 anyps5_wasm_library(libSceVideoOut EXCLUDE DisplayWindow.cpp HostHdrProbe.cpp ImeTextInput.cpp InputMapping.cpp KeyboardInput.cpp KeyboardMouse.cpp MouseInput.cpp PadInput.cpp Telemetry.cpp)
 target_include_directories(aps5_wasm_libSceVideoOut PRIVATE ${PROJECT_SOURCE_DIR}/3rdparty/Vulkan-Headers/include)
 foreach(library IN ITEMS libSceCommonDialog libSceLibcInternal libSceMouse libSceNpGameIntent libSceNpTrophy2 libSceNpUniversalDataSystem libScePad

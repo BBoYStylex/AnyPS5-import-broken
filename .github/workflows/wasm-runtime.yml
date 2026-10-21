@@ -29,7 +29,7 @@ permissions:
 jobs:
   emscripten-runtime:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
         with:
@@ -56,4 +56,4 @@ jobs:
           python3 -m unittest discover -s tools/tests -p test_wasm_nid_thunks.py
           export ANYPS5_WASM_RUNTIME_TEST="$PWD/build-runtime/core/wasm-runtime/anyps5-runtime-test.js"
           export PATH="$(dirname "$ANYPS5_TEST_NODE"):$PATH"
-          cargo test --release --locked --manifest-path core/wasm-aot/Cargo.toml --test runtime -- --nocapture
+          cargo test --release --locked --manifest-path core/wasm-aot/Cargo.toml --test runtime -- --ignored --nocapture

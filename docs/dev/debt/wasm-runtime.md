@@ -2,6 +2,7 @@
 
 ### Functional
 
+- [AudioOut2 and AudioOut2Lo](../../../core/wasm-runtime/CMakeLists.txt) (WebAssembly) - the SDL-backed AudioOut2 service and its low-latency forwarding exports are not built; titles importing them stop at startup with missing NIDs
 - [Guest thread frame chain](../../../core/wasm-runtime/src/Thread.cpp) (WebAssembly) - a guest thread starts with rbp 0, not at the {saved rbp 0, return address 0} record native threads start on, so a frame-pointer walk that stops at a zero return address reads guest address 8 past its last frame instead
 - [WebGPU blend constants](../../../core/wasm-runtime/gpu/WebGpuBackend.cpp) (WebAssembly) - WebGPU has one blend constant factor, which takes the constant's RGB for color and its alpha for alpha. A color blend that uses the constant alpha gets the alpha in all four channels; one that uses both the constant color and the constant alpha throws unless the constant's RGB equal its alpha
 - [WebGPU compute dispatches](../../../core/wasm-runtime/gpu/WebGpuBackend.cpp) (WebAssembly) - the queue waits for each dispatch to finish, then copies every buffer the program can write back to guest memory, only the bytes that changed. A CPU write to such a buffer while the dispatch runs survives unless the program wrote the same bytes. Programs that write more than 64 MiB of one buffer throw. Images a program writes stay on the GPU like render targets: later draws and dispatches sample them, but guest memory never receives them
