@@ -30,6 +30,11 @@ int APS5_VABI sceSysmoduleUnloadModuleInternalWithArg(std::uint32_t id, int argc
 int APS5_VABI sceSysmoduleGetModuleInfoForUnwind(std::uint64_t addr, int flags, ModuleInfoForUnwind* info);
 int APS5_VABI sceSysmoduleGetModuleHandleInternal(std::uint32_t id, std::int32_t* handle);
 int APS5_VABI sceKernelDlsym(std::int32_t handle, const char* symbol, void** addr);
+int APS5_VABI sceSysmoduleIsCalledFromSysModule();
+int APS5_VABI sceSysmoduleIsCameraPreloaded();
+int APS5_VABI sceSysmoduleMapLibcForLibkernel();
+int APS5_VABI sceSysmodulePreloadModuleForLibkernel();
+int APS5_VABI sceSysmoduleUnloadModuleByNameInternal();
 }
 
 namespace {
@@ -381,4 +386,10 @@ int main() {
     Require(sceSysmoduleUnloadModule(kAudioPropagationModuleId) == 0);
     Require(sceSysmoduleIsLoaded(kAudioPropagationModuleId) == kModuleUnloaded);
     Require(sceSysmoduleGetModuleHandleInternal(kAudioPropagationModuleId, &audioPropagationHandle) == kModuleUnloaded);
+
+    Require(ThrowsRuntimeError([] { sceSysmoduleIsCalledFromSysModule(); }));
+    Require(ThrowsRuntimeError([] { sceSysmoduleIsCameraPreloaded(); }));
+    Require(ThrowsRuntimeError([] { sceSysmoduleMapLibcForLibkernel(); }));
+    Require(ThrowsRuntimeError([] { sceSysmodulePreloadModuleForLibkernel(); }));
+    Require(ThrowsRuntimeError([] { sceSysmoduleUnloadModuleByNameInternal(); }));
 }
