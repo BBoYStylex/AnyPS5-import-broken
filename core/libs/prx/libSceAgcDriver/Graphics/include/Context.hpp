@@ -238,7 +238,10 @@ struct Context {
     bool samplerTableUpdateAfterBind = false;
     bool geometryShader = false;
     bool sampleRateShading = false;
+    bool fillModeNonSolid = false;
+    bool maintenance5 = false;
     bool storageImageMultisample = false;
+    bool storageImageWriteWithoutFormat = false;
     bool shaderClipDistance = false;
     bool shaderCullDistance = false;
     bool nullDescriptors = false;
