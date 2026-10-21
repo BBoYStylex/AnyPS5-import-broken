@@ -25,10 +25,12 @@ constexpr std::int32_t SCE_PNG_DEC_ERROR_INVALID_WORK_MEMORY = static_cast<std::
 constexpr std::int32_t SCE_PNG_DEC_ERROR_INVALID_DATA = static_cast<std::int32_t>(0x80690010);
 constexpr std::int32_t SCE_PNG_DEC_ERROR_DECODE_ERROR = static_cast<std::int32_t>(0x80690012);
 
+constexpr std::int32_t SCE_PNG_DEC_ERROR_INVALID_ATTR = static_cast<std::int32_t>(0x80690006);
+
 constexpr std::uint32_t ATTRIBUTE_NONE = 0;
 constexpr std::uint32_t ATTRIBUTE_BIT_DEPTH_16 = 1;
 constexpr std::uint32_t MAX_IMAGE_WIDTH = 1000000;
-constexpr std::uint32_t MEMORY_SIZE = 0x20;
+constexpr std::uint32_t MIN_MEMORY_SIZE = 0x20;
 constexpr std::uintptr_t HANDLE_ALIGNMENT = 8;
 
 constexpr std::uint16_t PIXEL_FORMAT_R8G8B8A8 = 0;
@@ -52,14 +54,18 @@ struct Context {
     std::uint32_t maxImageWidth;
 };
 
-static_assert(sizeof(Context) + HANDLE_ALIGNMENT - 1 <= MEMORY_SIZE);
-
 std::int32_t validateCreateParam(const PngDecCreateParam* param) {
     if (!param) return SCE_PNG_DEC_ERROR_INVALID_PARAM;
     if (param->this_size != sizeof(PngDecCreateParam)) return SCE_PNG_DEC_ERROR_INVALID_SIZE;
     if (param->attribute != ATTRIBUTE_NONE && param->attribute != ATTRIBUTE_BIT_DEPTH_16) return SCE_PNG_DEC_ERROR_INVALID_PARAM;
     if (param->max_image_width - 1 >= MAX_IMAGE_WIDTH) return SCE_PNG_DEC_ERROR_INVALID_PARAM;
     return 0;
+}
+
+std::uint32_t calculateMemorySize(const PngDecCreateParam* param) {
+    const std::uint32_t alignedWidth = (param->max_image_width + 0x47u) & ~0x7u;
+    const std::uint32_t multiplier = 8u << param->attribute;
+    return alignedWidth * multiplier + MIN_MEMORY_SIZE;
 }
 
 Context* toContext(void* handle) {
@@ -110,7 +116,8 @@ int32_t APS5_VABI scePngDecCreate(const PngDecCreateParam* param, void* memory_a
     const std::int32_t result = validateCreateParam(param);
     if (result != 0) return result;
     if (!memory_address || !handle) return SCE_PNG_DEC_ERROR_INVALID_ADDR;
-    if (memory_size < MEMORY_SIZE) return SCE_PNG_DEC_ERROR_INVALID_WORK_MEMORY;
+    const std::uint32_t requiredSize = calculateMemorySize(param);
+    if (memory_size < requiredSize) return SCE_PNG_DEC_ERROR_INVALID_WORK_MEMORY;
     const auto address = reinterpret_cast<std::uintptr_t>(memory_address);
     const std::uintptr_t aligned = (address + HANDLE_ALIGNMENT - 1) & ~(HANDLE_ALIGNMENT - 1);
     auto* context = new (reinterpret_cast<void*>(aligned)) Context{};
@@ -192,7 +199,7 @@ int32_t APS5_VABI scePngDecParseHeader(const PngDecParseParam* param, PngDecImag
 int32_t APS5_VABI scePngDecQueryMemorySize(const PngDecCreateParam* param) {
     const std::int32_t result = validateCreateParam(param);
     if (result != 0) return result;
-    return static_cast<std::int32_t>(MEMORY_SIZE);
+    return static_cast<std::int32_t>(calculateMemorySize(param));
 }
 
 int APS5_VABI scePngDecDecodeWithInputControl() {

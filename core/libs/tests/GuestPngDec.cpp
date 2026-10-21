@@ -94,7 +94,26 @@ int main() {
     const PngDecCreateParam overWidth{sizeof(PngDecCreateParam), 1, 1000001};
     Require(scePngDecQueryMemorySize(&overWidth) == invalidParam);
     const PngDecCreateParam maxWidth{sizeof(PngDecCreateParam), 1, 1000000};
-    Require(scePngDecQueryMemorySize(&maxWidth) == memorySize);
+    const std::int32_t maxWidthMemorySize = scePngDecQueryMemorySize(&maxWidth);
+    Require(maxWidthMemorySize > memorySize);
+
+    const PngDecCreateParam deepParam{sizeof(PngDecCreateParam), 1, 1920};
+    const std::int32_t deepMemorySize = scePngDecQueryMemorySize(&deepParam);
+    Require(deepMemorySize == memorySize * 2);
+
+    std::vector<unsigned char> exactMemory(static_cast<std::size_t>(memorySize) + 7);
+    unsigned char* exactUnaligned = exactMemory.data() + 1;
+    void* exactHandle = nullptr;
+    Require(scePngDecCreate(&param, exactUnaligned, static_cast<std::uint32_t>(memorySize), &exactHandle) == 0);
+    Require(scePngDecDelete(exactHandle) == 0);
+    Require(scePngDecCreate(&param, exactUnaligned, static_cast<std::uint32_t>(memorySize) - 1, &exactHandle) == invalidWorkMemory);
+
+    std::vector<unsigned char> deepExactMemory(static_cast<std::size_t>(deepMemorySize) + 7);
+    unsigned char* deepExactUnaligned = deepExactMemory.data() + 1;
+    void* deepExactHandle = nullptr;
+    Require(scePngDecCreate(&deepParam, deepExactUnaligned, static_cast<std::uint32_t>(deepMemorySize), &deepExactHandle) == 0);
+    Require(scePngDecDelete(deepExactHandle) == 0);
+    Require(scePngDecCreate(&deepParam, deepExactUnaligned, static_cast<std::uint32_t>(deepMemorySize) - 1, &deepExactHandle) == invalidWorkMemory);
 
     std::vector<unsigned char> memory(static_cast<std::size_t>(memorySize) + 1);
     unsigned char* unaligned = memory.data() + 1;
@@ -253,9 +272,8 @@ int main() {
     Require(scePngDecDecode(handle, &decode, &info) == decodeError);
 
     void* deepHandle = nullptr;
-    std::vector<unsigned char> deepMemory(static_cast<std::size_t>(memorySize));
-    const PngDecCreateParam deepParam{sizeof(PngDecCreateParam), 1, 1920};
-    Require(scePngDecCreate(&deepParam, deepMemory.data(), static_cast<std::uint32_t>(memorySize), &deepHandle) == 0);
+    std::vector<unsigned char> deepMemory(static_cast<std::size_t>(deepMemorySize));
+    Require(scePngDecCreate(&deepParam, deepMemory.data(), static_cast<std::uint32_t>(deepMemorySize), &deepHandle) == 0);
     decode = DecodeParam(gray16Png, gray16Image);
     Require(ThrowsRuntimeError([&] { scePngDecDecode(deepHandle, &decode, &info); }));
     decode = DecodeParam(rgbPng, image);
