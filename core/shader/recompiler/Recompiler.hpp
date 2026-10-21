@@ -293,6 +293,7 @@ struct SpirvTarget {
     bool robustBufferAccess2 = false;
     bool depthRangeRemap = false;
     bool float32FlushToZero = false;
+    bool float32DenormPreserve = false;
 };
 
 struct BindingLayout {
