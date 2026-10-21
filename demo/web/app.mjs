@@ -452,6 +452,11 @@ $("drop").ondrop = event => {
   selectInputs([...event.dataTransfer.files].map(file => ({ name: file.name, file })));
 };
 for (const id of ["save", "target", "acknowledge", "language"]) $(id).addEventListener("change", update);
+$("language").addEventListener("change", () => {
+  if ($("language").value === "21" && document.documentElement.lang !== "ar") {
+    applyUiLanguage("ar");
+  }
+});
 $("cancel").onclick = () => fail("Cancelled. Choose the ZIP or folder again to restart.");
 $("convert").onclick = async () => {
   if ($("convert").disabled) return;
@@ -490,9 +495,14 @@ window.toggleUiLang = () => {
   applyUiLanguage(target);
 };
 $("ui-lang").onclick = window.toggleUiLang;
-let savedUiLang = "en";
-try { savedUiLang = localStorage.getItem("anyps5_ui_lang") || "en"; } catch {}
-if (savedUiLang === "ar") applyUiLanguage("ar");
+let savedUiLang = null;
+try { savedUiLang = localStorage.getItem("anyps5_ui_lang"); } catch {}
+if (savedUiLang) {
+  if (savedUiLang === "ar") applyUiLanguage("ar");
+} else {
+  const isSystemArabic = (navigator.languages?.some(lang => lang.toLowerCase().startsWith("ar")) || (navigator.language && navigator.language.toLowerCase().startsWith("ar")));
+  if (isSystemArabic) applyUiLanguage("ar");
+}
 update();
 lock(false);
 if (supported) fetch("./release.json", { cache: "no-cache" }).then(response => { if (!response.ok) throw new Error(`Cannot load release information (${response.status}).${response.status === 404 ? " release.json is generated during the site build, so it is missing when serving demo/web directly." : ""}`); return response.json(); }).then(value => {
