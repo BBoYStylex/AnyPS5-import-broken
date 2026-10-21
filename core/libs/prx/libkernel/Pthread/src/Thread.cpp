@@ -43,6 +43,7 @@ static constexpr std::size_t THREAD_NAME_CAPACITY = 32;
 #ifdef _WIN32
 #include <windows.h>
 #include <process.h>
+#include <immintrin.h>
 #endif
 
 struct ThreadArgs {
@@ -439,14 +440,17 @@ KernelCpumask LiveGuestThreadsAffinity() {
     return mask;
 }
 
-bool GuestThreadIsLive(const PthreadPrivate* thread) {
+std::unique_lock<std::mutex> LockLiveGuestThread(const PthreadPrivate* thread) {
     auto& registry = CpuClocks();
-    std::lock_guard lock(registry.lock);
+    std::unique_lock lock(registry.lock);
     for (const auto& [id, live] : registry.threads) {
-        if (live != thread) continue;
-        return !live->_finished.load(std::memory_order_acquire);
+        if (live == thread && !live->_finished.load(std::memory_order_acquire)) return lock;
     }
-    return false;
+    return {};
+}
+
+bool GuestThreadIsLive(const PthreadPrivate* thread) {
+    return LockLiveGuestThread(thread).owns_lock();
 }
 
 bool GetLiveGuestThreadAffinity_nid_no_patch(std::int64_t tid, KernelCpumask& mask) {
@@ -1029,7 +1033,28 @@ Pthread APS5_VABI scePthreadSelf() {
 }
 
 void APS5_VABI scePthreadYield() {
+#ifdef _WIN32
+    thread_local unsigned int spins = 0;
+    thread_local std::uint64_t lastTsc = 0;
+    const auto now = __rdtsc();
+    if (now - lastTsc > 10000) {
+        spins = 0;
+    }
+    lastTsc = now;
+    if (SwitchToThread()) {
+        spins = 0;
+        return;
+    }
+    if (++spins < 512) {
+        _mm_pause();
+        return;
+    }
+    spins = 0;
+    Sleep(1);
+    lastTsc = __rdtsc();
+#else
     std::this_thread::yield();
+#endif
 }
 
 int APS5_VABI scePthreadCancel(Pthread thread) {
@@ -1041,7 +1066,7 @@ int APS5_VABI scePthreadCancel(Pthread thread) {
             if (!thread->cancelWait) return SCE_OK;
             thread->cancelWait->NotifyAll();
         }
-        std::this_thread::yield();
+        scePthreadYield();
     }
 }
 
