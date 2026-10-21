@@ -270,8 +270,7 @@ int APS5_VABI sceGnmGetGpuBlockStatus(void) {
 }
 
 int APS5_VABI sceGnmGetGpuCoreClockFrequency(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return 911000000;
 }
 
 int APS5_VABI sceGnmGetGpuInfoStatus(void) {
@@ -290,8 +289,7 @@ int APS5_VABI sceGnmGetNumTcaUnits(void) {
 }
 
 int APS5_VABI sceGnmGetOffChipTessellationBufferSize(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return 0x800000;
 }
 
 int APS5_VABI sceGnmGetOwnerName(void) {
