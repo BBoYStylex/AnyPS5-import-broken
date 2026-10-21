@@ -33,6 +33,7 @@ struct QoS {
     std::map<std::int32_t, Endpoint> locals;
     std::map<std::int32_t, Endpoint> remotes;
     std::map<std::int32_t, Connection> connections;
+    std::map<std::int32_t, Endpoint> connectionAttributes;
 };
 
 QoS& State() {
@@ -85,6 +86,14 @@ int GetAttribute(std::map<std::int32_t, Endpoint>& endpoints, std::int32_t id, s
     return 0;
 }
 
+int GetStoredAttribute(std::map<std::int32_t, Endpoint>& endpoints, std::int32_t id, std::int32_t attribute, void* value, std::int32_t size, bool& unset) {
+    const auto endpoint = endpoints.find(id);
+    if (endpoint == endpoints.end() || !value || size <= 0) return SCE_VOICE_ERROR_LIBVOICEQOS_ARGUMENT_INVALID;
+    const auto attr = endpoint->second.find(attribute);
+    unset = attr == endpoint->second.end() || attr->second.empty();
+    return unset ? 0 : GetAttribute(endpoints, id, attribute, value, size);
+}
+
 template<typename Body>
 int Locked(Body&& body) {
     auto& qos = State();
@@ -109,6 +118,7 @@ int APS5_VABI sceVoiceQoSInit(void* memBlock, uint32_t memSize, int32_t appType)
 int APS5_VABI sceVoiceQoSEnd() {
     return Locked([](QoS& qos) {
         qos.connections.clear();
+        qos.connectionAttributes.clear();
         qos.locals.clear();
         qos.remotes.clear();
         qos.initialized = false;
@@ -140,17 +150,20 @@ int APS5_VABI sceVoiceQoSConnect(int32_t* connectionId, int32_t localId, int32_t
         if (!connectionId || !qos.locals.contains(localId) || !qos.remotes.contains(remoteId)) return SCE_VOICE_ERROR_LIBVOICEQOS_ARGUMENT_INVALID;
         *connectionId = NewId(qos);
         qos.connections.emplace(*connectionId, Connection{localId, remoteId});
+        qos.connectionAttributes.emplace(*connectionId, Endpoint{});
         return 0;
     });
 }
 
 int APS5_VABI sceVoiceQoSDisconnect(int32_t connectionId) {
-    return Locked([&](QoS& qos) { return qos.connections.erase(connectionId) != 0 ? 0 : SCE_VOICE_ERROR_LIBVOICEQOS_ARGUMENT_INVALID; });
+    return Locked([&](QoS& qos) {
+        qos.connectionAttributes.erase(connectionId);
+        return qos.connections.erase(connectionId) != 0 ? 0 : SCE_VOICE_ERROR_LIBVOICEQOS_ARGUMENT_INVALID;
+    });
 }
 
-int APS5_VABI sceVoiceQoSSetConnectionAttribute() {
- NotImplemented_nid_no_patch(__func__);
- return 0;
+int APS5_VABI sceVoiceQoSSetConnectionAttribute(int32_t connectionId, int32_t attributeId, const void* value, int32_t size) {
+    return Locked([&](QoS& qos) { return SetAttribute(qos.connectionAttributes, connectionId, attributeId, value, size); });
 }
 
 int APS5_VABI sceVoiceQoSSetLocalEndpointAttribute(int32_t localId, int32_t attributeId, const void* value, int32_t size) {
@@ -180,22 +193,18 @@ int APS5_VABI sceVoiceQoSGetLocalEndpointAttribute(int32_t localId, int32_t attr
     return Locked([&](QoS& qos) { return GetAttribute(qos.locals, localId, attributeId, value, size); });
 }
 
-int APS5_VABI sceVoiceQoSGetRemoteEndpointAttribute(int32_t remoteId, int32_t attributeId, const void* value, int32_t size) {
-    (void)remoteId;
-    (void)attributeId;
-    (void)value;
-    (void)size;
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+int APS5_VABI sceVoiceQoSGetRemoteEndpointAttribute(int32_t remoteId, int32_t attributeId, void* value, int32_t size) {
+    bool unset = false;
+    const int result = Locked([&](QoS& qos) { return GetStoredAttribute(qos.remotes, remoteId, attributeId, value, size, unset); });
+    if (unset) NotImplemented_nid_no_patch(__func__);
+    return result;
 }
 
 int APS5_VABI sceVoiceQoSGetConnectionAttribute(int32_t connectionId, int32_t attributeId, void* value, int32_t size) {
-    (void)connectionId;
-    (void)attributeId;
-    (void)value;
-    (void)size;
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    bool unset = false;
+    const int result = Locked([&](QoS& qos) { return GetStoredAttribute(qos.connectionAttributes, connectionId, attributeId, value, size, unset); });
+    if (unset) NotImplemented_nid_no_patch(__func__);
+    return result;
 }
 
 int APS5_VABI sceVoiceQoSGetLocalEndpoint(int32_t connectionId, int32_t* localId) {
