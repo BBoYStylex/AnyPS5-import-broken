@@ -661,6 +661,7 @@ if(BUILD_TESTING)
     if(WIN32)
         set_tests_properties(guest_remoteplay PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceRemoteplay>")
+    endif()
     add_test_executable(guest_sysutil_tests tests/GuestSysUtil.cpp)
     target_include_directories(guest_sysutil_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_link_libraries(guest_sysutil_tests PRIVATE libSceSysUtil libc)
