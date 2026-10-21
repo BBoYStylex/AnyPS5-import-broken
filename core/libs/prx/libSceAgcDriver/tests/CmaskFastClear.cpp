@@ -171,7 +171,11 @@ void oneFragment(AgcDriver::VulkanDevice& device) {
     prepare(color, [](std::uint32_t tileX, std::uint32_t tileY) { return tileX == 2 && tileY == 0; }, 3);
     expectRefused([&] { eliminate(device, color); }, "CMASK code 0x3 of a one-fragment color target is not implemented", "a one-fragment target with CMASK code 3");
     prepare(color, [](std::uint32_t, std::uint32_t) { return true; });
-    expectRefused([&] { eliminate(device, color); }, "materializing a CMASK fast clear of a one-fragment color target is not implemented", "a fast-cleared one-fragment target");
+    eliminate(device, color);
+    expect(device, color, [](std::uint32_t, std::uint32_t) { return Clear; }, "a fast-cleared one-fragment target eliminated");
+    prepare(color, [](std::uint32_t tileX, std::uint32_t tileY) { return tileX == 7 && tileY == 1; });
+    eliminate(device, color);
+    expect(device, color, [](std::uint32_t x, std::uint32_t y) { return x >= 56 && y >= 8 ? Clear : Stale; }, "a one-fragment target with one fast-cleared tile eliminated");
     prepare(color, [](std::uint32_t tileX, std::uint32_t) { return tileX < 4; }, 0xc);
     const auto codes = Cmask;
     eliminate(device, color);

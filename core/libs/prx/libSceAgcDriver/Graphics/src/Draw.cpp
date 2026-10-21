@@ -294,11 +294,8 @@ bool materializeCmaskClear(const Context& context, const ColorTarget& color, con
     Require(color.cmaskBytes == bytes, "CMASK size differs from the color target's CMASK layout");
     if (cmaskProved(color.cmaskAddress, bytes)) return false;
     if (color.coverageSamples > color.samples) {
-        const auto collected = GuestMemory::CollectWrites(color.cmaskAddress, bytes);
-        std::vector<std::uint32_t> cleared;
-        Require(readCmask(color, layout, cleared) == CmaskState::Expanded, "materializing a CMASK fast clear of a one-fragment color target is not implemented");
-        proveCmask(color.cmaskAddress, bytes, collected);
-        return false;
+        std::vector<std::uint32_t> codes;
+        static_cast<void>(readCmask(color, layout, codes));
     }
     auto* recorder = Recorder::Active();
     if (resident != nullptr && context.detiler != nullptr && recorder != nullptr && GuestMemory::GpuMutex().HeldByThisThread()) {
