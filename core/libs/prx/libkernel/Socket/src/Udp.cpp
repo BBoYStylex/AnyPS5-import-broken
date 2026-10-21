@@ -68,6 +68,7 @@ using NativeSocket = int;
 constexpr auto Invalid = -1;
 #endif
 int Fail(int error) { *__error_nid_postfix() = error; return -1; }
+constexpr int GuestSocketDescriptorLimit = 1024;
 constexpr int GuestPeek = 0x2;
 constexpr int GuestDontWait = 0x80;
 constexpr int GuestNoSignal = 0x20000;
@@ -109,7 +110,7 @@ int SendError(int type) {
 #endif
     return NativeError();
 }
-struct Socket {
+struct Socket : KernelSocketPoll::NativeOwner {
     NativeSocket value;
     int family;
     int type;
@@ -181,9 +182,14 @@ int ReserveNumber(NativeSocket) {
         ::CloseHandle(placeholder);
         return Fail(24);
     }
+    if (number >= GuestSocketDescriptorLimit) {
+        ::_close(number);
+        return Fail(24);
+    }
     return number;
 }
 int CopyNumber(int number, int minimum = 0) {
+    if (minimum >= GuestSocketDescriptorLimit) return Fail(24);
     std::vector<int> below;
     int copy = -1;
     int error = 0;
@@ -196,9 +202,15 @@ int CopyNumber(int number, int minimum = 0) {
         error = 12;
     }
     for (const int temporary : below) ::_close(temporary);
-    return copy < 0 ? Fail(error) : copy;
+    if (copy < 0) return Fail(error);
+    if (copy >= GuestSocketDescriptorLimit) {
+        ::_close(copy);
+        return Fail(24);
+    }
+    return copy;
 }
 int CopyNumberTo(int number, int target) {
+    if (target >= GuestSocketDescriptorLimit) return Fail(24);
     return ::_dup2(number, target) != 0 ? Fail(errno == EMFILE ? 24 : 9) : 0;
 }
 void ReleaseNumber(int number) {
@@ -207,13 +219,25 @@ void ReleaseNumber(int number) {
 #else
 int ReserveNumber(NativeSocket native) {
     const int number = ::fcntl(native, F_DUPFD_CLOEXEC, 0);
-    return number < 0 ? Fail(NativeError()) : number;
+    if (number < 0) return Fail(NativeError());
+    if (number >= GuestSocketDescriptorLimit) {
+        ::close(number);
+        return Fail(24);
+    }
+    return number;
 }
 int CopyNumber(int number, int minimum = 0) {
+    if (minimum >= GuestSocketDescriptorLimit) return Fail(24);
     const int copy = ::fcntl(number, F_DUPFD_CLOEXEC, minimum);
-    return copy < 0 ? Fail(NativeError()) : copy;
+    if (copy < 0) return Fail(NativeError());
+    if (copy >= GuestSocketDescriptorLimit) {
+        ::close(copy);
+        return Fail(24);
+    }
+    return copy;
 }
 int CopyNumberTo(int number, int target) {
+    if (target >= GuestSocketDescriptorLimit) return Fail(24);
     return ::dup2(number, target) < 0 ? Fail(NativeError()) : 0;
 }
 void ReleaseNumber(int number) {
@@ -413,6 +437,10 @@ bool GuestSockets::WaitAny(const std::vector<Interest>& interests, std::uint64_t
     if (pipes && (timeout < 0 || timeout > 1)) timeout = 1;
     if (WSAPoll(entries.data(), static_cast<ULONG>(entries.size()), timeout) == SOCKET_ERROR)
         throw std::runtime_error("equeue wait: WSAPoll failed, guest errno " + std::to_string(NativeError()));
+#elif defined(__APPLE__)
+    const int timeout = deadlineNanos != 0 ? static_cast<int>(std::min<std::uint64_t>((remaining + 999999) / 1000000, INT_MAX)) : -1;
+    if (::poll(entries.data(), entries.size(), timeout) < 0 && errno != EINTR)
+        throw std::runtime_error("equeue wait: poll failed, guest errno " + std::to_string(NativeError()));
 #else
     timespec timeout{static_cast<time_t>(remaining / 1000000000), static_cast<long>(remaining % 1000000000)};
     if (::ppoll(entries.data(), entries.size(), deadlineNanos != 0 ? &timeout : nullptr, nullptr) < 0 && errno != EINTR)
@@ -738,12 +766,24 @@ int NativePair(int type, NativeSocket (&pair)[2]) {
 }
 #else
 int NativePair(int type, NativeSocket (&pair)[2]) {
+#ifdef __APPLE__
+    if (type == 5) throw std::runtime_error("socketpair: SOCK_SEQPACKET is not supported on macOS");
+#endif
     const int nativeType = type == 1 ? SOCK_STREAM : type == 2 ? SOCK_DGRAM : SOCK_SEQPACKET;
     int native[2];
     if (::socketpair(AF_UNIX, nativeType, 0, native)) return NativeError();
     pair[0] = native[0];
     pair[1] = native[1];
     return 0;
+}
+int QueuedBytes(const Socket& socket, int& count) {
+#ifdef __APPLE__
+    if (socket.type == 2) {
+        socklen_t size = sizeof(count);
+        return ::getsockopt(socket.value, SOL_SOCKET, SO_NREAD, &count, &size);
+    }
+#endif
+    return ::ioctl(socket.value, FIONREAD, &count);
 }
 #endif
 int UnnamedAddress(void* address, std::uint32_t* length) {
@@ -775,7 +815,7 @@ int GuestSockets::Stat(int descriptor, FileStat* status) {
     if (ioctlsocket(socket->value, FIONREAD, &count) == 0) available = static_cast<std::int64_t>(count);
 #else
     int count = 0;
-    if (::ioctl(socket->value, FIONREAD, &count) == 0) available = count;
+    if (QueuedBytes(*socket, count) == 0) available = count;
 #endif
     int sendBuffer = 0;
     socklen_t length = sizeof(sendBuffer);
@@ -818,6 +858,13 @@ bool GuestSockets::Ready(int descriptor, bool write, std::int64_t* data, bool* e
 #ifdef _WIN32
     WSAPOLLFD entry{socket->value, static_cast<SHORT>(write ? POLLWRNORM : POLLRDNORM), 0};
     if (WSAPoll(&entry, 1, 0) <= 0) return false;
+#elif defined(__APPLE__)
+    pollfd entry{socket->value, static_cast<short>(write ? POLLOUT : POLLIN), 0};
+    if (::poll(&entry, 1, 0) <= 0) return false;
+    if (!write && socket->type == 1 && (entry.revents & POLLIN)) {
+        char byte;
+        if (::recv(socket->value, &byte, 1, MSG_PEEK | MSG_DONTWAIT) == 0) entry.revents |= POLLHUP;
+    }
 #else
     pollfd entry{socket->value, static_cast<short>(write ? POLLOUT : (POLLIN | POLLRDHUP)), 0};
     if (::poll(&entry, 1, 0) <= 0) return false;
@@ -841,7 +888,7 @@ bool GuestSockets::Ready(int descriptor, bool write, std::int64_t* data, bool* e
         if (ioctlsocket(socket->value, FIONREAD, &available) == 0) *data = static_cast<std::int64_t>(available);
 #else
         int available = 0;
-        if (::ioctl(socket->value, FIONREAD, &available) == 0) *data = available;
+        if (QueuedBytes(*socket, available) == 0) *data = available;
 #endif
     }
     return true;
@@ -939,7 +986,7 @@ int GuestSockets::Poll(KernelSocketPoll::Entry* entries, int count, int timeoutM
 extern "C" bool KernelLookupSocketNative_nid_no_patch(int descriptor, std::shared_ptr<void>* owner, std::uintptr_t* native) {
     if (auto socket = Find(descriptor)) {
         *native = static_cast<std::uintptr_t>(socket->value);
-        *owner = std::move(socket);
+        *owner = std::static_pointer_cast<KernelSocketPoll::NativeOwner>(std::move(socket));
         return true;
     }
     return KernelFindSocketNative_nid_no_patch(descriptor, owner, native);
@@ -1277,7 +1324,7 @@ int APS5_VABI ioctl_nid_postfix(int descriptor, std::uint64_t request, void* arg
     const auto result = ioctlsocket(socket->value, request == 0x8004667e ? FIONBIO : FIONREAD, &value);
 #else
     int nativeValue = static_cast<int>(value);
-    const auto result = ::ioctl(socket->value, request == 0x8004667e ? FIONBIO : FIONREAD, &nativeValue);
+    const auto result = request == 0x8004667e ? ::ioctl(socket->value, FIONBIO, &nativeValue) : QueuedBytes(*socket, nativeValue);
     value = static_cast<unsigned long>(nativeValue);
 #endif
     if (result) return Fail(NativeError());
