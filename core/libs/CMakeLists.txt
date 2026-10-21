@@ -674,6 +674,15 @@ if(BUILD_TESTING)
         set_tests_properties(guest_sysutil PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceSysUtil>")
     endif()
+    add_test_executable(guest_kernel_sys_signatures_tests tests/GuestKernelSysSignatures.cpp)
+    target_include_directories(guest_kernel_sys_signatures_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(guest_kernel_sys_signatures_tests PRIVATE libkernel_sys libkernel libc)
+    configure_windows_unwind(guest_kernel_sys_signatures_tests)
+    add_test(NAME guest_kernel_sys_signatures COMMAND guest_kernel_sys_signatures_tests)
+    if(WIN32)
+        set_tests_properties(guest_kernel_sys_signatures PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libkernel_sys>")
+    endif()
 
     add_test_executable(MemoryPoolTest
         tests/MemoryPoolTest.cpp

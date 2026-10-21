@@ -1,5 +1,12 @@
 # libkernel_sys technical debt
 
+### Unknown function info
+
+- [sceKernelGetBasicProductShape, sceKernelGetCpuUsage, sceKernelGetCpuUsageAll, sceKernelGetCpuUsageProc, sceKernelGetCurrentFanDuty, sceKernelGetSocClock, sceKernelGetUniversalMode, sceKernelIccGetBDPowerState, sceKernelIccGetPowerNumberOfBootShutdown, sceKernelIccGetPowerOperatingTime, sceKernelIccGetUSBPowerState](../../../core/libs/prx/libkernel_sys/Export.Discovery.cpp) (libkernel_sys) - the prototypes follow the public PS5 homebrew [ps5-exporter](https://github.com/Marice/ps5-exporter/blob/0a66cdf66ae08425f53e808dabbaf629327e70a0/src/probe.c), which declares and calls them, and [Breeze](https://github.com/MiladRTX/Breeze/blob/abf41a860d971442068893f53a90bb20b8e87e63/source/fan.c), which calls `sceKernelGetCurrentFanDuty`; the behaviour is not implemented and the calls throw
+- [sceKernelGetHwModelName, sceKernelGetHwSerialNumber](../../../core/libs/prx/libkernel_sys/Export.Discovery.cpp) (libkernel_sys) - the prototypes follow the public PS5 payload SDK's own [hwinfo sample](https://github.com/ps5-payload-dev/sdk/blob/a7685ce8e97ce1f8a4f38253a41d54241c9124f1/samples/hwinfo/main.c), which declares and calls them with a buffer for the name and the serial number, and [ps5-payload-dev shsrv](https://github.com/ps5-payload-dev/shsrv/blob/6f320637d56d344a0e7797753099e33238bbf146/sh.c), which calls them the same way; the behaviour is not implemented and the calls throw
+- [sceKernelSetBudget](../../../core/libs/prx/libkernel_sys/Export.Discovery.cpp) (libkernel_sys) - the prototype follows the public PS5 homebrew [ps5-payload-dev shsrv](https://github.com/ps5-payload-dev/shsrv/blob/6f320637d56d344a0e7797753099e33238bbf146/builtin.c), which declares it with a budget and calls it with one; the behaviour is not implemented and the call throws
+- [sceKernelSetProcessName](../../../core/libs/prx/libkernel_sys/Export.Discovery.cpp) (libkernel_sys) - the prototype follows the public PS5 homebrew [ps5-payload-dev shsrv](https://github.com/ps5-payload-dev/shsrv/blob/6f320637d56d344a0e7797753099e33238bbf146/sh.c), which declares it with a name, and [Breeze](https://github.com/MiladRTX/Breeze/blob/abf41a860d971442068893f53a90bb20b8e87e63/source/guard.c), which calls it with the name of its own module; the behaviour is not implemented and the call throws
+
 ### Silent stubs
 - [fchmodat](../../../core/libs/prx/libkernel_sys/Export.cpp) (libkernel_sys) - `AT_SYMLINK_NOFOLLOW` on a symbolic link (on Windows and Linux)
 

@@ -1,5 +1,7 @@
+#include <cstdint>
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
+#include "prx/libkernel_sys/include/KernelSys.hpp"
 
 extern "C" {
 
@@ -898,7 +900,7 @@ int APS5_VABI sceKernelGetBackupRestoreModeOfNextBoot(void) {
     return 0;
 }
 
-int APS5_VABI sceKernelGetBasicProductShape(void) {
+int APS5_VABI sceKernelGetBasicProductShape(int* out) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -958,17 +960,17 @@ int APS5_VABI sceKernelGetCoredumpAppInfo(void) {
     return 0;
 }
 
-int APS5_VABI sceKernelGetCpuUsage(void) {
+int APS5_VABI sceKernelGetCpuUsage(void* buffer, int* count) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceKernelGetCpuUsageAll(void) {
+int APS5_VABI sceKernelGetCpuUsageAll(int* perCorePercentage, int* count) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceKernelGetCpuUsageProc(void) {
+int APS5_VABI sceKernelGetCpuUsageProc(int processId, void* buffer, int* count) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -988,7 +990,7 @@ int APS5_VABI sceKernelGetCpumodeGame(void) {
     return 0;
 }
 
-int APS5_VABI sceKernelGetCurrentFanDuty(void) {
+int APS5_VABI sceKernelGetCurrentFanDuty(std::uint16_t* duty, std::uint64_t* chassis) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -1063,12 +1065,12 @@ int APS5_VABI sceKernelGetHwFeatureInfoForDecid(void) {
     return 0;
 }
 
-int APS5_VABI sceKernelGetHwModelName(void) {
+int APS5_VABI sceKernelGetHwModelName(char* modelName) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceKernelGetHwSerialNumber(void) {
+int APS5_VABI sceKernelGetHwSerialNumber(char* serialNumber) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -1248,7 +1250,7 @@ int APS5_VABI sceKernelGetSanitizerNewReplace(void) {
     return 0;
 }
 
-int APS5_VABI sceKernelGetSocClock(void) {
+int APS5_VABI sceKernelGetSocClock(std::uint32_t* rawDomains) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -1293,7 +1295,7 @@ int APS5_VABI sceKernelGetTraceMemoryStats(void) {
     return 0;
 }
 
-int APS5_VABI sceKernelGetUniversalMode(void) {
+int APS5_VABI sceKernelGetUniversalMode(int* mode) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -1398,7 +1400,7 @@ int APS5_VABI sceKernelIccControlUSBPowerState(void) {
     return 0;
 }
 
-int APS5_VABI sceKernelIccGetBDPowerState(void) {
+int APS5_VABI sceKernelIccGetBDPowerState(std::uint8_t* state) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -1433,12 +1435,12 @@ int APS5_VABI sceKernelIccGetHwInfo(void) {
     return 0;
 }
 
-int APS5_VABI sceKernelIccGetPowerNumberOfBootShutdown(void) {
+int APS5_VABI sceKernelIccGetPowerNumberOfBootShutdown(std::uint64_t* count) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceKernelIccGetPowerOperatingTime(void) {
+int APS5_VABI sceKernelIccGetPowerOperatingTime(std::uint64_t* time) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -1453,7 +1455,7 @@ int APS5_VABI sceKernelIccGetSysEventLog(void) {
     return 0;
 }
 
-int APS5_VABI sceKernelIccGetUSBPowerState(void) {
+int APS5_VABI sceKernelIccGetUSBPowerState(std::uint8_t* state) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -1918,7 +1920,7 @@ int APS5_VABI sceKernelSetBootReqNotify(void) {
     return 0;
 }
 
-int APS5_VABI sceKernelSetBudget(void) {
+int APS5_VABI sceKernelSetBudget(std::int64_t budget) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -2003,7 +2005,7 @@ int APS5_VABI sceKernelSetPhysFmemLimit(void) {
     return 0;
 }
 
-int APS5_VABI sceKernelSetProcessName(void) {
+int APS5_VABI sceKernelSetProcessName(const char* name) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
