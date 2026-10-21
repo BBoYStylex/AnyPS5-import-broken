@@ -288,19 +288,7 @@ static bool AddAtrac9Range(Ngs2WaveformInfo& info, std::uint64_t begin, std::uin
     return true;
 }
 
-static bool AddPcmRange(Ngs2WaveformInfo& info, std::uint64_t begin, std::uint32_t samples, std::uint32_t repeats) {
-    if (samples == 0) return true;
-    const std::uint64_t offset = begin * info.audio_frame_size;
-    const std::uint64_t bytes = static_cast<std::uint64_t>(samples) * info.audio_frame_size;
-    if (offset > info.data_size || bytes > info.data_size - offset) return false;
-    auto& block = info.block[info.num_blocks++];
-    block = {info.data_offset + offset, bytes, repeats, 0, samples, 0, 0};
-    return true;
-}
-
-using AddLoopRange = bool (*)(Ngs2WaveformInfo&, std::uint64_t, std::uint32_t, std::uint32_t);
-
-static int ParseLoop(const RiffChunks& chunks, Ngs2WaveformInfo& info, AddLoopRange addRange) {
+static int ParseAtrac9Loop(const RiffChunks& chunks, Ngs2WaveformInfo& info) {
     if (chunks.sampler == nullptr) return SCE_NGS2_OK;
     if (chunks.samplerSize < 36) return SCE_NGS2_ERROR_INVALID_WAVEFORM_DATA;
     const auto count = ReadLe32(chunks.sampler + 28);
@@ -320,9 +308,9 @@ static int ParseLoop(const RiffChunks& chunks, Ngs2WaveformInfo& info, AddLoopRa
     info.loop_end_position = static_cast<std::uint32_t>(end - skip);
     info.num_blocks = 0;
     info.block[0] = {};
-    if (!addRange(info, skip, info.loop_begin_position, 0) ||
-        !addRange(info, begin, static_cast<std::uint32_t>(end - begin), plays == 0 ? UINT32_MAX : plays - 1) ||
-        !addRange(info, end, static_cast<std::uint32_t>(waveformEnd - end), 0))
+    if (!AddAtrac9Range(info, skip, info.loop_begin_position, 0) ||
+        !AddAtrac9Range(info, begin, static_cast<std::uint32_t>(end - begin), plays == 0 ? UINT32_MAX : plays - 1) ||
+        !AddAtrac9Range(info, end, static_cast<std::uint32_t>(waveformEnd - end), 0))
         return SCE_NGS2_ERROR_INVALID_WAVEFORM_DATA;
     return SCE_NGS2_OK;
 }
@@ -353,7 +341,30 @@ static int ParseAtrac9(const RiffChunks& chunks, Ngs2WaveformInfo& info) {
     info.block[0].data_size = chunks.dataSize;
     info.block[0].num_skip_samples = ReadLe32(chunks.fact + 8);
     info.block[0].num_samples = info.num_samples;
-    return ParseLoop(chunks, info, AddAtrac9Range);
+    return ParseAtrac9Loop(chunks, info);
+}
+
+static void AddPcmBlock(Ngs2WaveformInfo& info, std::uint32_t begin, std::uint32_t samples, std::uint32_t repeats) {
+    auto& block = info.block[info.num_blocks++];
+    block = {info.data_offset + static_cast<std::uint64_t>(begin) * info.audio_frame_size, static_cast<std::uint64_t>(samples) * info.audio_frame_size, repeats, 0, samples, 0, 0};
+}
+
+static int ParsePcmLoop(const RiffChunks& chunks, Ngs2WaveformInfo& info) {
+    if (chunks.sampler == nullptr) return SCE_NGS2_OK;
+    if (chunks.samplerSize < 32) throw std::runtime_error("NGS2: a smpl chunk too short for its loop count is not implemented");
+    if (ReadLe32(chunks.sampler + 28) == 0) return SCE_NGS2_OK;
+    if (chunks.samplerSize < 52) throw std::runtime_error("NGS2: a smpl chunk too short for its first loop is not implemented");
+    const std::uint32_t begin = ReadLe32(chunks.sampler + 44);
+    const std::uint32_t end = ReadLe32(chunks.sampler + 48) + 1u;
+    info.loop_begin_position = begin;
+    info.loop_end_position = end;
+    if (end <= begin) return SCE_NGS2_OK;
+    if (end > info.num_samples) throw std::runtime_error("NGS2: a waveform loop ending past the last sample is not implemented");
+    info.num_blocks = 0;
+    if (begin != 0) AddPcmBlock(info, 0, begin, 0);
+    AddPcmBlock(info, begin, end - begin, UINT32_MAX);
+    if (end != info.num_samples) AddPcmBlock(info, end, info.num_samples - end, 0);
+    return SCE_NGS2_OK;
 }
 
 static std::uint32_t PcmWaveformType(std::uint32_t bits, bool floating) {
@@ -388,7 +399,7 @@ static int ParsePcm(const RiffChunks& chunks, std::size_t size, Ngs2WaveformInfo
     info.block[0].data_offset = chunks.dataOffset;
     info.block[0].data_size = dataSize;
     info.block[0].num_samples = info.num_samples;
-    return ParseLoop(chunks, info, AddPcmRange);
+    return ParsePcmLoop(chunks, info);
 }
 
 static int ParseWaveform(const RiffChunks& chunks, std::size_t size, Ngs2WaveformInfo& info) {
