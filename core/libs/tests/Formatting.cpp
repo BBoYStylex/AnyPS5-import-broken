@@ -10,7 +10,6 @@
 #include <stdexcept>
 #include <cstdint>
 #include <cstdio>
-#include <string>
 
 extern "C" {
 int APS5_VABI snprintf_nid_postfix(char*, size_t, const char*, ...);
@@ -345,7 +344,7 @@ __attribute__((noinline)) static void APS5_VABI RunChecks() {
         Require(sscanf_nid_postfix("abcdef", "%3ls", text) == 1 && wideIs(text, u"abc"));
         Require(sscanf_nid_postfix("ab cd", "%*ls %ls", text) == 1 && wideIs(text, u"cd"));
 #ifndef _WIN32
-        Require(sscanf_nid_postfix("\xe9t\xe9", "%ls", text) == 1 && text[0] == 0x00E9 && text[1] == u't' && text[2] == 0x00E9 && text[3] == 0);
+        Require(sscanf_nid_postfix("\xc3\xa9t\xc3\xa9", "%ls", text) == 1 && text[0] == 0x00E9 && text[1] == u't' && text[2] == 0x00E9 && text[3] == 0);
 #endif
         Require(sscanf_nid_postfix("1", "%l[a-z]", text) == 0);
         Require(sscanf_nid_postfix("", "%ls", text) == EOF && sscanf_nid_postfix("   ", "%ls", text) == EOF);

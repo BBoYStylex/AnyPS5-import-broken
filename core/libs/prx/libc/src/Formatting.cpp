@@ -147,13 +147,13 @@ public:
 
     std::ptrdiff_t Offset() const { return cursor - start; }
 
-    bool Scan(const std::string& directive, void* target) {
+    int Scan(const std::string& directive, void* target) {
         const std::string text = directive + "%n";
         int consumed = -1;
         const int matched = target ? HostSscanf(cursor, text.c_str(), target, &consumed) : HostSscanf(cursor, text.c_str(), &consumed);
-        if (consumed < 0 || (target && matched != 1)) return false;
+        if (consumed < 0 || (target && matched != 1)) return matched == EOF ? EOF : 0;
         cursor += consumed;
-        return true;
+        return 1;
     }
 
 private:
@@ -183,13 +183,13 @@ public:
 
     std::ptrdiff_t Offset() const { return offset; }
 
-    bool Scan(const std::string& directive, void* target) {
+    int Scan(const std::string& directive, void* target) {
         const std::string text = directive + "%n";
         int consumed = -1;
         const int matched = target ? HostFscanf(stream, text.c_str(), target, &consumed) : HostFscanf(stream, text.c_str(), &consumed);
-        if (consumed < 0 || (target && matched != 1)) return false;
+        if (consumed < 0 || (target && matched != 1)) return matched == EOF ? EOF : 0;
         offset += consumed;
-        return true;
+        return 1;
     }
 
 private:
@@ -336,7 +336,8 @@ int ScanGuest(TInput& input, const char* format, bool secure, NextPointer nextPo
             if (width != 0) directive += std::to_string(width);
             directive += HostLength(length, conversion);
             directive += specifier;
-            if (!input.Scan(directive, target)) return failure();
+            const int result = input.Scan(directive, target);
+            if (result != 1) return result == EOF && !converted ? EOF : assigned;
         }
         if (capped && !single) {
             const int next = input.Peek();
