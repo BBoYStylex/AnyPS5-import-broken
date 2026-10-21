@@ -1,7 +1,9 @@
 #include "VulkanTestDevice.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver.hpp"
+#include "prx/libSceAgcDriver/Execution/include/Driver/Synchronization/SynchronizationStatistics.hpp"
 #include "prx/libSceAgcDriver/Execution/include/GuestMemory.hpp"
 #include "prx/libSceAgcDriver/Submit/include/Acb.hpp"
+#include "prx/libSceAgcDriver/Submit/include/Dcb.hpp"
 #include "prx/libc/include/GuestAllocations.hpp"
 #include "prx/libkernel/Time/include/SleepWake.hpp"
 #ifdef _WIN32
@@ -46,13 +48,15 @@ struct Slot {
 
 class GuestBlock {
 public:
-    GuestBlock() {
+    explicit GuestBlock(bool isolated = false) {
+        const std::size_t reserved = isolated ? 3 * BlockBytes : BlockBytes;
 #ifdef _WIN32
-        block = static_cast<std::uint8_t*>(VirtualAlloc(nullptr, BlockBytes, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
+        allocation = static_cast<std::uint8_t*>(VirtualAlloc(nullptr, reserved, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
 #else
-        block = static_cast<std::uint8_t*>(std::aligned_alloc(BlockBytes, BlockBytes));
+        allocation = static_cast<std::uint8_t*>(std::aligned_alloc(BlockBytes, reserved));
 #endif
-        Require(block != nullptr, "same-queue label wait: cannot allocate the guest block");
+        Require(allocation != nullptr, "same-queue label wait: cannot allocate the guest block");
+        block = isolated ? allocation + BlockBytes : allocation;
         std::memset(block, 0, BlockBytes);
         GuestAllocations::Mutation().Add(block, BlockBytes, true, true, true);
     }
@@ -60,9 +64,9 @@ public:
     ~GuestBlock() {
         GuestAllocations::Mutation().Remove(block);
 #ifdef _WIN32
-        VirtualFree(block, 0, MEM_RELEASE);
+        VirtualFree(allocation, 0, MEM_RELEASE);
 #else
-        std::free(block);
+        std::free(allocation);
 #endif
     }
 
@@ -72,6 +76,7 @@ public:
     Slot& Data() { return *reinterpret_cast<Slot*>(block); }
 
 private:
+    std::uint8_t* allocation = nullptr;
     std::uint8_t* block = nullptr;
 };
 
@@ -168,6 +173,78 @@ void CpuLabelWake(Slot& slot) {
     std::cout << "CPU label wakes the guest only after its bytes landed\n";
 }
 
+void LabelWakeAfterStore(Slot& work, Slot& fresh) {
+    constexpr std::uint32_t ShortSpin = 1u << 12u;
+    constexpr std::uint32_t MaxAttempts = 256;
+    constexpr std::uint32_t WantedWakes = 16;
+    work.spinDescriptor = {Low(work.spinOutput.data()), High(work.spinOutput.data()) & 0xffffu, sizeof(work.spinOutput), 0x31016facu};
+    const auto submit = [&](std::uint32_t value) {
+        std::vector<std::uint32_t> words;
+        Dispatch(words, SpinCode.data(), {Low(work.spinDescriptor.data()), High(work.spinDescriptor.data()), ShortSpin});
+        WriteData(words, &fresh.label, value);
+        Packet packet{words.data(), static_cast<std::uint32_t>(words.size()), 0, {}};
+        return sceAgcDriverSubmitDcb(&packet);
+    };
+    Require(submit(1) == 0, "label wake handoff warmup submit failed");
+    AgcDriverWaitIdle_nid_postfix();
+    Require(fresh.label == 1, "the warmup label did not reach guest memory");
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    std::uint32_t afterStore = 0, beforeStore = 0, missed = 0, late = 0, otherPath = 0;
+    std::vector<std::int64_t> wakeUs;
+    for (std::uint32_t attempt = 0; attempt < MaxAttempts && afterStore < WantedWakes; ++attempt) {
+        const auto value = 2000 + attempt;
+        const auto synced = AgcDriver::DriverDetail::syncedUnimportedLabels.load();
+        std::atomic<bool> ready{false};
+        int result = -1;
+        std::jthread worker([&] {
+            while (!ready.load(std::memory_order_acquire)) std::this_thread::yield();
+            const auto start = std::chrono::steady_clock::now();
+            while (std::chrono::steady_clock::now() - start < std::chrono::microseconds(100)) std::this_thread::yield();
+            result = submit(value);
+        });
+        std::chrono::steady_clock::time_point landedAt{};
+        std::jthread observer([&] {
+            while (!ready.load(std::memory_order_acquire)) std::this_thread::yield();
+            const auto start = std::chrono::steady_clock::now();
+            while (fresh.label != value && std::chrono::steady_clock::now() - start < std::chrono::milliseconds(20)) {}
+            if (fresh.label == value) landedAt = std::chrono::steady_clock::now();
+        });
+        KernelNoteGpuSubmit_nid_no_patch();
+        const auto began = std::chrono::steady_clock::now();
+        ready.store(true, std::memory_order_release);
+        SleepWake::Sleep(1000000);
+        const auto woke = std::chrono::steady_clock::now();
+        const bool landed = fresh.label == value;
+        worker.join();
+        observer.join();
+        AgcDriverWaitIdle_nid_postfix();
+        Require(result == 0 && fresh.label == value, "the unimported label did not reach guest memory");
+        if (AgcDriver::DriverDetail::syncedUnimportedLabels.load() == synced) {
+            ++otherPath;
+            continue;
+        }
+        const bool landedInSleep = landedAt != std::chrono::steady_clock::time_point{} && landedAt - began < std::chrono::microseconds(700);
+        if (woke - began >= std::chrono::microseconds(990)) {
+            if (landedInSleep) ++missed;
+            else ++late;
+            continue;
+        }
+        if (!landed) {
+            ++beforeStore;
+            continue;
+        }
+        ++afterStore;
+        if (landedInSleep) wakeUs.push_back(std::chrono::duration_cast<std::chrono::microseconds>(woke - landedAt).count());
+    }
+    std::sort(wakeUs.begin(), wakeUs.end());
+    std::cout << "label wake handoff: " << afterStore << " early wakes found the label, " << beforeStore << " came before its store, " << missed << " sleeps ran out after it landed, " << late << " before it landed, " << otherPath << " labels took another path";
+    if (!wakeUs.empty()) std::cout << "; store to wake median " << wakeUs[wakeUs.size() / 2] << " us, max " << wakeUs.back() << " us";
+    std::cout << '\n';
+    Require(beforeStore == 0, "a batch's completion woke the guest before its unimported label landed");
+    Require(missed == 0, "the unimported label landed without waking the guest's short sleep");
+    Require(afterStore != 0, "the unimported label's store never woke the guest's short sleep");
+}
+
 }
 
 int main(int argc, char** argv) {
@@ -179,6 +256,12 @@ int main(int argc, char** argv) {
         auto& slot = block.Data();
         if (argc == 2 && std::string_view(argv[1]) == "--cpu-label-wake-only") {
             CpuLabelWake(slot);
+            AgcDriverShutdown_nid_postfix();
+            return 0;
+        }
+        if (argc == 2 && std::string_view(argv[1]) == "--label-wake-handoff-only") {
+            GuestBlock fresh(true);
+            LabelWakeAfterStore(slot, fresh.Data());
             AgcDriverShutdown_nid_postfix();
             return 0;
         }

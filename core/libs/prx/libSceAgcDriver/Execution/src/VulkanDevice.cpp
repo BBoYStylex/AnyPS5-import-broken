@@ -2273,7 +2273,7 @@ int VulkanDevice::WriteLabelOnGpu(std::uint64_t address, std::span<const std::by
     const auto context = graphicsContext();
     const bool syncUnimported = queue == 0 && !recorder.SubmitHeld();
     const auto unimported = [&] {
-        recorder.Sync();
+        recorder.SyncForCpuLabel();
         return 7;
     };
     if (syncUnimported && !Graphics::HostImportCovers(context, address, bytes.size())) return unimported();

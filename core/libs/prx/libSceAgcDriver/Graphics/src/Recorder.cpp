@@ -240,6 +240,12 @@ bool RecorderAlive(std::uint64_t id) {
 thread_local int completionDepth = 0;
 // This thread's hook syncs that waited for an unsignaled target (Recorder::ThreadHookWaits).
 thread_local std::uint64_t hookRealWaits = 0;
+thread_local Recorder::LabelWakeHandoff* openHandoff = nullptr;
+
+bool LabelWakeHandoffEnabled() {
+    static const bool enabled = std::getenv("APS5_NO_LABEL_WAKE_HANDOFF") == nullptr;
+    return enabled;
+}
 
 }
 
@@ -1084,6 +1090,77 @@ void FlushForAccess(std::uint64_t address, std::size_t bytes) {
 
 }
 
+struct Recorder::WakeLedger {
+    std::mutex mutex;
+    std::uint64_t awaited = 0;
+    std::uint64_t drained = 0;
+    std::uint64_t wokenThrough = 0;
+    bool owed = false;
+
+    bool leave(std::uint64_t completed, bool coveredSkips) {
+        std::lock_guard lock(mutex);
+        if (coveredSkips && completed <= wokenThrough) return true;
+        if (awaited == 0 || completed < awaited) return false;
+        owed = true;
+        return true;
+    }
+};
+
+Recorder::LabelWakeHandoff::LabelWakeHandoff() {
+    if (!LabelWakeHandoffEnabled() || openHandoff != nullptr) return;
+    openHandoff = this;
+    open = true;
+}
+
+Recorder::LabelWakeHandoff::~LabelWakeHandoff() {
+    if (!open) return;
+    openHandoff = nullptr;
+    open = false;
+    if (settle(false)) KernelWakeSleepers_nid_no_patch();
+}
+
+void Recorder::LabelWakeHandoff::WakeNow() {
+    if (open) {
+        openHandoff = nullptr;
+        open = false;
+        settle(true);
+    }
+    KernelWakeSleepers_nid_no_patch();
+}
+
+bool Recorder::LabelWakeHandoff::settle(bool waking) {
+    const auto settled = std::exchange(ledger, nullptr);
+    if (settled == nullptr) return false;
+    std::lock_guard lock(settled->mutex);
+    const bool owed = std::exchange(settled->owed, false);
+    if (waking || owed) settled->wokenThrough = std::max(settled->wokenThrough, settled->drained);
+    settled->awaited = 0;
+    settled->drained = 0;
+    return owed;
+}
+
+bool Recorder::handOffWake(std::uint64_t serial) {
+    auto* handoff = openHandoff;
+    if (handoff == nullptr) return false;
+    bool pay = handoff->ledger != nullptr && handoff->ledger != wakeLedger && handoff->settle(false);
+    handoff->ledger = wakeLedger;
+    {
+        std::lock_guard lock(wakeLedger->mutex);
+        if (std::exchange(wakeLedger->owed, false)) {
+            wakeLedger->wokenThrough = std::max(wakeLedger->wokenThrough, wakeLedger->drained);
+            pay = true;
+        }
+        wakeLedger->awaited = std::max(wakeLedger->awaited, serial);
+    }
+    if (pay) KernelWakeSleepers_nid_no_patch();
+    return true;
+}
+
+void Recorder::noteHandoffDrained(std::uint64_t serial) {
+    std::lock_guard lock(wakeLedger->mutex);
+    if (wakeLedger->awaited != 0) wakeLedger->drained = std::max(wakeLedger->drained, serial);
+}
+
 struct Recorder::ProgressWatcher {
     std::mutex mutex;
     std::condition_variable wake;
@@ -1091,8 +1168,8 @@ struct Recorder::ProgressWatcher {
     bool stop = false;
     std::thread thread;
 
-    ProgressWatcher(VkDevice device, VkSemaphore timeline, PFN_vkWaitSemaphoresKHR waitSemaphores, PFN_vkGetSemaphoreCounterValueKHR counterValue) {
-        thread = std::thread([this, device, timeline, waitSemaphores, counterValue] {
+    ProgressWatcher(VkDevice device, VkSemaphore timeline, PFN_vkWaitSemaphoresKHR waitSemaphores, PFN_vkGetSemaphoreCounterValueKHR counterValue, std::shared_ptr<WakeLedger> ledger) {
+        thread = std::thread([this, device, timeline, waitSemaphores, counterValue, ledger = std::move(ledger)] {
             CpuTopology::PinHelperThread("GPU progress watcher");
             std::uint64_t seen = 0;
             for (;;) {
@@ -1115,7 +1192,7 @@ struct Recorder::ProgressWatcher {
                 std::uint64_t value = target;
                 if (counterValue(device, timeline, &value) != VK_SUCCESS) value = target;
                 seen = std::max(target, value);
-                KernelWakeSleepers_nid_no_patch();
+                if (!ledger->leave(seen, true)) KernelWakeSleepers_nid_no_patch();
             }
         });
     }
@@ -1138,7 +1215,7 @@ struct Recorder::ProgressWatcher {
     }
 };
 
-Recorder::Recorder(const Context& context, bool timelineSemaphores) : context(context), id(nextRecorderId.fetch_add(1)) {
+Recorder::Recorder(const Context& context, bool timelineSemaphores) : context(context), wakeLedger(std::make_shared<WakeLedger>()), id(nextRecorderId.fetch_add(1)) {
     {
         std::lock_guard lock(liveRecordersMutex);
         liveRecorders.push_back(id);
@@ -3547,7 +3624,7 @@ void Recorder::Submit() {
     if (timeline != VK_NULL_HANDLE) {
         if (!progressWatcher) {
             progressWatcher = std::make_unique<ProgressWatcher>(context.device, timeline, context.Function<PFN_vkWaitSemaphoresKHR>("vkWaitSemaphoresKHR"),
-                                                                context.Function<PFN_vkGetSemaphoreCounterValueKHR>("vkGetSemaphoreCounterValueKHR"));
+                                                                context.Function<PFN_vkGetSemaphoreCounterValueKHR>("vkGetSemaphoreCounterValueKHR"), wakeLedger);
         }
         progressWatcher->Submitted(batch->serial);
     }
@@ -3644,6 +3721,14 @@ void Recorder::Sync() {
         finish(std::move(batch), true, source);
     }
     activeSyncSite = previousSite;
+}
+
+void Recorder::SyncForCpuLabel() {
+    const auto awaited = open != nullptr ? OpenSerial() : submissions;
+    const bool handedOff = !Idle() && handOffWake(awaited);
+    if (announcedSite == nullptr) announcedSite = __builtin_return_address(0);
+    Sync();
+    if (handedOff) noteHandoffDrained(awaited);
 }
 
 void Recorder::FlushDeferredReleases() {
@@ -4046,7 +4131,7 @@ void Recorder::finish(std::unique_ptr<Batch> batch, bool wait, int source, bool 
             }
         }
     }
-    if (!batch->completions.empty()) KernelWakeSleepers_nid_no_patch();
+    if (!batch->completions.empty() && !(openHandoff != nullptr && openHandoff->ledger == wakeLedger && wakeLedger->leave(batch->serial, false))) KernelWakeSleepers_nid_no_patch();
     if (profile) holdCounters.completions += batch->completions.size();
     const auto keptStart = profile ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
     // Deferred only from inside a hold: the unlock that releases the list is this thread's own, and

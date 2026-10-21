@@ -251,6 +251,7 @@ The code reads environment names through `getenv`, `IsEnvironmentSet`, `kibSetti
 | `APS5_NO_LABEL_PACKET_FLUSH` | presence | `core/libs/prx/libSceAgcDriver/Execution/src/Driver/Packets/PacketFlush.cpp` |  | disables the label flush between packets |
 | `APS5_NO_LABEL_RUNS` | presence | `core/libs/prx/libSceAgcDriver/Graphics/src/Recorder.cpp` |  | records every store in a run of its own between a barrier pair |
 | `APS5_NO_LABEL_SHORTCUT` | presence | `core/libs/prx/libSceAgcDriver/Execution/src/Driver/Synchronization/WaitMemory.cpp` |  | disables the pending-label table shortcut in a memory wait |
+| `APS5_NO_LABEL_WAKE_HANDOFF` | presence | `core/libs/prx/libSceAgcDriver/Graphics/src/Recorder.cpp` |  | wakes short guest sleeps when the GPU progress watcher or a batch's completions see the last batch an unimported label's recorder sync waits for complete, before the label's CPU store, instead of once after the store |
 | `APS5_NO_LAYER_CLEAR` | presence | `core/libs/prx/libSceAgcDriver/Graphics/src/Texture.cpp` |  | tracks every surface as one layer instead of per array layer |
 | `APS5_NO_LAYER_REFUSAL_MEMO` | presence | `core/libs/prx/libSceAgcDriver/Graphics/src/Texture.cpp` |  | re-checks a layer whose surface check failed at its current generation on every fill |
 | `APS5_NO_LAYOUT_CACHE` | presence | `core/libs/prx/libSceAgcDriver/Graphics/src/ShaderResources.cpp` |  | builds descriptor set layouts fresh instead of through the descriptor cache |

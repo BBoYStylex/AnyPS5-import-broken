@@ -213,6 +213,22 @@ public:
     void FinishUpTo(std::uint64_t serial);
     // Submits and waits for every batch, running completions in order.
     void Sync();
+    void SyncForCpuLabel();
+    struct WakeLedger;
+    class LabelWakeHandoff {
+    public:
+        LabelWakeHandoff();
+        ~LabelWakeHandoff();
+        LabelWakeHandoff(const LabelWakeHandoff&) = delete;
+        LabelWakeHandoff& operator=(const LabelWakeHandoff&) = delete;
+        void WakeNow();
+
+    private:
+        friend class Recorder;
+        bool settle(bool waking);
+        std::shared_ptr<WakeLedger> ledger;
+        bool open = false;
+    };
     void CountSamples();
     bool RecordMeshArguments(VkCommandBuffer commands, VkDeviceAddress record, VkDeviceAddress arguments, std::span<const std::uint32_t, 7> rules);
     std::uint64_t SamplesTotal();
@@ -773,6 +789,8 @@ private:
     bool syncThroughUnlocked(std::uint64_t address, std::uint64_t end, int source, const void* site);
     // `source` is the CountSync source the wait is attributed to.
     void finish(std::unique_ptr<Batch> batch, bool wait, int source, bool releaseNow = false);
+    bool handOffWake(std::uint64_t serial);
+    void noteHandoffDrained(std::uint64_t serial);
     void discard(std::unique_ptr<Batch> batch) noexcept;
     void removeLabels(Batch& batch);
     void release(Batch& batch) noexcept;
@@ -812,6 +830,7 @@ private:
     std::uint64_t heldSerial = 0;
     struct ProgressWatcher;
     std::unique_ptr<ProgressWatcher> progressWatcher;
+    std::shared_ptr<WakeLedger> wakeLedger;
     // Identity for a thread that released the mutex around a wait (syncThroughUnlocked): the
     // recorder may have been torn down meanwhile, so it is looked up by this id, not by pointer.
     std::uint64_t id = 0;
