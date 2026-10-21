@@ -1,3 +1,4 @@
+#include "prx/libc/include/GuestFileNumber.hpp"
 #include "prx/libkernel/File/include/DirectoryDescriptor.hpp"
 #include "prx/libkernel/File/include/File.hpp"
 #include "prx/libkernel/File/include/NativeStat.hpp"
@@ -7,6 +8,7 @@
 #include "prx/libc/include/HostThreadLocal.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cerrno>
 #include <cstring>
 #include <limits>
@@ -59,6 +61,7 @@ struct DirectoryState {
 
 std::mutex g_mutex;
 std::map<int, std::shared_ptr<DirectoryState>> g_directories;
+std::atomic<std::size_t> g_directoryCount{0};
 
 int DirectoryError(const std::error_code& code) {
 #ifdef _WIN32
@@ -69,6 +72,7 @@ int DirectoryError(const std::error_code& code) {
 }
 
 std::shared_ptr<DirectoryState> Find(int fd) {
+    if (g_directoryCount.load(std::memory_order_relaxed) == 0) return nullptr;
     std::lock_guard lock(g_mutex);
     const auto found = g_directories.find(fd);
     return found == g_directories.end() ? nullptr : found->second;
@@ -89,7 +93,7 @@ std::uint8_t DirectoryEntryType(const std::filesystem::file_status& status) {
 
 void Add(DirectoryState& state, const std::string& name, std::uint64_t fileNumber, std::uint8_t type) {
     if (name.size() > 255) throw DirectoryEntryNameTooLong();
-    state.entries.push_back({name, fileNumber <= UINT32_MAX ? static_cast<std::uint32_t>(fileNumber) : 0, type});
+    state.entries.push_back({name, GuestFileNumber_nid_no_patch(fileNumber), type});
 }
 
 void Load(DirectoryState& state, int fd) {
@@ -189,6 +193,7 @@ int OpenDirectoryDescriptor(const std::filesystem::path& path) {
     try {
         std::lock_guard lock(g_mutex);
         g_directories[fd] = state;
+        g_directoryCount.store(g_directories.size(), std::memory_order_relaxed);
     } catch (...) {
 #ifdef _WIN32
         ::_close(fd);
@@ -242,15 +247,19 @@ std::optional<std::filesystem::path> DirectoryDescriptorPath(int fd) {
 }
 
 void ForgetDirectoryDescriptor(int fd) {
+    if (g_directoryCount.load(std::memory_order_relaxed) == 0) return;
     std::lock_guard lock(g_mutex);
     g_directories.erase(fd);
+    g_directoryCount.store(g_directories.size(), std::memory_order_relaxed);
 }
 
 void DuplicateDirectoryDescriptor(int from, int to) {
+    if (g_directoryCount.load(std::memory_order_relaxed) == 0) return;
     std::lock_guard lock(g_mutex);
     const auto found = g_directories.find(from);
     if (found == g_directories.end()) g_directories.erase(to);
     else g_directories[to] = found->second;
+    g_directoryCount.store(g_directories.size(), std::memory_order_relaxed);
 }
 
 std::optional<std::int64_t> SeekDirectoryDescriptor(int fd, std::int64_t offset, int whence) {
@@ -292,7 +301,7 @@ std::optional<std::int64_t> SeekDirectoryDescriptor(int fd, std::int64_t offset,
     return target;
 }
 
-int ReadDirectoryDescriptor(int fd, char* buf, int nbytes) {
+int ReadDirectoryDescriptor(int fd, char* buf, int nbytes, std::int64_t* base) {
     const auto state = Find(fd);
     if (!state) return SCE_KERNEL_ERROR_ENOTDIR;
     if (buf == nullptr) return SCE_KERNEL_ERROR_EFAULT;
@@ -304,6 +313,7 @@ int ReadDirectoryDescriptor(int fd, char* buf, int nbytes) {
     }
     catch (const DirectoryEntryNameTooLong&) { throw; }
     catch (const std::exception&) { return SCE_KERNEL_ERROR_EIO; }
+    if (base != nullptr) *base = static_cast<std::int64_t>(state->cursor);
     std::size_t used = 0;
     while (state->cursor < state->entries.size()) {
         const auto& entry = state->entries[state->cursor];

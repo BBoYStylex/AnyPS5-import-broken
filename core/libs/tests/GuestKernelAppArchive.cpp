@@ -1,6 +1,7 @@
 #include "AppArchiveFixture.hpp"
 #include "SceTypes.hpp"
 #include "prx/libc/include/general/VabiMacros.hpp"
+#include "prx/libc/include/GuestFileNumber.hpp"
 #include "prx/libkernel/File/include/FileFlags.hpp"
 #include "prx/libkernel/File/include/File.hpp"
 #include "prx/libkernel/File/include/DirectoryDescriptor.hpp"
@@ -10,6 +11,8 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
+#include <barrier>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -17,8 +20,10 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <mutex>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <typeinfo>
 #include <vector>
 
@@ -72,6 +77,7 @@ int APS5_VABI ftruncate_nid_postfix(int d, std::int64_t length);
 int APS5_VABI sceKernelFsync(int d);
 int APS5_VABI sceKernelFdatasync(int d);
 int APS5_VABI sceKernelGetdents(int d, char* buf, int nbytes);
+int APS5_VABI sceKernelGetdirentries(int d, char* buf, int nbytes, std::int64_t* basep);
 void* APS5_VABI fdopendir_nid_postfix(int d);
 int APS5_VABI sceKernelFchmod(int d, std::uint16_t mode);
 int APS5_VABI sceKernelFutimes(int d, const void* times);
@@ -117,7 +123,7 @@ constexpr int DuplicateFrom = 0;
 constexpr std::uint64_t ReadableRequest = 0x4004667f;
 
 void Archive(const std::filesystem::path& root) {
-    AppArchiveFixture::WriteArchive(root / "app0.zar", {
+    std::map<std::string, std::vector<char>> files{
         {"Data/Big.bin", AppArchiveFixture::Pattern(BigSize)},
         {"Data/Small.txt", {'z', 'a', 'r'}},
         {"sce_sys/Packed.json", {'{', '}'}},
@@ -125,7 +131,12 @@ void Archive(const std::filesystem::path& root) {
         {"Readme.TXT", {'z'}},
         {"MaskedDir/Child.txt", {'d'}},
         {"MaskedFile", {'f'}},
-    }, {"EmptyArchive"});
+    };
+    for (unsigned index = 0; index < 32; ++index) {
+        const auto suffix = std::string(1, static_cast<char>('a' + index / 10)) + static_cast<char>('0' + index % 10);
+        files.emplace("sce_sys/Concurrent/" + suffix, std::vector<char>{static_cast<char>(index)});
+    }
+    AppArchiveFixture::WriteArchive(root / "app0.zar", files, {"EmptyArchive"});
     std::ofstream eboot(root / "app0" / "eboot.bin", std::ios::binary);
     eboot << "disk";
     std::ofstream readme(root / "app0" / "README.txt", std::ios::binary);
@@ -133,6 +144,59 @@ void Archive(const std::filesystem::path& root) {
     std::ofstream masked(root / "app0" / "MaskedDir", std::ios::binary);
     masked << "disk";
     std::filesystem::create_directory(root / "app0" / "MaskedFile");
+}
+
+void FileNumbers() {
+    constexpr std::uint32_t Fold = 0x9E3779B1u;
+    Check(GuestFileNumber_nid_no_patch(7) == 7);
+    Check(GuestFileNumber_nid_no_patch((std::uint64_t{1} << 32) | 7) == (Fold ^ 7u));
+    Check(GuestFileNumber_nid_no_patch((std::uint64_t{1} << 32) | Fold) == 1);
+}
+
+void ConcurrentArchiveDirectoryEntries() {
+    constexpr int WorkerCount = 8;
+    constexpr int ChildCount = 32;
+    struct Entry {
+        std::int64_t base;
+        std::string name;
+    };
+    const int directory = sceKernelOpen("/app0/sce_sys/Concurrent", SCE_KERNEL_O_RDONLY | SCE_KERNEL_O_DIRECTORY, 0);
+    Check(directory >= 0);
+    std::barrier start(WorkerCount);
+    std::mutex entriesMutex;
+    std::vector<Entry> entries;
+    entries.reserve(ChildCount + 2);
+    std::atomic<int> failures{0};
+    std::vector<std::thread> workers;
+    workers.reserve(WorkerCount);
+    for (int worker = 0; worker < WorkerCount; ++worker) {
+        workers.emplace_back([&] {
+            start.arrive_and_wait();
+            for (;;) {
+                std::array<char, 12> record{};
+                std::int64_t base = -1;
+                const int bytes = sceKernelGetdirentries(directory, record.data(), static_cast<int>(record.size()), &base);
+                if (bytes == 0) break;
+                if (bytes != static_cast<int>(record.size()) || base < 0 || record[7] == 0) {
+                    failures.fetch_add(1, std::memory_order_relaxed);
+                    break;
+                }
+                std::lock_guard lock(entriesMutex);
+                entries.push_back({base, std::string(record.data() + 8)});
+            }
+        });
+    }
+    for (auto& worker : workers) worker.join();
+    Check(failures.load(std::memory_order_relaxed) == 0);
+    Check(sceKernelClose(directory) == 0);
+    std::sort(entries.begin(), entries.end(), [](const Entry& left, const Entry& right) { return left.base < right.base; });
+    Check(entries.size() == ChildCount + 2);
+    Check(entries[0].base == 0 && entries[0].name == ".");
+    Check(entries[1].base == 1 && entries[1].name == "..");
+    for (int index = 0; index < ChildCount; ++index) {
+        const auto name = std::string(1, static_cast<char>('a' + index / 10)) + static_cast<char>('0' + index % 10);
+        Check(entries[index + 2].base == index + 2 && entries[index + 2].name == name);
+    }
 }
 
 std::map<std::string, std::uint8_t> ReadDirectory(void* directory) {
@@ -456,6 +520,8 @@ int main(int argc, char** argv) {
     const auto root = AppArchiveFixture::EnterFreshRoot("anyps5-kernel-app-archive");
     if (mode == "archive") {
         Archive(root);
+        FileNumbers();
+        ConcurrentArchiveDirectoryEntries();
         Reads();
         Status();
         Refusals();

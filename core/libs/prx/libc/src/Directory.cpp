@@ -1,3 +1,4 @@
+#include "prx/libc/include/GuestFileNumber.hpp"
 #include "prx/libc/include/GuestDirectory.hpp"
 #include "prx/libc/include/General.hpp"
 #include "prx/libc/include/FilesystemError.hpp"
@@ -250,7 +251,7 @@ GuestDirectoryEntry* ReadEntry(Directory& directory) {
 GuestDirectoryEntry MakeEntry(const std::string& name, std::uint64_t inode, std::uint8_t type) {
     if (name.size() > 255) throw std::system_error(ENAMETOOLONG, std::generic_category(), "directory entry name");
     GuestDirectoryEntry entry{};
-    entry.fileNumber = inode <= UINT32_MAX ? static_cast<std::uint32_t>(inode) : 0;
+    entry.fileNumber = GuestFileNumber_nid_no_patch(inode);
     entry.recordLength = static_cast<std::uint16_t>(8 + ((name.size() + 1 + 3) & ~std::size_t{3}));
     entry.nameLength = static_cast<std::uint8_t>(name.size());
     entry.type = type;
