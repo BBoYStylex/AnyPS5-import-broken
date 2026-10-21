@@ -1,6 +1,7 @@
 #include "SceTypes.hpp"
 #include <cstdint>
 #include <cstdlib>
+#include <initializer_list>
 #include <stdexcept>
 #include <string>
 
@@ -8,6 +9,10 @@ extern "C" int APS5_VABI sceContentDeleteInitialize(const ContentDeleteInitParam
 extern "C" int APS5_VABI sceContentDeleteTerminate(void);
 extern "C" int APS5_VABI sceContentDeleteById(std::int64_t contentId);
 extern "C" int APS5_VABI sceContentDeleteByPath(const char* contentPath);
+extern "C" int APS5_VABI sceContentDeleteByIdListForSf(void);
+extern "C" int APS5_VABI sceContentDeleteGlobalMstat(void);
+extern "C" int APS5_VABI sceContentDeleteMemoryInitialize(void);
+extern "C" int APS5_VABI sceContentDeleteMemoryTerminate(void);
 
 namespace {
 
@@ -49,5 +54,15 @@ int main() {
     Require(sceContentDeleteTerminate() == 0);
     Require(LogicErrorMessage([] { sceContentDeleteTerminate(); }) == "sceContentDeleteTerminate: not initialized");
     Require(LogicErrorMessage([] { sceContentDeleteById(1); }) == "sceContentDeleteById: not initialized");
+
+    for (auto call : {sceContentDeleteByIdListForSf, sceContentDeleteGlobalMstat, sceContentDeleteMemoryInitialize, sceContentDeleteMemoryTerminate}) {
+        bool threw = false;
+        try {
+            call();
+        } catch (const std::runtime_error&) {
+            threw = true;
+        }
+        Require(threw);
+    }
     return 0;
 }
