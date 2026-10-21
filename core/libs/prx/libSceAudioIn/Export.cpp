@@ -243,6 +243,11 @@ int APS5_VABI sceAudioInSetConnections(void) {
     return 0;
 }
 
+int APS5_VABI sceAudioInSetConnectionsForUser(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
 int APS5_VABI sceAudioInSetPortConnections(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
@@ -313,6 +318,11 @@ int APS5_VABI sceAudioInSetDevConnection(void) {
     return 0;
 }
 
+int APS5_VABI sceAudioInSetFocusForUser(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
 int APS5_VABI sceAudioInCountPorts(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
@@ -359,6 +369,26 @@ int APS5_VABI sceAudioInSetMode2(void) {
 }
 
 int APS5_VABI sceAudioInExtCtrl(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceAudioInExtClose(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceAudioInExtInput(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceAudioInExtOpen(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceAudioInExtSetAecMode(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
