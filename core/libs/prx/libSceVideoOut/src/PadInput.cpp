@@ -27,6 +27,7 @@ PadInput::PadInput(Pad::InputConfiguration configuration) : keyboardMouse(std::m
 
 PadInput::~PadInput() {
     closeController();
+    if (ownsGameController) SDL_QuitSubSystem(SDL_INIT_GAMECONTROLLER);
 }
 
 void PadInput::openFirstAvailableController() {
@@ -38,6 +39,7 @@ void PadInput::openFirstAvailableController() {
             APS5_LOG_ERR("Pad: SDL game controller init failed: %s", SDL_GetError());
             return;
         }
+        ownsGameController = true;
     }
     for (int deviceIndex = 0; deviceIndex < SDL_NumJoysticks(); ++deviceIndex) {
         if (!SDL_IsGameController(deviceIndex)) continue;

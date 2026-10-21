@@ -32,6 +32,7 @@ private:
 
     Pad::KeyboardMouse keyboardMouse;
     SDL_GameController* controller = nullptr;
+    bool ownsGameController = false;
     PadInputState controllerState{};
     std::uint32_t outputSequence = 0;
     PadOutputState outputState{};
