@@ -25,7 +25,11 @@ constexpr Case Cases[]{
     {VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS, true},
     {VK_DRIVER_ID_INTEL_OPEN_SOURCE_MESA, true},
     {VK_DRIVER_ID_MESA_LLVMPIPE, true},
+#ifdef __APPLE__
+    {VK_DRIVER_ID_MOLTENVK, false},
+#else
     {VK_DRIVER_ID_MOLTENVK, true},
+#endif
 };
 
 constexpr std::array<std::uint32_t, 19> BranchedLdsStep{
