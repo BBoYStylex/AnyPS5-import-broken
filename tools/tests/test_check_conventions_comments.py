@@ -391,9 +391,16 @@ class SilentStubSectionTests(unittest.TestCase):
         result = self.check_stub("# Project technical debt\n\n### Build\n\n- A toolchain limitation.\n", "docs/dev/TechnicalDebt.md")
         self.assertNotIn("[debt-file]", result.stdout + result.stderr)
 
+    def test_entry_without_a_core_link_in_a_library_file_is_rejected(self):
+        result = self.check_stub("# libSceExample technical debt\n\n### Functional\n\n- A driver limitation.\n")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("docs/dev/debt/libSceExample.md:5: error: [debt-file]", result.stdout)
+        self.assertIn("docs/dev/TechnicalDebt.md", result.stdout)
+
 
 class TestFixtureExportTests(unittest.TestCase):
-    def check(self, path, text):
+    def check(self, path, text=None):
+        files = path if text is None else {path: text}
         checker = Path(__file__).resolve().parents[1] / "check_conventions.py"
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -415,7 +422,8 @@ class TestFixtureExportTests(unittest.TestCase):
             write("core/libs/prx/libSceNgs2/tests/Render.cpp", "static int APS5_VABI Process(int value) { return value; }\n")
             git("add", ".")
             git("commit", "-qm", "feat: add libraries")
-            write(path, text)
+            for relative, content in files.items():
+                write(relative, content)
             git("add", ".")
             git("commit", "-qm", "feat: add source")
             env = {key: value for key, value in os.environ.items()
@@ -444,12 +452,16 @@ class TestFixtureExportTests(unittest.TestCase):
         self.assertIn("sceKernelGetProcessTime is also in libkernel", result.stdout)
 
     def test_comment_in_a_shader_is_reported(self):
+        shaders = {}
         for path in ("core/libs/prx/libSceAgcDriver/Graphics/shaders/Fill.comp", "core/libs/prx/libSceAgcDriver/tests/shaders/Fill.frag", "core/libs/prx/libSceAgcDriver/Graphics/shaders/Fill.glsl"):
-            for line in ("    // fill the target", "    /* fill the target */"):
-                with self.subTest(path=path, line=line):
-                    result = self.check(path, f"#version 450\nvoid main() {{\n{line}\n}}\n")
-                    self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-                    self.assertIn(f"{path}:3: error: [comment]", result.stdout)
+            for style, line in (("Line", "    // fill the target"), ("Block", "    /* fill the target */")):
+                stem, extension = path.rsplit(".", 1)
+                shaders[f"{stem}{style}.{extension}"] = f"#version 450\nvoid main() {{\n{line}\n}}\n"
+        result = self.check(shaders)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        for path in shaders:
+            with self.subTest(path=path):
+                self.assertIn(f"{path}:3: error: [comment]", result.stdout)
 
     def test_shader_without_comments_passes(self):
         result = self.check("core/libs/prx/libSceAgcDriver/Graphics/shaders/Fill.vert",
