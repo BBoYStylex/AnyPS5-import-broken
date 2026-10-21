@@ -268,6 +268,7 @@ anyps5_wasm_library(libSceSsl)
 target_link_libraries(aps5_wasm_libSceSsl PRIVATE mbedx509 mbedcrypto)
 
 set(LIBATRAC9_DIR ${PROJECT_SOURCE_DIR}/3rdparty/LibAtrac9/C/src)
+set(VGMSTREAM_ATRAC9_DIR ${PROJECT_SOURCE_DIR}/3rdparty/vgmstream/src/coding/libs)
 set(LIBATRAC9_PATCHED_DIR ${CMAKE_CURRENT_BINARY_DIR}/atrac9)
 include(${ANYPS5_LIBS_DIR}/prx/libSceAjm.native/PatchLibAtrac9.cmake)
 add_library(aps5_wasm_atrac9 OBJECT
@@ -284,10 +285,12 @@ add_library(aps5_wasm_atrac9 OBJECT
         ${LIBATRAC9_DIR}/tables.c
         ${LIBATRAC9_PATCHED_DIR}/unpack.c
         ${LIBATRAC9_DIR}/utility.c
+        ${VGMSTREAM_ATRAC9_DIR}/atrac9_dec.c
+        ${VGMSTREAM_ATRAC9_DIR}/atrac9_internal.c
 )
-target_include_directories(aps5_wasm_atrac9 PRIVATE ${LIBATRAC9_DIR})
+target_include_directories(aps5_wasm_atrac9 PRIVATE ${LIBATRAC9_DIR} ${VGMSTREAM_ATRAC9_DIR})
 target_compile_options(aps5_wasm_atrac9 PRIVATE -pthread)
-set(ANYPS5_WASM_libSceAjm_native_INCLUDES ${ANYPS5_LIBS_DIR} ${LIBATRAC9_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/ffmpeg-stub)
+set(ANYPS5_WASM_libSceAjm_native_INCLUDES ${ANYPS5_LIBS_DIR} ${LIBATRAC9_DIR} ${VGMSTREAM_ATRAC9_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/ffmpeg-stub)
 anyps5_wasm_library(libSceAjm.native)
 
 set(ANYPS5_WASM_LIBRARY_OBJECTS $<TARGET_OBJECTS:aps5_wasm_atrac9>)
