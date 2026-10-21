@@ -7,6 +7,13 @@
 extern "C" {
 int APS5_VABI sceNpSessionSignalingInitialize(void* param);
 int APS5_VABI sceNpSessionSignalingCreateContext2(const void* param, std::uint32_t* contextId);
+int APS5_VABI sceNpSessionSignalingCreateContext(const void* param, std::uint32_t* contextId);
+int APS5_VABI sceNpSessionSignalingDeactivate(std::uint32_t contextId);
+int APS5_VABI sceNpSessionSignalingDestroyContext(std::uint32_t contextId);
+int APS5_VABI sceNpSessionSignalingActivateSession(void);
+int APS5_VABI sceNpSessionSignalingActivateUser(void);
+int APS5_VABI sceNpSessionSignalingGetConnectionInfo(void);
+int APS5_VABI sceNpSessionSignalingGetConnectionFromPeerAddress2(void);
 std::int32_t APS5_VABI sceNpSessionSignalingGetLocalNetInfo(std::int32_t contextId, void* info);
 int APS5_VABI sceNpSessionSignalingRequestPrepare(std::uint32_t contextId, std::uint32_t* requestId);
 std::int32_t APS5_VABI sceNpSessionSignalingGetConnectionStatus(std::int32_t contextId, std::int32_t connectionId, std::int32_t* status, void* peerAddress, std::uint16_t* peerPort);
@@ -56,6 +63,18 @@ int main() {
     Require(sceNpSessionSignalingGetConnectionStatus(netContextId, 1, &status, &peerAddress, &peerPort) == ConnectionNotFound, "connection without network");
     Require(sceNpSessionSignalingGetConnectionStatus(netContextId, 1, &status, nullptr, nullptr) == ConnectionNotFound, "connection without peer outputs");
     Require(status == 0x5a5a5a5a && peerAddress == 0xa5a5a5a5u && peerPort == 0xa5a5, "failed status query wrote an output");
+
+        std::uint32_t legacyContextId = 0;
+    Require(sceNpSessionSignalingCreateContext(nullptr, nullptr) == InvalidArgument, "null legacy context id");
+    Require(sceNpSessionSignalingCreateContext(nullptr, &legacyContextId) == 0, "legacy context creation");
+    Require(legacyContextId > 0, "valid legacy context id");
+    Require(sceNpSessionSignalingDeactivate(legacyContextId) == 0, "deactivate legacy context");
+    Require(sceNpSessionSignalingDestroyContext(legacyContextId) == 0, "destroy legacy context");
+
+    Require(sceNpSessionSignalingActivateSession() == Unavailable, "activate session without network");
+    Require(sceNpSessionSignalingActivateUser() == Unavailable, "activate user without network");
+    Require(sceNpSessionSignalingGetConnectionInfo() == Unavailable, "connection info without network");
+    Require(sceNpSessionSignalingGetConnectionFromPeerAddress2() == Unavailable, "peer address query without network");
 
     Require(sceNpSessionSignalingTerminate() == 0, "terminate failed");
 }
