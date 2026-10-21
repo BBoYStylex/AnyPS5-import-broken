@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <initializer_list>
 #include <stdexcept>
 
 struct GameLiveStreamingStatus2 {
@@ -22,6 +23,11 @@ int APS5_VABI sceGameLiveStreamingInitialize(std::size_t heap_size);
 int APS5_VABI sceGameLiveStreamingTerminate(void);
 int APS5_VABI sceGameLiveStreamingGetCurrentStatus2(GameLiveStreamingStatus2* status);
 int APS5_VABI sceGameLiveStreamingGetProgramInfo(void);
+int APS5_VABI sceGameLiveStreamingScreenInitialize(void);
+int APS5_VABI sceGameLiveStreamingScreenTerminate(void);
+int APS5_VABI sceGameLiveStreamingPermitLiveStreaming(void);
+int APS5_VABI sceGameLiveStreamingSetMaxBitrate(void);
+int APS5_VABI sceGameLiveStreamingEnableLiveStreaming(void);
 }
 
 namespace {
@@ -74,6 +80,16 @@ int main() {
         threwProgramInfo = true;
     }
     Require(threwProgramInfo);
+
+    for (auto call : {sceGameLiveStreamingScreenInitialize, sceGameLiveStreamingScreenTerminate, sceGameLiveStreamingPermitLiveStreaming, sceGameLiveStreamingSetMaxBitrate, sceGameLiveStreamingEnableLiveStreaming}) {
+        bool threw = false;
+        try {
+            call();
+        } catch (const std::runtime_error&) {
+            threw = true;
+        }
+        Require(threw);
+    }
 
     Require(sceGameLiveStreamingTerminate() == 0);
 }
