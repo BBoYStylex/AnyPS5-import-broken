@@ -566,12 +566,14 @@ void DescriptorBindingBuilder::Populate(BindingAllocationResult& allocation, con
     if (needsShaderData) {
         for (const auto reg : layout.userDataRegisters) allocation.shaderDataUserWords.push_back(reg - userDataBase);
     }
-    std::vector<DescriptorBinding> bindings;
-    bindings.reserve(plan.bindings.size());
+    auto bindings = std::move(allocation.bindings);
+    bindings.resize(plan.bindings.size());
     std::size_t writtenHere = 0;
     std::size_t readOnlyHere = 0;
-    for (const auto& entry : plan.bindings) {
-        auto physical = entry.descriptor;
+    for (std::size_t index = 0; index < plan.bindings.size(); ++index) {
+        const auto& entry = plan.bindings[index];
+        auto& physical = bindings[index];
+        physical = entry.descriptor;
         switch (physical.role) {
         case DescriptorRole::GuestBuffers:
             physical.guestDescriptor = GuestBuffersDescriptor(entry.resources, snapshot);
@@ -654,8 +656,6 @@ void DescriptorBindingBuilder::Populate(BindingAllocationResult& allocation, con
                 fail("DescriptorBindingBuilder::Populate guest descriptor size is not a multiple of the binding count");
             }
         }
-
-        bindings.push_back(std::move(physical));
     }
 
     if (bufferWrittenTraceEnabled()) {
