@@ -36,9 +36,9 @@ jobs:
           python3 tools/pr_overlap.py --base "${{ github.event.repository.default_branch }}" --out "$out"
           [ -s "$state" ] || echo '{}' > "$state"
           record() { jq --arg pr "$1" --arg h "$2" '.[$pr] = $h' "$state" > "$state.new" && mv "$state.new" "$state"; }
-          shopt -s nullglob
           marker='<!-- pr-overlap -->'
           unpinned() { sed -E 's#/blob/[0-9a-f]{40}/#/blob/main/#g'; }
+          shopt -s nullglob
           prev=
           for file in "$out"/*.md; do
             [ -z "$prev" ] || record "$prev" "$hash"
@@ -62,7 +62,8 @@ jobs:
             fi
           done
           [ -z "$prev" ] || record "$prev" "$hash"
-          reports=$(for file in "$out"/*.md; do basename "$file" .md; done | jq -R . | jq -sc .)
+          files=("$out"/*.md)
+          reports=$(if ((${#files[@]})); then printf '%s\n' "${files[@]##*/}" | sed 's/\.md$//' | jq -R . | jq -sc .; else echo '[]'; fi)
           jq -c --argjson keep "$reports" 'with_entries(select(.key | IN($keep[])))' "$state" > "$state.new" && mv "$state.new" "$state"
       - if: always()
         uses: actions/cache/save@v6
