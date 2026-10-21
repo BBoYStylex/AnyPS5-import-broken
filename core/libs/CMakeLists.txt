@@ -643,6 +643,17 @@ if(BUILD_TESTING)
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libScePosixForWebKit>")
     endif()
 
+    add_test_executable(guest_sysutil_tests tests/GuestSysUtil.cpp)
+    target_include_directories(guest_sysutil_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(guest_sysutil_tests PRIVATE libSceSysUtil libc)
+    configure_windows_unwind(guest_sysutil_tests)
+    add_test(NAME guest_sysutil COMMAND guest_sysutil_tests)
+    set_tests_properties(guest_sysutil PROPERTIES TIMEOUT 30)
+    if(WIN32)
+        set_tests_properties(guest_sysutil PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceSysUtil>")
+    endif()
+
     add_test_executable(MemoryPoolTest
         tests/MemoryPoolTest.cpp
         prx/libkernel/DirectMemory/MemoryPool.cpp
