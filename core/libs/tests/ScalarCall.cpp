@@ -43,6 +43,11 @@ static RdnaInstruction Sop1(std::uint32_t pc, std::uint32_t destination, std::ui
     return DecodeRdnaSop1(pc, code, 0u);
 }
 
+static RdnaInstruction Sop2(std::uint32_t pc, std::uint32_t destination, std::uint32_t op, std::uint32_t source0, std::uint32_t source1) {
+    const std::array<std::uint32_t, 1> code{0x80000000u | (op << 23u) | (destination << 16u) | (source1 << 8u) | source0};
+    return DecodeRdnaSop2(pc, code, 0u);
+}
+
 static RdnaInstruction Sopp(std::uint32_t pc, std::uint32_t op, std::uint32_t immediate = 0u) {
     const std::array<std::uint32_t, 1> code{0xbf800000u | (op << 16u) | immediate};
     return DecodeRdnaSopp(pc, code, 0u);
@@ -301,6 +306,10 @@ static void CheckTableCalls() {
     Require(readsFirst.FindBlockByProgramCounter(0u).terminator.trueBlock == readsFirst.FindBlockByProgramCounter(12u).id);
     ExpectThrow("escapes the constant-offset call/return model", [] {
         Build({Sop1(0u, 0u, 3u, 8u), Call(4u, 8u, 2u), Sopp(8u, 2u, 0xfffdu), Sopp(12u, 1u), Sop1(16u, 0u, 0x20u, 8u)});
+    });
+    static_cast<void>(Build({Call(0u, 8u, 3u), Sop2(4u, 8u, 0x15u, 0u, 2u), Sop2(8u, 10u, 0x1bu, 8u, 2u), Sopp(12u, 1u), Sop1(16u, 0u, 0x20u, 8u)}));
+    ExpectThrow("escapes the constant-offset call/return model", [] {
+        Build({Call(0u, 8u, 3u), Sop2(4u, 8u, 0x0eu, 0u, 2u), Sop2(8u, 10u, 0x1bu, 8u, 2u), Sopp(12u, 1u), Sop1(16u, 0u, 0x20u, 8u)});
     });
 }
 

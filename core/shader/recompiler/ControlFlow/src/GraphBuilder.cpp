@@ -503,11 +503,9 @@ bool overwritesScalar(const RdnaInstruction& instruction, std::uint32_t reg, std
                 case RdnaOpcode::SBitset1B64:
                 case RdnaOpcode::SSwappcB64:
                 case RdnaOpcode::SSetpcB64: return false;
-                case RdnaOpcode::SMovB64:
-                case RdnaOpcode::SGetpcB64: return first != NoScalarRegister && reg >= first && reg - first < 2u;
-                default: return first != NoScalarRegister && reg == first;
+                default: return first != NoScalarRegister && reg >= first && reg - first < std::max(instruction.dataDwordCount, 1u);
             }
-        case RdnaInstructionFamily::SOP2: return first != NoScalarRegister && reg == first;
+        case RdnaInstructionFamily::SOP2: return first != NoScalarRegister && reg >= first && reg - first < std::max(instruction.dataDwordCount, 1u);
         case RdnaInstructionFamily::SOPK: return instruction.op == RdnaOpcode::SMovkI32 && reg == first;
         case RdnaInstructionFamily::VOP1:
         case RdnaInstructionFamily::VOP2:
