@@ -314,6 +314,22 @@ int main() {
         require(wcstoull_nid_postfix(binary, &end, base) == 0 && end == binary + 3);
     }
     require(wcstoll_nid_postfix(binary + 2, &end, 16) == 0xb101 && end == binary + 7);
+    struct SignedCase {
+        const char16_t* text;
+        int base;
+        long long value;
+        std::ptrdiff_t consumed;
+        int error;
+    };
+    for (const SignedCase& item : {SignedCase{u"- 1", 10, -1, 3, 0}, SignedCase{u"+\t-1", 10, LLONG_MAX, 4, 34}, SignedCase{u" - -1", 10, LLONG_MIN, 5, 34},
+             SignedCase{u"-18446744073709551615", 10, LLONG_MIN, 21, 34}, SignedCase{u"-9223372036854775808", 10, LLONG_MIN, 20, 0},
+             SignedCase{u"-9223372036854775809", 10, LLONG_MIN, 20, 34}, SignedCase{u"+-9223372036854775808", 10, LLONG_MAX, 21, 34}, SignedCase{u" -0x", 16, 0, 0, 0},
+             SignedCase{u"- ", 10, 0, 0, 0}}) {
+        for (auto* parse : {wcstol_nid_postfix, wcstoll_nid_postfix, wcstoimax_nid_postfix}) {
+            *__error_nid_postfix() = 0;
+            require(parse(item.text, &end, item.base) == item.value && end - item.text == item.consumed && *__error_nid_postfix() == item.error);
+        }
+    }
 
     const char16_t* scientific = u"3.5e2!";
     require(wcstod_nid_postfix(scientific, &end) == 350.0 && end == scientific + 5);
@@ -322,12 +338,12 @@ int main() {
     const char16_t* half = u"-1.5é";
     require(wcstold_nid_postfix(half, &end) == -1.5L && end == half + 4);
     const char16_t* wideNan = u" -nan(0x123)é";
-    require(std::bit_cast<std::uint64_t>(wcstod_nid_postfix(wideNan, &end)) == 0xfff8000000000000u && end == wideNan + 12);
-    require(std::bit_cast<std::uint32_t>(wcstof_nid_postfix(wideNan, &end)) == 0xffc00000u && end == wideNan + 12);
+    require(std::bit_cast<std::uint64_t>(wcstod_nid_postfix(wideNan, &end)) == 0xfff8000000000123u && end == wideNan + 12);
+    require(std::bit_cast<std::uint32_t>(wcstof_nid_postfix(wideNan, &end)) == 0x7fc00000u && end == wideNan + 12);
     const long double wideExtended = wcstold_nid_postfix(wideNan, &end);
     std::uint64_t significand;
     std::memcpy(&significand, &wideExtended, sizeof(significand));
-    require(std::isnan(wideExtended) && std::signbit(wideExtended) && significand == 0xc000000000000000u && end == wideNan + 12);
+    require(std::isnan(wideExtended) && !std::signbit(wideExtended) && significand == 0xc000000000000000u && end == wideNan + 12);
 
     require(wcscoll_nid_postfix(u"a", u"b") < 0);
     require(wcscoll_nid_postfix(u"￿", u"a") > 0);
