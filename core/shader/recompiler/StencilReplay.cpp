@@ -2,6 +2,7 @@
 #include "Optimization/MaskedSelectEliminator.hpp"
 #include "Optimization/SrtWalker/SrtInstructionPredicates.hpp"
 #include <algorithm>
+#include <array>
 #include <functional>
 #include <iterator>
 #include <map>
@@ -166,6 +167,31 @@ private:
         return ballot->Opcode() == IrOpcode::Ballot && ballot->ArgumentCount() == 1u ? ballot : nullptr;
     }
 
+    struct WqmHalves {
+        ReplayMask input;
+        std::array<ReplayMask, 2> sources;
+        std::array<const IrValue*, 4> parts;
+    };
+
+    std::optional<WqmHalves> wqmHalves(ReplayMask mask) const {
+        const auto source = [](const IrValue* word, std::uint32_t half) -> std::pair<const IrValue*, const IrValue*> {
+            if (word->Opcode() != IrOpcode::CompositeExtractU64 || word->ArgumentCount() != 2u || !Immediate(word->Argument(1), half)) return {};
+            const IrValue* wqm = word->Argument(0)->Resolve();
+            if (wqm->Opcode() != IrOpcode::WqmU64 || wqm->ArgumentCount() != 1u) return {};
+            const IrValue* construct = wqm->Argument(0)->Resolve();
+            if (construct->Opcode() != IrOpcode::CompositeConstructU64 || construct->ArgumentCount() != 2u) return {};
+            return {wqm, construct};
+        };
+        const auto [lowWqm, low] = source(mask.low, 0u);
+        if (!low) return std::nullopt;
+        const ReplayMask lowSource{low->Argument(0)->Resolve(), low->Argument(1)->Resolve()};
+        if (waveSize == 32u) return WqmHalves{lowSource, {lowSource, lowSource}, {lowWqm, low, lowWqm, low}};
+        const auto [highWqm, high] = source(mask.high, 1u);
+        if (!high) return std::nullopt;
+        const ReplayMask highSource{high->Argument(0)->Resolve(), high->Argument(1)->Resolve()};
+        return WqmHalves{ReplayMask{lowSource.low, highSource.high}, {lowSource, highSource}, {lowWqm, low, highWqm, high}};
+    }
+
     bool maskStable(ReplayMask mask, unsigned depth) {
         if (depth > 128u) return false;
         mask = ReplayMask{mask.low->Resolve(), mask.high->Resolve()};
@@ -187,18 +213,13 @@ private:
         } else if (mask.low->Opcode() == IrOpcode::BitwiseAnd32 && (waveSize == 32u || mask.high->Opcode() == IrOpcode::BitwiseAnd32)) {
             const auto pair = [&](unsigned low, unsigned high) { return ReplayMask{mask.low->Argument(low)->Resolve(), waveSize == 32u ? mask.low->Argument(low)->Resolve() : mask.high->Argument(high)->Resolve()}; };
             valid = (maskStable(pair(0u, 0u), depth + 1u) && maskStable(pair(1u, 1u), depth + 1u)) || (waveSize != 32u && maskStable(pair(0u, 1u), depth + 1u) && maskStable(pair(1u, 0u), depth + 1u));
-        } else if (mask.low->Opcode() == IrOpcode::CompositeExtractU64 && mask.low->ArgumentCount() == 2u && Immediate(mask.low->Argument(1), 0u)) {
-            const IrValue* wqm = mask.low->Argument(0)->Resolve();
-            const bool paired = waveSize == 32u || (mask.high->Opcode() == IrOpcode::CompositeExtractU64 && mask.high->ArgumentCount() == 2u && mask.high->Argument(0)->Resolve() == wqm && Immediate(mask.high->Argument(1), 1u));
-            if (paired && wqm->Opcode() == IrOpcode::WqmU64 && wqm->ArgumentCount() == 1u) {
-                const IrValue* source = wqm->Argument(0)->Resolve();
-                valid = source->Opcode() == IrOpcode::CompositeConstructU64 && source->ArgumentCount() == 2u && maskStable(ReplayMask{source->Argument(0)->Resolve(), source->Argument(1)->Resolve()}, depth + 1u);
-                if (valid) {
-                    const auto provenance = helpers(ReplayMask{source->Argument(0)->Resolve(), source->Argument(1)->Resolve()}, depth + 1u);
-                    valid = provenance == HelperMask::RealOnly || provenance == HelperMask::QuadStable;
-                }
-                if (valid) { restrict(wqm); restrict(source); }
+        } else if (const auto halves = wqmHalves(mask)) {
+            valid = maskStable(halves->sources[0], depth + 1u) && maskStable(halves->sources[1], depth + 1u);
+            if (valid) {
+                const auto provenance = helpers(halves->input, depth + 1u);
+                valid = provenance == HelperMask::RealOnly || provenance == HelperMask::QuadStable;
             }
+            if (valid) for (const auto* part : halves->parts) restrict(part);
         } else if (mask.low->IsPhi() && mask.low->ArgumentCount() != 0u && mask.low->ArgumentCount() == mask.low->PhiBlockCount() && (waveSize == 32u || (mask.high->IsPhi() && mask.high->Parent() == mask.low->Parent() && mask.high->ArgumentCount() == mask.high->PhiBlockCount()))) {
             valid = true;
             for (std::size_t index = 0; index < mask.low->PhiBlockCount(); ++index) {
@@ -285,16 +306,9 @@ private:
                     const auto swapped = combine(1u, 0u);
                     if (swapped == HelperMask::RealOnly || (swapped == HelperMask::QuadStable && result == HelperMask::Uncertain)) result = swapped;
                 }
-            } else if (mask.low->Opcode() == IrOpcode::CompositeExtractU64 && mask.low->ArgumentCount() == 2u && Immediate(mask.low->Argument(1), 0u)) {
-                const IrValue* wqm = mask.low->Argument(0)->Resolve();
-                const bool paired = waveSize == 32u || (mask.high->Opcode() == IrOpcode::CompositeExtractU64 && mask.high->ArgumentCount() == 2u && mask.high->Argument(0)->Resolve() == wqm && Immediate(mask.high->Argument(1), 1u));
-                if (paired && wqm->Opcode() == IrOpcode::WqmU64 && wqm->ArgumentCount() == 1u) {
-                    const IrValue* source = wqm->Argument(0)->Resolve();
-                    if (source->Opcode() == IrOpcode::CompositeConstructU64 && source->ArgumentCount() == 2u) {
-                        const auto input = helpers(ReplayMask{source->Argument(0)->Resolve(), source->Argument(1)->Resolve()}, depth + 1u);
-                        if (input == HelperMask::RealOnly || input == HelperMask::QuadStable) result = HelperMask::QuadStable;
-                    }
-                }
+            } else if (const auto halves = wqmHalves(mask)) {
+                const auto input = helpers(halves->input, depth + 1u);
+                if (input == HelperMask::RealOnly || input == HelperMask::QuadStable) result = HelperMask::QuadStable;
             } else if (mask.low->IsPhi() && mask.low->ArgumentCount() != 0u && mask.low->ArgumentCount() == mask.low->PhiBlockCount() && (waveSize == 32u || (mask.high->IsPhi() && mask.high->Parent() == mask.low->Parent() && mask.high->ArgumentCount() == mask.high->PhiBlockCount()))) {
                 result = HelperMask::RealOnly;
                 for (std::size_t index = 0; index < mask.low->PhiBlockCount(); ++index) {

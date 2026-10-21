@@ -767,6 +767,20 @@ int main() {
         return b.threadBit(b.emit(IrOpcode::CompositeExtractU64, IrType::U32, {&wqm, &b.constant(0u)}), b.emit(IrOpcode::CompositeExtractU64, IrType::U32, {&wqm, &b.constant(1u)}));
     };
 
+    const auto wholeQuadMask = [](Builder& b, IrValue& live) -> IrValue& {
+        auto& ballot = b.emit(IrOpcode::Ballot, IrType::U32x4, {&live});
+        auto& all = b.emit(IrOpcode::Ballot, IrType::U32x4, {&b.truth()});
+        auto& low = b.emit(IrOpcode::BitwiseAnd32, IrType::U32, {&b.emit(IrOpcode::CompositeExtractU32x4, IrType::U32, {&ballot, &b.constant(0u)}), &b.emit(IrOpcode::CompositeExtractU32x4, IrType::U32, {&all, &b.constant(0u)})});
+        auto& high = b.emit(IrOpcode::BitwiseAnd32, IrType::U32, {&b.emit(IrOpcode::CompositeExtractU32x4, IrType::U32, {&ballot, &b.constant(1u)}), &b.emit(IrOpcode::CompositeExtractU32x4, IrType::U32, {&all, &b.constant(1u)})});
+        return b.emit(IrOpcode::WqmU64, IrType::U64, {&b.emit(IrOpcode::CompositeConstructU64, IrType::U64, {&low, &high})});
+    };
+
+    const auto splitWholeQuads = [&](Builder& b, IrValue& lowLive, IrValue& highLive) -> IrValue& {
+        auto& lowWqm = wholeQuadMask(b, lowLive);
+        auto& highWqm = wholeQuadMask(b, highLive);
+        return b.threadBit(b.emit(IrOpcode::CompositeExtractU64, IrType::U32, {&lowWqm, &b.constant(0u)}), b.emit(IrOpcode::CompositeExtractU64, IrType::U32, {&highWqm, &b.constant(1u)}));
+    };
+
     const auto sample = [&](IrShaderStage stage, std::uint32_t sampleFlags, IrOpcode opcode = IrOpcode::ImageSampleRaw, bool wholeQuadExec = false) {
         Builder b;
         b.program.Resources().stage = stage;
@@ -1064,6 +1078,30 @@ int main() {
         auto& real = b.ballotBit(helperPredicate(b, false));
         stencilByMask(b, wholeQuads(b, b.logicalAnd(real, pixelPredicate(b))));
         return StencilReplaySafe(b.program);
+    });
+
+    passed &= run("stencil replay admits whole-quad mask halves taken from separate expansions of one mask", [&] {
+        Builder b;
+        b.program.Resources().stage = IrShaderStage::Pixel;
+        auto& live = b.logicalAnd(pixelPredicate(b), helperPredicate(b, false));
+        stencilByMask(b, splitWholeQuads(b, live, live));
+        return StencilReplaySafe(b.program);
+    });
+
+    passed &= run("a helper-dependent high half cannot choose a kept lane's stencil through a separate whole-quad expansion", [&] {
+        Builder b;
+        b.program.Resources().stage = IrShaderStage::Pixel;
+        auto& live = b.logicalAnd(pixelPredicate(b), helperPredicate(b, false));
+        stencilByMask(b, splitWholeQuads(b, live, helperPredicate(b, true)));
+        return !StencilReplaySafe(b.program);
+    });
+
+    passed &= run("a helper-dependent low half cannot choose a kept lane's stencil through a separate whole-quad expansion", [&] {
+        Builder b;
+        b.program.Resources().stage = IrShaderStage::Pixel;
+        auto& live = b.logicalAnd(pixelPredicate(b), helperPredicate(b, false));
+        stencilByMask(b, splitWholeQuads(b, helperPredicate(b, true), live));
+        return !StencilReplaySafe(b.program);
     });
 
     passed &= run("only guarded read-only SRT diagnostics can be replayed", [] {
