@@ -352,6 +352,13 @@ static bool FindHostIpv4Interface(HostIpv4Interface& found) {
 #endif
 }
 
+extern "C" std::size_t NetCtlHostDnsServers_nid_no_patch(std::uint32_t* servers, std::size_t capacity) {
+    HostIpv4Interface host;
+    if (!FindHostIpv4Interface(host)) return 0;
+    for (std::size_t index = 0; index < host.dns.size() && index < capacity; ++index) servers[index] = host.dns[index].s_addr;
+    return host.dns.size();
+}
+
 static void WriteInfoWord(NetCtlInfo* info, std::uint32_t value) {
     std::memcpy(info->opaque, &value, sizeof(value));
 }
@@ -665,8 +672,12 @@ int APS5_VABI sceNetCtlUnregisterCallbackV6IpcInt(void) {
     return 0;
 }
 
-int APS5_VABI sceNetCtlGetResultV6(void) {
-    NotImplemented_nid_no_patch(__func__);
+int APS5_VABI sceNetCtlGetResultV6(int event_type, int* error_code) {
+    if (!error_code) return SCE_NET_CTL_ERROR_INVALID_ADDR;
+    if (event_type < NET_CTL_EVENT_DISCONNECTED || event_type > NET_CTL_EVENT_IPOBTAINED) {
+        throw std::runtime_error("sceNetCtlGetResultV6: event type " + std::to_string(event_type) + " is not implemented");
+    }
+    *error_code = 0;
     return 0;
 }
 

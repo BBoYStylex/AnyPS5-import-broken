@@ -3,6 +3,7 @@
 #include "prx/libSceAgcDriver/Execution/include/CaptureTrace.hpp"
 #include "prx/libc/include/HostThreadLocal.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Recorder.hpp"
+#include "prx/libkernel/Time/include/SleepWake.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Resources.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/ParallelCompare.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Texture.hpp"
@@ -1083,6 +1084,60 @@ void FlushForAccess(std::uint64_t address, std::size_t bytes) {
 
 }
 
+struct Recorder::ProgressWatcher {
+    std::mutex mutex;
+    std::condition_variable wake;
+    std::uint64_t submitted = 0;
+    bool stop = false;
+    std::thread thread;
+
+    ProgressWatcher(VkDevice device, VkSemaphore timeline, PFN_vkWaitSemaphoresKHR waitSemaphores, PFN_vkGetSemaphoreCounterValueKHR counterValue) {
+        thread = std::thread([this, device, timeline, waitSemaphores, counterValue] {
+            CpuTopology::PinHelperThread("GPU progress watcher");
+            std::uint64_t seen = 0;
+            for (;;) {
+                {
+                    std::unique_lock lock(mutex);
+                    wake.wait(lock, [&] { return stop || submitted > seen; });
+                    if (stop) return;
+                }
+                const std::uint64_t target = seen + 1;
+                VkSemaphoreWaitInfoKHR info{VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO_KHR};
+                info.semaphoreCount = 1;
+                info.pSemaphores = &timeline;
+                info.pValues = &target;
+                const auto result = waitSemaphores(device, &info, 50'000'000ull);
+                if (result == VK_TIMEOUT) continue;
+                if (result != VK_SUCCESS) {
+                    std::fprintf(stderr, "[gpu] progress watcher: vkWaitSemaphoresKHR failed (%d), watcher stops\n", static_cast<int>(result));
+                    return;
+                }
+                std::uint64_t value = target;
+                if (counterValue(device, timeline, &value) != VK_SUCCESS) value = target;
+                seen = std::max(target, value);
+                KernelWakeSleepers_nid_no_patch();
+            }
+        });
+    }
+
+    void Submitted(std::uint64_t serial) {
+        {
+            std::lock_guard lock(mutex);
+            submitted = serial;
+        }
+        wake.notify_one();
+    }
+
+    ~ProgressWatcher() {
+        {
+            std::lock_guard lock(mutex);
+            stop = true;
+        }
+        wake.notify_one();
+        thread.join();
+    }
+};
+
 Recorder::Recorder(const Context& context, bool timelineSemaphores) : context(context), id(nextRecorderId.fetch_add(1)) {
     {
         std::lock_guard lock(liveRecordersMutex);
@@ -1129,6 +1184,7 @@ Recorder::~Recorder() {
     } catch (const std::exception& error) {
         std::fprintf(stderr, "[gpu] recorder teardown: %s\n", error.what());
     }
+    progressWatcher.reset();
     holdKept.clear();
     if (activeRecorder == this) {
         activeRecorder = nullptr;
@@ -1676,6 +1732,18 @@ bool Recorder::closeStoreRun(bool atSubmit) {
         std::vector<QueuedWrite> writes;
         writes.reserve(stores.size());
         for (const auto& store : stores) writes.push_back({store.address, store.End(), store.dumpTarget != 0});
+        if (const auto order = QueuedWriteOrder(writes); !std::is_sorted(order.begin(), order.end())) {
+            std::vector<Batch::StoreRun::Queued> ordered;
+            std::vector<QueuedWrite> orderedWrites;
+            ordered.reserve(stores.size());
+            orderedWrites.reserve(writes.size());
+            for (const auto index : order) {
+                ordered.push_back(std::move(stores[index]));
+                orderedWrites.push_back(writes[index]);
+            }
+            stores = std::move(ordered);
+            writes = std::move(orderedWrites);
+        }
         const bool dumps = std::any_of(writes.begin(), writes.end(), [](const QueuedWrite& write) { return write.computed; });
         if (dumps) recordQueuedDumps(commands, stores);
         std::size_t first = 0;
@@ -1981,8 +2049,8 @@ void Recorder::EndGpuTiming(std::uint32_t index, std::uint64_t bytes) {
     context.Function<PFN_vkCmdWriteTimestamp>("vkCmdWriteTimestamp")(open->commands, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, open->queries, index * 2 + 1);
 }
 
-bool Recorder::RecordDispatchArguments(VkCommandBuffer commands, VkDeviceAddress source, VkDeviceAddress arguments) {
-    constexpr std::uint32_t PushBytes = 32;
+bool Recorder::RecordDispatchArguments(VkCommandBuffer commands, VkDeviceAddress source, VkDeviceAddress arguments, const std::array<std::uint32_t, 3>* threadGroup) {
+    constexpr std::uint32_t PushBytes = 48;
     if (dispatchArgumentState == 0) {
         dispatchArgumentState = -1;
         VkShaderModule module = VK_NULL_HANDLE;
@@ -2015,11 +2083,15 @@ bool Recorder::RecordDispatchArguments(VkCommandBuffer commands, VkDeviceAddress
         VkDeviceAddress source;
         VkDeviceAddress arguments;
         std::array<std::uint32_t, 4> limits;
-    } parameters{source, arguments, {limit[0], limit[1], limit[2], 0u}};
+        std::array<std::uint32_t, 4> group;
+    } parameters{source, arguments, {limit[0], limit[1], limit[2], threadGroup != nullptr ? 1u : 0u}, {1u, 1u, 1u, 0u}};
+    if (threadGroup != nullptr) std::copy(threadGroup->begin(), threadGroup->end(), parameters.group.begin());
     static_assert(sizeof(parameters) == PushBytes);
     function(cmdPushConstants, "vkCmdPushConstants")(commands, dispatchArgumentLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, PushBytes, &parameters);
     function(cmdDispatch, "vkCmdDispatch")(commands, 1, 1, 1);
-    recordBarrier(commands, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT, VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_INDIRECT_COMMAND_READ_BIT);
+    const VkPipelineStageFlags readers = VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT | (threadGroup != nullptr ? VK_PIPELINE_STAGE_TRANSFER_BIT : 0u);
+    const VkAccessFlags reads = VK_ACCESS_INDIRECT_COMMAND_READ_BIT | (threadGroup != nullptr ? VK_ACCESS_TRANSFER_READ_BIT : 0u);
+    recordBarrier(commands, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, readers, VK_ACCESS_SHADER_WRITE_BIT, reads);
     CountBarriers(CommandClass::DispatchLeading, 2);
     return true;
 }
@@ -2115,6 +2187,56 @@ bool Recorder::gpuSampleCounter() {
 
 std::uint64_t Recorder::Batch::StoreRun::Queued::End() const {
     return address + (dumpTarget != 0 ? SampleDumpBytes : bytes.size());
+}
+
+std::vector<std::size_t> Recorder::QueuedWriteOrder(std::span<const QueuedWrite> writes) {
+    std::vector<std::size_t> order(writes.size());
+    for (std::size_t i = 0; i < order.size(); ++i) order[i] = i;
+    std::vector<bool> coveredLater(writes.size()), overLater(writes.size());
+    std::map<std::uint64_t, std::uint64_t> later;
+    for (auto i = writes.size(); i-- > 0;) {
+        const auto& write = writes[i];
+        if (!write.computed) {
+            const auto after = later.upper_bound(write.begin);
+            coveredLater[i] = after != later.begin() && std::prev(after)->second >= write.end;
+            const auto last = later.lower_bound(write.end);
+            overLater[i] = last != later.begin() && std::prev(last)->second > write.begin;
+            continue;
+        }
+        auto begin = write.begin, end = write.end;
+        auto at = later.lower_bound(begin);
+        if (at != later.begin() && std::prev(at)->second >= begin) --at;
+        while (at != later.end() && at->first <= end) {
+            begin = std::min(begin, at->first);
+            end = std::max(end, at->second);
+            at = later.erase(at);
+        }
+        later.emplace(begin, end);
+    }
+    std::vector<std::size_t> before, dumps, after;
+    std::vector<std::pair<std::uint64_t, std::uint64_t>> earlier, delayed;
+    for (std::size_t i = 0; i < writes.size(); ++i) {
+        const auto& write = writes[i];
+        const auto over = [&](const std::vector<std::pair<std::uint64_t, std::uint64_t>>& ranges) {
+            return std::any_of(ranges.begin(), ranges.end(), [&](const auto& range) { return write.begin < range.second && range.first < write.end; });
+        };
+        if (write.computed) {
+            dumps.push_back(i);
+            earlier.emplace_back(write.begin, write.end);
+        } else if (dumps.empty()) {
+            before.push_back(i);
+        } else if (overLater[i]) {
+            if (over(delayed) || (!coveredLater[i] && over(earlier))) return order;
+            before.push_back(i);
+        } else {
+            after.push_back(i);
+            delayed.emplace_back(write.begin, write.end);
+        }
+    }
+    order = std::move(before);
+    order.insert(order.end(), dumps.begin(), dumps.end());
+    order.insert(order.end(), after.begin(), after.end());
+    return order;
 }
 
 std::vector<std::size_t> Recorder::QueuedWriteGroups(std::span<const QueuedWrite> writes) {
@@ -3483,6 +3605,13 @@ void Recorder::Submit() {
         newestSubmitted = batch->serial;
         newestSubmittedAt = batch->submittedAt;
     }
+    if (timeline != VK_NULL_HANDLE) {
+        if (!progressWatcher) {
+            progressWatcher = std::make_unique<ProgressWatcher>(context.device, timeline, context.Function<PFN_vkWaitSemaphoresKHR>("vkWaitSemaphoresKHR"),
+                                                                context.Function<PFN_vkGetSemaphoreCounterValueKHR>("vkGetSemaphoreCounterValueKHR"));
+        }
+        progressWatcher->Submitted(batch->serial);
+    }
     inFlight.push_back(std::move(batch));
     inFlightKeptBytes += inFlight.back()->keptBytes;
     if (activeRecorder == this) pendingLabelSince.store(NoPendingLabel, std::memory_order_release);
@@ -3978,6 +4107,7 @@ void Recorder::finish(std::unique_ptr<Batch> batch, bool wait, int source, bool 
             }
         }
     }
+    if (!batch->completions.empty()) KernelWakeSleepers_nid_no_patch();
     if (profile) holdCounters.completions += batch->completions.size();
     const auto keptStart = profile ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
     // Deferred only from inside a hold: the unlock that releases the list is this thread's own, and
