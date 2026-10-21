@@ -169,7 +169,7 @@ void Store(AgcDriver::VulkanDevice& device, std::uint8_t* texels, const Format& 
 }
 
 std::uint16_t ExpectedComponent(std::uint32_t tid, std::uint32_t dmask, std::uint32_t component) {
-    if (((dmask >> component) & 1u) == 0u) return 0x5a5au;
+    if (((dmask >> component) & 1u) == 0u) return 0u;
     std::uint32_t source = 0u;
     for (std::uint32_t lower = 0u; lower < component; ++lower) source += (dmask >> lower) & 1u;
     return HalfTowardZero(Value(tid, source));
