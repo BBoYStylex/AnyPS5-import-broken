@@ -417,6 +417,25 @@ void TestRetiredSurfaceRelease(const Context& context) {
     ClearDepthSurfaces(context.device);
 }
 
+void TestUnmappedStalePlaneFlush(const Context& context) {
+    ClearDepthSurfaces(context.device);
+    constexpr VkExtent2D extent{256, 256};
+    constexpr std::uint64_t unmapped = 0xa0000000;
+    DepthTarget target{unmapped, 0, extent, VK_FORMAT_D32_SFLOAT, 1.0f, 0};
+    target.depthSwizzle = XorSwizzleMode(TextureTileMode::kZ64KBX);
+    Require(DepthSurfaceView(context, target, true) != VK_NULL_HANDLE, "a mirrorable depth surface must render");
+    Require(DepthPlanesStale(), "a written mirrorable depth surface must leave its plane stale");
+    std::vector<std::pair<std::uint64_t, std::uint64_t>> stored;
+    try {
+        stored = FlushDepthPlanes(unmapped, DepthSliceBytes(extent, 4u));
+    } catch (const std::exception& error) {
+        Require(false, std::string("flushing a depth plane whose guest memory is not mapped must drop its results: ") + error.what());
+    }
+    Require(stored.empty(), "a depth plane without mapped guest memory must not be stored");
+    Require(!DepthPlanesStale(), "a dropped depth plane must not stay stale");
+    ClearDepthSurfaces(context.device);
+}
+
 void RunDepthSurfaceReuseTests() {
     static int deviceTag = 0;
     Context context{};
@@ -432,6 +451,7 @@ void RunDepthSurfaceReuseTests() {
     TestMultisampleDepthOwnership(context);
     TestMultisampleStencilAliases(context);
     TestStencilUnormView(context);
+    TestUnmappedStalePlaneFlush(context);
     constexpr std::uint64_t depth32 = 0x40000000;
     constexpr std::uint64_t depth16 = 0x50000000;
     constexpr std::uint64_t depthStencil = 0x60000000;
