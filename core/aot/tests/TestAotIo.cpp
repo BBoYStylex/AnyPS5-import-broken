@@ -25,6 +25,21 @@ int main() {
     assert(reqId > 0);
     streaming.WaitForRequest(reqId);
 
+    Aot::Io::ExternalGpuMemoryResource gpuResource{
+        .ResourceId = 42,
+        .SharedHandle = reinterpret_cast<void*>(0x1234),
+        .MappedHostAddress = destBuffer.data(),
+        .SizeBytes = destBuffer.size(),
+        .IsGpuExclusive = false
+    };
+    assert(streaming.RegisterExternalGpuMemory(gpuResource));
+    assert(streaming.HasExternalGpuMemory(42));
+    uint64_t gpuReqId = streaming.StreamToGpuResource(42, 0, "", 0, 32);
+    assert(gpuReqId > 0);
+    streaming.WaitForRequest(gpuReqId);
+    streaming.UnregisterExternalGpuMemory(42);
+    assert(!streaming.HasExternalGpuMemory(42));
+
     streaming.Shutdown();
 
     Aot::Io::FileStreamQueue queue;

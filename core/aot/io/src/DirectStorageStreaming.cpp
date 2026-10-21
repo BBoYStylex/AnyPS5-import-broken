@@ -52,6 +52,9 @@ void DirectStorageStreaming::Shutdown() {
     while (!pendingRequests.empty()) {
         pendingRequests.pop();
     }
+
+    std::lock_guard<std::mutex> resourceLock(resourceMutex);
+    registeredResources.clear();
 }
 
 uint64_t DirectStorageStreaming::EnqueueRequest(StreamRequest request) {
@@ -76,6 +79,68 @@ void DirectStorageStreaming::WaitForRequest(uint64_t requestId) {
 
 bool DirectStorageStreaming::IsHardwareDecompressionSupported() const {
     return hardwareDecompressionAvailable.load(std::memory_order_acquire);
+}
+
+bool DirectStorageStreaming::RegisterExternalGpuMemory(const ExternalGpuMemoryResource& resource) {
+    if (resource.ResourceId == 0 || (resource.SharedHandle == nullptr && resource.MappedHostAddress == nullptr)) {
+        return false;
+    }
+
+    std::lock_guard<std::mutex> lock(resourceMutex);
+    registeredResources[resource.ResourceId] = resource;
+    return true;
+}
+
+void DirectStorageStreaming::UnregisterExternalGpuMemory(uint64_t resourceId) {
+    std::lock_guard<std::mutex> lock(resourceMutex);
+    registeredResources.erase(resourceId);
+}
+
+bool DirectStorageStreaming::HasExternalGpuMemory(uint64_t resourceId) const {
+    std::lock_guard<std::mutex> lock(resourceMutex);
+    return registeredResources.contains(resourceId);
+}
+
+uint64_t DirectStorageStreaming::StreamToGpuResource(
+    uint64_t resourceId,
+    uint64_t resourceOffset,
+    std::string_view sourcePath,
+    uint64_t fileOffset,
+    size_t sizeBytes,
+    CompressionType compression,
+    std::function<void(uint64_t, bool)> callback) {
+    ExternalGpuMemoryResource resource{};
+    {
+        std::lock_guard<std::mutex> lock(resourceMutex);
+        auto it = registeredResources.find(resourceId);
+        if (it == registeredResources.end()) {
+            return 0;
+        }
+        resource = it->second;
+    }
+
+    if (resourceOffset + sizeBytes > resource.SizeBytes) {
+        return 0;
+    }
+
+    void* destinationAddress = resource.MappedHostAddress;
+    if (destinationAddress != nullptr) {
+        destinationAddress = static_cast<uint8_t*>(destinationAddress) + resourceOffset;
+    }
+
+    StreamRequest request{
+        .RequestId = 0,
+        .SourceFilePath = std::string(sourcePath),
+        .FileOffset = fileOffset,
+        .CompressedSize = sizeBytes,
+        .UncompressedSize = sizeBytes,
+        .TargetDestination = destinationAddress,
+        .Compression = compression,
+        .Destination = DestinationType::GpuDeviceMemory,
+        .CompletionCallback = std::move(callback)
+    };
+
+    return EnqueueRequest(std::move(request));
 }
 
 void DirectStorageStreaming::workerThreadLoop() {

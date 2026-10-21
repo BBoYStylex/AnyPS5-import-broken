@@ -12,6 +12,7 @@
 #include <queue>
 #include <thread>
 #include <condition_variable>
+#include <unordered_map>
 
 namespace Aot::Io {
 
@@ -24,6 +25,14 @@ enum class CompressionType {
 enum class DestinationType {
     HostMemory,
     GpuDeviceMemory
+};
+
+struct ExternalGpuMemoryResource {
+    uint64_t ResourceId;
+    void* SharedHandle;
+    void* MappedHostAddress;
+    uint64_t SizeBytes;
+    bool IsGpuExclusive;
 };
 
 struct StreamRequest {
@@ -55,6 +64,19 @@ public:
     void WaitForRequest(uint64_t requestId);
     bool IsHardwareDecompressionSupported() const;
 
+    bool RegisterExternalGpuMemory(const ExternalGpuMemoryResource& resource);
+    void UnregisterExternalGpuMemory(uint64_t resourceId);
+    bool HasExternalGpuMemory(uint64_t resourceId) const;
+    uint64_t StreamToGpuResource(
+        uint64_t resourceId,
+        uint64_t resourceOffset,
+        std::string_view sourcePath,
+        uint64_t fileOffset,
+        size_t sizeBytes,
+        CompressionType compression = CompressionType::None,
+        std::function<void(uint64_t, bool)> callback = nullptr
+    );
+
 private:
     void workerThreadLoop();
     bool processRequestCpuFallback(const StreamRequest& request);
@@ -71,6 +93,9 @@ private:
     std::mutex completionMutex;
     std::condition_variable completionCondition;
     std::unordered_map<uint64_t, bool> completedRequests;
+
+    mutable std::mutex resourceMutex;
+    std::unordered_map<uint64_t, ExternalGpuMemoryResource> registeredResources;
 
     std::vector<std::thread> workerThreads;
 };
