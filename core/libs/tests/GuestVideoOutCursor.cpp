@@ -11,6 +11,8 @@ int APS5_VABI sceVideoOutCursorEnable(std::int32_t handle, std::int32_t index, c
 int APS5_VABI sceVideoOutCursorDisable(std::int32_t handle, std::int32_t index);
 int APS5_VABI sceVideoOutCursorSetImageAddress(std::int32_t handle, std::int32_t index, const void* address);
 int APS5_VABI sceVideoOutCursorSetPosition(std::int32_t handle, std::int32_t index, std::uint32_t x, std::uint32_t y);
+int APS5_VABI sceVideoOutSetFlipMaster();
+int APS5_VABI sceVideoOutClearFlipMaster();
 }
 
 static bool ReportsNotImplemented(const std::string& name, const std::function<int()>& call) {
@@ -31,5 +33,7 @@ int main() {
     passed = ReportsNotImplemented("sceVideoOutCursorSetImageAddress", [] { return sceVideoOutCursorSetImageAddress(1, 0, image); }) && passed;
     passed = ReportsNotImplemented("sceVideoOutCursorSetPosition", [] { return sceVideoOutCursorSetPosition(1, 0, 960, 540); }) && passed;
     passed = ReportsNotImplemented("sceVideoOutCursorDisable", [] { return sceVideoOutCursorDisable(1, 0); }) && passed;
+    passed = ReportsNotImplemented("sceVideoOutSetFlipMaster", [] { return sceVideoOutSetFlipMaster(); }) && passed;
+    passed = ReportsNotImplemented("sceVideoOutClearFlipMaster", [] { return sceVideoOutClearFlipMaster(); }) && passed;
     return passed ? 0 : 1;
 }
