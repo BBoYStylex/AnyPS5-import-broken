@@ -2179,7 +2179,7 @@ void recordDraw(const Context& context, const State& state, const Pm4::DrawParam
     }
     const PassAccess passAccess{passReads, passWrites, passImages, passAttachments, unknownMemory, unknownWrites, passWriteOnly};
     const bool fenced = state.depth.has_value() || !record.proxies.empty();
-    const auto start = recorder->StartDrawPass(passKey, capture || readsTarget || gpuIndirect || meshIndirect, fenced, passAccess);
+    const auto start = recorder->StartDrawPass(passKey, capture || readsTarget || gpuIndirect || meshIndirect || PixelFunctionLdsSubgroup(shaders) != 0u, fenced, passAccess);
     for (const auto& target : record.multisampleTargets) KeepMultisampleTarget_nid_no_patch(target);
     const bool continued = start.continued;
     outcome.passContinued = continued;
