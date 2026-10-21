@@ -2,6 +2,7 @@
 #define CORE_LIBS_PRX_LIBSCEAGCDRIVER_GRAPHICS_INCLUDE_DEPTHSURFACE_HPP
 
 #include "prx/libSceAgcDriver/Graphics/include/GuestTextureResource.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/SampleOrder.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/State.hpp"
 #include <array>
 #include <cstdint>
@@ -17,6 +18,8 @@ class Texture;
 class StorageTexture;
 
 VkImageView DepthSurfaceView(const Context& context, const DepthTarget& target, bool depthWritten = true);
+SampleOrderTarget DepthSurfaceOrderTarget(const Context& context, const DepthTarget& target);
+DepthSampleLocations DepthSurfaceSampleLocations(const Context& context, const DepthTarget& target);
 std::vector<std::pair<std::uint64_t, std::uint64_t>> FlushDepthPlanes(std::uint64_t address, std::size_t bytes);
 bool DepthPlanesStale();
 bool SampleLocationsCompatibleDepth(const Context& context, VkFormat format, std::uint32_t samples);
