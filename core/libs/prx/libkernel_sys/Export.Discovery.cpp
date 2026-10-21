@@ -103,11 +103,6 @@ int APS5_VABI fstat_nid_postfix(void) {
     return 0;
 }
 
-int APS5_VABI futimesat_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
 int APS5_VABI get_authinfo_nid_postfix(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
@@ -143,9 +138,16 @@ int APS5_VABI getfsstat_nid_postfix(void) {
     return 0;
 }
 
-int APS5_VABI getlogin_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+int APS5_VABI getlogin_r_nid_postfix(char* output, int size);
+int* APS5_VABI __error_nid_postfix();
+
+char* APS5_VABI getlogin_nid_postfix(void) {
+    static char logname[33];
+    if (const int error = getlogin_r_nid_postfix(logname, static_cast<int>(sizeof(logname))); error != 0) {
+        *__error_nid_postfix() = error;
+        return nullptr;
+    }
+    return logname[0] != '\0' ? logname : nullptr;
 }
 
 int APS5_VABI ipmimgr_call_nid_postfix(void) {
