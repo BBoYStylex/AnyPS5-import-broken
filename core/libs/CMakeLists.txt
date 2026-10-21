@@ -781,6 +781,5 @@ if(BUILD_TESTING)
     if(WIN32)
         set_tests_properties(guest_mdbg_syscore PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libmdbg_syscore>")
->>>>>>> local/fix/libmdbg_syscore-export-signatures
     endif()
 endif()
