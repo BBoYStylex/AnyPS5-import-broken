@@ -7,10 +7,10 @@
 #include <list>
 #include <mutex>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 #include "SceTypes.hpp"
-#include "prx/libc/include/General.hpp"
 
 extern "C" {
 int* APS5_VABI __error_nid_postfix();
@@ -208,12 +208,12 @@ int Submit(GuestAiocb* job, int opcode, const std::string& function) {
     }
     if (notify == SigevKevent) {
         if ((request.sigevent.keventFlags & ~KeventFlags) != 0) return Rejected(job, GuestEinval);
-        NotImplemented_nid_no_patch((function + ": SIGEV_KEVENT completion notification").c_str());
+        throw std::runtime_error(function + ": SIGEV_KEVENT completion notification is not implemented");
     }
     if (notify == SigevThreadId && request.sigevent.threadId != pthread_getthreadid_np_nid_postfix())
-        NotImplemented_nid_no_patch((function + ": SIGEV_THREAD_ID completion notification to thread " + std::to_string(request.sigevent.threadId) + ", which is not the caller").c_str());
+        throw std::runtime_error(function + ": SIGEV_THREAD_ID completion notification to thread " + std::to_string(request.sigevent.threadId) + ", which is not the caller, is not implemented");
     job->error = GuestEinprogress;
-    if (opcode != LioSync && target == Target::Socket) NotImplemented_nid_no_patch((function + ": a request on socket descriptor " + std::to_string(request.fildes)).c_str());
+    if (opcode != LioSync && target == Target::Socket) throw std::runtime_error(function + ": a request on socket descriptor " + std::to_string(request.fildes) + " is not implemented");
     if (target != Target::Vnode) return Rejected(job, GuestEopnotsupp);
     std::list<Job>::iterator entry;
     {
