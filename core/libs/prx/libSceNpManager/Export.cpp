@@ -5,10 +5,8 @@
 #include "prx/libSceUserService/UserService.hpp"
 #include <array>
 #include <atomic>
-#include <cstring>
 #include <mutex>
 #include <unordered_set>
-#include <vector>
 
 // PSN is not emulated: the user is reported as signed out and online queries fail.
 static constexpr int SCE_NP_ERROR_INVALID_ARGUMENT = static_cast<int>(0x80550003);
@@ -31,28 +29,6 @@ void* reachabilityCallback = nullptr;
 void* reachabilityUserdata = nullptr;
 std::mutex requestMutex;
 std::unordered_set<int> liveRequests;
-
-struct AgeRestriction {
-    char countryCode[2];
-    char end;
-    char pad;
-    std::int8_t age;
-    std::uint8_t padding[3];
-};
-static_assert(sizeof(AgeRestriction) == 8);
-
-struct ContentRestriction {
-    std::uint64_t size;
-    std::int8_t defaultAgeRestriction;
-    std::uint8_t padding[3];
-    std::int32_t ageRestrictionCount;
-    const AgeRestriction* ageRestriction;
-};
-static_assert(sizeof(ContentRestriction) == 24);
-
-std::mutex restrictionMutex;
-std::int8_t defaultAgeRestriction = 0;
-std::vector<AgeRestriction> ageRestrictions;
 
 int AddRequest() {
     const int reqId = g_nextRequest.fetch_add(1, std::memory_order_relaxed);
@@ -373,8 +349,9 @@ int APS5_VABI sceNpIntRegisterGamePresenceCallback(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
-int APS5_VABI sceNpIsPlusMember(void) {
-    NotImplemented_nid_no_patch(__func__);
+int APS5_VABI sceNpIsPlusMember(int, bool* isMember) {
+    if (!isMember) return SCE_NP_ERROR_INVALID_ARGUMENT;
+    *isMember = false;
     return 0;
 }
 int APS5_VABI sceNpManagerIntAbortRequest(void) {
@@ -896,15 +873,18 @@ int APS5_VABI sceNpRegisterStateCallback(NpStateCallback callback, void* userdat
 }
 
 int APS5_VABI sceNpSetContentRestriction(const NpContentRestriction* restriction) {
+    struct Fields {
+        std::uint64_t size;
+        std::int8_t defaultAgeRestriction;
+        std::uint8_t padding[3];
+        std::int32_t ageRestrictionCount;
+        const void* ageRestrictions;
+    };
     if (!restriction) return SCE_NP_ERROR_INVALID_ARGUMENT;
-    ContentRestriction value;
-    std::memcpy(&value, restriction, sizeof(value));
-    if (value.size != sizeof(ContentRestriction)) return SCE_NP_ERROR_INVALID_SIZE;
-    if (value.defaultAgeRestriction < 0 || value.ageRestrictionCount < 0 || value.ageRestrictionCount > 0x100) return SCE_NP_ERROR_INVALID_ARGUMENT;
-    if (value.ageRestrictionCount > 0 && !value.ageRestriction) return SCE_NP_ERROR_INVALID_ARGUMENT;
-    std::lock_guard lock(restrictionMutex);
-    defaultAgeRestriction = value.defaultAgeRestriction;
-    ageRestrictions.assign(value.ageRestriction, value.ageRestriction + value.ageRestrictionCount);
+    const auto* fields = reinterpret_cast<const Fields*>(restriction);
+    if (fields->size != sizeof(Fields)) return SCE_NP_ERROR_INVALID_SIZE;
+    if (fields->defaultAgeRestriction < 0 || fields->ageRestrictionCount > 0x100) return SCE_NP_ERROR_INVALID_ARGUMENT;
+    if (fields->ageRestrictionCount > 0 && !fields->ageRestrictions) return SCE_NP_ERROR_INVALID_ARGUMENT;
     return 0;
 }
 

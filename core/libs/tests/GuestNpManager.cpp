@@ -25,7 +25,8 @@ int APS5_VABI sceNpGetAccountId(const NpOnlineId* online_id, std::uint64_t* acco
 int APS5_VABI sceNpSetGamePresenceOnline(int req_id, const NpOnlineId* online_id, std::uint32_t presence);
 int APS5_VABI sceNpRegisterPlusEventCallback(void* callback, void* userdata);
 int APS5_VABI sceNpUnregisterPlusEventCallback(void);
-int APS5_VABI sceNpSetContentRestriction(const void* restriction);
+int APS5_VABI sceNpIsPlusMember(int user_id, bool* is_member);
+int APS5_VABI sceNpSetContentRestriction(const NpContentRestriction* restriction);
 }
 
 extern "C" {
@@ -51,28 +52,11 @@ namespace {
 
 constexpr int InvalidArgument = static_cast<int>(0x80550003u);
 constexpr int SignedOut = static_cast<int>(0x80550006u);
+constexpr int InvalidSize = static_cast<int>(0x80550011u);
 constexpr int UserNotFound = static_cast<int>(0x80550007u);
 constexpr int AlreadyRegistered = static_cast<int>(0x80550008u);
 constexpr int NotRegistered = static_cast<int>(0x80550009u);
 constexpr int RequestNotFound = static_cast<int>(0x80550014u);
-constexpr int InvalidSize = static_cast<int>(0x80550011u);
-
-struct AgeRestriction {
-    char countryCode[2];
-    char end;
-    char pad;
-    std::int8_t age;
-    std::uint8_t padding[3];
-};
-
-struct ContentRestriction {
-    std::uint64_t size;
-    std::int8_t defaultAgeRestriction;
-    std::uint8_t padding[3];
-    std::int32_t ageRestrictionCount;
-    const AgeRestriction* ageRestriction;
-};
-static_assert(sizeof(AgeRestriction) == 8 && sizeof(ContentRestriction) == 24);
 
 void Require(bool condition, const char* message) {
     if (!condition) {
@@ -292,28 +276,46 @@ void CheckOnlineIdQueries() {
     }
 }
 
-void CheckContentRestriction() {
-    Require(sceNpSetContentRestriction(nullptr) == InvalidArgument, "null content restriction");
-    const AgeRestriction ages[2]{{{'u', 's'}, 0, 0, 13, {}}, {{'j', 'p'}, 0, 0, 15, {}}};
-    ContentRestriction restriction{sizeof(ContentRestriction), 0, {}, 2, ages};
-    Require(sceNpSetContentRestriction(&restriction) == 0, "two age restrictions");
-    restriction.size = 16;
-    Require(sceNpSetContentRestriction(&restriction) == InvalidSize, "a restriction of the wrong size");
-    restriction.size = sizeof(ContentRestriction);
-    restriction.defaultAgeRestriction = -1;
-    Require(sceNpSetContentRestriction(&restriction) == InvalidArgument, "a negative default age");
-    restriction.defaultAgeRestriction = 0;
-    restriction.ageRestrictionCount = -1;
-    Require(sceNpSetContentRestriction(&restriction) == InvalidArgument, "a negative age restriction count");
-    restriction.ageRestrictionCount = 0x101;
-    Require(sceNpSetContentRestriction(&restriction) == InvalidArgument, "more than 256 age restrictions");
-    restriction.ageRestrictionCount = 1;
-    restriction.ageRestriction = nullptr;
-    Require(sceNpSetContentRestriction(&restriction) == InvalidArgument, "age restrictions without their array");
-    restriction.ageRestrictionCount = 0;
-    Require(sceNpSetContentRestriction(&restriction) == 0, "no age restrictions");
 }
 
+struct ContentRestrictionFields {
+    std::uint64_t size;
+    std::int8_t defaultAgeRestriction;
+    std::uint8_t padding[3];
+    std::int32_t ageRestrictionCount;
+    const void* ageRestrictions;
+};
+
+int SetContentRestriction(const ContentRestrictionFields& fields) {
+    return sceNpSetContentRestriction(reinterpret_cast<const NpContentRestriction*>(&fields));
+}
+
+void CheckPlusAndContentRestriction() {
+    bool isMember = true;
+    Require(sceNpIsPlusMember(0x10000, &isMember) == 0 && !isMember, "sceNpIsPlusMember must report no Plus membership");
+    Require(sceNpIsPlusMember(0x10000, nullptr) == InvalidArgument, "sceNpIsPlusMember must reject a null output");
+
+    const std::uint8_t ages[8]{};
+    ContentRestrictionFields fields{sizeof(ContentRestrictionFields), 12, {}, 2, ages};
+    Require(SetContentRestriction(fields) == 0, "sceNpSetContentRestriction must accept a valid restriction");
+    fields.ageRestrictionCount = 0;
+    fields.ageRestrictions = nullptr;
+    Require(SetContentRestriction(fields) == 0, "sceNpSetContentRestriction must accept no age restrictions");
+    Require(sceNpSetContentRestriction(nullptr) == InvalidArgument, "sceNpSetContentRestriction must reject null");
+    auto bad = fields;
+    bad.size = sizeof(ContentRestrictionFields) + 8;
+    Require(SetContentRestriction(bad) == InvalidSize, "sceNpSetContentRestriction must check the size");
+    bad = fields;
+    bad.defaultAgeRestriction = -1;
+    Require(SetContentRestriction(bad) == InvalidArgument, "sceNpSetContentRestriction must reject a negative default age");
+    bad = fields;
+    bad.ageRestrictionCount = 0x101;
+    bad.ageRestrictions = ages;
+    Require(SetContentRestriction(bad) == InvalidArgument, "sceNpSetContentRestriction must reject more than 256 restrictions");
+    bad.ageRestrictionCount = 0x100;
+    Require(SetContentRestriction(bad) == 0, "sceNpSetContentRestriction must accept 256 restrictions");
+    bad.ageRestrictions = nullptr;
+    Require(SetContentRestriction(bad) == InvalidArgument, "sceNpSetContentRestriction must reject restrictions without an array");
 }
 
 int main() {
@@ -321,7 +323,7 @@ int main() {
     CheckStateCallbacksA();
     CheckLegacyStateCallback();
     CheckRequestTimeouts();
-    CheckContentRestriction();
+    CheckPlusAndContentRestriction();
     NpId npId{};
     std::memset(&npId, 0x5a, sizeof(npId));
     NpId untouched{};
