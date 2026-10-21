@@ -1289,7 +1289,7 @@ static int FindImageContaining(dl_phdr_info* image, std::size_t, void* data) {
 }
 #endif
 
-int DoMprotect(const void* addr, size_t len, int prot) {
+int DoMprotect(const void* addr, size_t len, int prot, bool requireMappedStart) {
     Trace("protect %p+0x%zx prot=0x%x", addr, len, prot);
     const auto address = reinterpret_cast<std::uintptr_t>(addr);
     constexpr auto pageMask = static_cast<std::uintptr_t>(PS5_PAGE_SIZE - 1);
@@ -1368,7 +1368,7 @@ int DoMprotect(const void* addr, size_t len, int prot) {
 #endif
     std::vector<std::pair<const void*, std::size_t>> spans;
     mutation.ForRegistered(pointer, bytes, [&](const void* span, std::size_t spanBytes) { spans.emplace_back(span, spanBytes); });
-    if (spans.empty() || reinterpret_cast<std::uintptr_t>(spans.front().first) != first) return SCE_KERNEL_ERROR_EINVAL;
+    if (requireMappedStart && (spans.empty() || reinterpret_cast<std::uintptr_t>(spans.front().first) != first)) return SCE_KERNEL_ERROR_EINVAL;
     for (const auto& [span, spanBytes] : spans) mutation.RequireUnpinned(span, spanBytes);
     for (const auto& [span, spanBytes] : spans) {
         mutation.Protect(span, spanBytes, (prot & 3) != 0, (prot & 2) != 0, (prot & GuestProtGpuReadWrite) != 0, [&] {
@@ -1379,8 +1379,8 @@ int DoMprotect(const void* addr, size_t len, int prot) {
     return 0;
 }
 
-int DoMtypeprotect(const void* addr, size_t len, int type, int prot) {
-    const int result = DoMprotect(addr, len, prot);
+int DoMtypeprotect(const void* addr, size_t len, int type, int prot, bool requireMappedStart) {
+    const int result = DoMprotect(addr, len, prot, requireMappedStart);
     if (result != 0) return result;
     const auto address = reinterpret_cast<std::uintptr_t>(addr);
     constexpr auto pageMask = static_cast<std::uintptr_t>(PS5_PAGE_SIZE - 1);
