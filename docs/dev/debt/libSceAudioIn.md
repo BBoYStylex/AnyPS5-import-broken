@@ -39,6 +39,7 @@
 - [sceAudioInSetMode2](../../../core/libs/prx/libSceAudioIn/Export.cpp) (libSceAudioIn) - unknown signature
 - [sceAudioInExtCtrl](../../../core/libs/prx/libSceAudioIn/Export.cpp) (libSceAudioIn) - unknown signature
 - [sceAudioInInputs](../../../core/libs/prx/libSceAudioIn/Export.cpp) (libSceAudioIn) - unknown signature
+- [sceAudioInExtClose, sceAudioInExtInput, sceAudioInExtOpen, sceAudioInExtSetAecMode, sceAudioInSetConnectionsForUser, sceAudioInSetFocusForUser](../../../core/libs/prx/libSceAudioIn/Export.cpp) (libSceAudioIn) - declared without parameters: the exports are in the [PS5 3.20 export inventory](https://github.com/DNNDHH/PS5-3.20_Libs/blob/b2a77c09cd71c01f34c790cfbe98c751a13262ad/libSceAudioIn.c), but no PS5 source declares their prototype or settles what they do, so every call throws
 
 ### Functional
 
