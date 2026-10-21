@@ -10,6 +10,10 @@ extern "C" {
 int APS5_VABI sceAudioPropagationPathGetNumPoints();
 int APS5_VABI sceAudioPropagationSystemLock();
 int APS5_VABI sceAudioPropagationMaterialInit();
+int APS5_VABI sceAudioPropagationReportApi();
+int APS5_VABI sceAudioPropagationResetAttributes();
+int APS5_VABI sceAudioPropagationSourceQueryInfo();
+int APS5_VABI sceAudioPropagationSystemQueryInfo();
 }
 
 namespace {
@@ -245,6 +249,10 @@ int main() {
     RequireThrows<std::runtime_error>([&] { sceAudioPropagationPathGetNumPoints(); }, "path get num points throw");
     RequireThrows<std::runtime_error>([&] { sceAudioPropagationSystemLock(); }, "system lock throw");
     RequireThrows<std::runtime_error>([&] { sceAudioPropagationMaterialInit(); }, "material init throw");
+    RequireThrows<std::runtime_error>([&] { sceAudioPropagationReportApi(); }, "report api throw");
+    RequireThrows<std::runtime_error>([&] { sceAudioPropagationResetAttributes(); }, "reset attributes throw");
+    RequireThrows<std::runtime_error>([&] { sceAudioPropagationSourceQueryInfo(); }, "source query info throw");
+    RequireThrows<std::runtime_error>([&] { sceAudioPropagationSystemQueryInfo(); }, "system query info throw");
 
     std::puts("AudioPropagation tests passed");
     return 0;
