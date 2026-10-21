@@ -694,4 +694,22 @@ if(BUILD_TESTING)
         set_tests_properties(guest_vorbis_dec PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceVorbisDec>")
     endif()
+
+    add_test_executable(sdk_missing_exports_tests tests/SdkMissingExports.cpp
+        nid/src/NidCompute.cpp nid/src/Sha1.cpp)
+    target_include_directories(sdk_missing_exports_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/nid/include)
+    configure_windows_unwind(sdk_missing_exports_tests)
+    if(MINGW)
+        target_compile_options(sdk_missing_exports_tests PRIVATE -fasynchronous-unwind-tables)
+        target_link_options(sdk_missing_exports_tests PRIVATE -static -static-libgcc -static-libstdc++)
+    endif()
+    add_custom_target(sdk_missing_exports_libraries DEPENDS
+        ${PATCHED_DIR}/libSceGLSlimVSH.prx ${PATCHED_DIR}/libSceIpmi.prx
+        ${PATCHED_DIR}/libc.prx ${PATCHED_DIR}/libkernel.prx)
+    add_dependencies(sdk_missing_exports_tests sdk_missing_exports_libraries)
+    add_test(NAME sdk_missing_exports COMMAND sdk_missing_exports_tests ${PATCHED_DIR})
+    if(WIN32)
+        set_tests_properties(sdk_missing_exports PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${PATCHED_DIR}")
+    endif()
 endif()
