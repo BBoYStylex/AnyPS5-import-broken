@@ -109,7 +109,7 @@ void Blocking() {
 
 void Identifiers() {
     Require(ksem_post_nid_postfix(-1) == -1 && Error() == Einval);
-    const auto path = (std::filesystem::temp_directory_path() / "anyps5-ksem-stale.bin").string();
+    const auto path = "anyps5-ksem-stale-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".bin";
     { std::ofstream stream(path); stream << "x"; }
     const int plain = open_nid_postfix(path.c_str(), 0, 0);
     Require(plain >= 0);
