@@ -13,3 +13,13 @@
 .setting-title>label{font-size:12px;font-weight:600}
 .badge{font-size:11px;font-weight:600;color:var(--on-accent);background:var(--good);padding:2px 8px;border-radius:12px;display:inline-flex;align-items:center;line-height:1.4}
 .badge.muted-badge{background:var(--sunken);color:var(--muted);border:1px solid var(--line)}
+[dir=rtl]{direction:rtl}
+[dir=rtl] body{font-family:system-ui,-apple-system,"Segoe UI","Noto Sans Arabic","Arial",sans-serif}
+[dir=rtl] .mark{margin-right:0;margin-left:3px}
+[dir=rtl] .private b{margin-right:0;margin-left:5px}
+[dir=rtl] .choices span{margin-left:0;margin-right:auto}
+[dir=rtl] .action-row>p{margin:0 0 0 auto}
+[dir=rtl] .warnings ul{padding-left:0;padding-right:18px}
+[dir=rtl] .app-list{padding-left:0;padding-right:22px}
+#ui-lang{font-size:13px;padding:3px 6px;cursor:pointer}
+#ui-lang:hover{color:var(--text)}
