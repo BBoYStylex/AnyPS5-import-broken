@@ -327,11 +327,6 @@ int APS5_VABI sceCesUcs2ToEucKr(void) {
     return 0;
 }
 
-int APS5_VABI sceCesUcs2ToMbc(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
 int APS5_VABI sceCesUcs2ToUhc(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
@@ -457,11 +452,6 @@ int APS5_VABI sceCesUtf16ToEucKr(void) {
     return 0;
 }
 
-int APS5_VABI sceCesUtf16ToMbc(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
 int APS5_VABI sceCesUtf16ToUhc(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
@@ -477,11 +467,6 @@ int APS5_VABI sceCesUtf16beToEucKr(void) {
     return 0;
 }
 
-int APS5_VABI sceCesUtf16beToMbc(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
 int APS5_VABI sceCesUtf16beToUhc(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
@@ -493,11 +478,6 @@ int APS5_VABI sceCesUtf16leToBig5(void) {
 }
 
 int APS5_VABI sceCesUtf16leToEucKr(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceCesUtf16leToMbc(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -527,11 +507,6 @@ int APS5_VABI sceCesUtf32ToEucKr(void) {
     return 0;
 }
 
-int APS5_VABI sceCesUtf32ToMbc(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
 int APS5_VABI sceCesUtf32ToUhc(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
@@ -547,11 +522,6 @@ int APS5_VABI sceCesUtf32beToEucKr(void) {
     return 0;
 }
 
-int APS5_VABI sceCesUtf32beToMbc(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
 int APS5_VABI sceCesUtf32beToUhc(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
@@ -563,11 +533,6 @@ int APS5_VABI sceCesUtf32leToBig5(void) {
 }
 
 int APS5_VABI sceCesUtf32leToEucKr(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceCesUtf32leToMbc(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -593,11 +558,6 @@ int APS5_VABI sceCesUtf8ToBig5(void) {
 }
 
 int APS5_VABI sceCesUtf8ToEucKr(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceCesUtf8ToMbc(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
