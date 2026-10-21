@@ -10,7 +10,7 @@ const TRANSLATIONS = {
     "brand-sub": "/ المحول",
     "nav-compat": "التوافق ↗",
     "eyebrow": "تحويل محلي",
-    "title": "محول تطبيقات PS5 إلى Windows و Linux",
+    "title": "محول تطبيقات PS5 إلى نظامي Windows&nbsp;و&nbsp;Linux",
     "panel-title": "تحويل التطبيقات",
     "files-stay": "الملفات تبقى على جهازك",
     "drop-title": "اختر مجلداً أو أسقط ملفات ZIP هنا",
@@ -158,7 +158,39 @@ function update() {
     $("save-note").textContent = multi ? $("save").value === "memory" ? "Creates one ZIP with each app in its own folder. The complete bundle must fit in the 256 MiB memory-download budget." : "Writes one compressed ZIP containing each app in its own folder, without holding the whole bundle in memory." : $("save").value === "disk" ? "Creates a subfolder with the executable, libs and app0. No ZIP compression. Incomplete output folders are removed after cancellation or failure. Browsers may block DLL and other restricted files; use ZIP for those apps." : $("save").value === "zip" ? "Writes a compressed ZIP directly to disk without holding the whole archive in memory." : "Up to 256 MiB including expanded files and output overhead.";
   }
   $("browser-note").hidden = supported && canStream && canSaveZip && !memoryBlocked && !folderBlocked && !conversionBlocked;
-  $("browser-note").textContent = !supported ? "This browser or connection does not support the converter. Use a current browser over HTTPS, or use the native relinker." : folderBlocked && multi ? "Batch conversion creates one ZIP bundle. Choose Save ZIP to disk or Download in memory." : folderBlocked ? "Browsers block direct DLL creation. Windows output requires ZIP. Choose Save ZIP to disk or Download in memory." : iconTooLarge ? "A Windows icon exceeds 16 MiB. Choose Linux or use the native relinker." : conversionTooLarge ? `A ${target} conversion input exceeds 256 MiB. Use the native relinker for that app.` : estimateOverflow ? "The combined output exceeds the browser's supported size range. Choose Save ZIP to disk." : memoryBlocked ? "This output exceeds the memory-download limit. Choose Save ZIP to disk. If that option is unavailable, open this page in desktop Chrome or Edge." : "Some direct disk saving options are unavailable in this browser or context. Small apps can still be downloaded in memory. For larger apps, use desktop Chrome or Edge over HTTPS.";
+  if (isAr) {
+    $("browser-note").textContent = !supported
+      ? "هذا المتصفح أو طريقة الاتصال لا تدعم المحول. استخدم متصفحاً حديثاً عبر بروتوكول HTTPS أو استخدم أداة relinker الأصلية."
+      : folderBlocked && multi
+      ? "التحويل المجمع ينشئ حزمة ZIP واحدة. اختر حفظ ZIP على القرص أو تنزيل في الذاكرة."
+      : folderBlocked
+      ? "المتصفحات تحظر إنشاء ملفات DLL مباشرة. يتطلب إخراج Windows ملف ZIP. اختر حفظ ZIP على القرص أو تنزيل في الذاكرة."
+      : iconTooLarge
+      ? "حجم أيقونة Windows يتجاوز 16 ميجابايت. اختر Linux أو استخدم الأداة الأصلية."
+      : conversionTooLarge
+      ? `مدخلات التحويل لنظام ${target} تتجاوز 256 ميجابايت. استخدم أداة relinker الأصلية لهذا التطبيق.`
+      : estimateOverflow
+      ? "المخرجات المجمعة تتجاوز نطاق الحجم المدعوم في المتصفح. اختر حفظ ZIP على القرص."
+      : memoryBlocked
+      ? "هذه المخرجات تتجاوز الحد المسموح للتنزيل في الذاكرة. اختر حفظ ZIP على القرص، أو افتح هذه الصفحة في متصفح Chrome أو Edge على سطح المكتب."
+      : "بعض خيارات الحفظ المباشر على القرص غير متاحة في هذا المتصفح أو السياق. لا يزال بالإمكان تنزيل التطبيقات الصغيرة في الذاكرة. للتطبيقات الأكبر، استخدم Chrome أو Edge على سطح المكتب عبر HTTPS.";
+  } else {
+    $("browser-note").textContent = !supported
+      ? "This browser or connection does not support the converter. Use a current browser over HTTPS, or use the native relinker."
+      : folderBlocked && multi
+      ? "Batch conversion creates one ZIP bundle. Choose Save ZIP to disk or Download in memory."
+      : folderBlocked
+      ? "Browsers block direct DLL creation. Windows output requires ZIP. Choose Save ZIP to disk or Download in memory."
+      : iconTooLarge
+      ? "A Windows icon exceeds 16 MiB. Choose Linux or use the native relinker."
+      : conversionTooLarge
+      ? `A ${target} conversion input exceeds 256 MiB. Use the native relinker for that app.`
+      : estimateOverflow
+      ? "The combined output exceeds the browser's supported size range. Choose Save ZIP to disk."
+      : memoryBlocked
+      ? "This output exceeds the memory-download limit. Choose Save ZIP to disk. If that option is unavailable, open this page in desktop Chrome or Edge."
+      : "Some direct disk saving options are unavailable in this browser or context. Small apps can still be downloaded in memory. For larger apps, use desktop Chrome or Edge over HTTPS.";
+  }
   const hasWarnings = inspected && summaries.some(summary => summary.warnings.length > 0);
   $("convert").disabled = !supported || working || !inspected || !release || conversionBlocked || memoryBlocked || folderBlocked || (hasWarnings && !$("acknowledge").checked);
   $("convert").textContent = isAr ? "تحويل وحفظ ←" : "Convert & save →";
@@ -376,8 +408,8 @@ async function selectInputs(inputs) {
   $("acknowledge").checked = false;
   $("status").hidden = false;
   $("cancel").hidden = false;
-  $("phase").textContent = "Inspecting files";
-  $("current-file").textContent = inputs.length > 1 ? `Inspecting ${inputs.length} ZIP archives` : inputs[0].name;
+  $("phase").textContent = isAr ? "جارٍ فحص الملفات" : "Inspecting files";
+  $("current-file").textContent = inputs.length > 1 ? (isAr ? `فحص ${inputs.length} حزم ZIP` : `Inspecting ${inputs.length} ZIP archives`) : inputs[0].name;
   $("percent").textContent = "";
   $("progress").removeAttribute("value");
   lock(true);
