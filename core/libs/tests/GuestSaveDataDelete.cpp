@@ -9,6 +9,7 @@
 #include <fstream>
 #include <iterator>
 #include <random>
+#include <stdexcept>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -30,6 +31,16 @@ constexpr int SaveDataErrorParameter = -2137063424;
 constexpr int SaveDataErrorBusy = -2137063421;
 
 int failures = 0;
+
+template <typename TFunction>
+bool ThrowsRuntimeError(TFunction function) {
+    try {
+        function();
+    } catch (const std::runtime_error&) {
+        return true;
+    }
+    return false;
+}
 
 void Check(bool condition, const std::string& what) {
     if (condition) return;
@@ -89,6 +100,9 @@ int main() {
     char unterminated[sizeof(SceSaveDataDirName::data)];
     std::memset(unterminated, 'a', sizeof(unterminated));
     Check(Delete(unterminated, sizeof(unterminated)) == SaveDataErrorParameter, "an unterminated name is rejected");
+    Check(ThrowsRuntimeError([] { sceSaveDataDelete(nullptr); }), "null del throws");
+    SaveDataDelete nullDirDel{};
+    Check(ThrowsRuntimeError([&] { sceSaveDataDelete(&nullDirDel); }), "null dir_name throws");
 
     constexpr char mountedPayload[] = "live mounted save";
     constexpr char updatedPayload[] = "still mounted";
