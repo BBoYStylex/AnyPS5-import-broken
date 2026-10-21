@@ -132,6 +132,20 @@ int main() {
         context.checked.get_future().get();
     }
 #endif
+    {
+        const std::uint32_t guestMxcsr = 0x9fc0;
+        asm volatile("ldmxcsr %0" : : "m"(guestMxcsr));
+        ThreadContext context;
+        context.stackSize = 1u << 20;
+        if (scePthreadCreate(&context.thread, nullptr, CheckThread, &context, nullptr) != 0)
+            throw std::runtime_error("Thread creation from a guest-MXCSR creator failed");
+        context.checked.get_future().get();
+        void* result = nullptr;
+        if (scePthreadJoin(context.thread, &result) != 0) throw std::runtime_error("Thread join failed");
+        asm volatile("ldmxcsr %0" : : "m"(hostMxcsrBefore));
+        if (workerMxcsrAfterReturn.load() != 0x1f80)
+            throw std::runtime_error("Worker host MXCSR was not the host default after a thread created at the guest MXCSR");
+    }
     std::uint32_t hostMxcsrAfter = 0;
     asm volatile("stmxcsr %0" : "=m"(hostMxcsrAfter));
     if (hostMxcsrAfter != hostMxcsrBefore)

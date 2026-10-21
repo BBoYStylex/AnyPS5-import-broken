@@ -664,8 +664,7 @@ static void RunThread(std::unique_ptr<ThreadArgs> args) {
 #ifndef _WIN32
     pthread_sigmask(SIG_SETMASK, &signalMask, nullptr);
 #endif
-    std::uint32_t hostMxcsr = 0;
-    asm volatile("stmxcsr %0" : "=m"(hostMxcsr));
+    std::uint32_t hostMxcsr = 0x1f80;
     self->hostMxcsr = hostMxcsr;
     finishThread(self, Aps5CallGuestEntry_nid_no_patch(entry, arg));
     asm volatile("ldmxcsr %0" : : "m"(hostMxcsr));
