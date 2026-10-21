@@ -9226,14 +9226,27 @@ void pipelineCacheHeaderTests(const Device& device) {
     std::error_code lockError;
     const auto lockNative = ShaderRecompiler::NativeCachePath_nid_no_patch(files.front(), lockError);
     Require(!lockError, "could not resolve long cache path");
-    const HANDLE lockHandle = CreateFileW(lockNative.c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (lockHandle != INVALID_HANDLE_VALUE) {
+    struct FileLockGuard {
+        HANDLE handle = INVALID_HANDLE_VALUE;
+        ~FileLockGuard() {
+            if (handle != INVALID_HANDLE_VALUE) CloseHandle(handle);
+        }
+    } lockGuard{CreateFileW(lockNative.c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr)};
+    Require(lockGuard.handle != INVALID_HANDLE_VALUE, "could not lock pipeline cache file");
+    std::string capturedStderr;
+    {
+        StderrCapture capture;
         PipelineCache lockedCache(context, device.Properties());
         lockedCache.SaveNow();
-        CloseHandle(lockHandle);
-        std::vector<std::byte> retained;
-        Require(ShaderRecompiler::ReadWholeFile(files.front(), retained) && retained == stored, "an unreadable long pipeline cache file was overwritten");
+        capturedStderr = capture.Finish();
     }
+    Require(capturedStderr.find("cannot read") != std::string::npos, "an unreadable long pipeline cache file did not report the cannot read diagnostic");
+    if (lockGuard.handle != INVALID_HANDLE_VALUE) {
+        CloseHandle(lockGuard.handle);
+        lockGuard.handle = INVALID_HANDLE_VALUE;
+    }
+    std::vector<std::byte> retained;
+    Require(ShaderRecompiler::ReadWholeFile(files.front(), retained) && retained == stored, "an unreadable long pipeline cache file was overwritten");
 #endif
     std::cout << "long-path pipeline cache header reused without reloading\n";
 }
