@@ -4794,7 +4794,7 @@ void verifyPixelRequestSerialization() {
     pixel.stencilRefExportEnable = true;
     pixel.ditheredAlphaToCoverage = true;
     pixel.reversedBlend = 0x570001u;
-    pixel.targetMerge = {1u, 0x0ff0u, 1u, {0x100u, 0x2u, 0x3u, 0x4u, 0x5u, 0x6u, 0x7u, 0x8u}};
+    pixel.targetMerge = {.target = 1u, .mask = 0x0ff0u, .samples = 1u, .descriptor = {0x100u, 0x2u, 0x3u, 0x4u, 0x5u, 0x6u, 0x7u, 0x8u}};
     const std::array<std::array<std::uint8_t, 8>, 3> mappings{{
         {0x00u, 0xe4u, 0xc6u, 0x1bu, 0xffu, 0x80u, 0x55u, 0xaau},
         {0xe4u, 0xe4u, 0xe4u, 0xe4u, 0xe4u, 0xe4u, 0xe4u, 0xe4u},
@@ -4865,7 +4865,7 @@ void verifyPixelRequestSerialization() {
     minimal.context.pixel->layerExported = true;
     minimal.context.pixel->ditheredAlphaToCoverage = true;
     const auto encoded = serializer.Serialize(minimal);
-    require(requestPrefix(encoded, 8u) == "NVNQQSgAAAA=", "new requests did not use serialization version 40");
+    require(requestPrefix(encoded, 8u) == "NVNQQSkAAAA=", "new requests did not use serialization version 41");
     const std::array<std::uint32_t, 2> fallbacks{0x40u, 0x1ac4u};
     auto withFallbacks = minimal;
     withFallbacks.context.linkedCallFallbacks = fallbacks;
@@ -4983,7 +4983,7 @@ void verifyPixelRequestSerialization() {
     for (std::size_t bytes = 0; bytes < 45u; ++bytes) {
         expectFailure([&] { static_cast<void>(serializer.Deserialize(requestPrefix(encoded, mappingOffset + bytes))); }, "truncated data", "a truncated pixel mapping, packing, dual-source, alpha-to-coverage, stencil reference export flag, primitive class, layer export, dither or front-face flag, quad pixel mask or quad sample mask was accepted");
     }
-    for (const auto unsupported : {"NVNQQQAAAAA=", "NVNQQSkAAAA="}) {
+    for (const auto unsupported : {"NVNQQQAAAAA=", "NVNQQSoAAAA="}) {
         expectFailure([&] { static_cast<void>(serializer.Deserialize(unsupported)); }, "serialization version", "an unsupported request version was accepted");
     }
     static constexpr std::string_view version18Request{
@@ -5122,10 +5122,10 @@ void verifyVertexInfoVersion19() {
     require(allBitsOffset == flagOffset + 2u, "the front-face all-bits flag does not follow the dithered coverage flag");
     require(blendOffset == allBitsOffset + 18u, "the reversed-order blend code is not serialized after the front-face all-bits flag, quad pixel mask and quad sample masks");
     constexpr std::size_t iterationBytes = 35u;
-    constexpr std::size_t mergeBytes = 40u;
+    constexpr std::size_t mergeBytes = 45u;
     const auto mergeOffset = static_cast<std::ptrdiff_t>(blendOffset + 4u + iterationBytes);
     auto merging = pixel;
-    merging.context.pixel->targetMerge = {3u, 0xf00fu, 2u, {1u, 2u, 3u, 4u, 5u, 6u, 7u, 0x89abcdefu}, true, true};
+    merging.context.pixel->targetMerge = {.target = 3u, .mask = 0xf00fu, .samples = 2u, .descriptor = {1u, 2u, 3u, 4u, 5u, 6u, 7u, 0x89abcdefu}, .depthStencilWrites = true, .depthStencilTests = true};
     const auto mergingBytes = decodeBase64(serializer.Serialize(merging));
     require(mergingBytes.size() == plainPixel.size() && std::equal(plainPixel.begin(), plainPixel.begin() + mergeOffset, mergingBytes.begin()) && mergingBytes[mergeOffset] == 3u && mergingBytes[mergeOffset + 1] == 0x0fu && mergingBytes[mergeOffset + 2] == 0xf0u && mergingBytes[mergeOffset + 5] == 2u && mergingBytes[mergeOffset + 6] == 1u && mergingBytes[mergeOffset + 34] == 0xefu && mergingBytes[mergeOffset + 37] == 0x89u && mergingBytes[mergeOffset + 38] == 1u && mergingBytes[mergeOffset + 39] == 1u && std::equal(plainPixel.begin() + mergeOffset + static_cast<std::ptrdiff_t>(mergeBytes), plainPixel.end(), mergingBytes.begin() + mergeOffset + static_cast<std::ptrdiff_t>(mergeBytes)), "the color target merge is not the 40 bytes the version 40 pixel info adds after the stencil operation value flag");
     require(serializer.Deserialize(serializer.Serialize(merging)).request.context.pixel->targetMerge == merging.context.pixel->targetMerge, "a serialized request lost its color target merge");
