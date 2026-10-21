@@ -255,27 +255,39 @@ static void CheckTableCalls() {
     const std::vector<std::vector<TableCallee>> callees{{{0x1122334455ull, first}, {0x66778899aaull, second}}};
     const auto linkedCalls = LinkCalls(program, {}, {}, calls, callees);
     const auto& linked = linkedCalls.code;
-    Require(linkedCalls.fallbacks == std::vector<std::uint32_t>{50u * 4u});
+    Require(linkedCalls.fallbacks == std::vector<std::uint32_t>{53u * 4u});
     ExpectThrow("is shared with another call", [&] { static_cast<void>(BuildCode(linked, swappc)); });
     SwappcInfo linkedSwappc = swappc;
     linkedSwappc.linkedCallFallbacks = linkedCalls.fallbacks;
-    Require(linked.size() == 59u && linked[9] == 0xbf820001u && linked[11] == 0xbf850010u && linked[58] == 0xbf9f0000u);
-    Require(linked[12] == 0xbf07ff0eu && linked[13] == 0x22334455u && linked[14] == 0xbf850004u && linked[15] == 0xbf07ff0fu && linked[16] == 0x11u && linked[17] == 0xbf850001u && linked[18] == 0xbf82001bu);
-    Require(linked[20] == 0x778899aau && linked[26] == 0xbf078080u && linked[27] == 0xbf820016u && linked[34] == 0xbf068080u && linked[35] == 0xbf82000au && linked[44] == 0xbf068080u && linked[45] == 0xbf820004u);
-    Require(linked[46] == 0xbb0e0005u && linked[47] == 0xbf82ffdau && linked[48] == 0xbb0e0006u && linked[49] == 0xbf82ffd8u && linked[50] == 0xbe8e210eu && linked[51] == 0xbf82ffd6u);
-    Require(std::equal(first.begin(), first.end(), linked.begin() + 52) && std::equal(second.begin(), second.end(), linked.begin() + 55));
+    Require(linked.size() == 56u && linked[9] == 0xbf820001u && linked[11] == 0xbf850007u && linked[55] == 0xbf9f0000u);
+    Require(linked[12] == 0xbf07ff0eu && linked[13] == 0x22334455u && linked[14] == 0xbf850010u && linked[15] == 0xbf07ff0fu && linked[16] == 0x11u && linked[17] == 0xbf85000du && linked[18] == 0xbf820007u);
+    Require(linked[19] == 0xbf07ff0eu && linked[21] == 0xbf850010u && linked[24] == 0xbf85000du && linked[25] == 0xbf068080u && linked[26] == 0xbb0e0001u && linked[27] == 0xbf82ffeeu);
+    Require(linked[32] == 0x778899aau && linked[33] == 0xbf850010u && linked[37] == 0xbf820007u && linked[40] == 0xbf85000bu && linked[43] == 0xbf850008u && linked[45] == 0xbb0e0001u && linked[46] == 0xbf82ffecu);
+    Require(linked[50] == 0xbf078080u && linked[51] == 0xbf820001u && linked[52] == 0xbf068080u && linked[53] == 0xbe8e210eu && linked[54] == 0xbf82fff7u);
+    Require(std::equal(first.begin(), first.end(), linked.begin() + 28) && std::equal(second.begin(), second.end(), linked.begin() + 47));
     const auto cfg = BuildCode(linked, linkedSwappc);
     const auto block = [&](std::uint32_t word) { return cfg.FindBlockByProgramCounter(word * 4u).id; };
-    Require(cfg.FindBlockByProgramCounter(46u * 4u).terminator.trueBlock == block(52u));
-    Require(cfg.FindBlockByProgramCounter(52u * 4u).terminator.trueBlock == block(47u));
-    Require(cfg.FindBlockByProgramCounter(48u * 4u).terminator.trueBlock == block(55u));
-    Require(cfg.FindBlockByProgramCounter(55u * 4u).terminator.trueBlock == block(49u));
-    Require(cfg.unlinkedCallProgramCounters == std::vector<std::uint32_t>{50u * 4u});
+    Require(cfg.FindBlockByProgramCounter(26u * 4u).terminator.trueBlock == block(28u));
+    Require(cfg.FindBlockByProgramCounter(28u * 4u).terminator.trueBlock == block(27u));
+    Require(cfg.FindBlockByProgramCounter(45u * 4u).terminator.trueBlock == block(47u));
+    Require(cfg.FindBlockByProgramCounter(47u * 4u).terminator.trueBlock == block(46u));
+    Require(cfg.unlinkedCallProgramCounters == std::vector<std::uint32_t>{53u * 4u});
     static_cast<void>(TranslateCode(linked, linkedSwappc));
 
-    std::vector<std::uint32_t> large(0x8000u, 0xbf800000u);
-    const std::vector<std::vector<TableCallee>> far{{{0x10ull, large}, {0x20ull, first}}};
-    ExpectThrow("out of s_call_b64 range", [&] { static_cast<void>(LinkCalls(program, {}, {}, calls, far)); });
+    std::vector<std::uint32_t> large(0x3000u, 0xbf800000u);
+    large.push_back(0xbe80200eu);
+    const std::vector<std::vector<TableCallee>> far{{{0x10ull, large}, {0x20ull, large}, {0x30ull, large}, {0x40ull, first}}};
+    const auto farLinked = LinkCalls(program, {}, {}, calls, far);
+    const auto farCall = 12u + 3u * (16u + 0x3001u) + 14u;
+    Require(farLinked.code[farCall] == 0xbb0e0001u && std::equal(first.begin(), first.end(), farLinked.code.begin() + farCall + 2u));
+    SwappcInfo farSwappc = swappc;
+    farSwappc.linkedCallFallbacks = farLinked.fallbacks;
+    const auto farCfg = BuildCode(farLinked.code, farSwappc);
+    Require(farCfg.FindBlockByProgramCounter(farCall * 4u).terminator.trueBlock == farCfg.FindBlockByProgramCounter((farCall + 2u) * 4u).id);
+    Require(farCfg.FindBlockByProgramCounter((farCall + 2u) * 4u).terminator.trueBlock == farCfg.FindBlockByProgramCounter((farCall + 1u) * 4u).id);
+    std::vector<std::uint32_t> oversized(0x8000u, 0xbf800000u);
+    const std::vector<std::vector<TableCallee>> overflows{{{0x10ull, oversized}, {0x20ull, first}}};
+    ExpectThrow("out of the 16-bit branch range", [&] { static_cast<void>(LinkCalls(program, {}, {}, calls, overflows)); });
 
     const std::vector<std::uint32_t> jumpTable{
         0xbe8c1f00u, 0x800cff0cu, 0x00000058u, 0x820d800du, 0x83928202u, 0xd4c40016u, 0x02000500u, 0x8f128212u, 0xf4000386u, 0x24000000u,

@@ -1587,41 +1587,35 @@ LinkedCalls LinkCalls(const RdnaProgram& program, std::span<const UserDataCall> 
         const auto at = "the table callees of the call at program counter " + toHexString(table.programCounter);
         const auto original = linked[word];
         const auto count = callees.size();
-        const auto dispatch = linked.size();
-        const auto zero = dispatch + 1u;
-        const auto one = zero + count * 7u + 2u;
-        const auto calls = one + count * 8u + 2u;
-        const auto fault = calls + count * 2u;
+        std::vector<std::size_t> segments(count + 1u);
+        segments[0] = linked.size() + 1u;
+        for (std::size_t callee = 0; callee < count; ++callee) segments[callee + 1u] = segments[callee] + 16u + callees[callee].code.size();
+        const auto one = [&](std::size_t callee) { return segments[callee] + (callee < count ? 7u : 2u); };
+        const auto back = [&](std::size_t callee) { return callee == 0u ? word + 1u : segments[callee - 1u] + 15u; };
+        const auto fault = segments[count] + 3u;
         const auto branch = [&](std::uint32_t opcode, std::size_t target) { linked.push_back(branchWord(opcode, linked.size(), target, at.c_str())); };
-        linked[word] = branchWord(0xbf820000u, word, dispatch, at.c_str());
-        branch(0xbf850000u, one);
-        for (const bool sccOne : {false, true}) {
-            for (std::size_t callee = 0; callee < count; ++callee) {
-                const auto next = linked.size() + (sccOne ? 8u : 7u);
+        linked[word] = branchWord(0xbf820000u, word, linked.size(), at.c_str());
+        branch(0xbf850000u, one(0u));
+        for (std::size_t callee = 0; callee < count; ++callee) {
+            for (const bool sccOne : {false, true}) {
+                const auto next = sccOne ? one(callee + 1u) : segments[callee + 1u];
                 linked.insert(linked.end(), {0xbf07ff00u | table.targetRegister, static_cast<std::uint32_t>(callees[callee].target)});
                 branch(0xbf850000u, next);
                 linked.insert(linked.end(), {0xbf07ff00u | (table.targetRegister + 1u), static_cast<std::uint32_t>(callees[callee].target >> 32u)});
                 branch(0xbf850000u, next);
                 if (sccOne) linked.push_back(0xbf068080u);
-                branch(0xbf820000u, calls + callee * 2u);
+                else branch(0xbf820000u, segments[callee] + 14u);
             }
-            linked.push_back(sccOne ? 0xbf068080u : 0xbf078080u);
-            branch(0xbf820000u, fault);
-        }
-        for (std::size_t callee = 0; callee < count; ++callee) {
-            linked.push_back(0u);
-            branch(0xbf820000u, word + 1u);
-        }
-        fallbacks.push_back(static_cast<std::uint32_t>(linked.size() * 4u));
-        linked.push_back(original);
-        branch(0xbf820000u, word + 1u);
-        for (std::size_t callee = 0; callee < count; ++callee) {
-            const auto site = calls + callee * 2u;
-            const auto offset = static_cast<std::int64_t>(linked.size()) - static_cast<std::int64_t>(site) - 1;
-            if (offset > 0x7fff) throw std::invalid_argument(at + " land out of s_call_b64 range");
-            linked[site] = 0xbb000000u | (table.linkRegister << 16u) | static_cast<std::uint32_t>(offset);
+            linked.push_back(0xbb000001u | (table.linkRegister << 16u));
+            branch(0xbf820000u, back(callee));
             linked.insert(linked.end(), callees[callee].code.begin(), callees[callee].code.end());
         }
+        linked.push_back(0xbf078080u);
+        branch(0xbf820000u, fault);
+        linked.push_back(0xbf068080u);
+        fallbacks.push_back(static_cast<std::uint32_t>(linked.size() * 4u));
+        linked.push_back(original);
+        branch(0xbf820000u, back(count));
     }
     linked.push_back(0xbf9f0000u);
     return {std::move(linked), std::move(fallbacks)};
