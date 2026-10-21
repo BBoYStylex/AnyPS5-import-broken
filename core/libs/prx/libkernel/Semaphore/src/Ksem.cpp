@@ -1,5 +1,6 @@
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
+#include "prx/libkernel/Semaphore/include/Ksem.hpp"
 #include <cerrno>
 #include <chrono>
 #include <climits>
@@ -9,6 +10,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #ifdef _WIN32
 #include <fcntl.h>
@@ -31,6 +33,7 @@ constexpr int GuestEexist = 17;
 constexpr int GuestEinval = 22;
 constexpr int GuestEnfile = 23;
 constexpr int GuestEmfile = 24;
+constexpr int GuestEnospc = 28;
 constexpr int GuestEagain = 35;
 constexpr int GuestEtimedout = 60;
 constexpr int GuestEnametoolong = 63;
@@ -39,6 +42,7 @@ constexpr int GuestOCreat = 0x0200;
 constexpr int GuestOExcl = 0x0800;
 constexpr std::size_t GuestPathMax = 1024;
 constexpr unsigned SemValueMax = 0x7fffffffu;
+constexpr std::size_t SemMax = 30;
 
 struct GuestTimespec {
     std::int64_t seconds;
@@ -77,6 +81,13 @@ int ReserveDescriptor() {
 #endif
 }
 
+std::size_t Objects() {
+    std::set<const Ksem*> objects;
+    for (const auto& [descriptor, ksem] : g_ksems) objects.insert(ksem.get());
+    for (const auto& [path, ksem] : g_named) objects.insert(ksem.get());
+    return objects.size();
+}
+
 void DescriptorClosed(int descriptor) {
     std::lock_guard lock(g_ksemLock);
     g_ksems.erase(descriptor);
@@ -111,21 +122,33 @@ int Wait(std::intptr_t id, bool once, const GuestTimespec* abstime) {
 
 }
 
+bool IsKsemDescriptor(int descriptor) {
+    std::lock_guard lock(g_ksemLock);
+    return g_ksems.count(descriptor) != 0;
+}
+
 extern "C" {
 
 int APS5_VABI ksem_init_nid_postfix(std::intptr_t* idp, unsigned int value) {
     if (value > SemValueMax) return Fail(GuestEinval);
-    if (idp == nullptr) return Fail(GuestEfault);
     const int descriptor = ReserveDescriptor();
-    if (descriptor < 0) return Fail(errno == ENFILE ? GuestEnfile : GuestEmfile);
+    if (descriptor < 0) return Fail(GuestEnospc);
+    if (idp == nullptr) {
+        close_nid_postfix(descriptor);
+        return Fail(GuestEfault);
+    }
+    *idp = descriptor;
     auto ksem = std::make_shared<Ksem>();
     ksem->count = value;
     {
         std::lock_guard lock(g_ksemLock);
-        g_ksems[descriptor] = std::move(ksem);
+        if (Objects() < SemMax) {
+            g_ksems[descriptor] = std::move(ksem);
+            return 0;
+        }
     }
-    *idp = descriptor;
-    return 0;
+    close_nid_postfix(descriptor);
+    return Fail(GuestEnospc);
 }
 
 int APS5_VABI ksem_post_nid_postfix(std::intptr_t id) {
@@ -172,30 +195,44 @@ int APS5_VABI ksem_destroy_nid_postfix(std::intptr_t id) {
 
 int APS5_VABI ksem_open_nid_postfix(std::intptr_t* idp, const char* name, int oflag, unsigned int mode, unsigned int value) {
     (void)mode;
-    if (value > SemValueMax) return Fail(GuestEinval);
-    if (name == nullptr) return Fail(GuestEfault);
-    const std::string path(name, strnlen(name, GuestPathMax));
-    if (path.size() >= GuestPathMax) return Fail(GuestEnametoolong);
-    if (path.empty() || path[0] != '/') return Fail(GuestEinval);
     if ((oflag & ~(GuestOCreat | GuestOExcl)) != 0) return Fail(GuestEinval);
-    if (idp == nullptr) return Fail(GuestEfault);
-    std::lock_guard lock(g_ksemLock);
+    if (value > SemValueMax) return Fail(GuestEinval);
+    const int descriptor = ReserveDescriptor();
+    if (descriptor < 0) return Fail(errno == ENFILE ? GuestEnfile : GuestEmfile);
+    const auto fail = [descriptor](int error) {
+        close_nid_postfix(descriptor);
+        return Fail(error);
+    };
+    if (idp == nullptr) return fail(GuestEfault);
+    *idp = descriptor;
+    if (name == nullptr) return fail(GuestEfault);
+    const std::string path(name, strnlen(name, GuestPathMax));
+    if (path.size() >= GuestPathMax) return fail(GuestEnametoolong);
+    if (path[0] != '/') return fail(GuestEinval);
+    std::unique_lock lock(g_ksemLock);
     std::shared_ptr<Ksem> ksem;
     const auto found = g_named.find(path);
     if (found == g_named.end()) {
-        if ((oflag & GuestOCreat) == 0) return Fail(GuestEnoent);
+        if ((oflag & GuestOCreat) == 0) {
+            lock.unlock();
+            return fail(GuestEnoent);
+        }
+        if (Objects() >= SemMax) {
+            lock.unlock();
+            return fail(GuestEnfile);
+        }
         ksem = std::make_shared<Ksem>();
         ksem->count = value;
         ksem->named = true;
+        g_named[path] = ksem;
     } else {
-        if ((oflag & (GuestOCreat | GuestOExcl)) == (GuestOCreat | GuestOExcl)) return Fail(GuestEexist);
+        if ((oflag & (GuestOCreat | GuestOExcl)) == (GuestOCreat | GuestOExcl)) {
+            lock.unlock();
+            return fail(GuestEexist);
+        }
         ksem = found->second;
     }
-    const int descriptor = ReserveDescriptor();
-    if (descriptor < 0) return Fail(errno == ENFILE ? GuestEnfile : GuestEmfile);
-    if (found == g_named.end()) g_named[path] = ksem;
     g_ksems[descriptor] = std::move(ksem);
-    *idp = descriptor;
     return 0;
 }
 
