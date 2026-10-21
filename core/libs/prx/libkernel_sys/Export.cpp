@@ -295,24 +295,6 @@ std::int64_t APS5_VABI readlinkat_nid_postfix(int fd, const char* path, char* bu
                           std::filesystem::path(reinterpret_cast<const char8_t*>(path)), buffer, size);
 }
 
-int APS5_VABI utimes_nid_postfix(const char* path, const KernelTimeval* times);
-int APS5_VABI futimes_nid_postfix(int d, const KernelTimeval* times);
-int APS5_VABI close_nid_postfix(int d);
-int APS5_VABI openat_nid_postfix(int fd, const char* path, int flags, ...);
-
-int APS5_VABI futimesat_nid_postfix(int fd, const char* path, const KernelTimeval* times) {
-    if (path == nullptr) return static_cast<int>(Fail(GuestEfault));
-    if (*path == '\0') return static_cast<int>(Fail(GuestEnoent));
-    if (fd == GuestAtFdcwd || *path == '/') return utimes_nid_postfix(path, times);
-    const int target = openat_nid_postfix(fd, path, SCE_KERNEL_O_NONBLOCK);
-    if (target < 0) return -1;
-    const int result = futimes_nid_postfix(target, times);
-    const int error = *__error_nid_postfix();
-    close_nid_postfix(target);
-    if (result != 0) *__error_nid_postfix() = error;
-    return result;
-}
-
 std::int64_t APS5_VABI pathconf_nid_postfix(const char* path, int name) {
     if (path == nullptr) return Fail(GuestEfault);
     if (*path == '\0') return Fail(GuestEnoent);
