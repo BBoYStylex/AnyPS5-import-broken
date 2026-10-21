@@ -447,9 +447,14 @@ private:
             const IrValue* current = pending.back();
             pending.pop_back();
             if (!visited.insert(current).second) continue;
-            for (const auto& info : program.Metadata().blockInfo) if (info.condition && info.condition->Resolve() == current) return true;
+            for (const auto& info : program.Metadata().blockInfo) {
+                if (!info.condition || info.condition->Resolve() != current) continue;
+                const auto kind = info.terminator.condition;
+                if (kind != BranchCondition::ExecZero && kind != BranchCondition::ExecNonZero && kind != BranchCondition::VccZero && kind != BranchCondition::VccNonZero) return true;
+            }
             for (const auto& use : current->OperandUses()) {
                 const auto opcode = use.user->Opcode();
+                if (restricted.contains(use.user)) continue;
                 if (ImageOpcodeInfoOf(opcode).needsSampler || opcode == IrOpcode::Ballot || opcode == IrOpcode::WqmU64 || opcode == IrOpcode::ReadLane || opcode == IrOpcode::ReadFirstLane || opcode == IrOpcode::DppMoveU32 || opcode == IrOpcode::DppUpdateU32 || opcode == IrOpcode::SwizzleU32 || opcode == IrOpcode::PermuteU32 || opcode == IrOpcode::BpermuteU32 || opcode == IrOpcode::Permlane16U32 || opcode == IrOpcode::WriteLane || SharedAccessOf(opcode) != SharedAccess::None) return true;
                 if (opcode == IrOpcode::SetAttribute || opcode == IrOpcode::Reference || opcode == IrOpcode::ReferenceU32) continue;
                 pending.push_back(use.user);

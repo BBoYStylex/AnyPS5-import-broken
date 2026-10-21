@@ -1120,7 +1120,7 @@ int main() {
         return !StencilReplaySafe(b.program);
     });
 
-    const auto optionalPixelBody = [&](bool derivativeConsumer, IrOpcode observer = IrOpcode::ImageSampleRaw) {
+    const auto optionalPixelBody = [&](bool derivativeConsumer, IrOpcode observer = IrOpcode::ImageSampleRaw, bool ballotGuard = false) {
         Builder b;
         b.program.Resources().stage = IrShaderStage::Pixel;
         auto& entry = *b.block;
@@ -1146,6 +1146,12 @@ int main() {
         b.block = &merge;
         auto& merged = b.phi(IrType::U32, entry, zero);
         merged.AddPhiOperand(&body, &written);
+        if (ballotGuard) {
+            auto& live = b.emit(IrOpcode::INotEqual32, IrType::Bool, {&merged, &zero});
+            if (observer == IrOpcode::WqmU64) stencilByMask(b, wholeQuads(b, live));
+            else exportUnder(b, b.ballotBit(live), true, true);
+            return StencilReplaySafe(b.program);
+        }
         if (derivativeConsumer) {
             auto& address = b.emit(IrOpcode::MakeImageAddress, IrType::ImageAddress, {&merged});
             auto& image = b.emit(IrOpcode::GetImageResource, IrType::ImageResource, {});
@@ -1159,6 +1165,8 @@ int main() {
     passed &= run("an optional wave body preserves inactive values consumed only within a lane", [&] { return optionalPixelBody(false); });
     passed &= run("an optional wave body cannot change helper coordinates for later implicit samples", [&] { return !optionalPixelBody(true); });
     passed &= run("an optional wave body cannot change helper coordinates for LOD queries", [&] { return !optionalPixelBody(true, IrOpcode::ImageQueryLod); });
+    passed &= run("an optional wave body may merge a value that a vetted own-lane ballot guard reads", [&] { return optionalPixelBody(false, IrOpcode::ImageSampleRaw, true); });
+    passed &= run("an optional wave body cannot let helper lanes choose a kept lane's stencil through a whole-quad merge", [&] { return !optionalPixelBody(false, IrOpcode::WqmU64, true); });
 
     passed &= run("varying attribute sources cannot be treated as uniform any-active predicates", [&] {
         for (const auto opcode : {IrOpcode::GetAttribute, IrOpcode::GetInterpolationParameter, IrOpcode::GetInterpolationParameterF16, IrOpcode::GetTessellationAttribute}) {
