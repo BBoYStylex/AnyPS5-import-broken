@@ -75,7 +75,44 @@ CompilationStatistics AotCompilerDriver::Compile(const CompilerOptions& options)
         options.OptimizationLevel
     );
 
+    if (stats.Success && options.EmitExecutable && !options.OutputExecutablePath.empty()) {
+        stats.Success = LinkExecutable(
+            options.OutputObjectPath,
+            options.OutputExecutablePath,
+            options.AdditionalLibraries
+        );
+    }
+
     return stats;
+}
+
+bool AotCompilerDriver::LinkExecutable(
+    const std::filesystem::path& objectPath,
+    const std::filesystem::path& executablePath,
+    const std::vector<std::filesystem::path>& additionalLibraries) {
+    if (!std::filesystem::exists(objectPath)) {
+        return false;
+    }
+
+    if (executablePath.has_parent_path()) {
+        std::filesystem::create_directories(executablePath.parent_path());
+    }
+
+    std::string command;
+#if defined(_WIN32)
+    command = "lld-link /NOLOGO /SUBSYSTEM:CONSOLE /OUT:\"" + executablePath.string() + "\" \"" + objectPath.string() + "\"";
+    for (const auto& lib : additionalLibraries) {
+        command += " \"" + lib.string() + "\"";
+    }
+#else
+    command = "clang++ -o \"" + executablePath.string() + "\" \"" + objectPath.string() + "\"";
+    for (const auto& lib : additionalLibraries) {
+        command += " \"" + lib.string() + "\"";
+    }
+#endif
+
+    int result = std::system(command.c_str());
+    return result == 0;
 }
 
 bool AotCompilerDriver::emitObjectFile(

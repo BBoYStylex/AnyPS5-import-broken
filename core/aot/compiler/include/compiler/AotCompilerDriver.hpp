@@ -17,6 +17,9 @@ struct CompilerOptions {
     std::string TargetTriple;
     uint32_t OptimizationLevel = 2;
     bool EnableSyscallReplacement = true;
+    std::filesystem::path OutputExecutablePath;
+    bool EmitExecutable = false;
+    std::vector<std::filesystem::path> AdditionalLibraries;
     bool VerboseLogging = false;
 };
 
@@ -36,6 +39,12 @@ public:
     ~AotCompilerDriver();
 
     CompilationStatistics Compile(const CompilerOptions& options);
+
+    bool LinkExecutable(
+        const std::filesystem::path& objectPath,
+        const std::filesystem::path& executablePath,
+        const std::vector<std::filesystem::path>& additionalLibraries = {}
+    );
 
 private:
     bool emitObjectFile(

@@ -7,6 +7,7 @@ static void PrintUsage(const char* executableName) {
               << "Options:\n"
               << "  -i, --input <path>      Input console ELF binary\n"
               << "  -o, --output <path>     Output native object file\n"
+              << "  -e, --exe <path>        Output native linked executable\n"
               << "  -O, --opt <0-3>         Optimization level (default: 2)\n"
               << "  --triple <target>       Target LLVM triple\n"
               << "  -h, --help              Display this help message\n";
@@ -27,6 +28,9 @@ int main(int argc, char* argv[]) {
             options.InputExecutablePath = argv[++i];
         } else if ((argument == "-o" || argument == "--output") && i + 1 < argc) {
             options.OutputObjectPath = argv[++i];
+        } else if ((argument == "-e" || argument == "--exe") && i + 1 < argc) {
+            options.OutputExecutablePath = argv[++i];
+            options.EmitExecutable = true;
         } else if ((argument == "-O" || argument == "--opt") && i + 1 < argc) {
             options.OptimizationLevel = static_cast<uint32_t>(std::stoul(argv[++i]));
         } else if (argument == "--triple" && i + 1 < argc) {
