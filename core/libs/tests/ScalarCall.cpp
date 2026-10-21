@@ -5,6 +5,7 @@
 #include "RdnaDecoder/RdnaMemoryOpDecoder.hpp"
 #include "ControlFlow/GraphBuilder.hpp"
 #include <array>
+#include <cstdint>
 #include <cstdio>
 #include <algorithm>
 #include <initializer_list>
@@ -290,6 +291,36 @@ static void CheckTableCalls() {
     const auto farCfg = BuildCode(farLinked.code, farSwappc);
     Require(farCfg.FindBlockByProgramCounter(farCall * 4u).terminator.trueBlock == farCfg.FindBlockByProgramCounter((farCall + 2u) * 4u).id);
     Require(farCfg.FindBlockByProgramCounter((farCall + 2u) * 4u).terminator.trueBlock == farCfg.FindBlockByProgramCounter((farCall + 1u) * 4u).id);
+    auto twoCallers = caller;
+    twoCallers.pop_back();
+    twoCallers.insert(twoCallers.end(), caller.begin(), caller.end());
+    const auto twoProgram = RdnaInstructionDecoder{}.Decode(twoCallers);
+    auto secondCall = calls[0];
+    secondCall.programCounter += 40u;
+    const std::array<TableCall, 2> twoCalls{calls[0], secondCall};
+    const std::vector<std::vector<TableCallee>> twoCallees{far[0], {{0x50ull, first}, {0x60ull, second}}};
+    const auto twoLinked = LinkCalls(twoProgram, {}, {}, twoCalls, twoCallees);
+    const auto& two = twoLinked.code;
+    const auto follow = [&](std::size_t word, std::size_t& hops) {
+        hops = 0;
+        while (two[word] >> 16u == 0xbf82u) {
+            word = static_cast<std::size_t>(static_cast<std::int64_t>(word) + 1 + static_cast<std::int16_t>(two[word] & 0xffffu));
+            ++hops;
+        }
+        return word;
+    };
+    std::size_t hops = 0;
+    Require(follow(9u, hops) == 23u && hops == 1u && two[21] >> 16u == 0xbf82u && two[22] >> 16u == 0xbf82u);
+    Require(follow(39u, hops) == 10u && hops == 1u);
+    const auto secondChain = follow(19u, hops);
+    Require(hops == 6u && two[secondChain] == 0xbf850007u && two[secondChain + 1u] == 0xbf07ff0eu && two[secondChain + 2u] == 0x50u);
+    Require(two[secondChain + 15u] == 0xbb0e0001u && std::equal(first.begin(), first.end(), two.begin() + static_cast<std::ptrdiff_t>(secondChain + 17u)));
+    Require(follow(secondChain + 16u, hops) == 20u && hops == 6u);
+    SwappcInfo twoSwappc = swappc;
+    twoSwappc.linkedCallFallbacks = twoLinked.fallbacks;
+    const auto twoCfg = BuildCode(two, twoSwappc);
+    Require(twoCfg.FindBlockByProgramCounter(static_cast<std::uint32_t>(secondChain + 15u) * 4u).terminator.trueBlock == twoCfg.FindBlockByProgramCounter(static_cast<std::uint32_t>(secondChain + 17u) * 4u).id);
+    Require(twoCfg.unlinkedCallProgramCounters.size() == 2u);
     std::vector<std::uint32_t> oversized(0x8000u, 0xbf800000u);
     const std::vector<std::vector<TableCallee>> overflows{{{0x10ull, oversized}, {0x20ull, first}}};
     ExpectThrow("out of the 16-bit branch range", [&] { static_cast<void>(LinkCalls(program, {}, {}, calls, overflows)); });

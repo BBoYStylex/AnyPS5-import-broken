@@ -1578,6 +1578,7 @@ LinkedCalls LinkCalls(const RdnaProgram& program, std::span<const UserDataCall> 
         linked[word] = 0xbb000000u | (userDataCalls[call].linkRegister << 16u) | static_cast<std::uint32_t>(offset);
         linked.insert(linked.end(), userDataCallees[call].begin(), userDataCallees[call].end());
     }
+    std::vector<std::pair<std::size_t, std::size_t>> stations;
     for (std::size_t call = 0; call < tableCalls.size(); ++call) {
         const auto& table = tableCalls[call];
         const auto& callees = tableCallees[call];
@@ -1585,14 +1586,28 @@ LinkedCalls LinkCalls(const RdnaProgram& program, std::span<const UserDataCall> 
         const auto at = "the table callees of the call at program counter " + toHexString(table.programCounter);
         const auto original = linked[word];
         const auto count = callees.size();
+        const auto relays = 2u * (tableCalls.size() - call - 1u);
+        std::vector<std::size_t> path;
+        for (const auto& [position, block] : stations) path.push_back(position + 2u * (call - block - 1u));
+        const auto station = [&] {
+            if (relays == 0u) return;
+            stations.push_back({linked.size(), call});
+            linked.insert(linked.end(), relays, 0u);
+        };
+        station();
+        const auto start = linked.size();
         std::vector<std::size_t> segments(count + 1u);
-        segments[0] = linked.size() + 1u;
-        for (std::size_t callee = 0; callee < count; ++callee) segments[callee + 1u] = segments[callee] + 16u + callees[callee].code.size();
+        segments[0] = start + 1u;
+        for (std::size_t callee = 0; callee < count; ++callee) segments[callee + 1u] = segments[callee] + 16u + callees[callee].code.size() + relays;
         const auto one = [&](std::size_t callee) { return segments[callee] + (callee < count ? 7u : 2u); };
-        const auto back = [&](std::size_t callee) { return callee == 0u ? word + 1u : segments[callee - 1u] + 15u; };
+        const auto back = [&](std::size_t callee) { return callee != 0u ? segments[callee - 1u] + 15u : path.empty() ? word + 1u : path.back() + 1u; };
         const auto fault = segments[count] + 3u;
         const auto branch = [&](std::uint32_t opcode, std::size_t target) { linked.push_back(branchWord(opcode, linked.size(), target, at.c_str())); };
-        linked[word] = branchWord(0xbf820000u, word, linked.size(), at.c_str());
+        for (std::size_t hop = 0; hop < path.size(); ++hop) {
+            linked[path[hop]] = branchWord(0xbf820000u, path[hop], hop + 1u < path.size() ? path[hop + 1u] : start, at.c_str());
+            linked[path[hop] + 1u] = branchWord(0xbf820000u, path[hop] + 1u, hop == 0u ? word + 1u : path[hop - 1u] + 1u, at.c_str());
+        }
+        linked[word] = branchWord(0xbf820000u, word, path.empty() ? start : path.front(), at.c_str());
         branch(0xbf850000u, one(0u));
         for (std::size_t callee = 0; callee < count; ++callee) {
             for (const bool sccOne : {false, true}) {
@@ -1607,6 +1622,7 @@ LinkedCalls LinkCalls(const RdnaProgram& program, std::span<const UserDataCall> 
             linked.push_back(0xbb000001u | (table.linkRegister << 16u));
             branch(0xbf820000u, back(callee));
             linked.insert(linked.end(), callees[callee].code.begin(), callees[callee].code.end());
+            station();
         }
         linked.push_back(0xbf078080u);
         branch(0xbf820000u, fault);
