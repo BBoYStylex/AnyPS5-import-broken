@@ -84,7 +84,7 @@ static bool CheckMemcpyOverlap() {
 
 static void CheckSecureCopySizeLimits() {
     using Copy = int (APS5_VABI*)(void*, std::size_t, const void*, std::size_t);
-    constexpr std::size_t RsizeMax = SIZE_MAX >> 1;
+    constexpr std::size_t RsizeMax = 0x1fffffffffffffff;
     const std::array<unsigned char, 8> original = {1, 2, 3, 4, 5, 6, 7, 8};
     const unsigned char source[] = {9, 10, 11, 12};
     for (Copy copy : {memcpy_s_nid_postfix, memmove_s_nid_postfix}) {
@@ -146,7 +146,7 @@ static void CheckBoundsCheckedFunctions() {
 }
 
 static void CheckSecureStringSizeLimits() {
-    constexpr std::size_t RsizeMax = SIZE_MAX >> 1;
+    constexpr std::size_t RsizeMax = 0x1fffffffffffffff;
     const std::array<char, 8> original = {'!', 'a', 'b', '\0', 'x', 'y', 'z', '!'};
     for (const auto size : {RsizeMax + 1, SIZE_MAX}) {
         for (const char* source : {"cd", "", static_cast<const char*>(nullptr)}) {
