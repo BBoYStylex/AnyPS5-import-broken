@@ -83,8 +83,6 @@ int ProcessGroupError(int descriptor, const char* pipeMessage) {
 }
 }
 
-extern "C" int TerminalError_nid_no_patch(int descriptor) { return TerminalError(descriptor); }
-
 extern "C" {
 int APS5_VABI cfsetspeed_nid_postfix(void* attributes, std::uint32_t speed) {
     if (attributes == nullptr) throw std::invalid_argument("cfsetspeed: attributes is null");
@@ -132,4 +130,6 @@ int APS5_VABI tcsetpgrp_nid_postfix(int descriptor, int group) {
     static_cast<void>(group);
     return Fail(ProcessGroupError(descriptor, "tcsetpgrp: the SIGIO owner of a pipe is not supported"));
 }
+
+int APS5_VABI tcgetsid_nid_postfix(int descriptor) { return Fail(TerminalError(descriptor)); }
 }
