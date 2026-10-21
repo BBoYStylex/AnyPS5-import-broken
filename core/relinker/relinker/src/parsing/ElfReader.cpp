@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <bit>
 #include <cstring>
+#include <limits>
 #include <utility>
 
 namespace Relinker {
@@ -11,6 +12,11 @@ namespace Relinker {
 using namespace Elfpatcher;
 
 namespace {
+
+constexpr std::uint32_t kExtendedProgramHeaderCount = 0xffff;
+constexpr std::uint32_t kExtendedSectionHeaderIndex = 0xffff;
+constexpr std::uint32_t kShdrLinkOffset = 0x28;
+constexpr std::uint32_t kShdrInfoOffset = 0x2c;
 
 bool _rangeFits(const std::uint64_t offset, const std::uint64_t length, const std::size_t size) {
     return offset <= size && length <= size - offset;
@@ -116,8 +122,36 @@ ElfHeader ElfReader::ReadHeader() const {
     return header;
 }
 
+ElfHeader ElfReader::_resolvedHeader() const {
+    ElfHeader header = ReadHeader();
+    const bool extendedProgramCount = header.ProgramHeaderCount == kExtendedProgramHeaderCount;
+    const bool extendedSectionCount = header.SectionHeaderCount == 0 && header.SectionHeaderOffset != 0;
+    const bool extendedSectionIndex = header.SectionHeaderStringIndex == kExtendedSectionHeaderIndex;
+    if (!extendedProgramCount && !extendedSectionCount && !extendedSectionIndex) return header;
+
+    if (header.SectionHeaderOffset == 0)
+        throw RelinkerException("Extended ELF numbering requires a section header table", 0x28);
+    if (header.SectionHeaderEntrySize != kShdrEntrySize)
+        throw RelinkerException("Invalid ELF section header entry size: expected 64 bytes", 0x3a);
+    if (!_rangeFits(header.SectionHeaderOffset, kShdrEntrySize, _fileBuffer.size()))
+        throw RelinkerException("Section header table out of bounds", header.SectionHeaderOffset);
+
+    if (extendedProgramCount)
+        header.ProgramHeaderCount = _readU32At(header.SectionHeaderOffset + kShdrInfoOffset);
+    if (extendedSectionIndex)
+        header.SectionHeaderStringIndex = _readU32At(header.SectionHeaderOffset + kShdrLinkOffset);
+    if (extendedSectionCount) {
+        const std::uint64_t count = _readU64At(header.SectionHeaderOffset + kShdrSizeOffset);
+        if (count > std::numeric_limits<std::uint32_t>::max())
+            throw RelinkerException("Extended ELF section header count is out of range", header.SectionHeaderOffset);
+        header.SectionHeaderCount = static_cast<std::uint32_t>(count);
+    }
+
+    return header;
+}
+
 std::vector<ProgramHeader> ElfReader::ReadProgramHeaders() const {
-    const ElfHeader header = ReadHeader();
+    const ElfHeader header = _resolvedHeader();
     if (header.ProgramHeaderCount != 0 && header.ProgramHeaderEntrySize != 56) {
         throw RelinkerException("Invalid ELF program header entry size: expected 56 bytes", 0x36);
     }
@@ -125,7 +159,7 @@ std::vector<ProgramHeader> ElfReader::ReadProgramHeaders() const {
     std::vector<ProgramHeader> headers;
     FileByteOffset offset = header.ProgramHeaderOffset;
 
-    for (std::uint16_t i = 0; i < header.ProgramHeaderCount; ++i) {
+    for (std::uint32_t i = 0; i < header.ProgramHeaderCount; ++i) {
         ProgramHeader ph{};
         ph.Type = _readU32At(offset);
         ph.Flags = _readU32At(offset + 0x04);
@@ -189,7 +223,7 @@ std::vector<ProgramHeader> ElfReader::ReadProgramHeaders() const {
 }
 
 std::vector<SectionHeader> ElfReader::ReadSectionHeaders() const {
-    const ElfHeader header = ReadHeader();
+    const ElfHeader header = _resolvedHeader();
     if (header.SectionHeaderCount != 0 && header.SectionHeaderEntrySize != kShdrEntrySize) {
         throw RelinkerException("Invalid ELF section header entry size: expected 64 bytes", 0x3a);
     }
@@ -204,7 +238,7 @@ std::vector<SectionHeader> ElfReader::ReadSectionHeaders() const {
     std::vector<SectionHeader> headers;
     FileByteOffset offset = header.SectionHeaderOffset;
 
-    for (std::uint16_t i = 0; i < header.SectionHeaderCount; ++i) {
+    for (std::uint32_t i = 0; i < header.SectionHeaderCount; ++i) {
         SectionHeader sh;
         const std::uint32_t nameOffset = _readU32At(offset);
         sh.Type = _readU32At(offset + 0x04);
@@ -231,7 +265,7 @@ std::string ElfReader::_resolveShdrName(std::uint32_t nameOffset, const ElfHeade
     }
 
     FileByteOffset shstrOffset = header.SectionHeaderOffset +
-                        (header.SectionHeaderStringIndex * header.SectionHeaderEntrySize);
+                        (static_cast<std::uint64_t>(header.SectionHeaderStringIndex) * header.SectionHeaderEntrySize);
 
     if (_readU32At(shstrOffset + kShdrTypeOffset) != SHT_STRTAB) {
         throw RelinkerException("Section names do not reference a string table", shstrOffset);

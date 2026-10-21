@@ -324,6 +324,44 @@ int main() {
             Require(reader.TranslateVirtualAddress(0x101f) == 0x25f);
             RejectAddress(Fixture(), 0x1020);
         }},
+        {"extended program header count", [] {
+            auto bytes = Fixture();
+            Write<std::uint16_t>(bytes, 56, 0xffff);
+            Write<std::uint32_t>(bytes, 172, 1);
+            Require(Relinker::ElfReader(std::move(bytes)).ReadProgramHeaders().size() == 1);
+        }},
+        {"extended section header count", [] {
+            auto bytes = Fixture();
+            Write<std::uint16_t>(bytes, 60, 0);
+            Write<std::uint64_t>(bytes, 160, 3);
+            const auto sections = Relinker::ElfReader(std::move(bytes)).ReadSectionHeaders();
+            Require(sections.size() == 3 && sections[1].Name == ".text");
+        }},
+        {"extended section name index", [] {
+            auto bytes = Fixture();
+            Write<std::uint16_t>(bytes, 62, 0xffff);
+            Write<std::uint32_t>(bytes, 168, 2);
+            const auto sections = Relinker::ElfReader(std::move(bytes)).ReadSectionHeaders();
+            Require(sections.size() == 3 && sections[2].Name == ".shstrtab");
+        }},
+        {"extended numbering without a section header table", [] {
+            auto bytes = Fixture();
+            Write<std::uint16_t>(bytes, 56, 0xffff);
+            Write<std::uint64_t>(bytes, 40, 0);
+            try {
+                Relinker::ElfReader(std::move(bytes)).ReadProgramHeaders();
+            } catch (const Relinker::RelinkerException& error) {
+                Require(std::string(error.what()) == "Extended ELF numbering requires a section header table");
+                return;
+            }
+            throw std::runtime_error("Extended numbering without a section header table was accepted");
+        }},
+        {"extended section count out of range", [] {
+            auto bytes = Fixture();
+            Write<std::uint16_t>(bytes, 60, 0);
+            Write<std::uint64_t>(bytes, 160, std::numeric_limits<std::uint64_t>::max());
+            RejectSections(std::move(bytes));
+        }},
     };
     std::size_t failures = 0;
     for (const auto& [name, test] : cases) {

@@ -31,10 +31,10 @@ struct ElfHeader {
     std::uint64_t ProgramHeaderOffset;
     std::uint64_t SectionHeaderOffset;
     std::uint32_t ProgramHeaderEntrySize;
-    std::uint16_t ProgramHeaderCount;
+    std::uint32_t ProgramHeaderCount;
     std::uint32_t SectionHeaderEntrySize;
-    std::uint16_t SectionHeaderCount;
-    std::uint16_t SectionHeaderStringIndex;
+    std::uint32_t SectionHeaderCount;
+    std::uint32_t SectionHeaderStringIndex;
 };
 
 struct ProgramHeader {
