@@ -772,4 +772,15 @@ if(BUILD_TESTING)
         set_tests_properties(sdk_missing_exports PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${PATCHED_DIR}")
     endif()
+    add_test_executable(guest_mdbg_syscore_tests tests/GuestMdbgSysCore.cpp)
+    target_include_directories(guest_mdbg_syscore_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(guest_mdbg_syscore_tests PRIVATE libmdbg_syscore libc)
+    configure_windows_unwind(guest_mdbg_syscore_tests)
+    add_test(NAME guest_mdbg_syscore COMMAND guest_mdbg_syscore_tests)
+    set_tests_properties(guest_mdbg_syscore PROPERTIES TIMEOUT 20)
+    if(WIN32)
+        set_tests_properties(guest_mdbg_syscore PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libmdbg_syscore>")
+>>>>>>> local/fix/libmdbg_syscore-export-signatures
+    endif()
 endif()
