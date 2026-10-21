@@ -53,6 +53,50 @@ std::vector<ExtractedShaderPackage> ConsoleShaderExtractor::ExtractFromMemory(st
         return {};
     }
 
+    uint32_t magic = 0;
+    std::memcpy(&magic, assetData.data(), sizeof(uint32_t));
+
+    if (magic == 0x30304253 || magic == 0x31304253 || magic == 0x32304253 || magic == 0x53424147) {
+        if (assetData.size() >= 24) {
+            uint8_t stageByte = assetData[8];
+            ConsoleShaderStage stage = ConsoleShaderStage::Vertex;
+            if (stageByte == 0) stage = ConsoleShaderStage::Fragment;
+            else if (stageByte == 1) stage = ConsoleShaderStage::Vertex;
+            else if (stageByte == 2) stage = ConsoleShaderStage::Geometry;
+            else if (stageByte == 3) stage = ConsoleShaderStage::Hull;
+            else if (stageByte == 4) stage = ConsoleShaderStage::Domain;
+            else if (stageByte == 5) stage = ConsoleShaderStage::Compute;
+
+            uint32_t codeSize = 0;
+            uint32_t codeOffset = 0;
+            std::memcpy(&codeSize, assetData.data() + 16, sizeof(uint32_t));
+            std::memcpy(&codeOffset, assetData.data() + 20, sizeof(uint32_t));
+
+            if (codeOffset == 0 || codeOffset >= assetData.size()) {
+                codeOffset = 24;
+            }
+            if (codeSize == 0 || (codeOffset + codeSize > assetData.size())) {
+                codeSize = static_cast<uint32_t>(assetData.size() - codeOffset);
+            }
+
+            uint64_t hash = 14695981039346656037ULL;
+            for (size_t b = 0; b < codeSize; ++b) {
+                hash ^= assetData[codeOffset + b];
+                hash *= 1099511628211ULL;
+            }
+
+            ExtractedShaderPackage package{};
+            package.Stage = stage;
+            package.ShaderHash = hash;
+            package.PushConstantSize = 128;
+            package.RawBytecode.assign(
+                assetData.data() + codeOffset,
+                assetData.data() + codeOffset + codeSize
+            );
+            return {std::move(package)};
+        }
+    }
+
     const auto* header = reinterpret_cast<const RawShaderContainerHeader*>(assetData.data());
     std::vector<ExtractedShaderPackage> result;
 
