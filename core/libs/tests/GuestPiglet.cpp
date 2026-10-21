@@ -9,6 +9,7 @@
 #include <cstring>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 using namespace Piglet;
 
@@ -237,5 +238,43 @@ int main() {
     glDrawArrays(GL_TRIANGLES, 0, 6);
     context.Finish();
     Require(Near(Pixel(surface, 32, 48), {255, 0, 0, 255}) && Near(Pixel(surface, 32, 16), {0, 0, 255, 255}));
+    GLuint single = 0;
+    glGenTextures(1, &single);
+    glBindTexture(GL_TEXTURE_2D, single);
+    const std::uint8_t white[] = {255, 255, 255, 255};
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, white);
+    glClear(GL_COLOR_BUFFER_BIT);
+    glDrawArrays(GL_TRIANGLES, 0, 6);
+    context.Finish();
+    Require(Near(Pixel(surface, 32, 32), {255, 255, 255, 255}));
+
+    std::vector<std::uint8_t> checker(64 * 64 * 4);
+    for (std::size_t texel = 0; texel < 64 * 64; ++texel) {
+        const std::uint8_t value = ((texel % 64 + texel / 64) & 1) ? 255 : 0;
+        checker[texel * 4] = checker[texel * 4 + 1] = checker[texel * 4 + 2] = value;
+        checker[texel * 4 + 3] = 255;
+    }
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 64, 64, 0, GL_RGBA, GL_UNSIGNED_BYTE, checker.data());
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glViewport(0, 0, 16, 16);
+    glClear(GL_COLOR_BUFFER_BIT);
+    glDrawArrays(GL_TRIANGLES, 0, 6);
+    context.Finish();
+    bool texelsOnly = true;
+    for (std::uint32_t row = 49; row < 63; ++row)
+        for (std::uint32_t x = 1; x < 15; ++x) {
+            const auto value = Pixel(surface, x, row)[0];
+            texelsOnly = texelsOnly && (value <= 2 || value >= 253);
+        }
+    Require(texelsOnly);
+    glViewport(0, 0, Size, Size);
+
+    {
+        Context discarded;
+        discarded.SetSurface(&surface);
+    }
+    glClear(GL_COLOR_BUFFER_BIT);
+    context.Finish();
+    Require(Near(Pixel(surface, 32, 32), {64, 64, 64, 255}));
     std::puts("guest_piglet: all checks passed");
 }

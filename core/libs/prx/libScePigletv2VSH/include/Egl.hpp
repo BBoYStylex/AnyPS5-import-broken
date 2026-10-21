@@ -24,6 +24,11 @@ struct PigletConfiguration {
 };
 
 struct WindowSurface {
+    WindowSurface() = default;
+    WindowSurface(const WindowSurface&) = delete;
+    WindowSurface& operator=(const WindowSurface&) = delete;
+    ~WindowSurface();
+
     Surface surface;
     int videoOut = -1;
     std::array<std::vector<std::byte>, 2> storage;

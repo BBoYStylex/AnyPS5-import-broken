@@ -162,6 +162,20 @@ Context::Context() : device(Device::Get()) {
     Upload(device, incomplete.image, 1, 1, {0, 0, 0, 255});
 }
 
+Context::~Context() {
+    for (auto& [name, program] : programs) program->deletePending = true;
+    currentProgram = 0;
+    ReleasePrograms();
+    for (auto& image : retired) device.DestroyImage(image);
+    for (auto& [name, texture] : textures) device.DestroyImage(texture.image);
+    device.DestroyImage(incomplete.image);
+    for (const auto& [key, sampler] : samplers) device.vkDestroySampler(device.device, sampler, nullptr);
+    for (const auto pool : pools) device.vkDestroyDescriptorPool(device.device, pool, nullptr);
+    for (auto* ring : {&vertexRing, &uniformRing})
+        for (auto& chunk : ring->chunks) device.DestroyBuffer(chunk);
+    device.vkFreeCommandBuffers(device.device, device.pool, 1, &commands);
+}
+
 void Context::SetError(GLenum code) {
     if (error == GL_NO_ERROR) error = code;
 }
@@ -290,7 +304,8 @@ void Context::TexImage2D(GLenum target, GLint level, GLint internalFormat, GLsiz
 
 const Texture& Context::SampledTexture(GLint unit) {
     const auto found = textures.find(boundTextures[static_cast<std::size_t>(unit)]);
-    if (found == textures.end() || !found->second.image.image || MipmapFilter(found->second.minFilter)) return incomplete;
+    if (found == textures.end() || !found->second.image.image) return incomplete;
+    if (MipmapFilter(found->second.minFilter) && (found->second.width > 1 || found->second.height > 1)) return incomplete;
     return found->second;
 }
 
@@ -305,7 +320,7 @@ VkSampler Context::Sampler(const Texture& texture) {
     info.addressModeU = AddressMode(texture.wrapS);
     info.addressModeV = AddressMode(texture.wrapT);
     info.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    info.maxLod = 0.0f;
+    info.maxLod = 0.25f;
     VkSampler sampler = VK_NULL_HANDLE;
     Check(device.vkCreateSampler(device.device, &info, nullptr, &sampler), "vkCreateSampler");
     samplers.emplace(key, sampler);

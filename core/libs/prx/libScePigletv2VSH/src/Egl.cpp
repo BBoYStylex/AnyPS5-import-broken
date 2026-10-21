@@ -64,15 +64,22 @@ bool ValidDisplay(void* display) {
 }
 
 void DestroySurfaceNow(WindowSurface* window) {
-    auto& device = Device::Get();
-    if (window->surface.framebuffer) device.vkDestroyFramebuffer(device.device, window->surface.framebuffer, nullptr);
-    device.DestroyImage(window->surface.color);
-    device.DestroyBuffer(window->surface.readback);
-    if (window->videoOut >= 0) sceVideoOutClose(window->videoOut);
     surfaces.erase(window);
     delete window;
 }
 
+}
+
+WindowSurface::~WindowSurface() {
+    if (videoOut >= 0) {
+        VideoOutFlipStatus status{};
+        while (sceVideoOutGetFlipStatus(videoOut, &status) >= 0 && status.flipPendingNum != 0) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        sceVideoOutClose(videoOut);
+    }
+    auto& device = Device::Get();
+    if (surface.framebuffer) device.vkDestroyFramebuffer(device.device, surface.framebuffer, nullptr);
+    device.DestroyImage(surface.color);
+    device.DestroyBuffer(surface.readback);
 }
 
 void* EglGetDisplay(void* native) {

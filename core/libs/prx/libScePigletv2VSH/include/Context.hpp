@@ -87,6 +87,9 @@ struct Surface {
 class Context {
 public:
     Context();
+    Context(const Context&) = delete;
+    Context& operator=(const Context&) = delete;
+    ~Context();
 
     void ActiveTexture(GLenum texture);
     void AttachShader(GLuint program, GLuint shader);
