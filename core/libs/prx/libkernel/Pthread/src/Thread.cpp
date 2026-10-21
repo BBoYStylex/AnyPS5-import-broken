@@ -329,6 +329,18 @@ static void UnregisterStack(PthreadPrivate* self) {
     liveStacks.erase(self);
 }
 
+#ifdef _WIN32
+static const std::thread::id initialThread = std::this_thread::get_id();
+#endif
+
+extern "C" bool IsInitialThread_nid_no_patch() {
+#ifdef _WIN32
+    return std::this_thread::get_id() == initialThread;
+#else
+    return gettid() == getpid();
+#endif
+}
+
 bool GuestThreadStack(std::uintptr_t address, std::uintptr_t* start, std::uintptr_t* end) {
     std::uintptr_t low = 0;
     std::uintptr_t high = 0;
