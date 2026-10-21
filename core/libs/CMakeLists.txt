@@ -645,6 +645,17 @@ if(BUILD_TESTING)
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libScePosixForWebKit>")
     endif()
 
+    add_test_executable(guest_user_service_exports_tests tests/GuestUserServiceExports.cpp)
+    target_include_directories(guest_user_service_exports_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(guest_user_service_exports_tests PRIVATE libSceUserService)
+    configure_windows_unwind(guest_user_service_exports_tests)
+    add_test(NAME guest_user_service_exports COMMAND guest_user_service_exports_tests)
+    set_tests_properties(guest_user_service_exports PROPERTIES TIMEOUT 30)
+    if(WIN32)
+        set_tests_properties(guest_user_service_exports PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceUserService>")
+    endif()
+
     add_test_executable(MemoryPoolTest
         tests/MemoryPoolTest.cpp
         prx/libkernel/DirectMemory/MemoryPool.cpp

@@ -1,16 +1,7 @@
-#include "SceTypes.hpp"
-#include "prx/libSceUserService/UserService.hpp"
+#include "prx/libSceUserService/include/GuestUserService.hpp"
 #include <cstdlib>
 #include <cstring>
 #include <initializer_list>
-
-extern "C" {
-int APS5_VABI sceUserServiceInitialize(const UserServiceInitParam* params);
-int APS5_VABI sceUserServiceInitialize2(std::int32_t priority, KernelCpumask affinityMask);
-int APS5_VABI sceUserServiceTerminate(void);
-int APS5_VABI sceUserServiceGetLoginUserIdList(UserServiceLoginUserIdList* user_id_list);
-int APS5_VABI sceUserServiceGetEvent(SceUserServiceEvent* event);
-}
 
 namespace {
 

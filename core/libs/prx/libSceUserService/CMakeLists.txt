@@ -1,4 +1,4 @@
-add_library(libSceUserService SHARED EXCLUDE_FROM_ALL Export.cpp)
+add_library(libSceUserService SHARED EXCLUDE_FROM_ALL Export.cpp Pending.cpp)
 target_include_directories(libSceUserService PRIVATE ${LIBS_INCLUDE_DIR})
 configure_windows_unwind(libSceUserService)
 

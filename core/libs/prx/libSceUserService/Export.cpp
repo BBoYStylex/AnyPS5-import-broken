@@ -5,6 +5,7 @@
 #include <atomic>
 #include <cstring>
 #include "prx/libSceUserService/UserService.hpp"
+#include "prx/libSceUserService/include/GuestUserService.hpp"
 
 static std::atomic<bool> initialized{false};
 static std::atomic<bool> loginReported{false};
@@ -21,6 +22,11 @@ static int ReportAccessibilitySetting(int user_id, int32_t* setting, int32_t val
 }
 
 extern "C" {
+
+int APS5_VABI sceUserServiceDestroyUser(int user_id) {
+ NotImplemented_nid_no_patch(__func__);
+ return 0;
+}
 
 int APS5_VABI sceUserServiceGetAccessibilityChatTranscription(int user_id, int32_t* chat_transcription) {
  return ReportAccessibilitySetting(user_id, chat_transcription, 0);
@@ -146,6 +152,11 @@ int APS5_VABI sceUserServiceGetUserNumber(int user_id, int32_t* number) {
  }
  *number = 1;
  return USER_SERVICE_OK;
+}
+
+int APS5_VABI sceUserServiceSetUserName(int user_id, const char* name) {
+ NotImplemented_nid_no_patch(__func__);
+ return 0;
 }
 
 static bool ValidThreadPriority(int priority) {

@@ -1,13 +1,8 @@
-#include "SceTypes.hpp"
-#include "prx/libSceUserService/UserService.hpp"
+#include "prx/libSceUserService/include/GuestUserService.hpp"
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
 #include <initializer_list>
-
-extern "C" {
-int APS5_VABI sceUserServiceGetUserName(int user_id, char* name, std::size_t size);
-}
 
 namespace {
 
