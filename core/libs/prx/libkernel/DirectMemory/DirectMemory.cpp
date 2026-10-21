@@ -1262,6 +1262,7 @@ static bool IsGuestModuleImage(const void* base) {
 struct GuestImageOverlap {
     std::uintptr_t base = 0;
     bool guestModule = false;
+    bool containsStart = false;
 };
 
 struct GuestImageSearch {
@@ -1276,15 +1277,18 @@ static int FindImagesOverlapping(dl_phdr_info* image, std::size_t, void* data) {
     auto& search = *static_cast<GuestImageSearch*>(data);
     const bool main = search.first;
     search.first = false;
+    GuestImageOverlap overlap{.base = image->dlpi_addr, .guestModule = image->dlpi_name != nullptr && std::string_view(image->dlpi_name).ends_with(".guest.prx")};
+    bool overlaps = false;
     for (int index = 0; index < image->dlpi_phnum; ++index) {
         const auto& header = image->dlpi_phdr[index];
         if (header.p_type != PT_LOAD) continue;
         const auto start = (image->dlpi_addr + header.p_vaddr) & ~(search.pageSize - 1);
         const auto end = (image->dlpi_addr + header.p_vaddr + header.p_memsz + search.pageSize - 1) & ~(search.pageSize - 1);
         if (search.end <= start || search.start >= end) continue;
-        if (!main) search.images.push_back({image->dlpi_addr, image->dlpi_name != nullptr && std::string_view(image->dlpi_name).ends_with(".guest.prx")});
-        return 0;
+        overlaps = true;
+        if (search.start >= start) overlap.containsStart = true;
     }
+    if (overlaps && !main) search.images.push_back(overlap);
     return 0;
 }
 #endif
@@ -1349,7 +1353,7 @@ int DoMprotect(const void* addr, size_t len, int prot, bool requireMappedStart) 
         if (view.Type == MEM_IMAGE) {
             if (view.AllocationBase == GetModuleHandleW(nullptr)) mutation.RegisterMainImage();
             else if (IsGuestModuleImage(view.AllocationBase)) mutation.RegisterImage(view.AllocationBase);
-            else throw std::invalid_argument("Memory protection of a foreign image is not supported");
+            else if (cursor == first) throw std::invalid_argument("Memory protection of a foreign image is not supported");
         }
         if (view.Type == MEM_MAPPED && (nativeProtection & ~PosixRightsFromWin(view.AllocationProtect)) != 0)
             throw std::system_error(EACCES, std::generic_category(), "mprotect above the maximum protection of a mapped view");
@@ -1360,8 +1364,8 @@ int DoMprotect(const void* addr, size_t len, int prot, bool requireMappedStart) 
     GuestImageSearch search{.start = first, .end = end, .pageSize = static_cast<std::uintptr_t>(::sysconf(_SC_PAGESIZE))};
     dl_iterate_phdr(FindImagesOverlapping, &search);
     for (const auto& image : search.images) {
-        if (!image.guestModule) throw std::invalid_argument("Memory protection of a foreign image is not supported");
-        mutation.RegisterImage(reinterpret_cast<const void*>(image.base));
+        if (image.guestModule) mutation.RegisterImage(reinterpret_cast<const void*>(image.base));
+        else if (image.containsStart) throw std::invalid_argument("Memory protection of a foreign image is not supported");
     }
 #endif
     std::vector<std::pair<const void*, std::size_t>> spans;
