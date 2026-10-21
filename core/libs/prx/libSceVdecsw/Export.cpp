@@ -406,11 +406,36 @@ int APS5_VABI sceVdecswSyncDecodeOutput(std::uint64_t handle, OutputInfo* output
 }
 
 int APS5_VABI sceVdecswGetPictureInfo(const OutputInfo* output, void* first, void* second) {
-    (void)output;
-    (void)first;
-    (void)second;
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    if (output == nullptr || first == nullptr) throw std::runtime_error("Vdecsw: invalid argument pointer");
+    std::uint64_t thisSize;
+    std::memcpy(&thisSize, first, sizeof(thisSize));
+    if (thisSize < sizeof(std::uint64_t)) throw std::runtime_error("Vdecsw: invalid argument pointer");
+    if (output->pictureCount > 1) throw std::runtime_error("Vdecsw: second field picture info is not implemented");
+    if (output->pictureCount == 0) return 0;
+    static_cast<void>(second);
+    const bool vp9 = output->codecType == CodecVp9;
+    const std::uint64_t infoSize = vp9 ? sizeof(Vp9PictureInfo) : sizeof(AvcPictureInfo);
+    std::vector<std::shared_ptr<Decoder>> all;
+    {
+        std::lock_guard lock(decodersMutex);
+        for (const auto& [handle, decoder] : decoders) all.push_back(decoder);
+    }
+    for (const auto& decoder : all) {
+        std::lock_guard lock(decoder->mutex);
+        const void* info = nullptr;
+        if (vp9) {
+            const auto found = decoder->deliveredVp9.find(output->frameBuffer);
+            if (found != decoder->deliveredVp9.end()) info = &found->second;
+        } else {
+            const auto found = decoder->delivered.find(output->frameBuffer);
+            if (found != decoder->delivered.end()) info = &found->second;
+        }
+        if (info == nullptr) continue;
+        const auto bytes = std::min<std::uint64_t>(thisSize, infoSize) - sizeof(std::uint64_t);
+        std::memcpy(static_cast<std::uint8_t*>(first) + sizeof(std::uint64_t), static_cast<const std::uint8_t*>(info) + sizeof(std::uint64_t), bytes);
+        return 0;
+    }
+    throw std::runtime_error("Vdecsw: picture info requested for a frame buffer no decoder returned");
 }
 
 int APS5_VABI sceVdecswGetAvcPictureInfo(const OutputInfo* output, AvcPictureInfo* first, AvcPictureInfo* second) {

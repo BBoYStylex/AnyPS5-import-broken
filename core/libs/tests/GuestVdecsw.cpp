@@ -150,6 +150,7 @@ int APS5_VABI sceVdecswTrySyncDecodeOutput(std::uint64_t, OutputInfo*);
 int APS5_VABI sceVdecswSyncDecodeOutput(std::uint64_t, OutputInfo*);
 int APS5_VABI sceVdecswGetVp9PictureInfo(const OutputInfo*, Vp9PictureInfo*);
 int APS5_VABI sceVdecswGetAvcPictureInfo(const OutputInfo*, AvcPictureInfo*, AvcPictureInfo*);
+int APS5_VABI sceVdecswGetPictureInfo(const OutputInfo*, void*, void*);
 int APS5_VABI sceVdecswGetHevcPictureInfo(const OutputInfo*, void*);
 int APS5_VABI sceVdecswFinalizeDecodeSequence(std::uint64_t);
 int APS5_VABI sceVdecswResetDecoder(std::uint64_t);
@@ -166,6 +167,14 @@ constexpr std::uint32_t CodecVp9 = 2382845;
 
 void check(bool condition, const std::string& message) {
     if (!condition) throw std::runtime_error(message);
+}
+
+bool sameBytes(const Vp9PictureInfo& left, const Vp9PictureInfo& right) {
+    return std::memcmp(&left, &right, sizeof(Vp9PictureInfo)) == 0;
+}
+
+bool sameBytes(const AvcPictureInfo& left, const AvcPictureInfo& right) {
+    return std::memcmp(&left, &right, sizeof(AvcPictureInfo)) == 0;
 }
 
 struct Session {
@@ -224,6 +233,8 @@ void testDecode() {
             const auto unit = DisplayOrderUnits[pictures];
             check(info.ptsData == 1000 + unit && info.dtsData == unit && info.attachedData == 0xa0 + unit && info.idrPictureFlag == (pictures == 0 ? 1 : 0) && info.profileIdc == 100, "pictures out of display order");
             check(info.picWidthInMbsMinus1 == Width / 16 - 1 && info.picHeightInMapUnitsMinus1 == CodedHeight / 16 - 1 && info.frameMbsOnlyFlag == 1 && info.frameCroppingFlag == 1 && info.frameCropLeftOffset == 0 && info.frameCropRightOffset == 0 && info.frameCropTopOffset == 0 && info.frameCropBottomOffset == (CodedHeight - Height) / 2, "picture geometry in the picture info is wrong");
+            AvcPictureInfo generic{sizeof(AvcPictureInfo)};
+            check(sceVdecswGetPictureInfo(&output, &generic, nullptr) == 0 && sameBytes(generic, info), "the generic picture info query disagrees with the AVC one");
             check(hashNv12(static_cast<const std::uint8_t*>(output.frameBuffer), output.framePitch, output.frameHeight) == PictureHashes[pictures], "picture " + std::to_string(pictures) + " differs from the reference");
             ++pictures;
         }
@@ -325,10 +336,6 @@ Vp9PictureInfo sentinelVp9Info(std::uint64_t size = sizeof(Vp9PictureInfo)) {
     return info;
 }
 
-bool sameBytes(const Vp9PictureInfo& left, const Vp9PictureInfo& right) {
-    return std::memcmp(&left, &right, sizeof(Vp9PictureInfo)) == 0;
-}
-
 void checkVp9Info(const Vp9PictureInfo& info, std::size_t picture) {
     const std::string name = "VP9 picture " + std::to_string(picture);
     check(info.thisSize == sizeof(Vp9PictureInfo) && info.isValid, name + " has no picture info");
@@ -370,6 +377,9 @@ void testVp9PictureInfo() {
             auto info = sentinelVp9Info();
             check(sceVdecswGetVp9PictureInfo(&output, &info) == 0, "VP9 picture info query failed");
             checkVp9Info(info, pictures);
+            auto generic = sentinelVp9Info();
+            check(sceVdecswGetPictureInfo(&output, &generic, nullptr) == 0, "generic VP9 picture info query failed");
+            checkVp9Info(generic, pictures);
             check(hashNv12(target.data(), output.framePitch, output.frameHeight) == Vp9Hashes[pictures], "VP9 picture " + std::to_string(pictures) + " differs from the reference");
             outputs[pictures] = output;
             ++pictures;
@@ -412,6 +422,19 @@ void testVp9PictureInfo() {
     unknown.frameBuffer = nullptr;
     check(throws([&] { sceVdecswGetVp9PictureInfo(&unknown, &info); }) && sameBytes(info, unchanged), "a null frame buffer was accepted");
 
+    check(throws([&] { sceVdecswGetPictureInfo(nullptr, &info, nullptr); }) && sameBytes(info, unchanged), "a null output info was accepted by the generic query");
+    check(throws([&] { sceVdecswGetPictureInfo(&outputs[0], nullptr, nullptr); }), "a null picture info was accepted by the generic query");
+    auto genericTooSmall = sentinelVp9Info(7);
+    const auto genericTooSmallBefore = genericTooSmall;
+    check(throws([&] { sceVdecswGetPictureInfo(&outputs[0], &genericTooSmall, nullptr); }) && sameBytes(genericTooSmall, genericTooSmallBefore), "a generic picture info smaller than its size field was accepted");
+    check(throws([&] { sceVdecswGetPictureInfo(&doubled, &info, nullptr); }) && sameBytes(info, unchanged), "an output with two pictures was accepted by the generic query");
+    auto genericEmpty = sentinelVp9Info();
+    check(sceVdecswGetPictureInfo(&empty, &genericEmpty, nullptr) == 0 && sameBytes(genericEmpty, unchanged), "an output without a picture wrote a generic picture info");
+    check(throws([&] { sceVdecswGetPictureInfo(&unknown, &info, nullptr); }) && sameBytes(info, unchanged), "a frame buffer no decoder returned was accepted by the generic query");
+    auto mislabelled = outputs[0];
+    mislabelled.codecType = 0;
+    check(throws([&] { sceVdecswGetPictureInfo(&mislabelled, &info, nullptr); }) && sameBytes(info, unchanged), "a VP9 picture was returned for an output that names AVC");
+
     const auto head = offsetof(Vp9PictureInfo, profile);
     auto partial = sentinelVp9Info(head);
     check(sceVdecswGetVp9PictureInfo(&outputs[2], &partial) == 0, "a VP9 picture info with a short size field was rejected");
@@ -429,6 +452,23 @@ void testVp9PictureInfo() {
     oversized.info.thisSize = sizeof(Vp9PictureInfo);
     checkVp9Info(oversized.info, 3);
     for (const auto byte : oversized.tail) check(byte == 0xcc, "a VP9 picture info with a long size field was written beyond the structure");
+
+    auto genericPartial = sentinelVp9Info(head);
+    check(sceVdecswGetPictureInfo(&outputs[2], &genericPartial, nullptr) == 0, "a generic picture info with a short size field was rejected");
+    check(genericPartial.thisSize == head && genericPartial.isValid && genericPartial.ptsData == 1002 && genericPartial.dtsData == 2 && genericPartial.attachedData == 0xa2, "the leading generic picture info fields were not written");
+    check(genericPartial.profile == unchanged.profile && genericPartial.frameWidth == unchanged.frameWidth && genericPartial.renderHeight == unchanged.renderHeight, "a generic picture info with a short size field was written beyond it");
+
+    struct GenericOversized {
+        Vp9PictureInfo info;
+        std::uint8_t tail[64];
+    } genericOversized;
+    std::memset(&genericOversized, 0xcc, sizeof(genericOversized));
+    genericOversized.info.thisSize = sizeof(GenericOversized);
+    check(sceVdecswGetPictureInfo(&outputs[3], &genericOversized.info, nullptr) == 0, "a generic picture info with a long size field was rejected");
+    check(genericOversized.info.thisSize == sizeof(GenericOversized), "a long generic picture info size field was changed");
+    genericOversized.info.thisSize = sizeof(Vp9PictureInfo);
+    checkVp9Info(genericOversized.info, 3);
+    for (const auto byte : genericOversized.tail) check(byte == 0xcc, "a generic picture info with a long size field was written beyond the structure");
 
     AvcPictureInfo avc{sizeof(AvcPictureInfo)};
     check(throws([&] { sceVdecswGetAvcPictureInfo(&outputs[0], &avc, nullptr); }), "AVC picture info was returned for a VP9 picture");
