@@ -177,12 +177,8 @@ void oneFragment(AgcDriver::VulkanDevice& device) {
     eliminate(device, color);
     expect(device, color, [](std::uint32_t x, std::uint32_t y) { return x >= 56 && y >= 8 ? Clear : Stale; }, "a one-fragment target with one fast-cleared tile eliminated");
     prepare(color, [](std::uint32_t tileX, std::uint32_t) { return tileX < 4; }, 0xc);
-    const auto codes = Cmask;
     eliminate(device, color);
-    std::lock_guard lock(AgcDriver::GuestMemory::GpuMutex());
-    device.WaitIdle();
-    Require(Cmask == codes, "a one-fragment target with CMASK codes 0xc and 0xf had its CMASK rewritten");
-    Require(std::all_of(Surface.begin(), Surface.begin() + color.bytes, [&](std::byte value) { return value == Surface[0]; }) && std::memcmp(Surface.data(), &Stale, 4) == 0, "a one-fragment target with CMASK codes 0xc and 0xf had its texels rewritten");
+    expect(device, color, [](std::uint32_t, std::uint32_t) { return Stale; }, "a one-fragment target with CMASK codes 0xc and 0xf eliminated");
 }
 
 }
