@@ -19,6 +19,7 @@
 #include "prx/libSceAgcDriver/Graphics/include/ParallelCompare.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/DepthSurface.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Texture.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/TextureTiling.hpp"
 #include "SceShaders.hpp"
 #include "prx/libSceAgc/Shader/include/ShaderConstants.hpp"
 #include "ControlFlow/RequestSerializer.hpp"
@@ -830,7 +831,7 @@ void msaaEnableClearOneSampleTargetTests() {
     queue.context[0x1b3] = queue.context[0x1b4] = 2u | ShaderRecompiler::PixelInputBit(ShaderRecompiler::PixelInput::Ancillary) | ShaderRecompiler::PixelInputBit(ShaderRecompiler::PixelInput::SampleCoverage);
     Require(AgcDriver::Graphics::PixelProgramSkipped(queue), "the depth-only draw did not skip its pixel program");
     requireOneSampleDepth(queue, 0, "a one-sample depth target whose skipped pixel program has PS_ITER_SAMPLE and sample index and coverage inputs");
-    constexpr std::string_view depthRefused = "a one-sample depth target under a multisampled rasterizer without MSAA_ENABLE is unsupported for points or lines and with alpha-to-coverage, PS_ITER_SAMPLE, a sample index or coverage input, a sample-mask export, or DB_EQAA Z interpolation or overrasterization";
+    constexpr std::string_view depthRefused = "a one-sample depth target under a multisampled rasterizer without MSAA_ENABLE is unsupported for points or lines and with alpha-to-coverage, a sample index or coverage input, a sample-mask export, or DB_EQAA Z interpolation or overrasterization";
     for (const bool color : {false, true}) {
         for (const auto input : {ShaderRecompiler::PixelInput::Ancillary, ShaderRecompiler::PixelInput::SampleCoverage}) {
             queue = depthTarget(color);
@@ -841,6 +842,10 @@ void msaaEnableClearOneSampleTargetTests() {
         queue = depthTarget(color);
         queue.context[0x203] |= 0x40u;
         queue.context[0x293] = 0x10000u;
+        Require(!AgcDriver::Graphics::PixelProgramSkipped(queue), "the PS_ITER_SAMPLE draw skipped its pixel program");
+        requireOneSampleDepth(queue, color ? 1u : 0u, "a one-sample depth target whose running pixel program has PS_ITER_SAMPLE and no sample index or coverage input");
+        Require(!DecodeState(queue).perSampleShading, "a PS_ITER_SAMPLE program drawn as one sample still shades per sample");
+        queue.context[0x1b3] = queue.context[0x1b4] = 2u | ShaderRecompiler::PixelInputBit(ShaderRecompiler::PixelInput::Ancillary);
         expectFailure([&] { DecodeState(queue); }, depthRefused);
         queue = depthTarget(color);
         queue.context[0x1c4] = 9;
@@ -1725,7 +1730,39 @@ void DisabledColorTests() {
     queue.context[0x002] = 3;
     const auto thirdSlice = AgcDriver::Graphics::DecodeState(queue);
     Require(thirdSlice.depth && thirdSlice.depth->firstSlice == 3 && thirdSlice.depth->address == depthOnly.depth->address + 3u * AgcDriver::Graphics::DepthSliceBytes(depthOnly.depth->extent, 4u), "a depth view of slice 3 lost its slice or its Z offset");
+    queue.context[0x002] = 1u << 26u;
+    expectFailure([&] { AgcDriver::Graphics::DecodeState(queue); }, "on a surface without mips");
     queue.context[0x002] = 0;
+    {
+        using AgcDriver::Graphics::ComputeElementMipLayout;
+        using AgcDriver::Graphics::TextureTileMode;
+        auto mipped = queue;
+        mipped.context[0x007] = 0x03ff03ff;
+        mipped.context[0x010] = 0x80000181u | (2u << 16u);
+        const auto mips = ComputeElementMipLayout(TextureTileMode::kZ64KBX, 2u, 1024u, 1024u, 3u);
+        Require(!mips.at(1).tail && mips.at(1).width == 512u && mips.at(1).height == 512u, "the 1024x1024 Z_X layout does not give a 512x512 second mip outside the tail");
+        const auto first = AgcDriver::Graphics::DecodeState(mipped);
+        Require(first.depth && first.depth->address == depthOnly.depth->address + mips.at(0).tiledOffset && first.depth->extent.width == 1024u && first.depth->extent.height == 1024u, "view mip 0 of a mip chain is not its first level");
+        mipped.context[0x002] = 1u << 26u;
+        const auto second = AgcDriver::Graphics::DecodeState(mipped);
+        Require(second.depth && second.depth->address == depthOnly.depth->address + mips.at(1).tiledOffset, "view mip 1 is not at the second level's offset in the Z_X mip chain");
+        Require(second.depth->extent.width == 512u && second.depth->extent.height == 512u, "view mip 1 does not render at the second level's extent");
+        mipped.context[0x002] = (1u << 26u) | 1u | (1u << 13u);
+        const auto sliced = AgcDriver::Graphics::DecodeState(mipped);
+        Require(sliced.depth && sliced.depth->address == second.depth->address + AgcDriver::Graphics::ComputeSurfaceSize(mips, 1u), "slice 1 of a mip chain does not step by the whole chain");
+        mipped.context[0x002] = 3u << 26u;
+        expectFailure([&] { AgcDriver::Graphics::DecodeState(mipped); }, "is beyond the surface's mips");
+        mipped.context[0x002] = 2u << 26u;
+        mipped.context[0x007] = 0x003f003f;
+        expectFailure([&] { AgcDriver::Graphics::DecodeState(mipped); }, "into the packed mip tail is unsupported");
+        mipped.context[0x007] = 0x03ff03ff;
+        mipped.context[0x002] = 1u << 26u;
+        mipped.context[0x010] |= 1u << 29u;
+        mipped.context[0x005] = 0x300;
+        expectFailure([&] { AgcDriver::Graphics::DecodeState(mipped); }, "HTILE for the depth view mip");
+        mipped.context[0x010] = (0x80000181u | (2u << 16u)) & ~(31u << 4u);
+        expectFailure([&] { AgcDriver::Graphics::DecodeState(mipped); }, "uses a swizzle other than 64 KiB Z_X");
+    }
     for (const auto colorControl : {0x0u, 0xcc0000u}) {
         queue = makeState();
         queue.context[0x202] = colorControl;
@@ -2258,7 +2295,41 @@ void DepthStencilTests() {
     queue.context[0x10b] = 0x40;
     queue.context[0x10c] = 0x05ffff02;
     queue.context[0x200] = 0x00200211;
+    state = AgcDriver::Graphics::DecodeState(queue);
+    Require(state.stencilFront.passOp == VK_STENCIL_OP_INVERT && state.stencilFront.failOp == VK_STENCIL_OP_KEEP && state.stencilFront.depthFailOp == VK_STENCIL_OP_KEEP && state.stencilFront.compareOp == VK_COMPARE_OP_EQUAL, "an equal test replaced by another value is not drawn as an inversion");
+    Require(state.stencilFront.reference == 2 && state.stencilFront.compareMask == 0xff && state.stencilFront.writeMask == 7, "an inverted replacement does not keep the test value and write only the bits that differ from it");
+    queue.context[0x10b] = 0x440;
+    state = AgcDriver::Graphics::DecodeState(queue);
+    Require(state.stencilFront.passOp == VK_STENCIL_OP_INVERT && state.stencilFront.depthFailOp == VK_STENCIL_OP_INVERT && state.stencilFront.writeMask == 7, "a replacement on pass and depth fail is not drawn as one inversion");
+    queue.context[0x10b] = 0x4;
+    queue.context[0x200] = 0x00200511;
+    state = AgcDriver::Graphics::DecodeState(queue);
+    Require(state.stencilFront.failOp == VK_STENCIL_OP_INVERT && state.stencilFront.passOp == VK_STENCIL_OP_KEEP && state.stencilFront.writeMask == 7, "a not-equal test that fails is not replaced as an inversion");
+    queue.context[0x10c] = 0x40ffffff;
+    queue.context[0x10b] = 0x40;
+    queue.context[0x200] = 0x00200311;
+    state = AgcDriver::Graphics::DecodeState(queue);
+    Require(state.stencilFront.passOp == VK_STENCIL_OP_INVERT && state.stencilFront.writeMask == 0xbf && state.stencilFront.reference == 0xff, "a less-or-equal test against 0xff, which passes only on 0xff, is not replaced as an inversion");
+    queue.context[0x10b] = 0x4;
+    queue.context[0x200] = 0x00200411;
+    state = AgcDriver::Graphics::DecodeState(queue);
+    Require(state.stencilFront.failOp == VK_STENCIL_OP_INVERT && state.stencilFront.writeMask == 0xbf, "a greater test against 0xff, which fails only on 0xff, is not replaced as an inversion");
+    queue.context[0x10c] = 0x40ffff7f;
+    queue.context[0x10b] = 0x40;
+    queue.context[0x200] = 0x00200311;
     expectFailure([&] { AgcDriver::Graphics::DecodeState(queue); }, "stencil replacement");
+    queue.context[0x10c] = 0x05ffff02;
+    queue.context[0x200] = 0x00200511;
+    queue.context[0x10b] = 0x40;
+    expectFailure([&] { AgcDriver::Graphics::DecodeState(queue); }, "stencil replacement");
+    queue.context[0x200] = 0x00200111;
+    expectFailure([&] { AgcDriver::Graphics::DecodeState(queue); }, "stencil replacement");
+    queue.context[0x200] = 0x00200211;
+    queue.context[0x10c] = 0x05ff0f02;
+    expectFailure([&] { AgcDriver::Graphics::DecodeState(queue); }, "stencil replacement");
+    queue.context[0x10c] = 0x05ffff02;
+    queue.context[0x10b] = 0x41;
+    expectFailure([&] { AgcDriver::Graphics::DecodeState(queue); }, "beside another stencil operation");
     queue.context[0x10b] = 0x50;
     queue.context[0x200] = 0x00700711;
     expectFailure([&] { AgcDriver::Graphics::DecodeState(queue); }, "stencil add/subtract");
@@ -9157,10 +9228,16 @@ void ProvokingVertexTests() {
         meshDraw.topology = topology;
         for (const auto& drawn : {std::span<const CompiledShader>{}, std::span<const CompiledShader>(flatShaders), std::span<const CompiledShader>(flatP10Shaders), std::span<const CompiledShader>(smoothShaders), std::span<const CompiledShader>(slotShaders)}) ValidateProvokingVertex(supported, meshDraw, drawn);
     }
+    meshDraw.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
+    for (const auto& drawn : {std::span<const CompiledShader>{}, std::span<const CompiledShader>(flatShaders), std::span<const CompiledShader>(flatP10Shaders), std::span<const CompiledShader>(smoothShaders)}) ValidateProvokingVertex(supported, meshDraw, drawn);
+    fragment.fragmentParameters = {{0, 0, false, true, false, false, false}, {1, 1, false, true, false, false, false}, {2, 2, false, true, false, false, false}, {3, 3, false, true, false, false, false}};
+    ValidateProvokingVertex(supported, meshDraw, shaders);
+    expectFailure([&] { ValidateProvokingVertex(supported, meshDraw, slotShaders); }, "last provoking vertex with explicit per-vertex triangle-strip interpolation is unsupported");
+    meshDraw.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_FAN;
+    expectFailure([&] { ValidateProvokingVertex(supported, meshDraw, flatShaders); }, "last provoking vertex is unsupported for triangle fans assembled for a geometry program");
     for (const auto topology : {VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_FAN}) {
-        meshDraw.topology = topology;
-        expectFailure([&] { ValidateProvokingVertex(supported, meshDraw, flatShaders); }, "last provoking vertex is unsupported for triangle strips or fans assembled for a geometry program");
         auto firstDraw = meshDraw;
+        firstDraw.topology = topology;
         firstDraw.provokingVertexMode = VK_PROVOKING_VERTEX_MODE_FIRST_VERTEX_EXT;
         ValidateProvokingVertex(supported, firstDraw, flatShaders);
     }
@@ -9846,26 +9923,63 @@ void validationTests() {
         attribute.resource.fields[3] = 77u << 12u;
         attribute.fetchIndex = 1;
         attribute.resource.fields[1] = 0;
-        attribute.resource.fields[2] = 16;
+        const auto zeroStride = [&](std::uint32_t select, std::uint32_t records) {
+            attribute.resource.fields[3] = (77u << 12u) | (select << 28u);
+            attribute.resource.fields[2] = records;
+        };
+        for (const auto records : {0u, 1u, 16u, 0xffffffffu}) {
+            zeroStride(0, records);
+            Require(AgcDriver::Graphics::VertexFetchOutOfRange(attribute), "OOB_SELECT 0 must read every zero-stride fetch as zero");
+            Require(AgcDriver::Graphics::ZeroStrideAvailableBytes(attribute) == 0, "OOB_SELECT 0 zero-stride fetch has bytes to read");
+            expectFailure([&] { AgcDriver::Graphics::VertexBufferReadSize(attribute, 0, 1); }, "byte range");
+            expectFailure([&] { AgcDriver::Graphics::VertexBufferExtent(attribute); }, "empty or oversized");
+        }
+        zeroStride(1, 16);
         Require(AgcDriver::Graphics::VertexBufferReadSize(attribute, 100, 2) == 16, "zero stride must repeat one value");
         Require(AgcDriver::Graphics::VertexBufferReadOffset(attribute, 100, 7) == 0, "zero-stride input skipped its repeated value");
-        attribute.resource.fields[2] = 8;
-        expectFailure([&] { AgcDriver::Graphics::VertexBufferReadSize(attribute, 0, 1); }, "byte range");
-        Require(!AgcDriver::Graphics::VertexFetchOutOfRange(attribute), "a structured zero-stride fetch was treated as out of range");
-        attribute.resource.fields[3] = (77u << 12u) | (2u << 28u);
-        attribute.resource.fields[2] = 1;
+        Require(AgcDriver::Graphics::VertexBufferExtent(attribute) == 16, "OOB_SELECT 1 extent must cover the whole fetch");
+        zeroStride(1, 0);
+        Require(AgcDriver::Graphics::VertexFetchOutOfRange(attribute), "OOB_SELECT 1 without records must read zero");
+        zeroStride(1, 8);
+        Require(!AgcDriver::Graphics::VertexFetchOutOfRange(attribute), "OOB_SELECT 1 counted NUM_RECORDS in bytes");
+        Require(AgcDriver::Graphics::VertexBufferReadSize(attribute, 0, 8) == 16, "OOB_SELECT 1 must read the whole element for every index below NUM_RECORDS");
+        Require(AgcDriver::Graphics::VertexBufferReadSize(attribute, 0, 1, 7) == 16, "OOB_SELECT 1 must read the whole element for the last index below NUM_RECORDS");
+        expectFailure([&] { AgcDriver::Graphics::VertexBufferReadSize(attribute, 0, 9); }, "record count");
+        expectFailure([&] { AgcDriver::Graphics::VertexBufferReadSize(attribute, 0, 1, 8); }, "record count");
+        zeroStride(1, 1);
+        Require(AgcDriver::Graphics::VertexBufferReadSize(attribute, 0, 1) == 16, "OOB_SELECT 1 with one record must read the element at index 0");
+        expectFailure([&] { AgcDriver::Graphics::VertexBufferReadSize(attribute, 0, 2); }, "record count");
+        attribute.fetchIndex = 0;
+        zeroStride(1, 3);
+        Require(AgcDriver::Graphics::VertexBufferReadSize(attribute, 2, 1) == 16, "OOB_SELECT 1 must read the element for index 2 of 3 records");
+        expectFailure([&] { AgcDriver::Graphics::VertexBufferReadSize(attribute, 3, 1); }, "record count");
+        attribute.fetchIndex = 1;
+        zeroStride(2, 1);
         Require(AgcDriver::Graphics::VertexBufferReadSize(attribute, 100, 2) == 16, "OOB_SELECT 2 must read a zero-stride fetch whole while NUM_RECORDS is nonzero");
         Require(AgcDriver::Graphics::VertexBufferExtent(attribute) == 16, "OOB_SELECT 2 extent must cover the whole fetch");
         Require(!AgcDriver::Graphics::VertexFetchOutOfRange(attribute), "OOB_SELECT 2 with records was treated as out of range");
-        attribute.resource.fields[2] = 0;
+        zeroStride(2, 0);
         Require(AgcDriver::Graphics::VertexFetchOutOfRange(attribute), "OOB_SELECT 2 without records must read zero");
-        attribute.resource.fields[3] = (77u << 12u) | (3u << 28u);
+        zeroStride(3, 0);
         Require(AgcDriver::Graphics::VertexFetchOutOfRange(attribute), "OOB_SELECT 3 without records must read zero");
-        attribute.resource.fields[2] = 8;
-        Require(!AgcDriver::Graphics::VertexFetchOutOfRange(attribute), "OOB_SELECT 3 with records was treated as out of range");
-        expectFailure([&] { AgcDriver::Graphics::VertexBufferReadSize(attribute, 0, 1); }, "byte range");
-        attribute.resource.fields[2] = 16;
-        Require(AgcDriver::Graphics::VertexBufferReadSize(attribute, 0, 1) == 16, "OOB_SELECT 3 must read a fetch inside the range");
+        for (const auto records : {1u, 8u, 15u}) {
+            zeroStride(3, records);
+            Require(AgcDriver::Graphics::VertexFetchOutOfRange(attribute), "OOB_SELECT 3 must read a fetch that only partly fits as zero");
+            expectFailure([&] { AgcDriver::Graphics::VertexBufferReadSize(attribute, 0, 1); }, "byte range");
+        }
+        for (const auto records : {16u, 17u, 0xffffffffu}) {
+            zeroStride(3, records);
+            Require(!AgcDriver::Graphics::VertexFetchOutOfRange(attribute), "OOB_SELECT 3 with the whole fetch in range was treated as out of range");
+            Require(AgcDriver::Graphics::VertexBufferReadSize(attribute, 100, 2) == 16, "OOB_SELECT 3 must read a fetch inside the range, whatever the index");
+            Require(AgcDriver::Graphics::VertexBufferExtent(attribute) == 16, "OOB_SELECT 3 extent must cover only the fetch");
+        }
+        attribute.resource.fields[3] = (22u << 12u) | (3u << 28u);
+        attribute.resource.fields[2] = 4;
+        Require(!AgcDriver::Graphics::VertexFetchOutOfRange(attribute), "OOB_SELECT 3 compared NUM_RECORDS with the wrong fetch size");
+        attribute.resource.fields[2] = 3;
+        Require(AgcDriver::Graphics::VertexFetchOutOfRange(attribute), "OOB_SELECT 3 read a 4-byte fetch past 3 bytes");
+        attribute.resource.fields[3] = (113u << 12u) | (3u << 28u);
+        expectFailure([&] { AgcDriver::Graphics::VertexFetchOutOfRange(attribute); }, "unsupported vertex format");
         attribute.resource.fields[3] = 113u << 12u;
         expectFailure([&] { AgcDriver::Graphics::DecodeVertexFormat(attribute); }, "unsupported vertex format");
         attribute.resource.fields[3] = 50u << 12u;
