@@ -63,8 +63,12 @@ public:
     [[nodiscard]] llvm::Value* ReadCarryFlag(llvm::IRBuilder<>& builder) const;
     [[nodiscard]] llvm::Value* ReadOverflowFlag(llvm::IRBuilder<>& builder) const;
 
+    [[nodiscard]] llvm::Value* ReadXmmRegister(uint8_t index, llvm::IRBuilder<>& builder) const;
+    void WriteXmmRegister(uint8_t index, llvm::Value* value, llvm::IRBuilder<>& builder);
+
 private:
     std::array<llvm::AllocaInst*, static_cast<size_t>(X86Register::Count)> registerAllocas;
+    std::array<llvm::AllocaInst*, 16> xmmAllocas;
     llvm::AllocaInst* flagZeroAlloca;
     llvm::AllocaInst* flagSignAlloca;
     llvm::AllocaInst* flagCarryAlloca;

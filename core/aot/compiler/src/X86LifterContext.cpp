@@ -1,4 +1,5 @@
 #include <compiler/X86LifterContext.hpp>
+#include <string>
 
 namespace Aot::Compiler {
 
@@ -14,10 +15,16 @@ X86LifterContext::X86LifterContext(llvm::Function* function, llvm::IRBuilder<>& 
 
     llvm::Type* i64Type = entryBuilder.getInt64Ty();
     llvm::Type* i1Type = entryBuilder.getInt1Ty();
+    llvm::Type* vecType = entryBuilder.getVectorTy();
 
     for (size_t i = 0; i < registerAllocas.size(); ++i) {
         registerAllocas[i] = entryBuilder.CreateAlloca(i64Type, nullptr, RegisterNames[i]);
         entryBuilder.CreateStore(entryBuilder.getInt64(0), registerAllocas[i]);
+    }
+
+    for (size_t i = 0; i < xmmAllocas.size(); ++i) {
+        std::string xmmName = "xmm" + std::to_string(i);
+        xmmAllocas[i] = entryBuilder.CreateAlloca(vecType, nullptr, xmmName);
     }
 
     flagZeroAlloca = entryBuilder.CreateAlloca(i1Type, nullptr, "flag_zf");
@@ -141,6 +148,20 @@ llvm::Value* X86LifterContext::ReadCarryFlag(llvm::IRBuilder<>& builder) const {
 
 llvm::Value* X86LifterContext::ReadOverflowFlag(llvm::IRBuilder<>& builder) const {
     return builder.CreateLoad(builder.getInt1Ty(), flagOverflowAlloca);
+}
+
+llvm::Value* X86LifterContext::ReadXmmRegister(uint8_t index, llvm::IRBuilder<>& builder) const {
+    if (index >= xmmAllocas.size()) {
+        index = 0;
+    }
+    return builder.CreateLoad(builder.getVectorTy(), xmmAllocas[index]);
+}
+
+void X86LifterContext::WriteXmmRegister(uint8_t index, llvm::Value* value, llvm::IRBuilder<>& builder) {
+    if (index >= xmmAllocas.size()) {
+        index = 0;
+    }
+    builder.CreateStore(value, xmmAllocas[index]);
 }
 
 } // namespace Aot::Compiler

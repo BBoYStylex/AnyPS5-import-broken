@@ -32,6 +32,9 @@ public:
     static Type* getInt32Ty(LLVMContext& context) { static_cast<void>(context); static Type t; return &t; }
     static Type* getInt8Ty(LLVMContext& context) { static_cast<void>(context); static Type t; return &t; }
     static Type* getInt1Ty(LLVMContext& context) { static_cast<void>(context); static Type t; return &t; }
+    static Type* getFloatTy(LLVMContext& context) { static_cast<void>(context); static Type t; return &t; }
+    static Type* getDoubleTy(LLVMContext& context) { static_cast<void>(context); static Type t; return &t; }
+    static Type* getVectorTy(LLVMContext& context) { static_cast<void>(context); static Type t; return &t; }
     static Type* getVoidTy(LLVMContext& context) { static_cast<void>(context); static Type t; return &t; }
 
     virtual bool isVoidTy() const { return false; }

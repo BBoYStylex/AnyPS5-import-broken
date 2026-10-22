@@ -18,6 +18,9 @@ public:
     Type* getInt32Ty() { static Type t; return &t; }
     Type* getInt8Ty() { static Type t; return &t; }
     Type* getInt1Ty() { static Type t; return &t; }
+    Type* getFloatTy() { static Type t; return &t; }
+    Type* getDoubleTy() { static Type t; return &t; }
+    Type* getVectorTy() { static Type t; return &t; }
     Type* getVoidTy() { static Type t; return &t; }
 
     Value* getInt64(uint64_t val) { return new ConstantInt(getInt64Ty(), val); }
@@ -111,6 +114,10 @@ public:
     Value* CreateShl(Value* lhs, Value* rhs) { return makeBinaryOp(lhs, rhs); }
     Value* CreateLShr(Value* lhs, Value* rhs) { return makeBinaryOp(lhs, rhs); }
     Value* CreateAShr(Value* lhs, Value* rhs) { return makeBinaryOp(lhs, rhs); }
+    Value* CreateFAdd(Value* lhs, Value* rhs) { return makeBinaryOp(lhs, rhs); }
+    Value* CreateFSub(Value* lhs, Value* rhs) { return makeBinaryOp(lhs, rhs); }
+    Value* CreateFMul(Value* lhs, Value* rhs) { return makeBinaryOp(lhs, rhs); }
+    Value* CreateFDiv(Value* lhs, Value* rhs) { return makeBinaryOp(lhs, rhs); }
     Value* CreateICmpEQ(Value* lhs, Value* rhs) { return makeCmpOp(lhs, rhs); }
     Value* CreateICmpNE(Value* lhs, Value* rhs) { return makeCmpOp(lhs, rhs); }
     Value* CreateICmpULT(Value* lhs, Value* rhs) { return makeCmpOp(lhs, rhs); }
