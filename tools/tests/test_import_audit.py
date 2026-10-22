@@ -605,6 +605,35 @@ class ImportAuditTests(unittest.TestCase):
         records, missing = import_audit.audit(imports, {}, {}, set(), import_audit.ModuleNames({"sdk-shipping.prx"}))
         self.assertEqual((records[0]["class"], missing), ("absent", {"SDK-Shipping.debug_prx": 1}))
 
+    def test_windows_module_suffix_matching_folds_before_stripping(self):
+        for suffix in (".PRX", ".SpRx", ".SuPrX", ".DeBuG_PrX"):
+            for other_suffix in (".prx", ".sprx", ".suprx", ".debug_prx"):
+                for provided, requested in (("shipping" + suffix, "shipping" + other_suffix),
+                                            ("shipping" + other_suffix, "shipping" + suffix)):
+                    with self.subTest(provided=provided, requested=requested):
+                        imports = [("AAAAAAAAAAA", requested, False)]
+                        records, missing = import_audit.audit(
+                            imports, {}, {}, set(), import_audit.ModuleNames({provided}, fold=True))
+                        self.assertEqual((records[0]["class"], missing), ("module", {}))
+                        records, missing = import_audit.audit(
+                            imports, {}, {}, set(), import_audit.ModuleNames({provided}))
+                        self.assertEqual((records[0]["class"], missing), ("absent", {requested: 1}))
+
+    def test_windows_cli_matches_uppercase_module_suffixes(self):
+        work = self.work
+        (work.libs / "libc.prx").write_bytes(build_pe_with_imports([]))
+        (work.modules / "shipping.PRX").write_bytes(exporting("AAAAAAAAAAA"))
+        registry, report = work.root / "game.registry.json", work.root / "audit.json"
+        requested = "shipping.DeBuG_PrX"
+        write_registry(registry, [("AAAAAAAAAAA", requested)])
+        import_audit.needed_registry_path(registry).write_text(json.dumps([requested]))
+        code, out, err = work.run(registry, "--json", str(report))
+        self.assertEqual((code, err), (0, ""), out)
+        data = json.loads(report.read_text())
+        record = next(record for record in data["imports"] if record["library"] == requested)
+        self.assertEqual(record["class"], "module")
+        self.assertEqual(data["missing_libraries"], {})
+
     def test_converted_module_matches_imports_of_its_base_name(self):
         work = self.work
         (work.libs / "libc.prx").write_bytes(exporting())
