@@ -37,6 +37,7 @@ int APS5_VABI sceNpSetTimeout(int reqId, std::int32_t resolveRetry, std::uint32_
 
 extern "C" {
 int APS5_VABI sceNpCheckCallback(void);
+int APS5_VABI sceNpCheckCallbackForLib(void);
 int APS5_VABI sceNpRegisterStateCallback(void* callback, void* userdata);
 int APS5_VABI sceNpUnregisterStateCallback(void);
 int APS5_VABI sceNpRegisterStateCallbackA(void* callback, void* userdata);
@@ -157,9 +158,13 @@ void CheckStateCallbacksA() {
             "unregistering one id removed another callback");
     }
     Require(sceNpRegisterStateCallbackA(callbacks[3], &userdata[3]) == ids[3], "registering again takes the freed slot");
-    Require(sceNpCheckCallback() == 0, "sceNpCheckCallback failed after registering again");
+    Require(sceNpCheckCallbackForLib() == 0, "sceNpCheckCallbackForLib failed after registering again");
     for (int index = 0; index < 8; ++index) {
         Require(stateCallsA[index].calls == (index == 3 ? 2 : 1), "only the registration made again gets SIGNED_OUT");
+    }
+    Require(sceNpCheckCallbackForLib() == 0 && sceNpCheckCallback() == 0, "checking again failed");
+    for (int index = 0; index < 8; ++index) {
+        Require(stateCallsA[index].calls == (index == 3 ? 2 : 1), "sceNpCheckCallbackForLib left the state pending");
     }
     for (int index = 0; index < 8; ++index) {
         Require(sceNpUnregisterStateCallbackA(ids[index]) == 0, "unregistering a state callback");
