@@ -2,758 +2,1040 @@
 #include <cstdint>
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
+#include <SDL_egl.h>
+#include <SDL_opengles2_khrplatform.h>
+#include <SDL_opengles2_gl2platform.h>
+#include <SDL_opengles2_gl2.h>
 
 extern "C" {
 
+void APS5_VABI glGetIntegerv_nid_postfix(GLenum pname, GLint *data) {
+    (void)pname;
+    (void)data;
+    NotImplemented_nid_no_patch(__func__);
+}
+
+GLenum APS5_VABI glCheckFramebufferStatus_nid_postfix(GLenum target) {
+    (void)target;
+    NotImplemented_nid_no_patch(__func__);
+    return {};
+}
+
+GLuint APS5_VABI glCreateShader_nid_postfix(GLenum type) {
+    (void)type;
+    NotImplemented_nid_no_patch(__func__);
+    return {};
+}
+
+EGLBoolean APS5_VABI eglSurfaceAttrib_nid_postfix(EGLDisplay dpy, EGLSurface surface, EGLint attribute, EGLint value) {
+    (void)dpy;
+    (void)surface;
+    (void)attribute;
+    (void)value;
+    NotImplemented_nid_no_patch(__func__);
+    return {};
+}
+
+EGLContext APS5_VABI eglCreateContext_nid_postfix(EGLDisplay dpy, EGLConfig config, EGLContext share_context, const EGLint *attrib_list) {
+    (void)dpy;
+    (void)config;
+    (void)share_context;
+    (void)attrib_list;
+    NotImplemented_nid_no_patch(__func__);
+    return {};
+}
+
+EGLDisplay APS5_VABI eglGetCurrentDisplay_nid_postfix(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return {};
+}
+
+void APS5_VABI glDrawArrays_nid_postfix(GLenum mode, GLint first, GLsizei count) {
+    (void)mode;
+    (void)first;
+    (void)count;
+    NotImplemented_nid_no_patch(__func__);
+}
+
+__eglMustCastToProperFunctionPointerType APS5_VABI eglGetProcAddress_nid_postfix(const char *procname) {
+    (void)procname;
+    NotImplemented_nid_no_patch(__func__);
+    return {};
+}
+
+void APS5_VABI glStencilMaskSeparate_nid_postfix(GLenum face, GLuint mask) {
+    (void)face;
+    (void)mask;
+    NotImplemented_nid_no_patch(__func__);
+}
+
+void APS5_VABI glTexParameterf_nid_postfix(GLenum target, GLenum pname, GLfloat param) {
+    (void)target;
+    (void)pname;
+    (void)param;
+    NotImplemented_nid_no_patch(__func__);
+}
+
+EGLBoolean APS5_VABI eglSwapInterval_nid_postfix(EGLDisplay dpy, EGLint interval) {
+    (void)dpy;
+    (void)interval;
+    NotImplemented_nid_no_patch(__func__);
+    return {};
+}
+
+GLboolean APS5_VABI glIsProgram_nid_postfix(GLuint program) {
+    (void)program;
+    NotImplemented_nid_no_patch(__func__);
+    return {};
+}
+
+void APS5_VABI glShaderSource_nid_postfix(GLuint shader, GLsizei count, const GLchar *const*string, const GLint *length) {
+    (void)shader;
+    (void)count;
+    (void)string;
+    (void)length;
+    NotImplemented_nid_no_patch(__func__);
+}
+
+void APS5_VABI glRenderbufferStorage_nid_postfix(GLenum target, GLenum internalformat, GLsizei width, GLsizei height) {
+    (void)target;
+    (void)internalformat;
+    (void)width;
+    (void)height;
+    NotImplemented_nid_no_patch(__func__);
+}
+
+void APS5_VABI glFramebufferTexture2D_nid_postfix(GLenum target, GLenum attachment, GLenum textarget, GLuint texture, GLint level) {
+    (void)target;
+    (void)attachment;
+    (void)textarget;
+    (void)texture;
+    (void)level;
+    NotImplemented_nid_no_patch(__func__);
+}
+
+void APS5_VABI glBlendFunc_nid_postfix(GLenum sfactor, GLenum dfactor) {
+    (void)sfactor;
+    (void)dfactor;
+    NotImplemented_nid_no_patch(__func__);
+}
+
+void APS5_VABI glTexSubImage2D_nid_postfix(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLenum type, const void *pixels) {
+    (void)target;
+    (void)level;
+    (void)xoffset;
+    (void)yoffset;
+    (void)width;
+    (void)height;
+    (void)format;
+    (void)type;
+    (void)pixels;
+    NotImplemented_nid_no_patch(__func__);
+}
+
+void APS5_VABI glDeleteFramebuffers_nid_postfix(GLsizei n, const GLuint *framebuffers) {
+    (void)n;
+    (void)framebuffers;
+    NotImplemented_nid_no_patch(__func__);
+}
+
+void APS5_VABI glBlendEquationSeparate_nid_postfix(GLenum modeRGB, GLenum modeAlpha) {
+    (void)modeRGB;
+    (void)modeAlpha;
+    NotImplemented_nid_no_patch(__func__);
+}
+
+void APS5_VABI glFrontFace_nid_postfix(GLenum mode) {
+    (void)mode;
+    NotImplemented_nid_no_patch(__func__);
+}
+
+void APS5_VABI glGenBuffers_nid_postfix(GLsizei n, GLuint *buffers) {
+    (void)n;
+    (void)buffers;
+    NotImplemented_nid_no_patch(__func__);
+}
+
+EGLBoolean APS5_VABI eglSwapBuffers_nid_postfix(EGLDisplay dpy, EGLSurface surface) {
+    (void)dpy;
+    (void)surface;
+    NotImplemented_nid_no_patch(__func__);
+    return {};
+}
 
-int APS5_VABI sceGLSlimVSHUnknown_yCo3HzKQSts_nid_no_patch() {
+void APS5_VABI glTexImage2D_nid_postfix(GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height, GLint border, GLenum format, GLenum type, const void *pixels) {
+    (void)target;
+    (void)level;
+    (void)internalformat;
+    (void)width;
+    (void)height;
+    (void)border;
+    (void)format;
+    (void)type;
+    (void)pixels;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("yCo3HzKQSts", sceGLSlimVSHUnknown_yCo3HzKQSts_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_EdefUaKYEPE_nid_no_patch() {
+EGLBoolean APS5_VABI eglGetConfigAttrib_nid_postfix(EGLDisplay dpy, EGLConfig config, EGLint attribute, EGLint *value) {
+    (void)dpy;
+    (void)config;
+    (void)attribute;
+    (void)value;
     NotImplemented_nid_no_patch(__func__);
+    return {};
 }
-APS5_EXPORT("EdefUaKYEPE", sceGLSlimVSHUnknown_EdefUaKYEPE_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_fesoNJCZpSA_nid_no_patch() {
+EGLBoolean APS5_VABI eglQueryContext_nid_postfix(EGLDisplay dpy, EGLContext ctx, EGLint attribute, EGLint *value) {
+    (void)dpy;
+    (void)ctx;
+    (void)attribute;
+    (void)value;
     NotImplemented_nid_no_patch(__func__);
+    return {};
 }
-APS5_EXPORT("fesoNJCZpSA", sceGLSlimVSHUnknown_fesoNJCZpSA_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_0oZKK6QmW_k_nid_no_patch() {
+void APS5_VABI glGenFramebuffers_nid_postfix(GLsizei n, GLuint *framebuffers) {
+    (void)n;
+    (void)framebuffers;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("0oZKK6QmW-k", sceGLSlimVSHUnknown_0oZKK6QmW_k_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_RqcWVDCXZcY_nid_no_patch() {
+void APS5_VABI glTexParameteriv_nid_postfix(GLenum target, GLenum pname, const GLint *params) {
+    (void)target;
+    (void)pname;
+    (void)params;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("RqcWVDCXZcY", sceGLSlimVSHUnknown_RqcWVDCXZcY_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_GGIG9nj2zXk_nid_no_patch() {
+void APS5_VABI glStencilFuncSeparate_nid_postfix(GLenum face, GLenum func, GLint ref, GLuint mask) {
+    (void)face;
+    (void)func;
+    (void)ref;
+    (void)mask;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("GGIG9nj2zXk", sceGLSlimVSHUnknown_GGIG9nj2zXk_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_PSqt1KLK7o0_nid_no_patch() {
+EGLContext APS5_VABI eglGetCurrentContext_nid_postfix(void) {
     NotImplemented_nid_no_patch(__func__);
+    return {};
 }
-APS5_EXPORT("PSqt1KLK7o0", sceGLSlimVSHUnknown_PSqt1KLK7o0_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_vrBLBaiUr5g_nid_no_patch() {
+EGLBoolean APS5_VABI eglDestroySurface_nid_postfix(EGLDisplay dpy, EGLSurface surface) {
+    (void)dpy;
+    (void)surface;
     NotImplemented_nid_no_patch(__func__);
+    return {};
 }
-APS5_EXPORT("vrBLBaiUr5g", sceGLSlimVSHUnknown_vrBLBaiUr5g_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_9TB8RLYXg_g_nid_no_patch() {
+void APS5_VABI glReleaseShaderCompiler_nid_postfix(void) {
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("9TB8RLYXg+g", sceGLSlimVSHUnknown_9TB8RLYXg_g_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_5O92iRi6Hk4_nid_no_patch() {
+void APS5_VABI glBufferSubData_nid_postfix(GLenum target, GLintptr offset, GLsizeiptr size, const void *data) {
+    (void)target;
+    (void)offset;
+    (void)size;
+    (void)data;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("5O92iRi6Hk4", sceGLSlimVSHUnknown_5O92iRi6Hk4_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_xg5Kn1Zto4k_nid_no_patch() {
+void APS5_VABI glFinish_nid_postfix(void) {
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("xg5Kn1Zto4k", sceGLSlimVSHUnknown_xg5Kn1Zto4k_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_7Nm1o42CbJ8_nid_no_patch() {
+void APS5_VABI glGetUniformiv_nid_postfix(GLuint program, GLint location, GLint *params) {
+    (void)program;
+    (void)location;
+    (void)params;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("7Nm1o42CbJ8", sceGLSlimVSHUnknown_7Nm1o42CbJ8_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_13Y3oJ7jRHQ_nid_no_patch() {
+void APS5_VABI glDepthRangef_nid_postfix(GLfloat n, GLfloat f) {
+    (void)n;
+    (void)f;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("13Y3oJ7jRHQ", sceGLSlimVSHUnknown_13Y3oJ7jRHQ_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_LP5RvgCb3AA_nid_no_patch() {
+void APS5_VABI glGetAttachedShaders_nid_postfix(GLuint program, GLsizei maxCount, GLsizei *count, GLuint *shaders) {
+    (void)program;
+    (void)maxCount;
+    (void)count;
+    (void)shaders;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("LP5RvgCb3AA", sceGLSlimVSHUnknown_LP5RvgCb3AA_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_Z7pNCsK2dAs_nid_no_patch() {
+void APS5_VABI glDisableVertexAttribArray_nid_postfix(GLuint index) {
+    (void)index;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("Z7pNCsK2dAs", sceGLSlimVSHUnknown_Z7pNCsK2dAs_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_Pu5Yd9_FY9Y_nid_no_patch() {
+void APS5_VABI glDeleteRenderbuffers_nid_postfix(GLsizei n, const GLuint *renderbuffers) {
+    (void)n;
+    (void)renderbuffers;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("Pu5Yd9+FY9Y", sceGLSlimVSHUnknown_Pu5Yd9_FY9Y_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_1Ml5nNkeImU_nid_no_patch() {
+EGLBoolean APS5_VABI eglTerminate_nid_postfix(EGLDisplay dpy) {
+    (void)dpy;
     NotImplemented_nid_no_patch(__func__);
+    return {};
 }
-APS5_EXPORT("1Ml5nNkeImU", sceGLSlimVSHUnknown_1Ml5nNkeImU_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_KJmeNzmA6UM_nid_no_patch() {
+GLboolean APS5_VABI glIsEnabled_nid_postfix(GLenum cap) {
+    (void)cap;
     NotImplemented_nid_no_patch(__func__);
+    return {};
 }
-APS5_EXPORT("KJmeNzmA6UM", sceGLSlimVSHUnknown_KJmeNzmA6UM_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_D947DWfj9tY_nid_no_patch() {
+EGLBoolean APS5_VABI eglMakeCurrent_nid_postfix(EGLDisplay dpy, EGLSurface draw, EGLSurface read, EGLContext ctx) {
+    (void)dpy;
+    (void)draw;
+    (void)read;
+    (void)ctx;
     NotImplemented_nid_no_patch(__func__);
+    return {};
 }
-APS5_EXPORT("D947DWfj9tY", sceGLSlimVSHUnknown_D947DWfj9tY_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_GpgGEmVl9Ck_nid_no_patch() {
+void APS5_VABI glGetShaderPrecisionFormat_nid_postfix(GLenum shadertype, GLenum precisiontype, GLint *range, GLint *precision) {
+    (void)shadertype;
+    (void)precisiontype;
+    (void)range;
+    (void)precision;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("GpgGEmVl9Ck", sceGLSlimVSHUnknown_GpgGEmVl9Ck_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_6CQ7RFmBjnQ_nid_no_patch() {
+void APS5_VABI glUniform1fv_nid_postfix(GLint location, GLsizei count, const GLfloat *value) {
+    (void)location;
+    (void)count;
+    (void)value;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("6CQ7RFmBjnQ", sceGLSlimVSHUnknown_6CQ7RFmBjnQ_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_mwSvDt0dHF8_nid_no_patch() {
+void APS5_VABI glUniform1iv_nid_postfix(GLint location, GLsizei count, const GLint *value) {
+    (void)location;
+    (void)count;
+    (void)value;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("mwSvDt0dHF8", sceGLSlimVSHUnknown_mwSvDt0dHF8_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_SR9U4__eibc_nid_no_patch() {
+EGLBoolean APS5_VABI eglBindTexImage_nid_postfix(EGLDisplay dpy, EGLSurface surface, EGLint buffer) {
+    (void)dpy;
+    (void)surface;
+    (void)buffer;
     NotImplemented_nid_no_patch(__func__);
+    return {};
 }
-APS5_EXPORT("SR9U4-+eibc", sceGLSlimVSHUnknown_SR9U4__eibc_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_UEiVB1s_wBw_nid_no_patch() {
+void APS5_VABI glBlendFuncSeparate_nid_postfix(GLenum sfactorRGB, GLenum dfactorRGB, GLenum sfactorAlpha, GLenum dfactorAlpha) {
+    (void)sfactorRGB;
+    (void)dfactorRGB;
+    (void)sfactorAlpha;
+    (void)dfactorAlpha;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("UEiVB1s+wBw", sceGLSlimVSHUnknown_UEiVB1s_wBw_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_mNDMTLdRYR8_nid_no_patch() {
+void APS5_VABI glDepthFunc_nid_postfix(GLenum func) {
+    (void)func;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("mNDMTLdRYR8", sceGLSlimVSHUnknown_mNDMTLdRYR8_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_0cZxCTXvyPs_nid_no_patch() {
+EGLSurface APS5_VABI eglCreatePbufferSurface_nid_postfix(EGLDisplay dpy, EGLConfig config, const EGLint *attrib_list) {
+    (void)dpy;
+    (void)config;
+    (void)attrib_list;
     NotImplemented_nid_no_patch(__func__);
+    return {};
 }
-APS5_EXPORT("0cZxCTXvyPs", sceGLSlimVSHUnknown_0cZxCTXvyPs_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_51YpII41z34_nid_no_patch() {
+void APS5_VABI glPixelStorei_nid_postfix(GLenum pname, GLint param) {
+    (void)pname;
+    (void)param;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("51YpII41z34", sceGLSlimVSHUnknown_51YpII41z34_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_1h8m1KuIR9o_nid_no_patch() {
+void APS5_VABI glGetFloatv_nid_postfix(GLenum pname, GLfloat *data) {
+    (void)pname;
+    (void)data;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("1h8m1KuIR9o", sceGLSlimVSHUnknown_1h8m1KuIR9o_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_ConU_nXswn8_nid_no_patch() {
+void APS5_VABI glScissor_nid_postfix(GLint x, GLint y, GLsizei width, GLsizei height) {
+    (void)x;
+    (void)y;
+    (void)width;
+    (void)height;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("ConU-nXswn8", sceGLSlimVSHUnknown_ConU_nXswn8_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_Q6OKS0BRf0A_nid_no_patch() {
+EGLenum APS5_VABI eglQueryAPI_nid_postfix(void) {
     NotImplemented_nid_no_patch(__func__);
+    return {};
 }
-APS5_EXPORT("Q6OKS0BRf0A", sceGLSlimVSHUnknown_Q6OKS0BRf0A_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_xf_XRFu56_8_nid_no_patch() {
+void APS5_VABI glBlendEquation_nid_postfix(GLenum mode) {
+    (void)mode;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("xf-XRFu56-8", sceGLSlimVSHUnknown_xf_XRFu56_8_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_hGmiwXj3cKU_nid_no_patch() {
+void APS5_VABI glBindTexture_nid_postfix(GLenum target, GLuint texture) {
+    (void)target;
+    (void)texture;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("hGmiwXj3cKU", sceGLSlimVSHUnknown_hGmiwXj3cKU_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_y20mWUHGzj8_nid_no_patch() {
+EGLBoolean APS5_VABI eglInitialize_nid_postfix(EGLDisplay dpy, EGLint *major, EGLint *minor) {
+    (void)dpy;
+    (void)major;
+    (void)minor;
     NotImplemented_nid_no_patch(__func__);
+    return {};
 }
-APS5_EXPORT("y20mWUHGzj8", sceGLSlimVSHUnknown_y20mWUHGzj8_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_uVdONJ4yNrc_nid_no_patch() {
+void APS5_VABI glClear_nid_postfix(GLbitfield mask) {
+    (void)mask;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("uVdONJ4yNrc", sceGLSlimVSHUnknown_uVdONJ4yNrc_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_lY7qdFGr0go_nid_no_patch() {
+void APS5_VABI glCompressedTexImage2D_nid_postfix(GLenum target, GLint level, GLenum internalformat, GLsizei width, GLsizei height, GLint border, GLsizei imageSize, const void *data) {
+    (void)target;
+    (void)level;
+    (void)internalformat;
+    (void)width;
+    (void)height;
+    (void)border;
+    (void)imageSize;
+    (void)data;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("lY7qdFGr0go", sceGLSlimVSHUnknown_lY7qdFGr0go_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_nl8lQxwAceM_nid_no_patch() {
+void APS5_VABI glTexParameteri_nid_postfix(GLenum target, GLenum pname, GLint param) {
+    (void)target;
+    (void)pname;
+    (void)param;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("nl8lQxwAceM", sceGLSlimVSHUnknown_nl8lQxwAceM_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_vWkaB9NZpGA_nid_no_patch() {
+void APS5_VABI glSampleCoverage_nid_postfix(GLfloat value, GLboolean invert) {
+    (void)value;
+    (void)invert;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("vWkaB9NZpGA", sceGLSlimVSHUnknown_vWkaB9NZpGA_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_lGJTnZqchvA_nid_no_patch() {
+void APS5_VABI glPolygonOffset_nid_postfix(GLfloat factor, GLfloat units) {
+    (void)factor;
+    (void)units;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("lGJTnZqchvA", sceGLSlimVSHUnknown_lGJTnZqchvA_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_I9IXZ61WkD0_nid_no_patch() {
+EGLSurface APS5_VABI eglGetCurrentSurface_nid_postfix(EGLint readdraw) {
+    (void)readdraw;
     NotImplemented_nid_no_patch(__func__);
+    return {};
 }
-APS5_EXPORT("I9IXZ61WkD0", sceGLSlimVSHUnknown_I9IXZ61WkD0_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_ey9N5U_C0hw_nid_no_patch() {
+void APS5_VABI glCopyTexSubImage2D_nid_postfix(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint x, GLint y, GLsizei width, GLsizei height) {
+    (void)target;
+    (void)level;
+    (void)xoffset;
+    (void)yoffset;
+    (void)x;
+    (void)y;
+    (void)width;
+    (void)height;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("ey9N5U-C0hw", sceGLSlimVSHUnknown_ey9N5U_C0hw_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_HFIXBmlQmXI_nid_no_patch() {
+void APS5_VABI glLinkProgram_nid_postfix(GLuint program) {
+    (void)program;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("HFIXBmlQmXI", sceGLSlimVSHUnknown_HFIXBmlQmXI_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_3yQipX6ypKM_nid_no_patch() {
+void APS5_VABI glGenTextures_nid_postfix(GLsizei n, GLuint *textures) {
+    (void)n;
+    (void)textures;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("3yQipX6ypKM", sceGLSlimVSHUnknown_3yQipX6ypKM_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_39BK09X7zLY_nid_no_patch() {
+void APS5_VABI glUniform1f_nid_postfix(GLint location, GLfloat v0) {
+    (void)location;
+    (void)v0;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("39BK09X7zLY", sceGLSlimVSHUnknown_39BK09X7zLY_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_En8ghzCM0HM_nid_no_patch() {
+EGLSurface APS5_VABI eglCreateWindowSurface_nid_postfix(EGLDisplay dpy, EGLConfig config, EGLNativeWindowType win, const EGLint *attrib_list) {
+    (void)dpy;
+    (void)config;
+    (void)win;
+    (void)attrib_list;
     NotImplemented_nid_no_patch(__func__);
+    return {};
 }
-APS5_EXPORT("En8ghzCM0HM", sceGLSlimVSHUnknown_En8ghzCM0HM_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_hKN5OJIT5ko_nid_no_patch() {
+void APS5_VABI glClearColor_nid_postfix(GLfloat red, GLfloat green, GLfloat blue, GLfloat alpha) {
+    (void)red;
+    (void)green;
+    (void)blue;
+    (void)alpha;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("hKN5OJIT5ko", sceGLSlimVSHUnknown_hKN5OJIT5ko_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_9rH9n8530IU_nid_no_patch() {
+EGLint APS5_VABI eglGetError_nid_postfix(void) {
     NotImplemented_nid_no_patch(__func__);
+    return {};
 }
-APS5_EXPORT("9rH9n8530IU", sceGLSlimVSHUnknown_9rH9n8530IU_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown__HAzeV7vL_Q_nid_no_patch() {
+EGLBoolean APS5_VABI eglWaitClient_nid_postfix(void) {
     NotImplemented_nid_no_patch(__func__);
+    return {};
 }
-APS5_EXPORT("-HAzeV7vL-Q", sceGLSlimVSHUnknown__HAzeV7vL_Q_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_KOJ4_zzhpAg_nid_no_patch() {
+void APS5_VABI glClearStencil_nid_postfix(GLint s) {
+    (void)s;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("KOJ4+zzhpAg", sceGLSlimVSHUnknown_KOJ4_zzhpAg_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_Pkhe5Qcq__0_nid_no_patch() {
+void APS5_VABI glDetachShader_nid_postfix(GLuint program, GLuint shader) {
+    (void)program;
+    (void)shader;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("Pkhe5Qcq++0", sceGLSlimVSHUnknown_Pkhe5Qcq__0_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_s5sv2KhvlxE_nid_no_patch() {
+EGLSurface APS5_VABI eglCreatePbufferFromClientBuffer_nid_postfix(EGLDisplay dpy, EGLenum buftype, EGLClientBuffer buffer, EGLConfig config, const EGLint *attrib_list) {
+    (void)dpy;
+    (void)buftype;
+    (void)buffer;
+    (void)config;
+    (void)attrib_list;
     NotImplemented_nid_no_patch(__func__);
+    return {};
 }
-APS5_EXPORT("s5sv2KhvlxE", sceGLSlimVSHUnknown_s5sv2KhvlxE_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_QBcAfwrr094_nid_no_patch() {
+GLboolean APS5_VABI glIsFramebuffer_nid_postfix(GLuint framebuffer) {
+    (void)framebuffer;
     NotImplemented_nid_no_patch(__func__);
+    return {};
 }
-APS5_EXPORT("QBcAfwrr094", sceGLSlimVSHUnknown_QBcAfwrr094_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_XQZkyJMxI18_nid_no_patch() {
+void APS5_VABI glHint_nid_postfix(GLenum target, GLenum mode) {
+    (void)target;
+    (void)mode;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("XQZkyJMxI18", sceGLSlimVSHUnknown_XQZkyJMxI18_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_zyebgmQUnWY_nid_no_patch() {
+EGLBoolean APS5_VABI eglQuerySurface_nid_postfix(EGLDisplay dpy, EGLSurface surface, EGLint attribute, EGLint *value) {
+    (void)dpy;
+    (void)surface;
+    (void)attribute;
+    (void)value;
     NotImplemented_nid_no_patch(__func__);
+    return {};
 }
-APS5_EXPORT("zyebgmQUnWY", sceGLSlimVSHUnknown_zyebgmQUnWY_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_KZ0xIC_Ev2c_nid_no_patch() {
+void APS5_VABI glEnable_nid_postfix(GLenum cap) {
+    (void)cap;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("KZ0xIC-Ev2c", sceGLSlimVSHUnknown_KZ0xIC_Ev2c_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_XZB2_9dSghM_nid_no_patch() {
+void APS5_VABI glGetBufferParameteriv_nid_postfix(GLenum target, GLenum pname, GLint *params) {
+    (void)target;
+    (void)pname;
+    (void)params;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("XZB2-9dSghM", sceGLSlimVSHUnknown_XZB2_9dSghM_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_yyJshE4eV3U_nid_no_patch() {
+EGLBoolean APS5_VABI eglReleaseTexImage_nid_postfix(EGLDisplay dpy, EGLSurface surface, EGLint buffer) {
+    (void)dpy;
+    (void)surface;
+    (void)buffer;
     NotImplemented_nid_no_patch(__func__);
+    return {};
 }
-APS5_EXPORT("yyJshE4eV3U", sceGLSlimVSHUnknown_yyJshE4eV3U_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_MnlqH3VAJxU_nid_no_patch() {
+GLint APS5_VABI glGetUniformLocation_nid_postfix(GLuint program, const GLchar *name) {
+    (void)program;
+    (void)name;
     NotImplemented_nid_no_patch(__func__);
+    return {};
 }
-APS5_EXPORT("MnlqH3VAJxU", sceGLSlimVSHUnknown_MnlqH3VAJxU_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_q0iQ6QttHjQ_nid_no_patch() {
+void APS5_VABI glFlush_nid_postfix(void) {
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("q0iQ6QttHjQ", sceGLSlimVSHUnknown_q0iQ6QttHjQ_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_0TyJ6AxRs5w_nid_no_patch() {
+void APS5_VABI glGetTexParameteriv_nid_postfix(GLenum target, GLenum pname, GLint *params) {
+    (void)target;
+    (void)pname;
+    (void)params;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("0TyJ6AxRs5w", sceGLSlimVSHUnknown_0TyJ6AxRs5w_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_bUxXBzkgul0_nid_no_patch() {
+void APS5_VABI glColorMask_nid_postfix(GLboolean red, GLboolean green, GLboolean blue, GLboolean alpha) {
+    (void)red;
+    (void)green;
+    (void)blue;
+    (void)alpha;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("bUxXBzkgul0", sceGLSlimVSHUnknown_bUxXBzkgul0_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_mPRFA5CE48g_nid_no_patch() {
+void APS5_VABI glCompressedTexSubImage2D_nid_postfix(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLsizei imageSize, const void *data) {
+    (void)target;
+    (void)level;
+    (void)xoffset;
+    (void)yoffset;
+    (void)width;
+    (void)height;
+    (void)format;
+    (void)imageSize;
+    (void)data;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("mPRFA5CE48g", sceGLSlimVSHUnknown_mPRFA5CE48g_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_3xsE3RDNnQw_nid_no_patch() {
+void APS5_VABI glDrawElements_nid_postfix(GLenum mode, GLsizei count, GLenum type, const void *indices) {
+    (void)mode;
+    (void)count;
+    (void)type;
+    (void)indices;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("3xsE3RDNnQw", sceGLSlimVSHUnknown_3xsE3RDNnQw_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_oOigDJBsN2c_nid_no_patch() {
+void APS5_VABI glFramebufferRenderbuffer_nid_postfix(GLenum target, GLenum attachment, GLenum renderbuffertarget, GLuint renderbuffer) {
+    (void)target;
+    (void)attachment;
+    (void)renderbuffertarget;
+    (void)renderbuffer;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("oOigDJBsN2c", sceGLSlimVSHUnknown_oOigDJBsN2c_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_CWnGG3DOIt8_nid_no_patch() {
+void APS5_VABI glGetShaderInfoLog_nid_postfix(GLuint shader, GLsizei bufSize, GLsizei *length, GLchar *infoLog) {
+    (void)shader;
+    (void)bufSize;
+    (void)length;
+    (void)infoLog;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("CWnGG3DOIt8", sceGLSlimVSHUnknown_CWnGG3DOIt8_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_r5IsX1dPwUk_nid_no_patch() {
+EGLDisplay APS5_VABI eglGetDisplay_nid_postfix(EGLNativeDisplayType display_id) {
+    (void)display_id;
     NotImplemented_nid_no_patch(__func__);
+    return {};
 }
-APS5_EXPORT("r5IsX1dPwUk", sceGLSlimVSHUnknown_r5IsX1dPwUk_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_tZ1lckB5o2A_nid_no_patch() {
+void APS5_VABI glGenRenderbuffers_nid_postfix(GLsizei n, GLuint *renderbuffers) {
+    (void)n;
+    (void)renderbuffers;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("tZ1lckB5o2A", sceGLSlimVSHUnknown_tZ1lckB5o2A_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_FyhlwO6__sM_nid_no_patch() {
+void APS5_VABI glDepthMask_nid_postfix(GLboolean flag) {
+    (void)flag;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("FyhlwO6-+sM", sceGLSlimVSHUnknown_FyhlwO6__sM_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_aN1B2MP3kLU_nid_no_patch() {
+void APS5_VABI glCullFace_nid_postfix(GLenum mode) {
+    (void)mode;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("aN1B2MP3kLU", sceGLSlimVSHUnknown_aN1B2MP3kLU_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_B_mNueVFgAw_nid_no_patch() {
+GLint APS5_VABI glGetAttribLocation_nid_postfix(GLuint program, const GLchar *name) {
+    (void)program;
+    (void)name;
     NotImplemented_nid_no_patch(__func__);
+    return {};
 }
-APS5_EXPORT("B-mNueVFgAw", sceGLSlimVSHUnknown_B_mNueVFgAw_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_RJtXkpCVfmA_nid_no_patch() {
+void APS5_VABI glTexParameterfv_nid_postfix(GLenum target, GLenum pname, const GLfloat *params) {
+    (void)target;
+    (void)pname;
+    (void)params;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("RJtXkpCVfmA", sceGLSlimVSHUnknown_RJtXkpCVfmA_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_pwl29nuNnqI_nid_no_patch() {
+void APS5_VABI glBlendColor_nid_postfix(GLfloat red, GLfloat green, GLfloat blue, GLfloat alpha) {
+    (void)red;
+    (void)green;
+    (void)blue;
+    (void)alpha;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("pwl29nuNnqI", sceGLSlimVSHUnknown_pwl29nuNnqI_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_BpP68iXiK5I_nid_no_patch() {
+GLboolean APS5_VABI glIsRenderbuffer_nid_postfix(GLuint renderbuffer) {
+    (void)renderbuffer;
     NotImplemented_nid_no_patch(__func__);
+    return {};
 }
-APS5_EXPORT("BpP68iXiK5I", sceGLSlimVSHUnknown_BpP68iXiK5I_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_19N0joauSsE_nid_no_patch() {
+EGLBoolean APS5_VABI eglChooseConfig_nid_postfix(EGLDisplay dpy, const EGLint *attrib_list, EGLConfig *configs, EGLint config_size, EGLint *num_config) {
+    (void)dpy;
+    (void)attrib_list;
+    (void)configs;
+    (void)config_size;
+    (void)num_config;
     NotImplemented_nid_no_patch(__func__);
+    return {};
 }
-APS5_EXPORT("19N0joauSsE", sceGLSlimVSHUnknown_19N0joauSsE_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_Xe_vzCJeV3Y_nid_no_patch() {
+void APS5_VABI glGetVertexAttribPointerv_nid_postfix(GLuint index, GLenum pname, void **pointer) {
+    (void)index;
+    (void)pname;
+    (void)pointer;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("Xe-vzCJeV3Y", sceGLSlimVSHUnknown_Xe_vzCJeV3Y_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_TIdn_yGbJlo_nid_no_patch() {
+GLboolean APS5_VABI glIsShader_nid_postfix(GLuint shader) {
+    (void)shader;
     NotImplemented_nid_no_patch(__func__);
+    return {};
 }
-APS5_EXPORT("TIdn+yGbJlo", sceGLSlimVSHUnknown_TIdn_yGbJlo_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_sA3IshgN8u8_nid_no_patch() {
+void APS5_VABI glGetVertexAttribiv_nid_postfix(GLuint index, GLenum pname, GLint *params) {
+    (void)index;
+    (void)pname;
+    (void)params;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("sA3IshgN8u8", sceGLSlimVSHUnknown_sA3IshgN8u8_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_APjMbicny1Q_nid_no_patch() {
+EGLBoolean APS5_VABI eglWaitNative_nid_postfix(EGLint engine) {
+    (void)engine;
     NotImplemented_nid_no_patch(__func__);
+    return {};
 }
-APS5_EXPORT("APjMbicny1Q", sceGLSlimVSHUnknown_APjMbicny1Q_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_VPgPm_9j054_nid_no_patch() {
+void APS5_VABI glBufferData_nid_postfix(GLenum target, GLsizeiptr size, const void *data, GLenum usage) {
+    (void)target;
+    (void)size;
+    (void)data;
+    (void)usage;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("VPgPm-9j054", sceGLSlimVSHUnknown_VPgPm_9j054_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_YjT8GrH5bsM_nid_no_patch() {
+void APS5_VABI glUniform1i_nid_postfix(GLint location, GLint v0) {
+    (void)location;
+    (void)v0;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("YjT8GrH5bsM", sceGLSlimVSHUnknown_YjT8GrH5bsM_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_326_26W1Ht4_nid_no_patch() {
+void APS5_VABI glStencilFunc_nid_postfix(GLenum func, GLint ref, GLuint mask) {
+    (void)func;
+    (void)ref;
+    (void)mask;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("326-26W1Ht4", sceGLSlimVSHUnknown_326_26W1Ht4_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_4Pd54jvwVhY_nid_no_patch() {
+void APS5_VABI glStencilMask_nid_postfix(GLuint mask) {
+    (void)mask;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("4Pd54jvwVhY", sceGLSlimVSHUnknown_4Pd54jvwVhY_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_4p8IUn5CM0I_nid_no_patch() {
+void APS5_VABI glGetRenderbufferParameteriv_nid_postfix(GLenum target, GLenum pname, GLint *params) {
+    (void)target;
+    (void)pname;
+    (void)params;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("4p8IUn5CM0I", sceGLSlimVSHUnknown_4p8IUn5CM0I_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_6OfeCf_u4bg_nid_no_patch() {
+void APS5_VABI glGetActiveAttrib_nid_postfix(GLuint program, GLuint index, GLsizei bufSize, GLsizei *length, GLint *size, GLenum *type, GLchar *name) {
+    (void)program;
+    (void)index;
+    (void)bufSize;
+    (void)length;
+    (void)size;
+    (void)type;
+    (void)name;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("6OfeCf-u4bg", sceGLSlimVSHUnknown_6OfeCf_u4bg_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_ZggLwqNsGIk_nid_no_patch() {
+void APS5_VABI glBindRenderbuffer_nid_postfix(GLenum target, GLuint renderbuffer) {
+    (void)target;
+    (void)renderbuffer;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("ZggLwqNsGIk", sceGLSlimVSHUnknown_ZggLwqNsGIk_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_OR6_CZL_oOw_nid_no_patch() {
+void APS5_VABI glBindAttribLocation_nid_postfix(GLuint program, GLuint index, const GLchar *name) {
+    (void)program;
+    (void)index;
+    (void)name;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("OR6-CZL+oOw", sceGLSlimVSHUnknown_OR6_CZL_oOw_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_nmUsbuL3Rc0_nid_no_patch() {
+void APS5_VABI glGetProgramiv_nid_postfix(GLuint program, GLenum pname, GLint *params) {
+    (void)program;
+    (void)pname;
+    (void)params;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("nmUsbuL3Rc0", sceGLSlimVSHUnknown_nmUsbuL3Rc0_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_kF_yS5OChO8_nid_no_patch() {
+EGLBoolean APS5_VABI eglReleaseThread_nid_postfix(void) {
     NotImplemented_nid_no_patch(__func__);
+    return {};
 }
-APS5_EXPORT("kF-yS5OChO8", sceGLSlimVSHUnknown_kF_yS5OChO8_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_tY7yQOR9_8s_nid_no_patch() {
+void APS5_VABI glGetTexParameterfv_nid_postfix(GLenum target, GLenum pname, GLfloat *params) {
+    (void)target;
+    (void)pname;
+    (void)params;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("tY7yQOR9-8s", sceGLSlimVSHUnknown_tY7yQOR9_8s_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_Bc3rL5ELD_A_nid_no_patch() {
+void APS5_VABI glDeleteBuffers_nid_postfix(GLsizei n, const GLuint *buffers) {
+    (void)n;
+    (void)buffers;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("Bc3rL5ELD-A", sceGLSlimVSHUnknown_Bc3rL5ELD_A_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_beY9ZJv5_dU_nid_no_patch() {
+void APS5_VABI glStencilOpSeparate_nid_postfix(GLenum face, GLenum sfail, GLenum dpfail, GLenum dppass) {
+    (void)face;
+    (void)sfail;
+    (void)dpfail;
+    (void)dppass;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("beY9ZJv5-dU", sceGLSlimVSHUnknown_beY9ZJv5_dU_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_tm_Ktm7aelA_nid_no_patch() {
+const char * APS5_VABI eglQueryString_nid_postfix(EGLDisplay dpy, EGLint name) {
+    (void)dpy;
+    (void)name;
     NotImplemented_nid_no_patch(__func__);
+    return {};
 }
-APS5_EXPORT("tm+Ktm7aelA", sceGLSlimVSHUnknown_tm_Ktm7aelA_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_TgsW7eXEdpA_nid_no_patch() {
+void APS5_VABI glLineWidth_nid_postfix(GLfloat width) {
+    (void)width;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("TgsW7eXEdpA", sceGLSlimVSHUnknown_TgsW7eXEdpA_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_uyjjXGqy_Ek_nid_no_patch() {
+GLboolean APS5_VABI glIsBuffer_nid_postfix(GLuint buffer) {
+    (void)buffer;
     NotImplemented_nid_no_patch(__func__);
+    return {};
 }
-APS5_EXPORT("uyjjXGqy-Ek", sceGLSlimVSHUnknown_uyjjXGqy_Ek_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_Gfzd1R86ep8_nid_no_patch() {
+void APS5_VABI glBindBuffer_nid_postfix(GLenum target, GLuint buffer) {
+    (void)target;
+    (void)buffer;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("Gfzd1R86ep8", sceGLSlimVSHUnknown_Gfzd1R86ep8_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_sw2_TzZR71g_nid_no_patch() {
+void APS5_VABI glGenerateMipmap_nid_postfix(GLenum target) {
+    (void)target;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("sw2+TzZR71g", sceGLSlimVSHUnknown_sw2_TzZR71g_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown__CyF1XyqmaQ_nid_no_patch() {
+void APS5_VABI glDeleteProgram_nid_postfix(GLuint program) {
+    (void)program;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("-CyF1XyqmaQ", sceGLSlimVSHUnknown__CyF1XyqmaQ_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_uVoPGNUyeZU_nid_no_patch() {
+GLboolean APS5_VABI glIsTexture_nid_postfix(GLuint texture) {
+    (void)texture;
     NotImplemented_nid_no_patch(__func__);
+    return {};
 }
-APS5_EXPORT("uVoPGNUyeZU", sceGLSlimVSHUnknown_uVoPGNUyeZU_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_m_7cQfah6KY_nid_no_patch() {
+void APS5_VABI glDisable_nid_postfix(GLenum cap) {
+    (void)cap;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("m-7cQfah6KY", sceGLSlimVSHUnknown_m_7cQfah6KY_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_jzjrS8gGNdY_nid_no_patch() {
+GLuint APS5_VABI glCreateProgram_nid_postfix(void) {
     NotImplemented_nid_no_patch(__func__);
+    return {};
 }
-APS5_EXPORT("jzjrS8gGNdY", sceGLSlimVSHUnknown_jzjrS8gGNdY_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_Yo4iw4JYCTI_nid_no_patch() {
+void APS5_VABI glGetUniformfv_nid_postfix(GLuint program, GLint location, GLfloat *params) {
+    (void)program;
+    (void)location;
+    (void)params;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("Yo4iw4JYCTI", sceGLSlimVSHUnknown_Yo4iw4JYCTI_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_DRwo4pgCHKk_nid_no_patch() {
+void APS5_VABI glDeleteShader_nid_postfix(GLuint shader) {
+    (void)shader;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("DRwo4pgCHKk", sceGLSlimVSHUnknown_DRwo4pgCHKk_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_sfRsq9Yq2Y8_nid_no_patch() {
+void APS5_VABI glClearDepthf_nid_postfix(GLfloat d) {
+    (void)d;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("sfRsq9Yq2Y8", sceGLSlimVSHUnknown_sfRsq9Yq2Y8_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_xqbiS7PMrSE_nid_no_patch() {
+void APS5_VABI glEnableVertexAttribArray_nid_postfix(GLuint index) {
+    (void)index;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("xqbiS7PMrSE", sceGLSlimVSHUnknown_xqbiS7PMrSE_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_mPN01lKHg0g_nid_no_patch() {
+void APS5_VABI glGetShaderiv_nid_postfix(GLuint shader, GLenum pname, GLint *params) {
+    (void)shader;
+    (void)pname;
+    (void)params;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("mPN01lKHg0g", sceGLSlimVSHUnknown_mPN01lKHg0g_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_Vov9fE6FD1c_nid_no_patch() {
+void APS5_VABI glGetFramebufferAttachmentParameteriv_nid_postfix(GLenum target, GLenum attachment, GLenum pname, GLint *params) {
+    (void)target;
+    (void)attachment;
+    (void)pname;
+    (void)params;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("Vov9fE6FD1c", sceGLSlimVSHUnknown_Vov9fE6FD1c_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_UMeDmpCpF40_nid_no_patch() {
+void APS5_VABI glStencilOp_nid_postfix(GLenum fail, GLenum zfail, GLenum zpass) {
+    (void)fail;
+    (void)zfail;
+    (void)zpass;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("UMeDmpCpF40", sceGLSlimVSHUnknown_UMeDmpCpF40_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_q3nWOTJHIM4_nid_no_patch() {
+void APS5_VABI glReadPixels_nid_postfix(GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, GLenum type, void *pixels) {
+    (void)x;
+    (void)y;
+    (void)width;
+    (void)height;
+    (void)format;
+    (void)type;
+    (void)pixels;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("q3nWOTJHIM4", sceGLSlimVSHUnknown_q3nWOTJHIM4_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_ArYdZGEUW8w_nid_no_patch() {
+void APS5_VABI glGetActiveUniform_nid_postfix(GLuint program, GLuint index, GLsizei bufSize, GLsizei *length, GLint *size, GLenum *type, GLchar *name) {
+    (void)program;
+    (void)index;
+    (void)bufSize;
+    (void)length;
+    (void)size;
+    (void)type;
+    (void)name;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("ArYdZGEUW8w", sceGLSlimVSHUnknown_ArYdZGEUW8w_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_ffv6I7TFVP4_nid_no_patch() {
+void APS5_VABI glDeleteTextures_nid_postfix(GLsizei n, const GLuint *textures) {
+    (void)n;
+    (void)textures;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("ffv6I7TFVP4", sceGLSlimVSHUnknown_ffv6I7TFVP4_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_yyAMU7O65qY_nid_no_patch() {
+void APS5_VABI glGetBooleanv_nid_postfix(GLenum pname, GLboolean *data) {
+    (void)pname;
+    (void)data;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("yyAMU7O65qY", sceGLSlimVSHUnknown_yyAMU7O65qY_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_gaFx7Axnsuo_nid_no_patch() {
+void APS5_VABI glAttachShader_nid_postfix(GLuint program, GLuint shader) {
+    (void)program;
+    (void)shader;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("gaFx7Axnsuo", sceGLSlimVSHUnknown_gaFx7Axnsuo_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_SCdKl_0EnuQ_nid_no_patch() {
+void APS5_VABI glGetProgramInfoLog_nid_postfix(GLuint program, GLsizei bufSize, GLsizei *length, GLchar *infoLog) {
+    (void)program;
+    (void)bufSize;
+    (void)length;
+    (void)infoLog;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("SCdKl+0EnuQ", sceGLSlimVSHUnknown_SCdKl_0EnuQ_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_nd_xdRd4_BU_nid_no_patch() {
+GLenum APS5_VABI glGetError_nid_postfix(void) {
     NotImplemented_nid_no_patch(__func__);
+    return {};
 }
-APS5_EXPORT("nd-xdRd4+BU", sceGLSlimVSHUnknown_nd_xdRd4_BU_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_Cu07x4fIYO0_nid_no_patch() {
+void APS5_VABI glBindFramebuffer_nid_postfix(GLenum target, GLuint framebuffer) {
+    (void)target;
+    (void)framebuffer;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("Cu07x4fIYO0", sceGLSlimVSHUnknown_Cu07x4fIYO0_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_S7VZWmI1u04_nid_no_patch() {
+EGLBoolean APS5_VABI eglDestroyContext_nid_postfix(EGLDisplay dpy, EGLContext ctx) {
+    (void)dpy;
+    (void)ctx;
     NotImplemented_nid_no_patch(__func__);
+    return {};
 }
-APS5_EXPORT("S7VZWmI1u04", sceGLSlimVSHUnknown_S7VZWmI1u04_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_1hulS01us_4_nid_no_patch() {
+EGLBoolean APS5_VABI eglWaitGL_nid_postfix(void) {
     NotImplemented_nid_no_patch(__func__);
+    return {};
 }
-APS5_EXPORT("1hulS01us-4", sceGLSlimVSHUnknown_1hulS01us_4_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_fVpuh_UJ4Qo_nid_no_patch() {
+EGLBoolean APS5_VABI eglGetConfigs_nid_postfix(EGLDisplay dpy, EGLConfig *configs, EGLint config_size, EGLint *num_config) {
+    (void)dpy;
+    (void)configs;
+    (void)config_size;
+    (void)num_config;
     NotImplemented_nid_no_patch(__func__);
+    return {};
 }
-APS5_EXPORT("fVpuh+UJ4Qo", sceGLSlimVSHUnknown_fVpuh_UJ4Qo_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_g_XVEn_57y8_nid_no_patch() {
+const GLubyte * APS5_VABI glGetString_nid_postfix(GLenum name) {
+    (void)name;
     NotImplemented_nid_no_patch(__func__);
+    return {};
 }
-APS5_EXPORT("g-XVEn-57y8", sceGLSlimVSHUnknown_g_XVEn_57y8_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_p8hjICuQP74_nid_no_patch() {
+void APS5_VABI glActiveTexture_nid_postfix(GLenum texture) {
+    (void)texture;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("p8hjICuQP74", sceGLSlimVSHUnknown_p8hjICuQP74_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_nMoFUeBjzrU_nid_no_patch() {
+EGLBoolean APS5_VABI eglBindAPI_nid_postfix(EGLenum api) {
+    (void)api;
     NotImplemented_nid_no_patch(__func__);
+    return {};
 }
-APS5_EXPORT("nMoFUeBjzrU", sceGLSlimVSHUnknown_nMoFUeBjzrU_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_ON26vhraMMU_nid_no_patch() {
+void APS5_VABI glShaderBinary_nid_postfix(GLsizei count, const GLuint *shaders, GLenum binaryFormat, const void *binary, GLsizei length) {
+    (void)count;
+    (void)shaders;
+    (void)binaryFormat;
+    (void)binary;
+    (void)length;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("ON26vhraMMU", sceGLSlimVSHUnknown_ON26vhraMMU_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_iIsF4NzYgD4_nid_no_patch() {
+void APS5_VABI glGetVertexAttribfv_nid_postfix(GLuint index, GLenum pname, GLfloat *params) {
+    (void)index;
+    (void)pname;
+    (void)params;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("iIsF4NzYgD4", sceGLSlimVSHUnknown_iIsF4NzYgD4_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_hA8TWZkwPRU_nid_no_patch() {
+void APS5_VABI glCopyTexImage2D_nid_postfix(GLenum target, GLint level, GLenum internalformat, GLint x, GLint y, GLsizei width, GLsizei height, GLint border) {
+    (void)target;
+    (void)level;
+    (void)internalformat;
+    (void)x;
+    (void)y;
+    (void)width;
+    (void)height;
+    (void)border;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("hA8TWZkwPRU", sceGLSlimVSHUnknown_hA8TWZkwPRU_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_LuP1plTAR7g_nid_no_patch() {
+void APS5_VABI glCompileShader_nid_postfix(GLuint shader) {
+    (void)shader;
     NotImplemented_nid_no_patch(__func__);
 }
-APS5_EXPORT("LuP1plTAR7g", sceGLSlimVSHUnknown_LuP1plTAR7g_nid_no_patch);
 
 int APS5_VABI sceGLSlimVSHUnknown_J5IG3lL56FI_nid_no_patch() {
     NotImplemented_nid_no_patch(__func__);
+    return 0;
 }
 APS5_EXPORT("J5IG3lL56FI", sceGLSlimVSHUnknown_J5IG3lL56FI_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_GNZpcrnC7uE_nid_no_patch() {
+int APS5_VABI sceGLSlimVSHUnknown_LuP1plTAR7g_nid_no_patch() {
     NotImplemented_nid_no_patch(__func__);
+    return 0;
 }
-APS5_EXPORT("GNZpcrnC7uE", sceGLSlimVSHUnknown_GNZpcrnC7uE_nid_no_patch);
+APS5_EXPORT("LuP1plTAR7g", sceGLSlimVSHUnknown_LuP1plTAR7g_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_LJ9eQ5Z7Wmo_nid_no_patch() {
+int APS5_VABI sceGLSlimVSHUnknown_hA8TWZkwPRU_nid_no_patch() {
     NotImplemented_nid_no_patch(__func__);
+    return 0;
 }
-APS5_EXPORT("LJ9eQ5Z7Wmo", sceGLSlimVSHUnknown_LJ9eQ5Z7Wmo_nid_no_patch);
+APS5_EXPORT("hA8TWZkwPRU", sceGLSlimVSHUnknown_hA8TWZkwPRU_nid_no_patch);
 
-int APS5_VABI sceGLSlimVSHUnknown_tPHxFS_55pY_nid_no_patch() {
+int APS5_VABI sceGLSlimVSHUnknown_iIsF4NzYgD4_nid_no_patch() {
     NotImplemented_nid_no_patch(__func__);
+    return 0;
 }
-APS5_EXPORT("tPHxFS+55pY", sceGLSlimVSHUnknown_tPHxFS_55pY_nid_no_patch);
-
-int APS5_VABI sceGLSlimVSHUnknown_9TZg6EG5ncM_nid_no_patch() {
-    NotImplemented_nid_no_patch(__func__);
-}
-APS5_EXPORT("9TZg6EG5ncM", sceGLSlimVSHUnknown_9TZg6EG5ncM_nid_no_patch);
-
-int APS5_VABI sceGLSlimVSHUnknown_2jKVW2uBSw8_nid_no_patch() {
-    NotImplemented_nid_no_patch(__func__);
-}
-APS5_EXPORT("2jKVW2uBSw8", sceGLSlimVSHUnknown_2jKVW2uBSw8_nid_no_patch);
-
-int APS5_VABI sceGLSlimVSHUnknown_LFLRtqqi4AQ_nid_no_patch() {
-    NotImplemented_nid_no_patch(__func__);
-}
-APS5_EXPORT("LFLRtqqi4AQ", sceGLSlimVSHUnknown_LFLRtqqi4AQ_nid_no_patch);
-
-int APS5_VABI sceGLSlimVSHUnknown_GmP2ZgUoTPo_nid_no_patch() {
-    NotImplemented_nid_no_patch(__func__);
-}
-APS5_EXPORT("GmP2ZgUoTPo", sceGLSlimVSHUnknown_GmP2ZgUoTPo_nid_no_patch);
-
-int APS5_VABI sceGLSlimVSHUnknown_yFJY7Te6ZRQ_nid_no_patch() {
-    NotImplemented_nid_no_patch(__func__);
-}
-APS5_EXPORT("yFJY7Te6ZRQ", sceGLSlimVSHUnknown_yFJY7Te6ZRQ_nid_no_patch);
-
-int APS5_VABI sceGLSlimVSHUnknown_2PuCkkEw9eE_nid_no_patch() {
-    NotImplemented_nid_no_patch(__func__);
-}
-APS5_EXPORT("2PuCkkEw9eE", sceGLSlimVSHUnknown_2PuCkkEw9eE_nid_no_patch);
-
-int APS5_VABI sceGLSlimVSHUnknown_hZarPUiZevM_nid_no_patch() {
-    NotImplemented_nid_no_patch(__func__);
-}
-APS5_EXPORT("hZarPUiZevM", sceGLSlimVSHUnknown_hZarPUiZevM_nid_no_patch);
-
-int APS5_VABI sceGLSlimVSHUnknown_6z5ySLhOFQE_nid_no_patch() {
-    NotImplemented_nid_no_patch(__func__);
-}
-APS5_EXPORT("6z5ySLhOFQE", sceGLSlimVSHUnknown_6z5ySLhOFQE_nid_no_patch);
-
-int APS5_VABI sceGLSlimVSHUnknown_jGo2URP56tE_nid_no_patch() {
-    NotImplemented_nid_no_patch(__func__);
-}
-APS5_EXPORT("jGo2URP56tE", sceGLSlimVSHUnknown_jGo2URP56tE_nid_no_patch);
-
-int APS5_VABI sceGLSlimVSHUnknown_1Tw_GwQJvug_nid_no_patch() {
-    NotImplemented_nid_no_patch(__func__);
-}
-APS5_EXPORT("1Tw-GwQJvug", sceGLSlimVSHUnknown_1Tw_GwQJvug_nid_no_patch);
-
-int APS5_VABI sceGLSlimVSHUnknown_t8HI9sZ4TSM_nid_no_patch() {
-    NotImplemented_nid_no_patch(__func__);
-}
-APS5_EXPORT("t8HI9sZ4TSM", sceGLSlimVSHUnknown_t8HI9sZ4TSM_nid_no_patch);
-
-int APS5_VABI sceGLSlimVSHUnknown_mTcFOuWRrhw_nid_no_patch() {
-    NotImplemented_nid_no_patch(__func__);
-}
-APS5_EXPORT("mTcFOuWRrhw", sceGLSlimVSHUnknown_mTcFOuWRrhw_nid_no_patch);
-
-int APS5_VABI sceGLSlimVSHUnknown_52_a3D15aw4_nid_no_patch() {
-    NotImplemented_nid_no_patch(__func__);
-}
-APS5_EXPORT("52+a3D15aw4", sceGLSlimVSHUnknown_52_a3D15aw4_nid_no_patch);
-
-int APS5_VABI sceGLSlimVSHUnknown_1dtq0xFWSNU_nid_no_patch() {
-    NotImplemented_nid_no_patch(__func__);
-}
-APS5_EXPORT("1dtq0xFWSNU", sceGLSlimVSHUnknown_1dtq0xFWSNU_nid_no_patch);
-
-int APS5_VABI sceGLSlimVSHUnknown_ehXUKUtch8M_nid_no_patch() {
-    NotImplemented_nid_no_patch(__func__);
-}
-APS5_EXPORT("ehXUKUtch8M", sceGLSlimVSHUnknown_ehXUKUtch8M_nid_no_patch);
-
-int APS5_VABI sceGLSlimVSHUnknown_Kzbvd9G7ieE_nid_no_patch() {
-    NotImplemented_nid_no_patch(__func__);
-}
-APS5_EXPORT("Kzbvd9G7ieE", sceGLSlimVSHUnknown_Kzbvd9G7ieE_nid_no_patch);
-
-int APS5_VABI sceGLSlimVSHUnknown_6e64qI81ak8_nid_no_patch() {
-    NotImplemented_nid_no_patch(__func__);
-}
-APS5_EXPORT("6e64qI81ak8", sceGLSlimVSHUnknown_6e64qI81ak8_nid_no_patch);
-
-int APS5_VABI sceGLSlimVSHUnknown_3DK2dxDedi0_nid_no_patch() {
-    NotImplemented_nid_no_patch(__func__);
-}
-APS5_EXPORT("3DK2dxDedi0", sceGLSlimVSHUnknown_3DK2dxDedi0_nid_no_patch);
-
-int APS5_VABI sceGLSlimVSHUnknown_POq8_5_inHY_nid_no_patch() {
-    NotImplemented_nid_no_patch(__func__);
-}
-APS5_EXPORT("POq8+5-inHY", sceGLSlimVSHUnknown_POq8_5_inHY_nid_no_patch);
-
-int APS5_VABI sceGLSlimVSHUnknown_Dn1NY1xs7Zw_nid_no_patch() {
-    NotImplemented_nid_no_patch(__func__);
-}
-APS5_EXPORT("Dn1NY1xs7Zw", sceGLSlimVSHUnknown_Dn1NY1xs7Zw_nid_no_patch);
-
-int APS5_VABI sceGLSlimVSHUnknown_hR59aDWzHPw_nid_no_patch() {
-    NotImplemented_nid_no_patch(__func__);
-}
-APS5_EXPORT("hR59aDWzHPw", sceGLSlimVSHUnknown_hR59aDWzHPw_nid_no_patch);
-
-int APS5_VABI sceGLSlimVSHUnknown_DqJyaSqqTng_nid_no_patch() {
-    NotImplemented_nid_no_patch(__func__);
-}
-APS5_EXPORT("DqJyaSqqTng", sceGLSlimVSHUnknown_DqJyaSqqTng_nid_no_patch);
+APS5_EXPORT("iIsF4NzYgD4", sceGLSlimVSHUnknown_iIsF4NzYgD4_nid_no_patch);
 
 }
