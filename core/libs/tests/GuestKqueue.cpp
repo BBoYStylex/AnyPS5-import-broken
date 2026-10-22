@@ -1147,6 +1147,24 @@ static void VnodeOneshotWatchStops() {
     Require(std::filesystem::remove(path));
 }
 
+static void TimerDisableEnableRearm() {
+    const int kq = kqueue_nid_postfix();
+    int marker = 0;
+    KernelEvent events[4]{};
+    Require(Apply(kq, Change(1, EvfiltTimer, EvAdd, NoteUseconds, 50000, &marker)) == 0);
+    Require(Apply(kq, Change(1, EvfiltTimer, EvDisable, 0, 0, &marker)) == 0);
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    Require(Apply(kq, Change(1, EvfiltTimer, EvEnable, 0, 0, &marker)) == 0);
+    Require(Wait(kq, events, 4) == 1);
+    Require(events[0].ident == 1 && events[0].filter == EvfiltTimer && events[0].udata == &marker);
+    Require(events[0].data >= 2 && events[0].data <= 6);
+    Require(Wait(kq, events, 4) == 1);
+    Require(events[0].data == 1);
+    Require(Throws([kq] { Apply(kq, Change(1, EvfiltTimer, EvAdd | EvEnable)); }));
+    Require(Apply(kq, Change(1, EvfiltTimer, EvDelete)) == 0);
+    Require(close_nid_postfix(kq) == 0);
+}
+
 static void PeriodicTimerFiresTwice() {
     const int kq = kqueue_nid_postfix();
     KernelEvent events[4]{};
@@ -1237,6 +1255,7 @@ int main() {
     RenameAndDeleteWatchedFile();
     VnodeOneshotWatchStops();
     PeriodicTimerFiresTwice();
+    TimerDisableEnableRearm();
 #endif
 #ifdef _WIN32
     RecycleBinDeleteWatchedFile();
