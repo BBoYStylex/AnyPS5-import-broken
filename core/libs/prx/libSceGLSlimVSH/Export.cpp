@@ -832,19 +832,6 @@ void APS5_VABI glUniformMatrix3fv_nid_postfix(GLint location, GLsizei count, GLb
     NotImplemented_nid_no_patch(__func__);
 }
 
-void APS5_VABI glUniformMatrix4fv_nid_postfix(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) {
-    (void)location;
-    (void)count;
-    (void)transpose;
-    (void)value;
-    NotImplemented_nid_no_patch(__func__);
-}
-
-void APS5_VABI glUseProgram_nid_postfix(GLuint program) {
-    (void)program;
-    NotImplemented_nid_no_patch(__func__);
-}
-
 void APS5_VABI glValidateProgram_nid_postfix(GLuint program) {
     (void)program;
     NotImplemented_nid_no_patch(__func__);
@@ -901,24 +888,6 @@ void APS5_VABI glVertexAttrib4f_nid_postfix(GLuint index, GLfloat x, GLfloat y, 
 void APS5_VABI glVertexAttrib4fv_nid_postfix(GLuint index, const GLfloat *v) {
     (void)index;
     (void)v;
-    NotImplemented_nid_no_patch(__func__);
-}
-
-void APS5_VABI glVertexAttribPointer_nid_postfix(GLuint index, GLint size, GLenum type, GLboolean normalized, GLsizei stride, const void *pointer) {
-    (void)index;
-    (void)size;
-    (void)type;
-    (void)normalized;
-    (void)stride;
-    (void)pointer;
-    NotImplemented_nid_no_patch(__func__);
-}
-
-void APS5_VABI glViewport_nid_postfix(GLint x, GLint y, GLsizei width, GLsizei height) {
-    (void)x;
-    (void)y;
-    (void)width;
-    (void)height;
     NotImplemented_nid_no_patch(__func__);
 }
 
@@ -1035,5 +1004,29 @@ int APS5_VABI sceGLSlimVSHUnknown_gI_XEd5mWPU_nid_no_patch() {
     return 0;
 }
 APS5_EXPORT("gI+XEd5mWPU", sceGLSlimVSHUnknown_gI_XEd5mWPU_nid_no_patch);
+
+int APS5_VABI sceGLSlimVSHUnknown_1TFdFqQBGqY_nid_no_patch() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+APS5_EXPORT("1TFdFqQBGqY", sceGLSlimVSHUnknown_1TFdFqQBGqY_nid_no_patch);
+
+int APS5_VABI sceGLSlimVSHUnknown_7Mp6qE235Qc_nid_no_patch() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+APS5_EXPORT("7Mp6qE235Qc", sceGLSlimVSHUnknown_7Mp6qE235Qc_nid_no_patch);
+
+int APS5_VABI sceGLSlimVSHUnknown_BrNgn7z6A40_nid_no_patch() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+APS5_EXPORT("BrNgn7z6A40", sceGLSlimVSHUnknown_BrNgn7z6A40_nid_no_patch);
+
+int APS5_VABI sceGLSlimVSHUnknown_iyTnezpw1jE_nid_no_patch() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+APS5_EXPORT("iyTnezpw1jE", sceGLSlimVSHUnknown_iyTnezpw1jE_nid_no_patch);
 
 }
