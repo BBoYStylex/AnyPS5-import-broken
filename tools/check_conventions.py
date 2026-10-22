@@ -221,6 +221,22 @@ class Check:
                 return function_body(source, number)
         return None
 
+    def is_pending_export_at(self, source, number):
+        """Whether the export at `number` is a pending export that throws."""
+        body = function_body(source, number)
+        if body is None:
+            return False
+        return PENDING_BODY.search(body) is not None
+
+    def is_pending_export(self, path, name):
+        """Whether the export `name` in `path` is a pending export that throws."""
+        source = cpp_text(self.show(path)).splitlines()
+        for number, line in enumerate(source):
+            match = EXPORT.search(line)
+            if match and match.group(1) == name:
+                return self.is_pending_export_at(source, number)
+        return False
+
     def duplicates(self, exports):
         if not exports:
             return
@@ -228,6 +244,7 @@ class Check:
                        "tests" not in PurePosixPath(path).parts)
         self.read(paths)
         bodies = {}
+        pending = {}
         for path in paths:
             text = self.show(path)
             if "APS5_VABI" not in text:
@@ -242,7 +259,8 @@ class Check:
                     if library(path) != library(own) and function_body(source, number) is not None:
                         if name not in bodies:
                             bodies[name] = self.body_of(own, name)
-                        if bodies[name] == function_body(source, number):
+                            pending[name] = self.is_pending_export(own, name)
+                        if pending[name] and self.is_pending_export_at(source, number):
                             continue
                         self.report("duplicate-export", own, own_number, f"{name} is also in {library(path)}")
 
