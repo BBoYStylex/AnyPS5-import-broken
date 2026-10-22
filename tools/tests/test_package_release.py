@@ -61,6 +61,18 @@ class ReleasePackageTests(unittest.TestCase):
         with tarfile.open(self.output / "prx-linux-v1.tar.gz") as archive:
             self.assertEqual(archive.extractfile("libs/licenses/vgmstream.txt").read(), b"decoder license")
 
+    def test_jemspace_allocator_license_in_archives(self):
+        (self.source / "core/libs/prx/libSceJemspace").mkdir()
+        (self.build / "core/libs/libs/libSceJemspace.prx").write_bytes(b"allocator")
+        license_file = self.source / "3rdparty/jemalloc/COPYING"
+        license_file.parent.mkdir(parents=True)
+        license_file.write_bytes(b"allocator license")
+        package_release.package("linux", self.build, self.output, "v1")
+        with zipfile.ZipFile(self.output / "prx-linux-v1.zip") as archive:
+            self.assertEqual(archive.read("libs/licenses/jemalloc.txt"), b"allocator license")
+        with tarfile.open(self.output / "prx-linux-v1.tar.gz") as archive:
+            self.assertEqual(archive.extractfile("libs/licenses/jemalloc.txt").read(), b"allocator license")
+
     def test_windows_runtime_follows_the_configured_compiler_directory(self):
         runtime = self.root / "custom toolchain" / "bin"
         runtime.mkdir(parents=True)
