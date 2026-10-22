@@ -2,8 +2,15 @@
 #include <graphics/ShaderInstructionDecoder.hpp>
 #include <graphics/ShaderTranspiler.hpp>
 #include <graphics/GraphicsDriver.hpp>
+#include <graphics/VulkanPresentationHook.hpp>
 #include <cassert>
 #include <vector>
+
+static uint64_t gMockPresentCallCount = 0;
+static VkResult MockVkQueuePresentKHR(VkQueue, const VkPresentInfoKHR*) {
+    ++gMockPresentCallCount;
+    return VK_SUCCESS;
+}
 
 int main() {
     Aot::Graphics::ConsoleShaderExtractor extractor;
@@ -137,6 +144,65 @@ int main() {
     auto summary = driver.ProcessAssets(options);
     assert(summary.ShadersExtracted == 0);
     assert(summary.ShadersTranspiled == 0);
+
+    auto& hook = Aot::Graphics::VulkanPresentationHook::Instance();
+    hook.ResetMetrics();
+    if (hook.GetTotalPresentedFrames() != 0 || hook.GetTargetPresentFunction() != nullptr) {
+        return 9;
+    }
+
+    hook.SetTargetPresentFunction(&MockVkQueuePresentKHR);
+    if (hook.GetTargetPresentFunction() != &MockVkQueuePresentKHR) {
+        return 10;
+    }
+
+    uint64_t callbackInvokedCount = 0;
+    Aot::Graphics::FramePresentationMetrics lastMetrics{};
+    hook.RegisterCallback([&](const Aot::Graphics::FramePresentationMetrics& m) {
+        ++callbackInvokedCount;
+        lastMetrics = m;
+    });
+
+    VkSwapchainKHR mockSwapchain = reinterpret_cast<VkSwapchainKHR>(static_cast<uintptr_t>(0x1234));
+    uint32_t mockImageIndex = 2;
+    VkPresentInfoKHR presentInfo{};
+    presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+    presentInfo.swapchainCount = 1;
+    presentInfo.pSwapchains = &mockSwapchain;
+    presentInfo.pImageIndices = &mockImageIndex;
+
+    VkResult res = hook.Present(VK_NULL_HANDLE, &presentInfo);
+    if (res != VK_SUCCESS || gMockPresentCallCount != 1 || callbackInvokedCount != 1) {
+        return 11;
+    }
+    if (lastMetrics.FrameIndex != 1 || lastMetrics.Swapchain != mockSwapchain || lastMetrics.ImageIndex != mockImageIndex) {
+        return 12;
+    }
+    if (lastMetrics.PresentResult != VK_SUCCESS || lastMetrics.CaptureRequested) {
+        return 13;
+    }
+
+    hook.RequestCaptureNextFrame();
+    if (!hook.IsCaptureRequested()) {
+        return 14;
+    }
+
+    res = hook.Present(VK_NULL_HANDLE, &presentInfo);
+    if (res != VK_SUCCESS || gMockPresentCallCount != 2 || callbackInvokedCount != 2) {
+        return 15;
+    }
+    if (lastMetrics.FrameIndex != 2 || !lastMetrics.CaptureRequested || hook.IsCaptureRequested()) {
+        return 16;
+    }
+
+    hook.ClearCallbacks();
+    res = hook.Present(VK_NULL_HANDLE, &presentInfo);
+    if (res != VK_SUCCESS || gMockPresentCallCount != 3 || callbackInvokedCount != 2) {
+        return 17;
+    }
+    if (hook.GetTotalPresentedFrames() != 3) {
+        return 18;
+    }
 
     return 0;
 }
