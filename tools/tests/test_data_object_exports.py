@@ -7,10 +7,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import nid_names
 
-# Every export the SDK's stub tables mark `@object` and that AnyPS5 exports.
-# The SDK's tables are ps5-payload-dev/sdk's sce_stubs/*.c at
-# a7685ce8e97ce1f8a4f38253a41d54241c9124f1, and the names are listed here
-# because the tables are not vendored.
 OBJECT_EXPORTS = {
     "libSceAmpr.prx": [
         ("_ZNSt7num_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE2idE", "-mLzBSk-VGs"),
