@@ -116,6 +116,7 @@ float APS5_VABI logbf_nid_postfix(float);
 int APS5_VABI ilogb_nid_postfix(double);
 int APS5_VABI ilogbf_nid_postfix(float);
 double APS5_VABI exp2_nid_postfix(double);
+float APS5_VABI expf_nid_postfix(float);
 float APS5_VABI __powisf2_nid_postfix(float, int);
 double APS5_VABI __powidf2_nid_postfix(double, int);
 double APS5_VABI ldexp_nid_postfix(double, int);
@@ -1016,6 +1017,26 @@ static void CheckAtanhf() {
     *__error_nid_postfix() = 0;
 }
 
+static void CheckExpfConsoleBits() {
+    constexpr struct {
+        std::uint32_t input;
+        std::uint32_t expected;
+        int error;
+    } cases[] = {
+        {0x3c0001e7u, 0x3f810104u, 0}, {0x3f000306u, 0x3fd30bcau, 0}, {0x4020050du, 0x4142fae2u, 0}, {0x42a00707u, 0x792d17d8u, 0},
+        {0xbf40091eu, 0x3ef1d16au, 0}, {0xc2a00b0bu, 0x05bbd45eu, 0}, {0x00000000u, 0x3f800000u, 0}, {0x80000000u, 0x3f800000u, 0},
+        {0x00000001u, 0x3f800000u, 0}, {0x38800000u, 0x3f800200u, 0}, {0x3f800000u, 0x402df854u, 0}, {0x42b17217u, 0x7f7fff84u, 0},
+        {0x42b17218u, 0x7f800000u, ERANGE}, {0x7f7fffffu, 0x7f800000u, ERANGE}, {0x7f800000u, 0x7f800000u, 0}, {0xff800000u, 0x00000000u, 0},
+        {0xc2aeac50u, 0x007fffe6u, 0}, {0xc2b00000u, 0x0041edc4u, 0}, {0xc2cff1b5u, 0x00000000u, 0}, {0xc2cff1b6u, 0x00000000u, ERANGE},
+        {0xff7fffffu, 0x00000000u, ERANGE}, {0x7fc00001u, 0x7fc00001u, 0}, {0xffc00002u, 0xffc00002u, 0},
+    };
+    for (const auto& item : cases) {
+        errno = 1234;
+        Require(std::bit_cast<std::uint32_t>(expf_nid_postfix(std::bit_cast<float>(item.input))) == item.expected);
+        Require(errno == (item.error != 0 ? item.error : 1234));
+    }
+}
+
 static void CheckFloatClassification() {
     Require(_FInf_nid_postfix.bits[0] == 0x7f800000u && _FNan_nid_postfix.bits[0] == 0x7fc00000u);
     for (int word = 1; word < 4; ++word) Require(_FInf_nid_postfix.bits[word] == 0 && _FNan_nid_postfix.bits[word] == 0);
@@ -1295,6 +1316,7 @@ static void CheckDinkumwareFloatCharacteristics() {
 
 int main() {
     CheckFloatClassification();
+    CheckExpfConsoleBits();
     CheckDinkumwareConstants();
     CheckNoConversionIsPositiveZero();
     CheckMissingClassificationExports();
