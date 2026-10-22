@@ -1,6 +1,7 @@
 #include "prx/libSceAgcDriver/Graphics/include/PipelineJournal.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Pipeline.hpp"
 #include "prx/libSceAgcDriver/Execution/include/ProfileOutput.hpp"
+#include "prx/libc/include/HostThreadLocal.hpp"
 #include "ShaderCacheDirectory.hpp"
 #include "ShaderDiskCache.hpp"
 #include <algorithm>
@@ -451,7 +452,7 @@ public:
                     if (event != nullptr) CloseHandle(event);
                 }
             };
-            static thread_local ReadEvent completion;
+            auto& completion = HostThreadLocal<ReadEvent, ReadEvent>();
             if (completion.event == nullptr) return false;
             OVERLAPPED at{};
             at.Offset = static_cast<DWORD>(position);
