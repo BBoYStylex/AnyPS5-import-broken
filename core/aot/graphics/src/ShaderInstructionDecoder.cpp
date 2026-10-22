@@ -129,6 +129,13 @@ std::vector<uint32_t> ShaderInstructionDecoder::GenerateSpirvFromInstructions(
         spirv.push_back((3 << 16) | 16);
         spirv.push_back(1);
         spirv.push_back(7);
+    } else if (executionModel == 5) {
+        spirv.push_back((6 << 16) | 16);
+        spirv.push_back(1);
+        spirv.push_back(17);
+        spirv.push_back(64);
+        spirv.push_back(1);
+        spirv.push_back(1);
     }
 
     bool hasImageSample = false;

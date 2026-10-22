@@ -329,12 +329,20 @@ VkPipeline VulkanPipelineWrapper::CompileComputePipeline(
     const std::vector<uint32_t>& computeSpirv,
     const std::vector<VkDescriptorSetLayout>& descriptorLayouts,
     std::string_view entryPoint) {
+    return CompileComputePipeline(computeSpirv, descriptorLayouts, {}, entryPoint);
+}
+
+VkPipeline VulkanPipelineWrapper::CompileComputePipeline(
+    const std::vector<uint32_t>& computeSpirv,
+    const std::vector<VkDescriptorSetLayout>& descriptorLayouts,
+    const std::vector<VkPushConstantRange>& pushConstantRanges,
+    std::string_view entryPoint) {
     VkShaderModule module = CreateShaderModule(computeSpirv);
     if (module == VK_NULL_HANDLE) {
         return VK_NULL_HANDLE;
     }
 
-    VkPipelineLayout layout = CreatePipelineLayout(descriptorLayouts, {});
+    VkPipelineLayout layout = CreatePipelineLayout(descriptorLayouts, pushConstantRanges);
     if (layout == VK_NULL_HANDLE) {
         return VK_NULL_HANDLE;
     }

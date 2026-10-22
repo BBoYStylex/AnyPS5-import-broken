@@ -16,6 +16,7 @@ public:
 
     Type* getInt64Ty() { static Type t; return &t; }
     Type* getInt32Ty() { static Type t; return &t; }
+    Type* getInt16Ty() { static Type t; return &t; }
     Type* getInt8Ty() { static Type t; return &t; }
     Type* getInt1Ty() { static Type t; return &t; }
     Type* getFloatTy() { static Type t; return &t; }
@@ -65,6 +66,20 @@ public:
         return inst;
     }
 
+    Value* CreateZExt(Value* val, Type* destTy) {
+        static_cast<void>(val);
+        auto* inst = new Instruction(destTy);
+        if (currentBlock) currentBlock->addInstruction(inst);
+        return inst;
+    }
+
+    Value* CreateSExt(Value* val, Type* destTy) {
+        static_cast<void>(val);
+        auto* inst = new Instruction(destTy);
+        if (currentBlock) currentBlock->addInstruction(inst);
+        return inst;
+    }
+
     Value* CreateZExtOrTrunc(Value* val, Type* destTy) {
         static_cast<void>(val);
         auto* inst = new Instruction(destTy);
@@ -108,6 +123,7 @@ public:
 
     Value* CreateAdd(Value* lhs, Value* rhs) { return makeBinaryOp(lhs, rhs); }
     Value* CreateSub(Value* lhs, Value* rhs) { return makeBinaryOp(lhs, rhs); }
+    Value* CreateMul(Value* lhs, Value* rhs) { return makeBinaryOp(lhs, rhs); }
     Value* CreateXor(Value* lhs, Value* rhs) { return makeBinaryOp(lhs, rhs); }
     Value* CreateAnd(Value* lhs, Value* rhs) { return makeBinaryOp(lhs, rhs); }
     Value* CreateOr(Value* lhs, Value* rhs) { return makeBinaryOp(lhs, rhs); }

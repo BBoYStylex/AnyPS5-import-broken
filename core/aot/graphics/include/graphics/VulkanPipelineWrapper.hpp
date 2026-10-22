@@ -60,6 +60,12 @@ public:
         const std::vector<VkDescriptorSetLayout>& descriptorLayouts,
         std::string_view entryPoint = "main"
     );
+    VkPipeline CompileComputePipeline(
+        const std::vector<uint32_t>& computeSpirv,
+        const std::vector<VkDescriptorSetLayout>& descriptorLayouts,
+        const std::vector<VkPushConstantRange>& pushConstantRanges,
+        std::string_view entryPoint = "main"
+    );
 
     void WarmupPipelineCache(const std::vector<PipelineConfiguration>& configurations);
 

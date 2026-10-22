@@ -56,8 +56,8 @@ llvm::Value* X86LifterContext::EvaluateAlu(
     llvm::Value* rhs,
     llvm::IRBuilder<>& builder) {
     llvm::Type* i64 = builder.getInt64Ty();
-    if (lhs->getType() != i64) lhs = builder.CreateZExtOrTrunc(lhs, i64);
-    if (rhs->getType() != i64) rhs = builder.CreateZExtOrTrunc(rhs, i64);
+    if (lhs != nullptr && lhs->getType() != i64) lhs = builder.CreateZExtOrTrunc(lhs, i64);
+    if (rhs != nullptr && rhs->getType() != i64) rhs = builder.CreateZExtOrTrunc(rhs, i64);
 
     llvm::Value* result = nullptr;
     switch (op) {
@@ -122,7 +122,9 @@ llvm::Value* X86LifterContext::EvaluateAlu(
         }
     }
 
-    UpdateFlags(result, builder);
+    if (op != X86AluOp::Not) {
+        UpdateFlags(result, builder);
+    }
     return result;
 }
 

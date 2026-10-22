@@ -256,6 +256,29 @@ int main() {
         return 24;
     }
 
+    Aot::Graphics::ExtractedShaderPackage computePkg{};
+    computePkg.Stage = Aot::Graphics::ConsoleShaderStage::Compute;
+    computePkg.RawBytecode = dummyBytecode;
+    auto computeResult = transpiler.Transpile(computePkg);
+    if (!computeResult.has_value()) {
+        return 25;
+    }
+
+    bool foundLocalSize = false;
+    for (size_t i = 5; i < computeResult->SpirvBytecode.size(); ) {
+        uint32_t word = computeResult->SpirvBytecode[i];
+        uint16_t op = word & 0xFFFF;
+        uint16_t len = word >> 16;
+        if (len == 0) break;
+        if (op == 16 && len == 6 && computeResult->SpirvBytecode[i + 2] == 17) {
+            foundLocalSize = true;
+        }
+        i += len;
+    }
+    if (!foundLocalSize) {
+        return 26;
+    }
+
     Aot::Graphics::GraphicsDriver driver;
     Aot::Graphics::GraphicsProcessingOptions options{};
     options.WarmupPipelines = true;
