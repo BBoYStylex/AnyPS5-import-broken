@@ -1,0 +1,6 @@
+# libkernel_web technical debt
+
+### Unknown function info
+
+- [libkernel_web pending exports](../../../core/libs/prx/libkernel_web/Pending.cpp) (libkernel_web) - 78 named callable exports are present in the public PS5 payload SDK's [stub table](https://github.com/ps5-payload-dev/sdk/blob/a7685ce8e97ce1f8a4f38253a41d54241c9124f1/sce_stubs/libkernel_web.c), which marks each of them a function. Their signatures and behavior are unverified; each declaration uses the no-parameter unknown-signature convention and throws through `NotImplemented_nid_no_patch`. A name the host toolchain declares carries the `_nid_postfix` suffix, which the NID is computed from
+- [libkernel_web pending exports](../../../core/libs/prx/libkernel_web/Pending.cpp) (libkernel_web) - 78 named callable exports are present in the public PS5 payload SDK's [stub table](https://github.com/ps5-payload-dev/sdk/blob/a7685ce8e97ce1f8a4f38253a41d54241c9124f1/sce_stubs/libkernel_web.c), which marks each of them a function. Their signatures and behavior are unverified; each declaration uses the no-parameter unknown-signature convention and throws through `NotImplemented_nid_no_patch`. A name the host toolchain declares carries the `_nid_postfix` suffix, which the NID is computed from
