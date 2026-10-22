@@ -352,7 +352,7 @@ std::int64_t APS5_VABI sceKernelRead(int d, void* buf, std::size_t nbytes) {
 }
 
 std::int64_t APS5_VABI sceKernelWrite(int d, const void* buf, std::size_t nbytes) {
-    if (File::IsDirectoryDescriptor(d)) return SceErrorFromErrno(EISDIR);
+    if (File::IsVirtualDirectoryDescriptor(d)) return SceErrorFromErrno(EISDIR);
     if (GuestSockets::IsOpen(d)) {
         const auto n = GuestSockets::Write(d, buf, nbytes);
         return n < 0 ? SceKernelError(*__error_nid_postfix()) : n;

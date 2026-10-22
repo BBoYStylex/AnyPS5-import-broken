@@ -74,6 +74,7 @@ int APS5_VABI sceKernelAioDeleteRequest(std::int32_t id, std::int32_t* ret);
 int APS5_VABI flock_nid_postfix(int d, int operation);
 int APS5_VABI _fstatfs_nid_postfix(int d, void* buf);
 int APS5_VABI ftruncate_nid_postfix(int d, std::int64_t length);
+int* __error_nid_postfix();
 int APS5_VABI sceKernelFsync(int d);
 int APS5_VABI sceKernelFdatasync(int d);
 int APS5_VABI sceKernelGetdents(int d, char* buf, int nbytes);
@@ -285,7 +286,8 @@ void Directories() {
     Check(sceKernelReadv(fd, &rejectedIovec, 1) == SCE_KERNEL_ERROR_EISDIR);
     Check(sceKernelPreadv(fd, &rejectedIovec, 1, 0) == SCE_KERNEL_ERROR_EISDIR);
     Check(sceKernelFsync(fd) == SCE_KERNEL_ERROR_EISDIR && sceKernelFdatasync(fd) == SCE_KERNEL_ERROR_EISDIR);
-    Check(ftruncate_nid_postfix(fd, 0) == -1);
+    Check(ftruncate_nid_postfix(fd, 0) == -1 && *__error_nid_postfix() == 22);
+    Check(ftruncate_nid_postfix(fd, 8) == -1 && *__error_nid_postfix() == 22);
     Check(sceKernelFchmod(fd, 0600) == SCE_KERNEL_ERROR_EISDIR);
     Check(sceKernelFutimes(fd, nullptr) == SCE_KERNEL_ERROR_EISDIR);
     Check(flock_nid_postfix(fd, 1) == -1);
