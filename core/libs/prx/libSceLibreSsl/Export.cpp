@@ -221,31 +221,6 @@ int APS5_VABI BN_sub_word_nid_postfix(void) {
     return 0;
 }
 
-int APS5_VABI CMAC_CTX_free_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI CMAC_CTX_new_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI CMAC_Final_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI CMAC_Init_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI CMAC_Update_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
 int APS5_VABI CONF_modules_free_nid_postfix(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
@@ -681,11 +656,6 @@ int APS5_VABI EVP_PKEY_type_nid_postfix(void) {
     return 0;
 }
 
-int APS5_VABI EVP_aes_128_cbc_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
 int APS5_VABI EVP_aes_128_cfb8_nid_postfix(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
@@ -701,11 +671,6 @@ int APS5_VABI EVP_aes_128_gcm_nid_postfix(void) {
     return 0;
 }
 
-int APS5_VABI EVP_aes_192_cbc_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
 int APS5_VABI EVP_aes_192_cfb8_nid_postfix(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
@@ -717,11 +682,6 @@ int APS5_VABI EVP_aes_192_ctr_nid_postfix(void) {
 }
 
 int APS5_VABI EVP_aes_192_gcm_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI EVP_aes_256_cbc_nid_postfix(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
