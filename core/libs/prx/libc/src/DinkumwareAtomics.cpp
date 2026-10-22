@@ -74,7 +74,6 @@ std::uint8_t APS5_VABI _Fetch_xor_seq_cst_1_nid_postfix(volatile std::uint8_t* t
 std::uint16_t APS5_VABI _Fetch_xor_seq_cst_2_nid_postfix(volatile std::uint16_t* target, std::uint16_t value) { return __atomic_fetch_xor(target, value, __ATOMIC_SEQ_CST); }
 std::uint32_t APS5_VABI _Fetch_xor_seq_cst_4_nid_postfix(volatile std::uint32_t* target, std::uint32_t value) { return __atomic_fetch_xor(target, value, __ATOMIC_SEQ_CST); }
 
-
 void APS5_VABI _Atomic_store_1_nid_postfix(volatile std::uint8_t* target, std::uint8_t value, int) { Store(target, value); }
 void APS5_VABI _Atomic_store_2_nid_postfix(volatile std::uint16_t* target, std::uint16_t value, int) { Store(target, value); }
 void APS5_VABI _Atomic_store_4_nid_postfix(volatile std::uint32_t* target, std::uint32_t value, int) { Store(target, value); }
