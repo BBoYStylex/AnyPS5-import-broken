@@ -428,7 +428,8 @@ private:
                 item.push_back(static_cast<char16_t>(input.Peek()));
                 input.Advance();
             }
-            if (item.size() < count) return Outcome::Matching;
+            if (item.size() < count && sized && target != nullptr && capacity < count)
+                Fail("short character field with capacity below width");
         } else {
             const std::size_t limit = directive.width == 0 ? std::numeric_limits<std::size_t>::max() : directive.width;
             while (item.size() < limit && input.Peek() >= 0) {

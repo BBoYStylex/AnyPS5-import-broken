@@ -131,7 +131,7 @@ static void CheckScan() {
     char16_t pair[3] = {u'?', u'?', u'?'};
     Require(swscanf_s_nid_postfix(u"xyz", u"%2lc", pair, std::size_t{2}) == 1 && pair[0] == u'x' && pair[1] == u'y' && pair[2] == u'?', "%2lc");
     Require(swscanf_s_nid_postfix(u"xyz", u"%2lc", pair, std::size_t{1}) == 0, "%2lc too small");
-    Require(swscanf_s_nid_postfix(u"x", u"%2lc", pair, std::size_t{2}) == 0, "%2lc short input");
+    Require(swscanf_s_nid_postfix(u"x", u"%2lc", pair, std::size_t{2}) == 1 && pair[0] == u'x', "%2lc short input");
     Require(swscanf_s_nid_postfix(u"cab12", u"%l[abc]%d", text, std::size_t{6}, &first) == 2 && std::u16string(text) == u"cab" && first == 12, "%l[");
     Require(swscanf_s_nid_postfix(u"été!", u"%l[^!]", text, std::size_t{6}) == 1 && std::u16string(text) == u"été", "%l[^");
     std::int64_t count = -1;
@@ -190,7 +190,7 @@ static void CheckUnsizedScan() {
     Require(swscanf_nid_postfix(u"abc def", u"%s%d", narrow, &first) == 1 && std::strcmp(narrow, "abc") == 0, "swscanf %s");
     char16_t pair[3] = {u'?', u'?', u'?'};
     Require(swscanf_nid_postfix(u"xyz", u"%2lc", pair) == 1 && pair[0] == u'x' && pair[1] == u'y' && pair[2] == u'?', "swscanf %2lc");
-    Require(swscanf_nid_postfix(u"x", u"%2lc", pair) == 0, "swscanf %2lc short input");
+    Require(swscanf_nid_postfix(u"x", u"%2lc", pair) == 1 && pair[0] == u'x', "swscanf %2lc short input");
     char letter = 0;
     Require(swscanf_nid_postfix(u" q7", u"%c%d", &letter, &first) == 1 && letter == ' ', "swscanf %c does not skip white space");
     Require(swscanf_nid_postfix(u"cab12", u"%l[abc]%d", text, &first) == 2 && std::u16string(text) == u"cab" && first == 12, "swscanf %l[");
@@ -227,7 +227,50 @@ static void CheckUnsizedScan() {
     Require(Throws([&] { swscanf_nid_postfix(u"Ā", u"%s", narrow); }), "swscanf unconvertible narrow %s throws");
 }
 
+static void CheckShortCharacterFields() {
+    const char16_t* inputs[]{u"", u"a", u"ab", u"abc", u"abcd"};
+    for (const char16_t* input : inputs) {
+        const std::size_t length = std::u16string(input).size();
+        const std::size_t consumed = length < 3 ? length : 3;
+        for (bool sized : {false, true}) {
+            char16_t output[]{0xa55a, 0xa55a, 0xa55a, 0xa55a, 0xa55a};
+            int count = -1;
+            const int result = sized ? swscanf_s_nid_postfix(input, u"%3lc%n", output + 1, 3u, &count)
+                                     : swscanf_nid_postfix(input, u"%3lc%n", output + 1, &count);
+            Require(result == (length == 0 ? EOF : 1), "short wide character field assignment count");
+            Require(count == (length == 0 ? -1 : static_cast<int>(consumed)), "short wide character field consumed count");
+            for (std::size_t index = 0; index < 5; ++index) {
+                const char16_t expected = index > 0 && index <= consumed ? input[index - 1] : 0xa55a;
+                Require(output[index] == expected, "short wide character field exact write extent without terminator");
+            }
+            count = -1;
+            const int suppressed = sized ? swscanf_s_nid_postfix(input, u"%*3lc%n", &count)
+                                         : swscanf_nid_postfix(input, u"%*3lc%n", &count);
+            Require(suppressed == (length == 0 ? EOF : 0), "suppressed short character field assignment count");
+            Require(count == (length == 0 ? -1 : static_cast<int>(consumed)), "suppressed short character field continues to count");
+        }
+    }
+    char16_t output[]{0xa55a, 0xa55a, 0xa55a};
+    int value = -1, count = -1;
+    Require(swscanf_nid_postfix(u"5 a", u"%d %3lc%n", &value, output, &count) == 2 && value == 5 && count == 3,
+            "short character field after another assignment");
+    Require(output[0] == u'a' && output[1] == 0xa55a && output[2] == 0xa55a, "short field after assignment does not terminate");
+    for (unsigned int capacity : {0u, 1u, 2u}) {
+        char16_t guarded[]{0xa55a, 0xa55a, 0xa55a};
+        Require(Throws([&] { swscanf_s_nid_postfix(u"a", u"%3lc", guarded + 1, capacity); }),
+                "short secure field with capacity below width is explicitly unsupported");
+        Require(guarded[0] == 0xa55a && guarded[1] == 0xa55a && guarded[2] == 0xa55a,
+                "unsupported short secure field leaves output untouched");
+    }
+    char bytes[]{'?', '?', '?', '?'};
+    count = -1;
+    Require(swscanf_nid_postfix(u"ab", u"%3c%n", bytes + 1, &count) == 1 && count == 2,
+            "short narrow destination follows FreeBSD character conversion");
+    Require(bytes[0] == '?' && bytes[1] == 'a' && bytes[2] == 'b' && bytes[3] == '?', "short narrow destination bounds");
+}
+
 int main() {
+    CheckShortCharacterFields();
     CheckStoul();
     CheckClassification();
     CheckScan();

@@ -168,7 +168,41 @@ static void CheckStandardInput() {
     Close(stream);
 }
 
+static void CheckShortCharacterFields() {
+    const char* inputs[]{"", "a", "ab", "abc", "abcd"};
+    for (const char* input : inputs) {
+        const std::size_t length = std::string(input).size();
+        const std::size_t consumed = length < 3 ? length : 3;
+        for (int mode = 0; mode < 4; ++mode) {
+            FileStream* stream = Open(input);
+            char16_t output[]{0xa55a, 0xa55a, 0xa55a, 0xa55a, 0xa55a};
+            int count = -1;
+            const int result = mode == 0 ? fwscanf_nid_postfix(stream, u"%3lc%n", output + 1, &count)
+                             : mode == 1 ? ScanStream(stream, u"%3lc%n", output + 1, &count)
+                             : mode == 2 ? fwscanf_s_nid_postfix(stream, u"%3lc%n", output + 1, 3u, &count)
+                                         : ScanStreamSized(stream, u"%3lc%n", output + 1, 3u, &count);
+            Require(result == (length == 0 ? EOF : 1), "short stream character assignment count");
+            Require(count == (length == 0 ? -1 : static_cast<int>(consumed)), "short stream character consumed count");
+            for (std::size_t index = 0; index < 5; ++index) {
+                const char16_t expected = index > 0 && index <= consumed ? static_cast<char16_t>(input[index - 1]) : 0xa55a;
+                Require(output[index] == expected, "short stream character exact write extent without terminator");
+            }
+            Require(fgetwc_nid_postfix(stream) == (length > 3 ? 'd' : -1), "short stream character lookahead");
+            Close(stream);
+        }
+    }
+    for (bool sized : {false, true}) {
+        FileStream* stream = Open("ab");
+        int count = -1;
+        const int result = sized ? ScanStreamSized(stream, u"%*3lc%n", &count) : ScanStream(stream, u"%*3lc%n", &count);
+        Require(result == 0 && count == 2, "suppressed short stream field continues to count");
+        Require(fgetwc_nid_postfix(stream) == -1, "suppressed short stream field consumes input");
+        Close(stream);
+    }
+}
+
 int main() {
+    CheckShortCharacterFields();
     CheckConsumption();
     CheckWideText();
     CheckStandardInput();
