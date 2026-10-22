@@ -17,6 +17,7 @@
 #endif
 
 extern "C" int APS5_VABI getlogin_r_nid_postfix(char*, int);
+extern "C" int APS5_VABI setlogin_nid_postfix(const char*);
 extern "C" int* APS5_VABI __error_nid_postfix();
 
 static void Check(bool condition, int line) {
@@ -78,4 +79,17 @@ int main() {
         for (int i = 0; i != 20; ++i) RequireLogin(expected);
     });
     for (auto& reader : readers) reader.join();
+    *__error_nid_postfix() = 0;
+    Require(setlogin_nid_postfix(nullptr) == -1 && *__error_nid_postfix() == 14);
+    const std::string longest(32, 'n');
+    const std::string tooLong(33, 'n');
+    *__error_nid_postfix() = 0;
+    Require(setlogin_nid_postfix(tooLong.c_str()) == -1 && *__error_nid_postfix() == 22);
+    RequireLogin(expected);
+    Require(setlogin_nid_postfix("guest") == 0);
+    RequireLogin("guest");
+    Require(setlogin_nid_postfix(longest.c_str()) == 0);
+    RequireLogin(longest);
+    Require(setlogin_nid_postfix("") == 0);
+    RequireLogin("");
 }

@@ -275,6 +275,13 @@ std::uint16_t APS5_VABI umask_nid_postfix(std::uint16_t mask) {
 
 int APS5_VABI _fstatfs_nid_postfix(int d, void* buf);
 
+int SetLogin_nid_no_patch(const char* name);
+
+int APS5_VABI setlogin_nid_postfix(const char* name) {
+    if (const int error = SetLogin_nid_no_patch(name)) return static_cast<int>(Fail(error));
+    return 0;
+}
+
 int APS5_VABI fstatfs_nid_postfix(int d, void* buf) {
     return _fstatfs_nid_postfix(d, buf);
 }
