@@ -10,6 +10,6 @@
 
 ### Functional
 
-- [libSceFreeType](../../../core/libs/prx/libSceFreeType/src/GuestObjects.cpp) (libSceFreeType) - private fields (`driver`, `memory`, `stream`, `sizes_list`, `extensions`) and `subglyphs` stay null. Face, size and glyph-slot records are copies. Only edits to outline points and flags are written back before `FT_Render_Glyph`; replacing arrays or exceeding the host `FT_Pos` range throws. `FT_New_Face` reads the whole file into memory and throws for files of 2 GiB or more on Windows. On macOS, native FreeType symbols remain exported and could resolve guest imports without adaptation; Windows and Linux hide them with `--exclude-libs`.
+- [libSceFreeType](../../../core/libs/prx/libSceFreeType/src/GuestObjects.cpp) (libSceFreeType) - private fields (`driver`, `memory`, `stream`, `sizes_list`, `extensions`) and `subglyphs` stay null. Face, size and glyph-slot records are copies. Only edits to outline points and flags are written back before `FT_Render_Glyph`; replacing arrays or exceeding the host `FT_Pos` range throws. `FT_New_Face` reads the whole file into memory and throws for files of 2 GiB or more on Windows.
 
 - [FT_New_Memory_Face](../../../core/libs/prx/libSceFreeType/Export.cpp) (libSceFreeType) - on Windows, the host FT_Long is 32 bits, so buffer sizes of 2 GiB or more or below -2 GiB throw before the font buffer is read
