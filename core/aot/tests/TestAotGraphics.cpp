@@ -31,6 +31,33 @@ int main() {
     assert(resultOpt.has_value());
     assert(resultOpt->SpirvBytecode[0] == 0x07230203);
 
+    std::vector<uint8_t> multiBytecode = {
+        0x02, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x80, 0xBF
+    };
+    auto multiDecoded = decoder.DecodeBytecode(multiBytecode);
+    assert(multiDecoded.size() == 2);
+    assert(multiDecoded[0].OpClass == Aot::Graphics::ShaderOpcodeClass::VectorAlu);
+
+    auto multiSpirv = decoder.GenerateSpirvFromInstructions(multiDecoded, 0);
+    assert(multiSpirv.size() > 5);
+
+    Aot::Graphics::ExtractedShaderPackage bindingPkg{};
+    bindingPkg.Stage = Aot::Graphics::ConsoleShaderStage::Fragment;
+    bindingPkg.RawBytecode = dummyBytecode;
+    bindingPkg.ResourceBindings.push_back(Aot::Graphics::ResourceBindingInfo{
+        .Binding = 1,
+        .DescriptorSet = 0,
+        .DescriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        .StageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+        .Count = 1
+    });
+
+    auto bindingResult = transpiler.Transpile(bindingPkg);
+    assert(bindingResult.has_value());
+    assert(bindingResult->Bindings.size() == 1);
+    assert(bindingResult->SpirvBytecode[0] == 0x07230203);
+
     Aot::Graphics::GraphicsDriver driver;
     Aot::Graphics::GraphicsProcessingOptions options{};
     options.WarmupPipelines = true;

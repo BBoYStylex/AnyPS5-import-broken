@@ -66,7 +66,8 @@ std::optional<TranspiledShaderResult> ShaderTranspiler::Transpile(const Extracte
         }
     }
 
-    spirvWords = emitSpirvHeader(8);
+    uint32_t boundId = 8 + static_cast<uint32_t>(package.ResourceBindings.size() * 2);
+    spirvWords = emitSpirvHeader(boundId);
 
     spirvWords.push_back((2 << 16) | 17);
     spirvWords.push_back(1);
@@ -86,6 +87,24 @@ std::optional<TranspiledShaderResult> ShaderTranspiler::Transpile(const Extracte
         spirvWords.push_back((3 << 16) | 16);
         spirvWords.push_back(1);
         spirvWords.push_back(7);
+    }
+
+    uint32_t varId = 10;
+    for (const auto& binding : package.ResourceBindings) {
+        spirvWords.push_back((4 << 16) | 71);
+        spirvWords.push_back(varId);
+        spirvWords.push_back(33);
+        spirvWords.push_back(binding.Binding);
+
+        spirvWords.push_back((4 << 16) | 71);
+        spirvWords.push_back(varId);
+        spirvWords.push_back(34);
+        spirvWords.push_back(binding.DescriptorSet);
+        ++varId;
+    }
+
+    if (varId >= boundId) {
+        spirvWords[3] = varId + 1;
     }
 
     spirvWords.push_back((2 << 16) | 19);

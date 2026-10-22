@@ -17,15 +17,9 @@
 #include <iostream>
 #include <string>
 
-#if defined(__GNUC__) || defined(__clang__)
-extern "C" __attribute__((weak)) void NotImplemented_nid_no_patch(const char* name) {
-    static_cast<void>(name);
-}
-#else
 extern "C" void NotImplemented_nid_no_patch(const char* name) {
     static_cast<void>(name);
 }
-#endif
 
 namespace Aot::Runtime {
 

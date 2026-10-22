@@ -31,6 +31,30 @@ public:
         return inst;
     }
 
+    Value* CreateBr(BasicBlock* dest) {
+        static_cast<void>(dest);
+        auto* inst = new Instruction(getVoidTy());
+        if (currentBlock) currentBlock->addInstruction(inst);
+        return inst;
+    }
+
+    Value* CreateCondBr(Value* cond, BasicBlock* trueBB, BasicBlock* falseBB) {
+        static_cast<void>(cond);
+        static_cast<void>(trueBB);
+        static_cast<void>(falseBB);
+        auto* inst = new Instruction(getVoidTy());
+        if (currentBlock) currentBlock->addInstruction(inst);
+        return inst;
+    }
+
+    void SetInsertPoint(BasicBlock* bb) {
+        currentBlock = bb;
+    }
+
+    BasicBlock* GetInsertBlock() const {
+        return currentBlock;
+    }
+
     Value* CreateTrunc(Value* val, Type* destTy) {
         static_cast<void>(val);
         auto* inst = new Instruction(destTy);

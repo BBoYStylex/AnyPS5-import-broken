@@ -39,6 +39,10 @@ std::vector<DecodedShaderInstruction> ShaderInstructionDecoder::DecodeBytecode(s
                 instr.TargetSpirvOp = DecodedSpirvOp::FSub;
             } else if (opId == 5 || opId == 8) {
                 instr.TargetSpirvOp = DecodedSpirvOp::FMul;
+            } else if (opId == 9) {
+                instr.TargetSpirvOp = DecodedSpirvOp::FDiv;
+            } else if (opId == 10) {
+                instr.TargetSpirvOp = DecodedSpirvOp::Dot;
             } else {
                 instr.TargetSpirvOp = DecodedSpirvOp::FAdd;
             }
@@ -50,9 +54,29 @@ std::vector<DecodedShaderInstruction> ShaderInstructionDecoder::DecodeBytecode(s
             instr.TargetSpirvOp = DecodedSpirvOp::ImageSample;
             instr.DstRegister = (raw >> 16) & 0xFF;
             instr.Src0Register = raw & 0xFF;
+        } else if (topBits >= 0x30 && topBits <= 0x3B) {
+            instr.OpClass = ShaderOpcodeClass::FlowControl;
+            uint32_t flowOp = (raw >> 20) & 0x3F;
+            if (flowOp == 1) {
+                instr.TargetSpirvOp = DecodedSpirvOp::BranchConditional;
+            } else {
+                instr.TargetSpirvOp = DecodedSpirvOp::Branch;
+            }
         } else {
             instr.OpClass = ShaderOpcodeClass::ScalarAlu;
-            instr.TargetSpirvOp = DecodedSpirvOp::Load;
+            uint32_t scalarOp = (raw >> 23) & 0x3F;
+            if (scalarOp == 0) {
+                instr.TargetSpirvOp = DecodedSpirvOp::IAdd;
+            } else if (scalarOp == 1) {
+                instr.TargetSpirvOp = DecodedSpirvOp::ISub;
+            } else if (scalarOp == 2) {
+                instr.TargetSpirvOp = DecodedSpirvOp::IMul;
+            } else {
+                instr.TargetSpirvOp = DecodedSpirvOp::Load;
+            }
+            instr.DstRegister = (raw >> 16) & 0x7F;
+            instr.Src0Register = raw & 0xFF;
+            instr.Src1Register = (raw >> 8) & 0xFF;
         }
 
         instructions.push_back(instr);
@@ -117,10 +141,47 @@ std::vector<uint32_t> ShaderInstructionDecoder::GenerateSpirvFromInstructions(
     spirv.push_back((2 << 16) | 248);
     spirv.push_back(6);
 
+    uint32_t nextId = 7;
     for (const auto& instr : instructions) {
         if (instr.IsEndProgram) {
             break;
         }
+
+        if (instr.TargetSpirvOp == DecodedSpirvOp::FAdd) {
+            spirv.push_back((5 << 16) | 129);
+            spirv.push_back(4);
+            spirv.push_back(nextId++);
+            spirv.push_back(4);
+            spirv.push_back(4);
+        } else if (instr.TargetSpirvOp == DecodedSpirvOp::FSub) {
+            spirv.push_back((5 << 16) | 131);
+            spirv.push_back(4);
+            spirv.push_back(nextId++);
+            spirv.push_back(4);
+            spirv.push_back(4);
+        } else if (instr.TargetSpirvOp == DecodedSpirvOp::FMul) {
+            spirv.push_back((5 << 16) | 133);
+            spirv.push_back(4);
+            spirv.push_back(nextId++);
+            spirv.push_back(4);
+            spirv.push_back(4);
+        } else if (instr.TargetSpirvOp == DecodedSpirvOp::FDiv) {
+            spirv.push_back((5 << 16) | 135);
+            spirv.push_back(4);
+            spirv.push_back(nextId++);
+            spirv.push_back(4);
+            spirv.push_back(4);
+        } else if (instr.TargetSpirvOp == DecodedSpirvOp::Dot) {
+            spirv.push_back((5 << 16) | 148);
+            spirv.push_back(4);
+            spirv.push_back(nextId++);
+            spirv.push_back(5);
+            spirv.push_back(5);
+        }
+    }
+
+    if (nextId >= 16) {
+        spirv[3] = nextId + 1;
     }
 
     spirv.push_back((1 << 16) | 253);

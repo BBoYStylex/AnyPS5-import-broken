@@ -19,11 +19,17 @@ enum class ShaderOpcodeClass : uint8_t {
 
 enum class DecodedSpirvOp : uint16_t {
     None = 0,
+    IAdd = 128,
     FAdd = 129,
+    ISub = 130,
     FSub = 131,
+    IMul = 132,
     FMul = 133,
+    UDiv = 134,
     FDiv = 135,
+    FMod = 141,
     Dot = 148,
+    Select = 169,
     Load = 61,
     Store = 62,
     ImageSample = 87,
