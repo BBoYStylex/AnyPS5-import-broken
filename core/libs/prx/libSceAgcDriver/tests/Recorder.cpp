@@ -8593,6 +8593,138 @@ void singleCubeTests(const Device& device, Recorder& recorder) {
     }
 }
 
+void snapshotStagingTests(const Device& device, Recorder& recorder) {
+    const auto& context = device.GetContext();
+    TextureDetiler detiler(context);
+    SampleProgram program(context, recorder);
+    const VkComponentMapping identity{VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY};
+    constexpr std::size_t hole = 65536;
+    for (const auto tileMode : {TextureTileMode::kLinear, TextureTileMode::kStandard64KB}) {
+        const bool linear = tileMode == TextureTileMode::kLinear;
+        const auto levels = linear ? std::array<std::uint8_t, 3>{0x40, 0x80, 0xc0} : std::array<std::uint8_t, 3>{0x50, 0x90, 0xd0};
+        GuestTextureResource resource{};
+        resource.baseAddress = 0x100000;
+        resource.width = 512;
+        resource.height = 512;
+        resource.mipCount = 3;
+        resource.baseLevel = 0;
+        resource.lastLevel = 2;
+        resource.tileMode = tileMode;
+        resource.dimension = TextureDimension::k2D;
+        resource.format = 56;
+        resource.dstSelX = 4;
+        resource.dstSelY = 5;
+        resource.dstSelZ = 6;
+        resource.dstSelW = 7;
+        const auto geometry = DescribeSurface(resource);
+        Require(geometry.mips.size() == levels.size(), "the staging snapshot test surface has an unexpected mip count");
+        Require(geometry.mips[2].tiledOffset + geometry.mips[2].tiledSize <= hole && geometry.mips[1].tiledOffset >= hole && geometry.mips[0].tiledOffset >= hole, "the staging snapshot test surface has an unexpected layout");
+        const auto bytes = static_cast<std::size_t>(geometry.guestBytes);
+        struct Surface {
+            std::byte* data = nullptr;
+            std::size_t bytes = 0;
+            ~Surface() {
+#ifdef _WIN32
+                if (data != nullptr) VirtualFree(data, 0, MEM_RELEASE);
+#else
+                if (data != nullptr) munmap(data, bytes);
+#endif
+            }
+        } surface{nullptr, bytes};
+#ifdef _WIN32
+        surface.data = static_cast<std::byte*>(VirtualAlloc(nullptr, bytes, MEM_RESERVE, PAGE_NOACCESS));
+        Require(surface.data != nullptr && VirtualAlloc(surface.data + hole, bytes - hole, MEM_COMMIT, PAGE_READWRITE) != nullptr, "cannot reserve the staging snapshot test surface");
+#else
+        void* mapped = mmap(nullptr, bytes, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        Require(mapped != MAP_FAILED, "cannot reserve the staging snapshot test surface");
+        surface.data = static_cast<std::byte*>(mapped);
+        Require(mprotect(surface.data + hole, bytes - hole, PROT_READ | PROT_WRITE) == 0, "cannot commit the staging snapshot test surface");
+#endif
+        for (std::size_t level = 0; level < 2; ++level) std::fill_n(surface.data + geometry.mips[level].tiledOffset, static_cast<std::size_t>(geometry.mips[level].tiledSize), std::byte{levels[level]});
+        resource.baseAddress = reinterpret_cast<std::uint64_t>(surface.data);
+        VkBuffer poisoned = VK_NULL_HANDLE;
+        {
+            Buffer stale(context, bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+            std::fill(stale.Bytes().begin(), stale.Bytes().end(), std::byte{0xee});
+            poisoned = stale.Handle();
+        }
+        auto staging = std::make_shared<Buffer>(context, bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+        Require(staging->Handle() == poisoned, "the staging snapshot test did not get the poisoned pooled buffer");
+        ReadTextureSurface(resource, DccKeys::Uncompressed, staging->Bytes());
+        const std::vector<std::byte> snapshot(staging->Bytes().begin(), staging->Bytes().end());
+        Require(std::none_of(snapshot.begin(), snapshot.end(), [](std::byte value) { return value == std::byte{0xee}; }), "a surface read into a pooled staging buffer kept the buffer's earlier bytes");
+        Require(std::all_of(snapshot.begin(), snapshot.begin() + hole, [](std::byte value) { return value == std::byte{}; }), "an uncommitted page read into a pooled staging buffer is not zero");
+        const auto handed = staging;
+        Texture fromStaging(context, detiler, resource, identity, std::move(staging));
+        Require(handed.use_count() > 1, "a texture made from a staging buffer did not upload from it");
+        Texture fromSnapshot(context, detiler, resource, identity, snapshot);
+        for (std::size_t level = 0; level < levels.size(); ++level) {
+            const auto lod = static_cast<float>(level);
+            const float expected = level == 2 ? 0.0f : levels[level] / 255.0f;
+            expectRed(program.Red(fromStaging.View(), fromStaging.Layout(), lod), expected, "a texture made from the staging buffer it was handed sampled the wrong bytes");
+            expectRed(program.Red(fromSnapshot.View(), fromSnapshot.Layout(), lod), expected, "a texture made from a snapshot sampled the wrong bytes");
+        }
+        std::cout << "staging snapshot upload, " << (linear ? "linear" : "tiled") << ": passed\n";
+    }
+    constexpr std::uint32_t side = 512;
+    constexpr std::size_t surfaceBytes = std::size_t{side} * side * 4u;
+    auto* surface = static_cast<std::uint8_t*>(AllocateWatched(surfaceBytes, 65536));
+    if (surface == nullptr) {
+        std::cout << "staging snapshot upload through the texture cache: skipped, guest memory has no write watch\n";
+        return;
+    }
+    GuestAllocations::Mutation().Add(surface, surfaceBytes, true, true, true);
+    struct Watched {
+        std::uint8_t* surface;
+        ~Watched() {
+            GuestAllocations::Mutation().Remove(surface);
+            ReleaseWatched(surface, surfaceBytes);
+        }
+    } watched{surface};
+    struct Clear {
+        const Context& context;
+        Recorder& recorder;
+        ~Clear() {
+            recorder.Sync();
+            ClearCachedTextures(context.device);
+        }
+    } clear{context, recorder};
+    auto cacheContext = context;
+    cacheContext.detiler = &detiler;
+    const auto address = reinterpret_cast<std::uint64_t>(surface);
+    const auto words = linearTextureWords(address, side, side, 56);
+    std::shared_ptr<Texture> previous;
+    const auto sample = [&](std::uint8_t value, const char* kept, const char* wrong) {
+        VkBuffer poisoned = VK_NULL_HANDLE;
+        {
+            Buffer stale(context, surfaceBytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+            std::fill(stale.Bytes().begin(), stale.Bytes().end(), std::byte{0xee});
+            poisoned = stale.Handle();
+        }
+        AgcDriver::GuestMemory::BumpCollectEpoch();
+        std::shared_ptr<Texture> texture;
+        {
+            std::unique_lock gpu(GpuMutex());
+            texture = CachedSampledTexture(cacheContext, words);
+        }
+        Require(texture != nullptr && !texture->ViewsStorageImage() && texture != previous, kept);
+        {
+            Buffer probe(context, surfaceBytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+            Require(probe.Handle() != poisoned, "a dropped snapshot did not upload the pooled buffer it read into");
+        }
+        expectRed(program.Red(texture->View(), texture->Layout(), 0.0f), value / 255.0f, wrong);
+        previous = texture;
+    };
+    std::memset(surface, 0x40, surfaceBytes);
+    sample(0x40, "the large tracked surface was not snapshotted at its first use", "a dropped snapshot sampled the wrong bytes at its first use");
+    AgcDriver::GuestMemory::MarkWritten(address + 0x200, 4);
+    sample(0x40, "the large tracked surface kept its snapshot across a driver store of the bytes already there", "a dropped snapshot sampled the wrong bytes after a driver store of the bytes already there");
+    std::memset(surface, 0x80, surfaceBytes);
+    sample(0x80, "the large tracked surface kept its snapshot across a CPU write", "a dropped snapshot sampled the wrong bytes after a CPU write");
+    previous.reset();
+    std::cout << "staging snapshot upload through the texture cache: passed\n";
+}
+
 void cubeExtraSliceTests(const Device& device, Recorder& recorder) {
     auto context = device.GetContext();
     TextureDetiler detiler(context);
@@ -10246,6 +10378,10 @@ int main(int argc, char** argv) {
             std::cout << "Single cube snapshot and storage sampling tests passed\n";
             return 0;
         }
+        if (argc == 2 && std::string_view(argv[1]) == "--snapshot-staging-only") {
+            snapshotStagingTests(device, recorder);
+            return 0;
+        }
         if (argc == 2 && std::string_view(argv[1]) == "--sampled-storage-base-level-usage-only") {
             sampledStorageBaseLevelUsageTests(device, recorder);
             return 0;
@@ -10537,6 +10673,7 @@ int main(int argc, char** argv) {
         sampledStorageBaseLevelUsageTests(device, recorder);
         singleCubeTests(device, recorder);
         cubeExtraSliceTests(device, recorder);
+        snapshotStagingTests(device, recorder);
         atomicViewTests(device, recorder);
         metadataPassTests(device, recorder);
         cmaskPassTests(device, recorder);
