@@ -1,10 +1,13 @@
 #include "IntermediateRepresentation/IrBuilder.hpp"
 #include "IntermediateRepresentation/IrProgram.hpp"
 #include "Optimization/TessellationLowering.hpp"
+#include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <exception>
 #include <functional>
+#include <iterator>
 #include <string>
 
 using namespace ShaderRecompiler;
@@ -15,6 +18,12 @@ constexpr std::uint32_t InputControlPoints = 3u;
 constexpr std::uint32_t LocalStride = 32u;
 constexpr std::uint32_t PatchStride = InputControlPoints * LocalStride;
 constexpr std::uint32_t ReadPc = 0x40u;
+constexpr std::uint32_t OutputControlPoints = 4u;
+constexpr std::uint32_t ControlStride = 64u;
+constexpr std::uint32_t ControlPatchStride = OutputControlPoints * ControlStride;
+constexpr std::uint32_t RingMemory = 1u;
+constexpr std::uint32_t RingWritePc = 0x80u;
+constexpr std::uint32_t RingReadPc = 0xc0u;
 
 bool IsKind(const IrValue* value, TessellationAttribute kind) {
     return value->HasImmediate() && value->Type() == IrType::U32 && value->ImmediateU32() == static_cast<std::uint32_t>(kind);
@@ -28,6 +37,7 @@ struct Hull {
     Hull() {
         program.Resources().stage = IrShaderStage::TessellationControl;
         program.Resources().memoryInfo.push_back(MemoryInfo{.kind = ResourceKind::Lds});
+        program.Resources().memoryInfo.push_back(MemoryInfo{.kind = ResourceKind::Buffer, .offen = true});
         static_cast<void>(newBlock());
     }
 
@@ -74,6 +84,35 @@ struct Hull {
         return loaded;
     }
 
+    IrValue& ring(IrValue& offset) {
+        return builder.IAdd(builder.IMul(relativePatch(), builder.Constant(ControlPatchStride)), offset);
+    }
+
+    IrValue& ownControlPoint(std::uint32_t field) {
+        return ring(builder.IAdd(builder.IMul(invocation(), builder.Constant(ControlStride)), builder.Constant(field)));
+    }
+
+    IrValue& controlPoint(std::uint32_t point, std::uint32_t field) {
+        return ring(builder.Constant(point * ControlStride + field));
+    }
+
+    IrValue& ringResource() {
+        return builder.Emit(IrOpcode::GetBufferResource, IrType::BufferResource, {&builder.Constant(0u), &builder.Constant(0u), &builder.Constant(0u), &builder.Constant(0u)});
+    }
+
+    IrValue& offChip() {
+        return builder.Emit(IrOpcode::TessellationBase, IrType::U32, {&builder.Constant(static_cast<std::uint32_t>(TessellationBaseKind::OffChip))});
+    }
+
+    void writeRing(IrValue& offset) {
+        static_cast<void>(builder.Emit(IrOpcode::StoreBufferU32, IrType::Void, {&ringResource(), &builder.Constant(0u), &offset, &offChip(), &builder.Constant(1u), &builder.ConstantBool(true)}, MemoryFlags{RingMemory, RingWritePc}));
+    }
+
+    void readRing(IrValue& offset, IrValue& predicate) {
+        auto& loaded = builder.Emit(IrOpcode::LoadBufferU32, IrType::U32, {&ringResource(), &builder.Constant(0u), &offset, &offChip(), &predicate}, MemoryFlags{RingMemory, RingReadPc});
+        static_cast<void>(builder.Emit(IrOpcode::ReferenceU32, IrType::Void, {&loaded}));
+    }
+
     IrValue& merge(std::uint32_t firstMultiple, std::uint32_t secondMultiple) {
         IrBlock& entry = *block;
         IrBlock& first = newBlock();
@@ -102,6 +141,7 @@ struct Outcome {
 };
 
 const ShaderTessellationInputInfo Tessellation{.inputControlPoints = InputControlPoints, .outputControlPoints = InputControlPoints, .patchesPerGroup = 1u};
+const ShaderTessellationInputInfo RingTessellation{.inputControlPoints = InputControlPoints, .outputControlPoints = OutputControlPoints, .patchesPerGroup = 1u};
 const ShaderTessellationInputInfo GroupedTessellation{.inputControlPoints = InputControlPoints, .outputControlPoints = InputControlPoints, .patchesPerGroup = 1u, .primitiveGroupSize = 1u};
 
 Outcome Lower(IrProgram& program, const ShaderTessellationInputInfo& tessellation = Tessellation) {
@@ -133,6 +173,81 @@ bool RefusedBecause(IrProgram& program, const char* reason) {
     const Outcome outcome = Lower(program);
     if (outcome.lowered) std::fprintf(stderr, "lowered instead of refusing: %s\n", reason);
     return !outcome.lowered && outcome.reason.find(reason) != std::string::npos;
+}
+
+bool LowersRing(IrProgram& program) {
+    const Outcome outcome = Lower(program, RingTessellation);
+    if (!outcome.lowered) std::fprintf(stderr, "refused: %s\n", outcome.reason.c_str());
+    return outcome.lowered;
+}
+
+bool RingRefusedBecause(IrProgram& program, const char* reason) {
+    const Outcome outcome = Lower(program, RingTessellation);
+    if (outcome.lowered) std::fprintf(stderr, "lowered instead of refusing: %s\n", reason);
+    if (!outcome.lowered && outcome.reason.find(reason) == std::string::npos) std::fprintf(stderr, "refused for another reason: %s\n", outcome.reason.c_str());
+    return !outcome.lowered && outcome.reason.find(reason) != std::string::npos;
+}
+
+bool IsBarrier(const IrValue* inst) {
+    return inst->Opcode() == IrOpcode::Barrier;
+}
+
+bool IsBranch(const IrValue* inst) {
+    return inst->Opcode() == IrOpcode::Branch || inst->Opcode() == IrOpcode::BranchConditional;
+}
+
+bool IsControlOutputWrite(const IrValue* inst) {
+    return inst->Opcode() == IrOpcode::SetTessellationAttribute && IsKind(inst->Argument(0), TessellationAttribute::ControlOutput);
+}
+
+bool IsControlOutputRead(const IrValue* inst) {
+    return inst->Opcode() == IrOpcode::GetTessellationAttribute && IsKind(inst->Argument(0), TessellationAttribute::ControlOutput);
+}
+
+std::ptrdiff_t FirstPosition(const IrBlock& block, bool (*match)(const IrValue*)) {
+    const auto& instructions = block.Instructions();
+    const auto found = std::find_if(instructions.begin(), instructions.end(), match);
+    return found == instructions.end() ? -1 : std::distance(instructions.begin(), found);
+}
+
+std::ptrdiff_t LastPosition(const IrBlock& block, bool (*match)(const IrValue*)) {
+    const auto& instructions = block.Instructions();
+    const auto found = std::find_if(instructions.rbegin(), instructions.rend(), match);
+    return found == instructions.rend() ? -1 : std::distance(instructions.begin(), found.base()) - 1;
+}
+
+std::size_t Barriers(const IrProgram& program) {
+    std::size_t count = 0;
+    for (const IrBlock* block : program.BlockOrder()) count += static_cast<std::size_t>(std::count_if(block->Instructions().begin(), block->Instructions().end(), IsBarrier));
+    return count;
+}
+
+std::uint32_t ReadAddress(const IrBlock& block) {
+    for (const IrValue* inst : block.Instructions()) {
+        if (!IsControlOutputRead(inst)) continue;
+        const IrValue* address = inst->Argument(1)->Resolve();
+        return address->HasImmediate() ? address->ImmediateU32() : ~0u;
+    }
+    return ~0u;
+}
+
+bool BarrierBetweenWritesAndBranch(const IrBlock& block) {
+    const auto barrier = FirstPosition(block, IsBarrier);
+    return barrier > LastPosition(block, IsControlOutputWrite) && barrier < FirstPosition(block, IsBranch);
+}
+
+void SkipHullProgram(Hull& hull, IrBlock& entry, std::uint32_t lanes, IrBlock& skip, IrBlock& body) {
+    hull.builder.SetInsertionPoint(entry);
+    auto& lane = hull.builder.Emit(IrOpcode::LaneId, IrType::U32, {});
+    auto& outside = hull.builder.Emit(IrOpcode::LogicalNot, IrType::Bool, {&hull.builder.Emit(IrOpcode::ULessThan32, IrType::Bool, {&lane, &hull.builder.Constant(lanes)})});
+    hull.builder.BranchConditional(outside, skip, body);
+    constexpr std::uint32_t Renumbered = 100u;
+    for (auto& info : hull.program.Metadata().blockInfo) info.id += Renumbered;
+    auto& info = hull.program.Metadata().blockInfo.front();
+    info.terminator.kind = TerminatorKind::ConditionalBranch;
+    info.terminator.trueBlock = skip.Id() + Renumbered;
+    info.terminator.falseBlock = body.Id() + Renumbered;
+    info.condition = &outside;
 }
 
 bool run(const char* name, const std::function<bool()>& body) {
@@ -204,6 +319,120 @@ int main() {
         if (!outcome.lowered || outcome.emitted->Opcode() != IrOpcode::ISub32 || outcome.emitted->Argument(0)->Resolve() != address.Resolve()) return false;
         const IrValue* patch = outcome.emitted->Argument(1)->Resolve();
         return patch->Opcode() == IrOpcode::IMul32 && patch->Argument(1)->Resolve()->ImmediateU32() == PatchStride;
+    });
+
+    passed &= run("a hull read of another control point's off-chip output behind a branch gets a barrier after every control point's writes", [] {
+        Hull hull;
+        hull.writeRing(hull.ownControlPoint(0u));
+        hull.writeRing(hull.ownControlPoint(16u));
+        IrBlock& entry = *hull.block;
+        IrBlock& reader = hull.newBlock();
+        IrBlock& done = hull.newBlock();
+        hull.builder.SetInsertionPoint(entry);
+        hull.builder.BranchConditional(hull.firstInvocation(), reader, done);
+        hull.builder.SetInsertionPoint(reader);
+        hull.readRing(hull.controlPoint(1u, 16u), hull.firstInvocation());
+        hull.builder.Branch(done);
+        return LowersRing(hull.program) && Barriers(hull.program) == 1u && BarrierBetweenWritesAndBranch(entry) && ReadAddress(reader) == ControlStride + 16u;
+    });
+
+    passed &= run("a hull read of another control point's off-chip output in the block that writes it gets a barrier between them", [] {
+        Hull hull;
+        hull.writeRing(hull.ownControlPoint(0u));
+        hull.readRing(hull.controlPoint(2u, 0u), hull.builder.ConstantBool(true));
+        if (!LowersRing(hull.program) || Barriers(hull.program) != 1u) return false;
+        const auto barrier = FirstPosition(*hull.block, IsBarrier);
+        return barrier > LastPosition(*hull.block, IsControlOutputWrite) && barrier < FirstPosition(*hull.block, IsControlOutputRead) && ReadAddress(*hull.block) == 2u * ControlStride;
+    });
+
+    passed &= run("a hull read of its own control point's off-chip output needs no barrier", [] {
+        Hull hull;
+        hull.writeRing(hull.ownControlPoint(0u));
+        hull.readRing(hull.ownControlPoint(0u), hull.builder.ConstantBool(true));
+        if (!LowersRing(hull.program) || Barriers(hull.program) != 0u) return false;
+        const auto read = FirstPosition(*hull.block, IsControlOutputRead);
+        if (read < 0) return false;
+        const IrValue* address = (*std::next(hull.block->Instructions().begin(), read))->Argument(1)->Resolve();
+        if (address->Opcode() != IrOpcode::IAdd32) return false;
+        const IrValue* scaled = address->Argument(0)->Resolve();
+        return scaled->Opcode() == IrOpcode::IMul32 && scaled->Argument(1)->Resolve()->ImmediateU32() == ControlStride;
+    });
+
+    passed &= run("a branch around the hull program that no control point takes does not keep the barrier from its writes", [] {
+        Hull hull;
+        IrBlock& entry = *hull.block;
+        IrBlock& body = hull.newBlock();
+        hull.writeRing(hull.ownControlPoint(0u));
+        IrBlock& reader = hull.newBlock();
+        hull.readRing(hull.controlPoint(1u, 0u), hull.firstInvocation());
+        IrBlock& done = hull.newBlock();
+        SkipHullProgram(hull, entry, OutputControlPoints, done, body);
+        hull.builder.SetInsertionPoint(body);
+        hull.builder.BranchConditional(hull.firstInvocation(), reader, done);
+        hull.builder.SetInsertionPoint(reader);
+        hull.builder.Branch(done);
+        return LowersRing(hull.program) && Barriers(hull.program) == 1u && BarrierBetweenWritesAndBranch(body);
+    });
+
+    passed &= run("a branch around the hull program that some control points take is refused", [] {
+        Hull hull;
+        IrBlock& entry = *hull.block;
+        IrBlock& body = hull.newBlock();
+        hull.writeRing(hull.ownControlPoint(0u));
+        IrBlock& reader = hull.newBlock();
+        hull.readRing(hull.controlPoint(1u, 0u), hull.firstInvocation());
+        IrBlock& done = hull.newBlock();
+        SkipHullProgram(hull, entry, OutputControlPoints - 1u, done, body);
+        hull.builder.SetInsertionPoint(body);
+        hull.builder.BranchConditional(hull.firstInvocation(), reader, done);
+        hull.builder.SetInsertionPoint(reader);
+        hull.builder.Branch(done);
+        return RingRefusedBecause(hull.program, "one of its writes there comes after the last block every invocation reaches before the read");
+    });
+
+    passed &= run("a hull read of another control point's off-chip output that no control point reaches is refused", [] {
+        Hull hull;
+        IrBlock& entry = *hull.block;
+        IrBlock& body = hull.newBlock();
+        hull.writeRing(hull.ownControlPoint(0u));
+        hull.readRing(hull.controlPoint(1u, 0u), hull.builder.ConstantBool(true));
+        IrBlock& done = hull.newBlock();
+        SkipHullProgram(hull, entry, 0u, done, body);
+        hull.builder.SetInsertionPoint(body);
+        hull.builder.Branch(done);
+        return RingRefusedBecause(hull.program, "in a block no control point reaches");
+    });
+
+    passed &= run("a hull write of its off-chip output after another control point's read is refused", [] {
+        Hull hull;
+        hull.writeRing(hull.ownControlPoint(0u));
+        hull.readRing(hull.controlPoint(1u, 0u), hull.builder.ConstantBool(true));
+        hull.writeRing(hull.ownControlPoint(16u));
+        return RingRefusedBecause(hull.program, "one of its writes there comes after the last block every invocation reaches before the read");
+    });
+
+    passed &= run("a hull read of another control point's off-chip output in a loop through the program's entry is refused", [] {
+        Hull hull;
+        IrBlock& entry = *hull.block;
+        hull.writeRing(hull.ownControlPoint(0u));
+        hull.readRing(hull.controlPoint(1u, 0u), hull.builder.ConstantBool(true));
+        IrBlock& done = hull.newBlock();
+        hull.builder.SetInsertionPoint(entry);
+        hull.builder.BranchConditional(hull.firstInvocation(), entry, done);
+        return RingRefusedBecause(hull.program, "no block before the read is reached once by every invocation");
+    });
+
+    passed &= run("a hull read of off-chip memory where no control point writes is refused", [] {
+        Hull hull;
+        hull.readRing(hull.controlPoint(1u, 0u), hull.builder.ConstantBool(true));
+        return RingRefusedBecause(hull.program, "writes no control point there");
+    });
+
+    passed &= run("a hull read past its patch's off-chip control points is refused", [] {
+        Hull hull;
+        hull.writeRing(hull.ownControlPoint(0u));
+        hull.readRing(hull.controlPoint(OutputControlPoints, 0u), hull.builder.ConstantBool(true));
+        return RingRefusedBecause(hull.program, "reads off-chip memory outside its patch's control points");
     });
 
     return passed ? 0 : 1;
