@@ -1309,8 +1309,7 @@ static std::int64_t TransferIovecs(int d, const KernelIovec* guestIov, int iovcn
                                   : GuestSockets::Readv(d, reinterpret_cast<const GuestSockets::Iovec*>(iov), iovcnt);
         return result < 0 ? SceKernelError(*__error_nid_postfix()) : result;
     }
-    std::optional<File::WriteSync> sync;
-    if (write) sync.emplace(d);
+    const File::WriteSync sync(write ? d : -1);
     if (write) PrepareWriteIovecs(iov, iovcnt);
     if (!write && File::IsRandomDevice(d)) return ReadRandomIovecs(d, iov, iovcnt);
     if (!write) {
