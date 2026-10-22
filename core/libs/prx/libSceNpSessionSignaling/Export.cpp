@@ -297,57 +297,32 @@ int APS5_VABI sceNpSessionSignalingActivate(void) {
     return 0;
 }
 
-int APS5_VABI sceNpSessionSignalingCreateJoinActivate() {
+int APS5_VABI sceNpSessionSignalingCreateJoinActivate(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceNpSessionSignalingCrossplayCreateContext(void) {
+int APS5_VABI sceNpSessionSignalingGetConnectionFromNetAddress(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceNpSessionSignalingCrossplayDestroyContext(void) {
+int APS5_VABI sceNpSessionSignalingGetCustomProperty(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceNpSessionSignalingCrossplayGetMemoryInfo(void) {
+int APS5_VABI sceNpSessionSignalingGetGroupFromPeerAddress(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceNpSessionSignalingCrossplayInitialize(void) {
+int APS5_VABI sceNpSessionSignalingInitializeWithPort(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceNpSessionSignalingCrossplayTerminate(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceNpSessionSignalingGetConnectionFromNetAddress() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceNpSessionSignalingGetCustomProperty() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceNpSessionSignalingGetGroupFromPeerAddress() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceNpSessionSignalingInitializeWithPort() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceNpSessionSignalingJoinActivate() {
+int APS5_VABI sceNpSessionSignalingJoinActivate(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -377,7 +352,7 @@ int APS5_VABI sceNpSessionSignalingRegisterInternalCallback(void) {
     return 0;
 }
 
-int APS5_VABI sceNpSessionSignalingSetCustomProperty() {
+int APS5_VABI sceNpSessionSignalingSetCustomProperty(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
