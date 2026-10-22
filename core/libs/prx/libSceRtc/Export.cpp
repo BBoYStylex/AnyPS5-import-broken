@@ -125,7 +125,12 @@ int setCurrentTick(std::size_t clock, const RtcTick* tick) {
     return 0;
 }
 
+std::int64_t g_timezoneOffsetMinutes = 0;
+bool g_timezoneOverride = false;
+
 std::int64_t localOffsetSeconds(std::uint64_t utcTick) {
+    if (g_timezoneOverride) return g_timezoneOffsetMinutes * 60;
+
     const auto elapsed = std::chrono::microseconds{static_cast<std::int64_t>(utcTick) - static_cast<std::int64_t>(UNIX_EPOCH_TICK)};
     const auto seconds = static_cast<std::time_t>(std::chrono::floor<std::chrono::seconds>(elapsed).count());
     std::tm local{};
@@ -743,11 +748,10 @@ int APS5_VABI sceRtcSetCurrentDebugNetworkTick(const RtcTick* tick) {
 }
 
 int APS5_VABI sceRtcSetConf(int first, int second, int third, int fourth) {
-    (void)first;
-    (void)second;
-    (void)third;
-    (void)fourth;
-    NotImplemented_nid_no_patch(__func__);
+    if (first != 0) return SCE_RTC_ERROR_INVALID_VALUE;
+    if (second < -1439 || second > 1439) return SCE_RTC_ERROR_INVALID_VALUE;
+    g_timezoneOffsetMinutes = second;
+    g_timezoneOverride = true;
     return 0;
 }
 
