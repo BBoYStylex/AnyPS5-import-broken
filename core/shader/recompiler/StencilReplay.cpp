@@ -497,6 +497,18 @@ private:
         value = value->Resolve();
         if (sameValue(value, other)) return true;
         if (value->Type() == IrType::Bool && other->Resolve() == predicate->Resolve() && GuardImplies(program, value, predicate)) return true;
+        for (std::uint32_t half = 0; half < (waveSize == 32u ? 1u : 2u); ++half) {
+            const IrValue* ballot = ballotWord(value, half);
+            if (!ballot) continue;
+            const IrValue* lanes = ballot->Argument(0)->Resolve();
+            if (lanes->Opcode() == IrOpcode::LogicalAnd && lanes->ArgumentCount() == 2u) {
+                const auto inactiveOnly = [&](const IrValue* side) { side = side->Resolve(); return side->Opcode() == IrOpcode::LogicalNot && side->ArgumentCount() == 1u && side->Argument(0)->Resolve() == predicate->Resolve(); };
+                if (inactiveOnly(lanes->Argument(1))) lanes = lanes->Argument(0)->Resolve();
+                else if (inactiveOnly(lanes->Argument(0))) lanes = lanes->Argument(1)->Resolve();
+                else continue;
+            }
+            if (const auto mask = own(lanes); mask && sameValue(half == 0u ? mask->low : mask->high, other)) return true;
+        }
         if ((value->Opcode() == IrOpcode::SelectU32 || value->Opcode() == IrOpcode::SelectF32 || value->Opcode() == IrOpcode::SelectU1) && value->ArgumentCount() == 3u && (value->Argument(0)->Resolve() == predicate->Resolve() || GuardImplies(program, value->Argument(0), predicate))) return inactiveEquals(value->Argument(2), other, predicate, region, depth + 1u);
         if (value->IsPhi() && region.contains(value->Parent()) && value->ArgumentCount() != 0u && value->ArgumentCount() == value->PhiBlockCount()) {
             return std::all_of(value->Arguments().begin(), value->Arguments().end(), [&](const IrValue* argument) { return inactiveEquals(argument, other, predicate, region, depth + 1u); });
