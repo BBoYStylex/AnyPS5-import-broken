@@ -796,6 +796,25 @@ int main() {
             std::fprintf(stderr, "symbolic links unavailable: the rename link cases not tested\n");
         }
 #ifdef _WIN32
+        const auto directoryJunction = root / "rename-directory.junction";
+        const auto movingJunction = root / "rename-moving.junction";
+        const auto junctionFile = root / "rename-junction-moving.txt";
+        const auto junctionOccupied = root / "rename-junction-occupied.txt";
+        { std::ofstream stream(junctionFile); stream << "moved"; }
+        { std::ofstream stream(junctionOccupied); stream << "occupied"; }
+        const auto junctionTargetPath = std::filesystem::absolute(linkedDirectory).wstring();
+        for (const auto& made : {directoryJunction, movingJunction})
+            Require(_wsystem((L"cmd /c mklink /J \"" + made.wstring() + L"\" \"" + junctionTargetPath + L"\" >nul").c_str()) == 0);
+        Require(rename_nid_postfix(movingJunction.string().c_str(), emptyDirectory.string().c_str()) == -1 && *__error_nid_postfix() == 21);
+        Require(std::filesystem::is_directory(emptyDirectory) && std::filesystem::is_empty(emptyDirectory));
+        Require(rename_nid_postfix(movingJunction.string().c_str(), junctionOccupied.string().c_str()) == 0);
+        Require(!std::filesystem::exists(movingJunction) && std::filesystem::is_regular_file(junctionOccupied / "kept.txt"));
+        Require(rename_nid_postfix(junctionFile.string().c_str(), directoryJunction.string().c_str()) == 0);
+        Require(!std::filesystem::exists(junctionFile) && std::filesystem::is_regular_file(directoryJunction));
+        Require(std::filesystem::is_regular_file(linkedDirectory / "kept.txt"));
+        Require(RemoveDirectoryW(junctionOccupied.wstring().c_str()) && unlink_nid_postfix(directoryJunction.string().c_str()) == 0);
+#endif
+#ifdef _WIN32
         RemoveDirectoryW(movingLink.wstring().c_str());
         RemoveDirectoryW(directoryLink.wstring().c_str());
         RemoveDirectoryW(occupiedFile.wstring().c_str());
