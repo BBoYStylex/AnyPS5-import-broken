@@ -30,6 +30,13 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #endif
+#ifdef __linux__
+#include <sys/uio.h>
+#endif
+#ifdef __APPLE__
+#include <mach/mach.h>
+#include <mach/mach_vm.h>
+#endif
 
 extern "C" int* APS5_VABI __error_nid_postfix();
 extern "C" int APS5_VABI dup2_nid_postfix(int from, int to);
@@ -544,6 +551,28 @@ int Fcntl(int fd, int command, std::intptr_t argument) {
     }
 }
 
+static bool ReadGuestInt(const void* source, int* value) {
+    const auto address = reinterpret_cast<std::uintptr_t>(source);
+    if (address == 0 || sizeof(int) > UINTPTR_MAX - address) return false;
+    GuestArena::GuestArenaPrepareHostRead_nid_no_patch(source, sizeof(int));
+#ifdef _WIN32
+    SIZE_T copied = 0;
+    return ReadProcessMemory(GetCurrentProcess(), source, value, sizeof(int), &copied) && copied == sizeof(int);
+#elif defined(__linux__)
+    iovec local{value, sizeof(int)};
+    iovec remote{const_cast<void*>(source), sizeof(int)};
+    const auto copied = ::process_vm_readv(::getpid(), &local, 1, &remote, 1, 0);
+    if (copied < 0 && errno != EFAULT) throw std::runtime_error("ioctl: process_vm_readv failed with errno " + std::to_string(errno));
+    return copied == static_cast<ssize_t>(sizeof(int));
+#elif defined(__APPLE__)
+    mach_vm_size_t copied = 0;
+    return ::mach_vm_read_overwrite(::mach_task_self(), static_cast<mach_vm_address_t>(address), sizeof(int),
+               reinterpret_cast<mach_vm_address_t>(value), &copied) == KERN_SUCCESS && copied == sizeof(int);
+#else
+    throw std::runtime_error("ioctl: checked guest copies are not implemented on this host");
+#endif
+}
+
 bool IoctlRequestMalformed(std::uint64_t request) {
     const auto command = static_cast<std::uint32_t>(request);
     const std::uint32_t length = (command >> 16) & 0x1fff;
@@ -564,8 +593,9 @@ int Ioctl(int fd, std::uint64_t request, void* argument) {
         return 0;
     }
     if (command == NonblockingRequest) {
-        const bool enable = *static_cast<const int*>(argument) != 0;
-        return ChangeStatus(fd, *kind, Nonblocking, enable ? Nonblocking : 0, "ioctl");
+        int enable = 0;
+        if (!ReadGuestInt(argument, &enable)) return Fail(GuestEfault);
+        return ChangeStatus(fd, *kind, Nonblocking, enable != 0 ? Nonblocking : 0, "ioctl");
     }
     if (command == ReadableRequest) {
         if (*kind == Kind::RandomDevice) return Fail(GuestEnotty);
@@ -578,7 +608,11 @@ int Ioctl(int fd, std::uint64_t request, void* argument) {
         std::memcpy(argument, &available, sizeof(available));
         return 0;
     }
-    if (command == SetOwnerRequest) return SetSigioOwner(fd, *kind, *static_cast<const int*>(argument), "ioctl", "FIOSETOWN");
+    if (command == SetOwnerRequest) {
+        int owner = 0;
+        if (!ReadGuestInt(argument, &owner)) return Fail(GuestEfault);
+        return SetSigioOwner(fd, *kind, owner, "ioctl", "FIOSETOWN");
+    }
     if (command == GetOwnerRequest) {
         const int owner = GetSigioOwner(fd, *kind, "ioctl", "FIOGETOWN");
         if (owner == -1 && *kind != Kind::Pipe) return -1;
