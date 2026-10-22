@@ -186,6 +186,7 @@ foreach(LIB_DIR ${LIBS_DIRS})
     endif()
 endforeach()
 
+include(prx/libSceLibreSsl/ErrorQueue.cmake)
 target_link_libraries(libSceUsbStorageDialog PRIVATE libSceUserService)
 
 if(APS5_ENABLE_TRACY)
