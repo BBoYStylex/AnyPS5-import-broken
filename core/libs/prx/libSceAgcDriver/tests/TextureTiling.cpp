@@ -1,4 +1,5 @@
 #include "GraphicsTests.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/ColorTargetLayout.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/TextureFormat.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/TextureSwizzleEquations.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/TextureTiling.hpp"
@@ -289,6 +290,12 @@ void gcnTilingTests() {
         Require(mips[0].tiledOffset == 0u && mips[1].tiledOffset == 256u * 256u * 4u && mips[1].blocksPerRow == 1u, "PS4 mips follow level 0 in order");
         Require(mips[2].tiledOffset == mips[1].tiledOffset + 128u * 128u * 4u && mips[2].blocksPerRow == 8u, "PS4 1D tiled mip after the 2D levels");
         Require(MipTileMode(TextureTileMode::kGcnDisplay2D, mips[2]) == TextureTileMode::kGcnDisplay1D, "a 1D tiled level of a 2D surface uses the 1D display mode");
+    }
+    {
+        Require(ColorTargetLayout(100u, 4u, ColorTileMode::GcnLinear, 4u).Bytes() == 112u * 4u * 4u, "a PS4 linear-aligned 32-bit target row is not padded to 16 elements");
+        Require(ColorTargetLayout(100u, 4u, ColorTileMode::GcnLinear, 1u).Bytes() == 128u * 4u, "a PS4 linear-aligned 8-bit target row is not padded to 64 elements");
+        Require(ColorTargetLayout(100u, 4u, ColorTileMode::GcnLinear, 16u).Bytes() == 104u * 4u * 16u, "a PS4 linear-aligned 128-bit target row is not padded to 8 elements");
+        Require(ColorTargetLayout(100u, 4u, ColorTileMode::Linear, 4u).Bytes() == 128u * 4u * 4u, "a PS5 linear target row is not padded to 256 bytes");
     }
 }
 
