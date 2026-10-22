@@ -1,6 +1,7 @@
 #include "SceTypes.hpp"
 #include "prx/libc/include/ApplicationHeap.hpp"
 #include "prx/libc/include/GuestHeap.hpp"
+#include <utility>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -42,6 +43,11 @@ static int APS5_VABI FormatList(char* buffer, size_t size, const char* format, .
     Require(std::memcmp(&list, &original, sizeof(list)) == 0);
     __builtin_sysv_va_end(args);
     return result;
+}
+
+template <std::size_t... Index>
+static int ManyArguments(char* buffer, size_t size, const char* format, std::index_sequence<Index...>) {
+    return FormatList(buffer, size, format, static_cast<int>(Index + 1)..., u"x");
 }
 
 static int APS5_VABI FormatListS(char* buffer, size_t size, const char* format, ...) {
@@ -202,7 +208,8 @@ __attribute__((noinline)) static void APS5_VABI RunChecks() {
     Require(FormatList(buffer, sizeof(buffer), "%2$ls|%1$C|%3$d", 0x41, u"\u00e9", 7) == 6 && std::strcmp(buffer, "\xc3\xa9|A|7") == 0);
     Require(FormatList(buffer, sizeof(buffer), "%2$d %d %ls|%*5$d|%1$d", 1, 2, 3, u"x", 4) == 12 && std::strcmp(buffer, "2 3 x|   4|1") == 0);
     Require(FormatList(buffer, sizeof(buffer), "[%*3$d]%ls", 5, u"", 3) == 5 && std::strcmp(buffer, "[  5]") == 0);
-    const char* const invalidPositions[] = {"%0$d%ls", "%100$d%ls", "%*0$d%ls"};
+    Require(ManyArguments(buffer, sizeof(buffer), "%120$d|%1$d|%100$d|%121$ls", std::make_index_sequence<120>()) == 11 && std::strcmp(buffer, "120|1|100|x") == 0);
+    const char* const invalidPositions[] = {"%0$d%ls", "%2147483648$d%ls", "%*0$d%ls"};
     for (const char* format : invalidPositions) {
         bool threw = false;
         try {

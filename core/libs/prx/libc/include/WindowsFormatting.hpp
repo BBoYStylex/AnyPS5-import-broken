@@ -205,7 +205,7 @@ inline std::string FormatPointer(const std::string& spec, const void* pointer) {
     return std::string(padding, ' ') + digits;
 }
 
-constexpr size_t maximumArgumentPosition = 99;
+constexpr size_t maximumArgumentPosition = static_cast<size_t>(std::numeric_limits<int>::max());
 
 inline size_t ArgumentPosition(const char*& format) {
     const char* end = format;
