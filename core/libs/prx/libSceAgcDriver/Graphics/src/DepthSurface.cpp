@@ -408,6 +408,7 @@ public:
         const auto clearLease = clearGeneration == 0u && stencilClearGeneration == 0u ? GuestAllocations::Lease{} : GuestAllocations::GuestAllocationsAcquireAll_nid_postfix();
         Require(active->load(std::memory_order_acquire), "the native multisample depth owner was released");
         Require(sampling.refusal.empty(), sampling.refusal);
+        Require(!clearPending, "native multisample depth clear has not been recorded");
         const auto* recorder = RecorderFor(context);
         if (recorder != nullptr && clearGeneration != 0u && clearPattern.has_value() && clearFillNote == 0u) clearFillNote = fillNoteAfter(*recorder, sampling.initial[1], clearFillFloor, *clearPattern);
         if (recorder != nullptr && stencilClearGeneration != 0u && stencilFillNote == 0u) stencilFillNote = fillNoteAfter(*recorder, sampling.initial[2], stencilFillFloor, *stencilClearValue * 0x01010101u);
@@ -1037,6 +1038,7 @@ public:
     bool sampleable = true;
     bool samplingActive = false;
     DepthSamplingState sampling;
+    bool clearPending = false;
     std::uint64_t clearGeneration = 0u;
     VkImageAspectFlags clearAspects = 0u;
     std::optional<std::uint32_t> clearPattern;
@@ -2323,10 +2325,11 @@ std::size_t HtileDepthClearBytes_nid_no_patch(std::span<const std::uint32_t> cod
     return address <= std::numeric_limits<std::uint64_t>::max() - bytes ? static_cast<std::size_t>(bytes) : 0u;
 }
 
-void NoteHtileDepthClear(std::uint64_t htileAddress, std::size_t bytes, std::size_t nativeBytes) {
+bool NoteHtileDepthClear(std::uint64_t htileAddress, std::size_t bytes, std::size_t nativeBytes) {
     std::lock_guard lock(surfacesMutex());
     forgetHtileReads(htileAddress, bytes);
     bool existing = false;
+    bool completionCandidate = false;
     for (const auto& surface : surfaces()) {
         if (!surface->active->load(std::memory_order_acquire)) continue;
         if (surface->target.htileAddress != 0u && htileAddress < surface->target.htileAddress + HtileMetadataBytes(surface->target.extent) && surface->target.htileAddress < htileAddress + bytes) surface->expanded = false;
@@ -2334,12 +2337,13 @@ void NoteHtileDepthClear(std::uint64_t htileAddress, std::size_t bytes, std::siz
             const auto& metadata = surface->sampling.initial[1];
             if (surface->target.stencilAddress != 0u) surface->sampling.Refuse("native multisample depth HTILE mask clear of a stencil surface is not implemented");
             else if (nativeBytes != bytes || nativeBytes < metadata.bytes || !GuestMemory::Accessible(reinterpret_cast<const void*>(metadata.address), metadata.bytes) || !GuestMemory::Watched(metadata.address, metadata.bytes)) surface->sampling.Refuse("native multisample depth incomplete or unproven fast-clear transition is not implemented");
-            else if (surface->clearGeneration != 0u) surface->sampling.Refuse("overlapping native multisample depth clear transitions are not implemented");
+            else if (surface->clearPending || surface->clearGeneration != 0u) surface->sampling.Refuse("overlapping native multisample depth clear transitions are not implemented");
             else {
-                surface->clearGeneration = GuestMemory::CollectWritesUncached(metadata.address, metadata.bytes);
+                surface->clearPending = true;
                 surface->clearAspects = VK_IMAGE_ASPECT_DEPTH_BIT;
                 surface->clearPattern.reset();
                 surface->clearFillNote = 0u;
+                completionCandidate = true;
             }
             existing = true;
             continue;
@@ -2350,6 +2354,30 @@ void NoteHtileDepthClear(std::uint64_t htileAddress, std::size_t bytes, std::siz
         existing = true;
     }
     if (!existing) clearedHtiles()[htileAddress] = bytes;
+    return completionCandidate;
+}
+
+void ArmHtileDepthClear(std::uint64_t htileAddress, std::size_t bytes) {
+    std::lock_guard lock(surfacesMutex());
+    for (const auto& surface : surfaces()) {
+        if (!surface->active->load(std::memory_order_acquire) || !surface->samplingActive || surface->target.htileAddress != htileAddress || !surface->clearPending) continue;
+        const auto& metadata = surface->sampling.initial[1];
+        if (bytes < metadata.bytes) continue;
+        surface->clearGeneration = GuestMemory::CollectWritesUncached(metadata.address, metadata.bytes);
+        surface->clearPending = false;
+        if (surface->clearGeneration == 0u) surface->sampling.Refuse("native multisample depth clear requires tracked HTILE generations");
+    }
+}
+
+void CompleteHtileDepthClear(std::uint64_t htileAddress, std::size_t bytes) {
+    std::lock_guard lock(surfacesMutex());
+    for (const auto& surface : surfaces()) {
+        if (!surface->active->load(std::memory_order_acquire) || !surface->samplingActive || surface->target.htileAddress != htileAddress || surface->clearGeneration == 0u) continue;
+        const auto& metadata = surface->sampling.initial[1];
+        if (bytes < metadata.bytes) continue;
+        Require(GuestMemory::UnchangedSinceCollected(metadata.address, metadata.bytes, surface->clearGeneration), "CPU writes raced native multisample depth clear");
+        GuestMemory::MarkWritten(metadata.address, metadata.bytes);
+    }
 }
 
 void ClearDepthSurfaces(VkDevice device) {
