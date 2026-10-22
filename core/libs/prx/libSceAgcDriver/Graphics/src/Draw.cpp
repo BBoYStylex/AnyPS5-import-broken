@@ -1986,7 +1986,15 @@ void recordDraw(const Context& context, const State& state, const Pm4::DrawParam
     }
     GuestRangeList passAtomics{};
     thread_local std::vector<std::pair<std::uint64_t, std::uint64_t>>* plainWritesSlot = nullptr;
-    if (const auto& atomicOnly = resources.AtomicOnlyRanges(); !atomicOnly.empty() && !unknownMemory && AtomicPasses()) {
+    thread_local std::vector<std::pair<std::uint64_t, std::uint64_t>>* atomicOnlySlot = nullptr;
+    auto& atomicOnly = ShaderRecompiler::ThreadOwned(atomicOnlySlot);
+    atomicOnly.clear();
+    if (!unknownMemory && AtomicPasses()) {
+        for (const auto& range : resources.AtomicOnlyRanges()) {
+            if (resources.WrittenInPlace(range.first, static_cast<std::size_t>(range.second - range.first))) atomicOnly.push_back(range);
+        }
+    }
+    if (!atomicOnly.empty()) {
         const auto listed = [&](const std::pair<std::uint64_t, std::uint64_t>& range, bool aligned) {
             return std::any_of(atomicOnly.begin(), atomicOnly.end(), [&](const auto& only) {
                 if (!aligned) return only == range;
