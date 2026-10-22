@@ -14,6 +14,10 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#ifdef __APPLE__
+#include <cstdlib>
+#include <xlocale.h>
+#endif
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
 
@@ -518,10 +522,18 @@ private:
         const auto parsed = std::from_chars(text.data(), text.data() + text.size(), real);
         bool converted = parsed.ec == std::errc{} && parsed.ptr == text.data() + text.size();
         if (parsed.ec == std::errc::result_out_of_range) {
+#ifdef __APPLE__
+            // libc++ fails both from_chars and istream on underflow to zero; strtod_l still returns the rounded value.
+            static const locale_t classic = newlocale(LC_ALL_MASK, "C", nullptr);
+            char* end = nullptr;
+            real = strtod_l(text.c_str(), &end, classic);
+            converted = end == text.c_str() + text.size();
+#else
             std::istringstream stream(text);
             stream.imbue(std::locale::classic());
             stream >> real;
             converted = !stream.fail() && stream.eof();
+#endif
         }
         if (!converted || !std::isfinite(real)) throw std::runtime_error("sce::Json::Parser::parse: number " + text + " overflows a double; the console's behaviour is unverified");
         out.type = TypeReal;
