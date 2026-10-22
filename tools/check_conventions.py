@@ -33,6 +33,7 @@ RULES = {
     "pr-template": ("error", ".github/pull_request_template.md", "Fill in the pull request template"),
     "env-reference": ("error", "docs/dev/ENVIRONMENT.md", "Every APS5_* or ANYPS5_* name a pull request adds to the code has a row in docs/dev/ENVIRONMENT.md, a row whose name the pull request stops reading is removed, and a row the pull request removes is no longer read"),
     "debt-length": ("warning", "CONTRIBUTING.md#documentation", "Technical debt entry over 1000 characters: state the gap first (what differs from the console, what is unverified, what throws) and keep only the behaviour it needs"),
+    "unrecorded-pending-export": ("warning", "CONTRIBUTING.md#code", "An export declared without parameters, whose body throws through NotImplemented_nid_no_patch, is listed in docs/dev/debt/<library>.md, by its file or by name with a path in their library"),
 }
 
 CPP = {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".inl", ".ipp"}
@@ -56,6 +57,7 @@ IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 NID_SOURCES = r"APS5_EXPORT|APS5_VABI|_nid_postfix|ASM_FUNCTION"
 STUB_BODY = re.compile(r"^(?:\(void\)\s*\w+\s*;|static_cast<void>\(\s*\w+\s*\)\s*;)*"
                        r"(?:return\s*\(?\s*(?:-?(?:0x[0-9a-fA-F]+|\d+)[uUlL]*|nullptr|true|false|\w*_OK)?\s*\)?\s*;)?$")
+PENDING_BODY = re.compile(r"NotImplemented_nid_no_patch\([^;]*\);(?:return[^;]*;)?$")
 SYSTEM_DEPENDENCY = re.compile(r"\b(find_package\s*\((?!\s*(Python3|Threads|Git)\b)|pkg_check_modules\b|pkg_search_module\b|find_(library|path|program|file)\b)", re.I)
 TITLE = re.compile(r"\b(PPSA|CUSA)\d{5}\b")
 EXTENSION = re.compile(r"__attribute__|__declspec|#\s*pragma\s+(?!once\b)")
@@ -165,12 +167,15 @@ class Check:
 
     def code(self):
         debt = [entry for path in sorted(self.tree) if is_debt(path) for entry in silent_stub_debt(self.show(path), path)]
+        pending = {path[len(DEBT_DIR):-len(".md")]: pending_export_debt(self.show(path), path)
+                   for path in sorted(self.tree) if is_debt(path) and path.startswith(DEBT_DIR)}
         exports = {}
         unknowns, symbols = [], []
         for path, lines in self.files(lambda p: p.suffix in CPP):
             core = path.startswith("core/") and "tests" not in PurePosixPath(path).parts
             source = self.show(path).split("\n")
             masked = cpp_text("\n".join(source), preserve_comments=True).split("\n")
+            plain = cpp_text("\n".join(source)).split("\n")
             for number, text in lines:
                 bare = masked[number - 1]
                 if ("//" in bare or "/*" in bare) and not ALLOWED_COMMENT.match(bare):
@@ -191,6 +196,9 @@ class Check:
                     exports[match.group(1)] = (path, number)
                     if match.group(1).startswith("sce") and STUB_BODY.match(body) and not listed(debt, match.group(1), path):
                         self.report("silent-stub", path, number, match.group(1))
+                    if (PENDING_BODY.search(body) and export_parameters(plain, number, match.end() - 1) in ("", "void")
+                            and not listed(pending.get(library(path), []), match.group(1), path)):
+                        self.report("unrecorded-pending-export", path, number, match.group(1))
         self.duplicates(exports)
         self.unknown_nids(unknowns, symbols)
         for path, lines in self.files(lambda p: p.suffix in (".py", ".cmake") or p.name == "CMakeLists.txt"):
@@ -453,6 +461,13 @@ def silent_stub_debt(text, path=DEBT):
     return debt
 
 
+def pending_export_debt(text, path=DEBT):
+    debt = []
+    for line in text.splitlines():
+        debt.append((line, links(path, line)))
+    return debt
+
+
 def block(lines, start):
     _, indent, _, _ = lines[start]
     end = start + 1
@@ -508,6 +523,19 @@ def listed(debt, name, path):
 
 def library(path):
     return PurePosixPath(path).parts[3]
+
+
+def export_parameters(lines, number, offset):
+    text = "\n".join(lines[number - 1:number + 12])
+    depth = 0
+    for index in range(offset, len(text)):
+        if text[index] == "(":
+            depth += 1
+        elif text[index] == ")":
+            depth -= 1
+            if depth == 0:
+                return text[offset + 1:index].strip()
+    return None
 
 
 def symbol_nid(name):
