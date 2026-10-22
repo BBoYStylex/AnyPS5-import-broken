@@ -93,6 +93,11 @@ def main(argv=None):
     with tempfile.TemporaryDirectory() as temporary:
         work = Path(args.work) if args.work else Path(temporary)
         source, output = work / "source", work / "output"
+        dump_path = dump.resolve()
+        for generated in (source, output):
+            generated_path = generated.resolve()
+            if dump_path.is_relative_to(generated_path) or generated_path.is_relative_to(dump_path):
+                parser.error(f"{generated}: work directory overlaps the input dump")
         for generated in (source, output):
             shutil.rmtree(generated, ignore_errors=True)
         output.mkdir(parents=True, exist_ok=True)

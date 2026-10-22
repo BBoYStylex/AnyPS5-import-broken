@@ -120,6 +120,40 @@ class AuditDumpTests(unittest.TestCase):
         self.assertEqual(audit.call_args.args[0][:2], [str(work / "output" / "app.registry.json"), "--libs"])
         self.assertFalse((work / "source" / "sce_module" / "gone.prx").exists())
 
+    def assert_overlap_rejected(self, dump, work):
+        marker = dump / "original-marker"
+        marker.write_bytes(b"preserve original")
+        original = (dump / "eboot.bin").read_bytes()
+        with mock.patch.object(audit_dump, "prepare", return_value=([], [])) as prepare, mock.patch.object(audit_dump, "convert", return_value=subprocess.CompletedProcess([], 0)) as convert, mock.patch.object(audit_dump.import_audit, "main", return_value=0):
+            with self.assertRaises(SystemExit) as error:
+                self.run_main(dump, "--relinker", self.relinker, "--libs", "libs", "--work", work)
+        self.assertEqual(error.exception.code, 2)
+        prepare.assert_not_called()
+        convert.assert_not_called()
+        self.assertEqual((dump / "eboot.bin").read_bytes(), original)
+        self.assertEqual(marker.read_bytes(), b"preserve original")
+
+    def test_overlapping_work_paths_are_rejected_before_input_is_removed(self):
+        for name, relative in (("source", "source"), ("output", "output"), ("nested-source", "source/nested"), ("nested-output", "output/nested"), ("work-is-dump", "."), ("work-in-dump", "ancestor")):
+            with self.subTest(name=name):
+                root = self.root / name
+                dump = root / relative
+                dump.mkdir(parents=True)
+                (dump / "eboot.bin").write_bytes(SELF)
+                work = dump / "work" if name == "work-in-dump" else root
+                self.assert_overlap_rejected(dump, work)
+
+    def test_symlinked_work_paths_are_checked_against_the_resolved_dump(self):
+        for generated in ("source", "output"):
+            with self.subTest(generated=generated):
+                work = self.root / ("linked-" + generated)
+                work.mkdir()
+                try:
+                    os.symlink(self.dump, work / generated, target_is_directory=True)
+                except OSError:
+                    self.skipTest("symbolic links unavailable")
+                self.assert_overlap_rejected(self.dump, work)
+
     def test_a_broken_module_link_fails_instead_of_being_skipped(self):
         (self.dump / "sce_module").mkdir()
         try:
