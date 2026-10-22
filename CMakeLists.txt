@@ -338,6 +338,8 @@ if(NOT ANYPS5_USE_SYSTEM_DEPS)
     endif()
 endif()
 
+include(cmake/Jxr.cmake)
+
 set(LIBUSB_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(LIBUSB_INSTALL_TARGETS OFF CACHE BOOL "" FORCE)
 set(LIBUSB_BUILD_TESTING OFF CACHE BOOL "" FORCE)
@@ -347,7 +349,6 @@ add_subdirectory(3rdparty/libusb-cmake EXCLUDE_FROM_ALL)
 set_target_properties(usb-1.0 PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 include(cmake/ZArchive.cmake)
-include(cmake/Jxr.cmake)
 if(WIN32)
     set(MI_BUILD_SHARED ON CACHE BOOL "" FORCE)
     set(MI_BUILD_STATIC OFF CACHE BOOL "" FORCE)
