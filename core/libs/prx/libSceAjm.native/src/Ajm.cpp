@@ -2142,7 +2142,7 @@ void* APS5_VABI sceAjmBatchJobRunBufferRa(void* position, uint32_t instance, uin
 
 int APS5_VABI sceAjmBatchStartBuffer(uint32_t context, const uint8_t* batch, uint32_t batch_size, int priority, AjmBatchError* error, uint32_t* batch_id) {
     if (context == 0 || context >= g_nextContext.load(std::memory_order_relaxed)) return SCE_AJM_ERROR_INVALID_CONTEXT;
-    if (!batch_id || (!batch && batch_size)) return SCE_AJM_ERROR_INVALID_PARAMETER;
+    if (!batch_id || !batch) return SCE_AJM_ERROR_INVALID_PARAMETER;
     AJM_TRACE("[ajm] batch start buffer: context %u, priority %d, %u bytes\n", context, priority, batch_size);
     std::vector<ConsoleJob> jobs;
     ConsoleRefusal refusal;

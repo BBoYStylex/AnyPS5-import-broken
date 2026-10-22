@@ -1977,6 +1977,21 @@ void TestConsoleBufferEdges(std::uint32_t context) {
     Require(sceAjmInstanceDestroy(context, instance) == 0);
 }
 
+void TestConsoleEmptyBatch(std::uint32_t context) {
+    constexpr int invalidParameter = static_cast<int>(0x80930005);
+    constexpr int invalidBatch = static_cast<int>(0x80930004);
+    std::uint32_t id = 0;
+    AjmBatchError error{};
+    Require(sceAjmBatchStartBuffer(context, nullptr, 0, 0, &error, &id) == invalidParameter);
+    Require(sceAjmBatchStartBuffer(context, nullptr, 16, 0, &error, &id) == invalidParameter);
+    const std::uint64_t words[2] = {0, 0};
+    Require(sceAjmBatchStartBuffer(context, reinterpret_cast<const std::uint8_t*>(words), 0, 0, &error, nullptr) == invalidParameter);
+    error.error_code = -1;
+    Require(sceAjmBatchStartBuffer(context, reinterpret_cast<const std::uint8_t*>(words), 0, 0, &error, &id) == 0);
+    Require(error.error_code == 0 && id != 0 && sceAjmBatchWait(context, id, 0, &error) == 0);
+    Require(sceAjmBatchWait(context, id, 0, &error) == invalidBatch);
+}
+
 void TestConsoleStaleHeaderBits(std::uint32_t context) {
     std::vector<std::uint8_t> stream(1024, 0);
     std::memcpy(stream.data(), AT9_MONO_SILENT_SUPERFRAME, sizeof(AT9_MONO_SILENT_SUPERFRAME));
@@ -2260,6 +2275,7 @@ int main() {
     TestConsoleBufferJobs(context);
     TestConsoleHandWrittenJobs(context);
     TestConsoleBufferEdges(context);
+    TestConsoleEmptyBatch(context);
     TestConsoleStaleHeaderBits(context);
     Require(sceAjmFinalize(context) == 0);
 }
