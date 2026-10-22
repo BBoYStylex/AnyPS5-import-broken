@@ -25,7 +25,10 @@ static unsigned allocationAttempts = 0;
 void* operator new(std::size_t size) {
     if (allocationBudget >= 0) {
         ++allocationAttempts;
-        if (allocationBudget == 0) throw std::bad_alloc();
+        if (allocationBudget == 0) {
+            allocationBudget = -1;
+            throw std::bad_alloc();
+        }
         --allocationBudget;
     }
     if (void* memory = std::malloc(size ? size : 1)) return memory;
