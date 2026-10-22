@@ -131,6 +131,10 @@ LIBRARIES = {
         "sceVideoOutUnlockBuffer",
         "sceVideoOutUnregisterBufferAttribute",
     ],
+    "libScePlayerInvitationDialog": [
+        "scePlayerInvitationDialogParamInit",
+        "scePlayerInvitationDialogParamInitialize",
+    ],
 }
 PENDING = re.compile(
     r"^int APS5_VABI (?P<name>\w+)\(void\) \{\n"
