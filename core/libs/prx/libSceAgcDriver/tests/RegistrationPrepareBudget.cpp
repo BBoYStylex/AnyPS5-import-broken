@@ -1,6 +1,7 @@
 #include "prx/libSceAgcDriver/Execution/include/Driver/Shaders/RegistrationPreparationBudget.hpp"
 #include <cstdint>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 
 namespace {
@@ -19,6 +20,9 @@ int main() {
         Require(!RegistrationPreparationAllowed(1024, 1024), "preparation should defer at the budget");
         Require(!RegistrationPreparationAllowed(1025, 1024), "preparation should defer above the budget");
         Require(!RegistrationPreparationAllowed(0, 0), "a zero budget should defer every preparation");
+        const auto unlimited = std::numeric_limits<std::uint64_t>::max();
+        Require(RegistrationPreparationAllowed(unlimited - 1, unlimited), "the maximum budget should allow values below it");
+        Require(!RegistrationPreparationAllowed(unlimited, unlimited), "the maximum budget should defer at its limit");
         std::cout << "registration prepare budget tests passed\n";
         return 0;
     } catch (const std::exception& error) {
