@@ -203,14 +203,15 @@ struct ClearedKqueueNote {
 
 bool PollClearedKqueue(KernelEqueueEvent* e) {
     auto& note = *static_cast<ClearedKqueueNote*>(e->filter.data);
-    const auto pending = e->filter.watched->CountTriggeredEvents();
-    const auto activations = e->filter.watched->Activations();
-    if (activations != note.seen) {
-        note.seen = activations;
-        if (pending != 0) {
-            note.active = true;
-            e->event.data = static_cast<std::intptr_t>(pending);
-        }
+    const auto snapshot = e->filter.watched->SnapshotTriggered();
+    if (snapshot.activations != note.seen) {
+        note.seen = snapshot.activations;
+        note.active = true;
+    }
+    if (snapshot.count == 0) {
+        note.active = false;
+    } else if (note.active) {
+        e->event.data = static_cast<std::intptr_t>(snapshot.count);
     }
     return note.active;
 }
@@ -253,10 +254,10 @@ int AddKqueueKnote(const KernelEqueueRef& queue, const KernelEqueueRef& watched,
     event.filter.watched = watched;
     if ((flags & EV_CLEAR) != 0) {
         auto note = std::make_shared<ClearedKqueueNote>();
-        const auto pending = watched->CountTriggeredEvents();
-        note->seen = watched->Activations();
-        note->active = pending != 0;
-        event.event.data = static_cast<std::intptr_t>(pending);
+        const auto snapshot = watched->SnapshotTriggered();
+        note->seen = snapshot.activations;
+        note->active = snapshot.count != 0;
+        event.event.data = static_cast<std::intptr_t>(snapshot.count);
         event.filter.data = note.get();
         event.filter.owner = std::move(note);
         event.filter.pollFunc = PollClearedKqueue;
@@ -387,6 +388,9 @@ int ModifyKnote(const KernelEqueueRef& queue, KernelEvent& change) {
         }
         if (event.enabled && event.filter.pollFunc == PollEdge) {
             static_cast<EdgeWatch::Watch*>(event.filter.data)->armed = true;
+        }
+        if (event.enabled && event.filter.pollFunc == PollClearedKqueue) {
+            static_cast<ClearedKqueueNote*>(event.filter.data)->active = true;
         }
         if (change.filter == EVFILT_USER) {
             TouchUserKnote(event, change);

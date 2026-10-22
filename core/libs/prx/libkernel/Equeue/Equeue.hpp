@@ -90,7 +90,11 @@ public:
     int GetTriggeredEvents(KernelEvent* ev, int num);
     bool HasTriggeredEvents();
     std::size_t CountTriggeredEvents();
-    std::uint64_t Activations();
+    struct TriggeredSnapshot {
+        std::size_t count = 0;
+        std::uint64_t activations = 0;
+    };
+    TriggeredSnapshot SnapshotTriggered();
     std::vector<std::shared_ptr<KernelEqueuePrivate>> WatchedQueues();
     int WaitForEvents(KernelEvent* ev, int num, uint32_t micros);
     int WaitForEventsUntil(KernelEvent* ev, int num, std::uint64_t deadlineNanos);

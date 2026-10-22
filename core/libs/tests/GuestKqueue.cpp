@@ -525,6 +525,62 @@ static void ClearedKqueue() {
     Require(close_nid_postfix(outer) == 0 && close_nid_postfix(inner) == 0);
 }
 
+static void ClearedKqueueRechecksTheWatchedCount() {
+    const int inner = kqueue_nid_postfix();
+    const int outer = kqueue_nid_postfix();
+    Require(inner >= 0 && outer >= 0);
+    const auto watched = static_cast<std::uintptr_t>(inner);
+    KernelEvent events[4]{};
+    Require(Apply(inner, Change(7, EvfiltUser, EvAdd | EvClear)) == 0);
+    Require(Apply(inner, Change(8, EvfiltUser, EvAdd | EvClear)) == 0);
+    Require(Apply(outer, Change(1, EvfiltUser, EvAdd | EvClear)) == 0);
+    Require(Apply(outer, Change(watched, EvfiltRead, EvAdd | EvClear)) == 0);
+
+    Require(Apply(inner, Change(7, EvfiltUser, 0, NoteTrigger)) == 0);
+    Require(Apply(outer, Change(1, EvfiltUser, 0, NoteTrigger)) == 0);
+    Require(Poll(outer, events, 1) == 1 && events[0].ident == 1 && events[0].filter == EvfiltUser);
+    Require(Poll(inner, events, 4) == 1 && events[0].ident == 7);
+    Require(Poll(outer, events, 4) == 0);
+
+    Require(Apply(inner, Change(7, EvfiltUser, 0, NoteTrigger)) == 0);
+    Require(Apply(inner, Change(8, EvfiltUser, 0, NoteTrigger)) == 0);
+    Require(Apply(outer, Change(1, EvfiltUser, 0, NoteTrigger)) == 0);
+    Require(Poll(outer, events, 1) == 1 && events[0].ident == 1);
+    Require(Poll(inner, events, 1) == 1);
+    Require(Poll(outer, events, 4) == 1 && events[0].ident == watched && events[0].data == 1);
+    Require(Poll(outer, events, 4) == 0);
+
+    Require(Apply(outer, Change(watched, EvfiltRead, EvAdd | EvClear)) == 0);
+    Require(Poll(outer, events, 4) == 1 && events[0].ident == watched && events[0].data == 1);
+    Require(Poll(outer, events, 4) == 0);
+    Require(Apply(outer, Change(watched, EvfiltRead, EvDisable)) == 0);
+    Require(Apply(outer, Change(watched, EvfiltRead, EvEnable)) == 0);
+    Require(Poll(outer, events, 4) == 1 && events[0].ident == watched && events[0].data == 1);
+    Require(Poll(inner, events, 4) == 1);
+    Require(Apply(outer, Change(watched, EvfiltRead, EvAdd | EvClear)) == 0);
+    Require(Poll(outer, events, 4) == 0);
+    Require(close_nid_postfix(outer) == 0 && close_nid_postfix(inner) == 0);
+}
+
+static void ClearedKqueueKeepsConcurrentActivations() {
+    const int inner = kqueue_nid_postfix();
+    const int outer = kqueue_nid_postfix();
+    Require(inner >= 0 && outer >= 0);
+    const auto watched = static_cast<std::uintptr_t>(inner);
+    KernelEvent events[4]{};
+    Require(Apply(inner, Change(7, EvfiltUser, EvAdd | EvClear)) == 0);
+    for (std::uintptr_t filler = 100; filler < 20100; ++filler) Require(Apply(inner, Change(filler, EvfiltUser, EvAdd)) == 0);
+    Require(Apply(outer, Change(watched, EvfiltRead, EvAdd | EvClear)) == 0);
+    for (int round = 0; round < 5000; ++round) {
+        std::thread trigger([inner] { Require(Apply(inner, Change(7, EvfiltUser, 0, NoteTrigger)) == 0); });
+        const int reported = Wait(outer, events, 4);
+        trigger.join();
+        Require(reported == 1 && events[0].ident == watched);
+        Require(Poll(inner, events, 4) == 1);
+    }
+    Require(close_nid_postfix(outer) == 0 && close_nid_postfix(inner) == 0);
+}
+
 static void LowWaterMarks() {
     const int kq = kqueue_nid_postfix();
     int pair[2];
@@ -1161,7 +1217,11 @@ static void StandardInput() {
     Require(close_nid_postfix(kq) == 0);
 }
 
-int main() {
+int main(int argc, char** argv) {
+    if (argc == 2 && std::string(argv[1]) == "cleared-race") {
+        ClearedKqueueKeepsConcurrentActivations();
+        return 0;
+    }
     StandardInput();
     CreateAndClose();
     Timers();
@@ -1183,6 +1243,7 @@ int main() {
     Errors();
     LowWaterMarks();
     ClearedKqueue();
+    ClearedKqueueRechecksTheWatchedCount();
     FileWatch();
 #ifndef _WIN32
     RenameAndDeleteWatchedFile();

@@ -294,9 +294,15 @@ std::size_t KernelEqueuePrivate::CountTriggeredEvents() {
     return static_cast<std::size_t>(std::count_if(m_events.begin(), m_events.end(), [](const KernelEqueueEvent& event) { return event.enabled && event.triggered; }));
 }
 
-std::uint64_t KernelEqueuePrivate::Activations() {
+KernelEqueuePrivate::TriggeredSnapshot KernelEqueuePrivate::SnapshotTriggered() {
     std::unique_lock lock(m_mutex);
-    return m_activations;
+    if (m_closed) {
+        return {0, m_activations};
+    }
+    TriggerExpiredTimers(MonotonicNs());
+    PollEvents();
+    const auto count = static_cast<std::size_t>(std::count_if(m_events.begin(), m_events.end(), [](const KernelEqueueEvent& event) { return event.enabled && event.triggered; }));
+    return {count, m_activations};
 }
 
 std::vector<std::shared_ptr<KernelEqueuePrivate>> KernelEqueuePrivate::WatchedQueues() {
