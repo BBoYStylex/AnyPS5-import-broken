@@ -35,7 +35,7 @@ static_assert(sizeof(VkStencilOpState) == 28, "VkStencilOpState changed: update 
 static_assert(sizeof(VkVertexInputBindingDescription) == 12, "VkVertexInputBindingDescription changed: update the recipe codec");
 static_assert(sizeof(VkVertexInputAttributeDescription) == 16, "VkVertexInputAttributeDescription changed: update the recipe codec");
 #if defined(__linux__) && defined(__x86_64__) && defined(__GLIBCXX__)
-static_assert(sizeof(State) == 784, "State changed: update CanonicalPipelineState and the recipe codec");
+static_assert(sizeof(State) == 808, "State changed: update CanonicalPipelineState and the recipe codec");
 static_assert(sizeof(ShaderStages) == 112, "ShaderStages changed: update the recipe codec");
 static_assert(sizeof(ShaderRecompiler::MeshConfiguration) == 40, "MeshConfiguration changed: update the recipe codec");
 static_assert(sizeof(ShaderRecompiler::TessellationConfiguration) == 40, "TessellationConfiguration changed: update the recipe codec");
@@ -44,7 +44,7 @@ static_assert(sizeof(ShaderRecompiler::TessellationConfiguration) == 40, "Tessel
 constexpr std::uint32_t FileMagic = 0x4c4a5041u;
 // Bumped when the recipe codec, CanonicalPipelineState or the store key change in a way the
 // layout guards above do not catch (a field renumbered or reinterpreted at the same size).
-constexpr std::uint32_t FileFormat = 4u;
+constexpr std::uint32_t FileFormat = 7u;
 constexpr std::uint32_t ModuleRecord = 1u;
 constexpr std::uint32_t GraphicsRecord = 2u;
 constexpr std::uint32_t ComputeRecord = 3u;
@@ -208,6 +208,7 @@ void encodeState(Writer& writer, const State& state) {
     writer.Bool(state.depthClamp);
     writer.U32(static_cast<std::uint32_t>(state.conservativeRasterization));
     writer.U32(state.cullMode);
+    writer.U32(static_cast<std::uint32_t>(state.polygonMode));
     writer.U32(static_cast<std::uint32_t>(state.frontFace));
     writer.U32(static_cast<std::uint32_t>(state.provokingVertexMode));
     writer.U32(state.samples);
@@ -216,6 +217,7 @@ void encodeState(Writer& writer, const State& state) {
     writer.Bool(state.sampleLocationGrid);
     writer.Bool(state.perSampleShading);
     writer.Bool(state.mergedCoverage);
+    writer.Bool(state.truncatedCoverage);
     for (const auto mask : state.quadSampleMask) writer.Raw(mask);
     writer.U32(state.depthRemap.mode);
 }
@@ -268,6 +270,7 @@ void decodeState(Reader& reader, State& state) {
     state.depthClamp = reader.Bool();
     state.conservativeRasterization = static_cast<VkConservativeRasterizationModeEXT>(reader.U32());
     state.cullMode = reader.U32();
+    state.polygonMode = static_cast<VkPolygonMode>(reader.U32());
     state.frontFace = static_cast<VkFrontFace>(reader.U32());
     state.provokingVertexMode = static_cast<VkProvokingVertexModeEXT>(reader.U32());
     state.samples = reader.U32();
@@ -276,6 +279,7 @@ void decodeState(Reader& reader, State& state) {
     state.sampleLocationGrid = reader.Bool();
     state.perSampleShading = reader.Bool();
     state.mergedCoverage = reader.Bool();
+    state.truncatedCoverage = reader.Bool();
     for (auto& mask : state.quadSampleMask) mask = reader.Raw<std::uint16_t>();
     state.depthRemap.mode = reader.U32();
 }
@@ -1040,6 +1044,7 @@ State CanonicalPipelineState(const State& state) {
     canonical.depthClamp = state.depthClamp;
     canonical.conservativeRasterization = state.conservativeRasterization;
     canonical.cullMode = state.cullMode;
+    canonical.polygonMode = state.polygonMode;
     canonical.frontFace = state.frontFace;
     canonical.provokingVertexMode = state.provokingVertexMode;
     canonical.samples = state.samples;
@@ -1048,6 +1053,7 @@ State CanonicalPipelineState(const State& state) {
     canonical.sampleLocationGrid = state.sampleLocationGrid;
     canonical.perSampleShading = state.perSampleShading;
     canonical.mergedCoverage = state.mergedCoverage;
+    canonical.truncatedCoverage = state.truncatedCoverage;
     canonical.quadSampleMask = state.quadSampleMask;
     canonical.depthRemap.mode = state.depthRemap.mode;
     return canonical;
