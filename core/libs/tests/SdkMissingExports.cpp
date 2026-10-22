@@ -151,7 +151,7 @@ void CheckLibrary(const std::filesystem::path& directory, const std::filesystem:
         Require(std::find(exported.begin(), exported.end(), nid) != exported.end(), library + " does not export the NID of " + name);
         Require(std::find(exported.begin(), exported.end(), name) == exported.end(), library + " still exports " + name + " under its plain name");
         const int status = RunChild(self, directory, library, index);
-        Require(status != 0 && status != 4, library + " exports " + name + " as something other than a pending export");
+        Require(status != 0 && status != 4, library + " exports " + name + " as something other than a pending export (the child ended with " + std::to_string(status) + ")");
         ++refused;
     }
     Require(refused == names.size(), library + " did not refuse every export");
