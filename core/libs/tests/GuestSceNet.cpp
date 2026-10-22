@@ -140,6 +140,8 @@ int APS5_VABI sceNetGetRandom(std::uint32_t*);
 int APS5_VABI sceNetSocketInternal(const char*, int, int, int);
 int APS5_VABI sceNetGetsockoptEx(int, int, int, void*, std::uint32_t*);
 int APS5_VABI sceNetSetsockoptEx(int, int, int, const void*, std::uint32_t);
+int APS5_VABI sceNetSysctl(const int*, std::uint32_t, void*, std::size_t*, const void*, std::size_t);
+int APS5_VABI sysctl_nid_postfix(const int*, std::uint32_t, void*, std::size_t*, const void*, std::size_t);
 void* APS5_VABI sceNetMemoryAllocate(std::int32_t, int);
 void APS5_VABI sceNetMemoryFree(void*);
 }
@@ -338,6 +340,25 @@ static void CheckExForwards() {
         const int internalError = *sceNetErrnoLoc();
         Require(internalResult < 0 && internalResult == sceNetSocket(nullptr, family, type, 0) && internalError == *sceNetErrnoLoc());
     }
+}
+
+static void CheckSysctl() {
+    const std::array<int, 2> pageSize{6, 7};
+    int kernelValue = 0;
+    std::size_t kernelSize = sizeof(kernelValue);
+    Require(sysctl_nid_postfix(pageSize.data(), 2, &kernelValue, &kernelSize, nullptr, 0) == 0);
+    int netValue = 0;
+    std::size_t netSize = sizeof(netValue);
+    Require(sceNetSysctl(pageSize.data(), 2, &netValue, &netSize, nullptr, 0) == 0);
+    Require(netValue == kernelValue && netSize == kernelSize && netValue > 0);
+    std::size_t probe = 0;
+    Require(sceNetSysctl(pageSize.data(), 2, nullptr, &probe, nullptr, 0) == 0 && probe == sizeof(int));
+    Require(Failed(sceNetSysctl(pageSize.data(), 1, &netValue, &netSize, nullptr, 0), 22));
+    Require(Failed(sceNetSysctl(nullptr, 2, &netValue, &netSize, nullptr, 0), 14));
+    Require(Failed(sceNetSysctl(pageSize.data(), 2, &netValue, &netSize, &netValue, sizeof(netValue)), 1));
+    std::uint8_t truncated = 0;
+    std::size_t truncatedSize = sizeof(truncated);
+    Require(Failed(sceNetSysctl(pageSize.data(), 2, &truncated, &truncatedSize, nullptr, 0), 12) && truncatedSize == sizeof(truncated));
 }
 
 static void CheckRandom() {
@@ -1519,6 +1540,7 @@ int main() {
     CheckPoolStats();
     CheckIfName();
     CheckExForwards();
+    CheckSysctl();
     CheckRandom();
     CheckNetMemory();
     CheckNetstat();

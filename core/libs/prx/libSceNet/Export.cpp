@@ -484,6 +484,7 @@ int* errno_slot() {
 }
 
 extern "C" int* APS5_VABI __error_nid_postfix();
+extern "C" int APS5_VABI sysctl_nid_postfix(const int* name, std::uint32_t nameLength, void* oldValue, std::size_t* oldLength, const void* newValue, std::size_t newLength);
 extern "C" int APS5_VABI __inet_pton_nid_postfix(int family, const char* text, void* destination);
 extern "C" const char* APS5_VABI __inet_ntop_nid_postfix(int family, const void* source, char* destination, std::uint32_t capacity);
 extern "C" std::size_t NetCtlHostDnsServers_nid_no_patch(std::uint32_t* servers, std::size_t capacity);
@@ -2516,8 +2517,8 @@ int APS5_VABI sceNetSyncWait(NetSyncObject* sync, std::uint32_t* timeout) {
 }
 
 int APS5_VABI sceNetSysctl(const int* name, std::uint32_t nameLength, void* oldValue, std::size_t* oldSize, const void* newValue, std::size_t newSize) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    if (sysctl_nid_postfix(name, nameLength, oldValue, oldSize, newValue, newSize) == 0) return 0;
+    return fail(*__error_nid_postfix());
 }
 
 int APS5_VABI sceNetThreadCreate(Pthread* thread, const NetThreadParameter* parameter, const char* name) {
