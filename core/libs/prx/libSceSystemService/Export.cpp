@@ -62,6 +62,12 @@ ConsoleTimeZone HostTimeZone() {
 std::mutex appSuspendBlockMutex;
 int appSuspendBlocks = 0;
 
+int WriteStatus(bool* status, bool value, const char* function) {
+    if (status == nullptr) NotImplemented_nid_no_patch((std::string(function) + " with a null output").c_str());
+    *status = value;
+    return SYSTEM_SERVICE_OK;
+}
+
 constexpr char MainExecutable[] = "/app0/eboot.bin";
 constexpr char ApplicationRoot[] = "/app0/";
 constexpr char MainExecutableVariable[] = "APS5_EBOOT";
@@ -327,6 +333,31 @@ int APS5_VABI sceSystemServiceEnableSuspendNotification() {
 
 int APS5_VABI sceSystemServiceDisableSuspendNotification() {
     return sceLncUtilDisableSuspendNotification();
+}
+
+int APS5_VABI sceShellCoreUtilGetRemotePlayStatus(bool* active) {
+    return WriteStatus(active, false, __func__);
+}
+
+int APS5_VABI sceSystemServiceGetRemoteplayStatus(bool* active) {
+    if (active == nullptr) return SYSTEM_SERVICE_ERROR_PARAMETER;
+    return sceShellCoreUtilGetRemotePlayStatus(active);
+}
+
+int APS5_VABI sceShellCoreUtilGetSharePlayStatus(bool* active) {
+    return WriteStatus(active, false, __func__);
+}
+
+bool APS5_VABI sceShellCoreUtilIsGameLiveStreamingOnAir() {
+    return false;
+}
+
+bool APS5_VABI sceSystemServiceIsGameLiveStreamingOnAir() {
+    return sceShellCoreUtilIsGameLiveStreamingOnAir();
+}
+
+int APS5_VABI sceShellCoreUtilGetGameLiveStreamingStatus(bool* active) {
+    return WriteStatus(active, sceShellCoreUtilIsGameLiveStreamingOnAir(), __func__);
 }
 
 int APS5_VABI sceSystemServiceHideSplashScreen(void) {
