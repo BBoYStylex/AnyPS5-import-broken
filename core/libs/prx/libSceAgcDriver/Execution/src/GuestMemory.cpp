@@ -2342,8 +2342,15 @@ std::uint32_t GpuLockThreadTag() {
 }
 
 GpuMutexType& GpuMutex() {
+#ifdef __APPLE__
+    // Driver::WaitIdle runs from the driver's destructor at exit, after this static is destroyed; Darwin fails to
+    // lock a destroyed mutex, so keep it alive.
+    static auto* mutex = new GpuMutexType;
+    return *mutex;
+#else
     static GpuMutexType mutex;
     return mutex;
+#endif
 }
 
 void TagGpuLockThread(std::uint32_t queue) {
