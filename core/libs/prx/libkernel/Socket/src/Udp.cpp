@@ -556,13 +556,20 @@ constexpr short GuestPollWritable = 0x4;
 constexpr short GuestPollVnodeReady = GuestPollReadable | GuestPollWritable;
 constexpr short GuestPollHangUp = 0x10;
 constexpr short GuestPollError = 0x8;
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__APPLE__)
 short ClosedStreamEvents(int descriptor, short revents, short requested) {
     if ((revents & (POLLHUP | POLLERR)) != POLLHUP) return revents;
     const auto socket = Find(descriptor);
     if (!socket || socket->type != 1) return revents;
     revents = static_cast<short>(revents | (requested & POLLRDNORM));
     std::lock_guard lock(socket->modeMutex);
+#ifdef __APPLE__
+    // XNU reports POLLHUP once the peer shuts its write side and then drops POLLOUT, though this side can still send.
+    if (!socket->sendShut && (requested & POLLOUT)) {
+        pollfd writable{socket->value, POLLOUT, 0};
+        if (::poll(&writable, 1, 0) == 1 && (writable.revents & POLLOUT)) revents = static_cast<short>(revents | POLLOUT);
+    }
+#endif
     return socket->sendShut ? revents : static_cast<short>(revents & ~POLLHUP);
 }
 #endif
@@ -1781,7 +1788,7 @@ int APS5_VABI poll_nid_postfix(GuestPollDescriptor* descriptors, std::uint32_t c
     }
     const auto collect = [&](std::size_t i, bool pipe) {
         auto& entry = descriptors[owners[i]];
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__APPLE__)
         if (!pipe) native[i].revents = ClosedStreamEvents(entry.descriptor, native[i].revents, native[i].events);
 #endif
         for (const auto& flag : RequestFlags)
