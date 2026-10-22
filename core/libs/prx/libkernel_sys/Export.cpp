@@ -263,10 +263,10 @@ int APS5_VABI setsid_nid_postfix(void) {
     return static_cast<int>(Fail(GuestEperm));
 }
 
-int APS5_VABI sigqueue_nid_disambig1_nid_postfix(int pid, int signal, void* value);
+int APS5_VABI GuestSigqueue_nid_no_patch(int pid, int signal);
 
-int APS5_VABI sigqueue_nid_postfix(int pid, int signal, void* value) {
-    return sigqueue_nid_disambig1_nid_postfix(pid, signal, value);
+int APS5_VABI sigqueue_nid_postfix(int pid, int signal, void*) {
+    return GuestSigqueue_nid_no_patch(pid, signal);
 }
 
 std::uint16_t APS5_VABI umask_nid_postfix(std::uint16_t mask) {
