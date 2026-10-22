@@ -84,39 +84,4 @@ int APS5_VABI sceAppInstUtilGetPrimaryAppSlot(const char* titleId, void* slot) {
     return 0;
 }
 
-int APS5_VABI sceAppInstUtilAppConvertAppDiscToDownload() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceAppInstUtilAppGetCustomThemeInfo() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceAppInstUtilAppGetInstallAddcontFromDiscStatus() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceAppInstUtilAppInstallCloudGame() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceAppInstUtilAppInstallMediaPlayer() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceAppInstUtilAppInstallRequestAddcontFromDisc() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceAppInstUtilAppSetSavedataUploadStatus() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
 }
