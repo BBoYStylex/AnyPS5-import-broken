@@ -162,7 +162,7 @@ inline void AppendUtf8(std::string& utf8, char32_t code) {
     }
 }
 
-inline std::string HexFloat(const std::string& spec, char conversion, double value) {
+inline std::string HexFloat(const std::string& spec, char conversion, double value, std::size_t maximumLength = INT_MAX) {
     bool left = false, plus = false, space = false, alternate = false, zero = false;
     std::size_t index = 1;
     for (; index < spec.size() && std::strchr("-+ #0", spec[index]); ++index) {
@@ -228,7 +228,7 @@ inline std::string HexFloat(const std::string& spec, char conversion, double val
     const auto fractionalDigits = static_cast<std::size_t>(precision > 13 ? precision : digits);
     const bool point = fractionalDigits != 0 || alternate;
     const std::size_t length = prefix.size() + 1 + point + fractionalDigits + suffix.size();
-    if (length > static_cast<std::size_t>(INT_MAX))
+    if (length > maximumLength || width > maximumLength)
         throw std::overflow_error("Formatted output exceeds INT_MAX");
     std::string body(1, hex[lead]);
     if (point) body += '.';
@@ -439,7 +439,7 @@ inline int FormatWindows(char* buffer, size_t size, const char* format, const vo
                 if (std::isnan(value)) {
                     output.Value(NanSpec(spec), nan);
                 } else if ((conversion == 'a' || conversion == 'A') && std::isfinite(value)) {
-                    const std::string text = HexFloat(spec, conversion, value);
+                    const std::string text = HexFloat(spec, conversion, value, static_cast<std::size_t>(INT_MAX - output.Count()));
                     output.Append(text.data(), text.size());
                 } else {
                     output.Value(spec + conversion, value);
