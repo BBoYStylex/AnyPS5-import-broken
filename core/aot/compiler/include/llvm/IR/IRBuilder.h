@@ -138,6 +138,13 @@ public:
     Value* CreateFSub(Value* lhs, Value* rhs) { return makeBinaryOp(lhs, rhs); }
     Value* CreateFMul(Value* lhs, Value* rhs) { return makeBinaryOp(lhs, rhs); }
     Value* CreateFDiv(Value* lhs, Value* rhs) { return makeBinaryOp(lhs, rhs); }
+    Value* CreateFSqrt(Value* val) {
+        auto* inst = new Instruction(val ? val->getType() : getVectorTy());
+        if (currentBlock) currentBlock->addInstruction(inst);
+        return inst;
+    }
+    Value* CreateFMin(Value* lhs, Value* rhs) { return makeBinaryOp(lhs, rhs); }
+    Value* CreateFMax(Value* lhs, Value* rhs) { return makeBinaryOp(lhs, rhs); }
     Value* CreateICmpEQ(Value* lhs, Value* rhs) { return makeCmpOp(lhs, rhs); }
     Value* CreateICmpNE(Value* lhs, Value* rhs) { return makeCmpOp(lhs, rhs); }
     Value* CreateICmpULT(Value* lhs, Value* rhs) { return makeCmpOp(lhs, rhs); }
@@ -176,6 +183,12 @@ public:
     }
 
     Value* CreateCTLZ(Value* val) {
+        auto* inst = new Instruction(val ? val->getType() : getInt64Ty());
+        if (currentBlock) currentBlock->addInstruction(inst);
+        return inst;
+    }
+
+    Value* CreateCtPop(Value* val) {
         auto* inst = new Instruction(val ? val->getType() : getInt64Ty());
         if (currentBlock) currentBlock->addInstruction(inst);
         return inst;
