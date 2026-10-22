@@ -19,7 +19,7 @@
 - [sceVoiceSetMuteFlagAll](../../../core/libs/prx/libSceVoice/Export.cpp) (libSceVoice) - unknown signature
 - [sceVoiceSetBitRate](../../../core/libs/prx/libSceVoice/Export.cpp) (libSceVoice) - unknown signature
 - [sceVoiceUpdatePort](../../../core/libs/prx/libSceVoice/Export.cpp) (libSceVoice) - unknown signature
-- [sceVoiceGetPortAttr](../../../core/libs/prx/libSceVoice/Export.cpp): native initialization, port-range, pointer, attribute-size and port-type validation is implemented. Supported device attributes throw because the host has no device state or voice-activity processing. The former constant-zero voice-activity fallback is removed; failed calls leave output untouched.
+- [sceVoiceGetPortAttr](../../../core/libs/prx/libSceVoice/Export.cpp): native initialization, port-range, pointer, attribute-size and port-type validation is implemented. Input-device voice activity returns zero because no capture backend feeds the port; the other supported device attributes still throw because host device state is unavailable.
 
 - [sceVoiceSetThreadsParams](../../../core/libs/prx/libSceVoice/Export.cpp): the 48-byte mode/priority/affinity layout and initialization, null, started-state and mode validation are recovered. Mode 1 throws because worker scheduling is not implemented; mode 0 is the native no-op. The 32-byte event callback union is recovered, but callback delivery and device-state byte semantics remain unimplemented.
 
