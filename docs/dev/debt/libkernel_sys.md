@@ -10,6 +10,11 @@
 ### Silent stubs
 - [fchmodat](../../../core/libs/prx/libkernel_sys/Export.cpp) (libkernel_sys) - `AT_SYMLINK_NOFOLLOW` on a symbolic link (on Windows and Linux)
 
+### Unknown function info
+
+- [libkernel_sys pending exports](../../../core/libs/prx/libkernel_sys/PendingExports.cpp) (libkernel_sys) - 96 named callable exports are present in the public PS5 payload SDK's [stub table](https://github.com/ps5-payload-dev/sdk/blob/a7685ce8e97ce1f8a4f38253a41d54241c9124f1/sce_stubs/libkernel_sys.c), which marks each of them a function. Their signatures and behavior are unverified; each declaration uses the no-parameter unknown-signature convention and throws through `NotImplemented_nid_no_patch`. 18 of them are declared in this file, 43 in [libkernel's](../../../core/libs/prx/libkernel/PendingExports.cpp) and 35 in [libkernel_web's](../../../core/libs/prx/libkernel_web/PendingExports.cpp), which this library compiles as well, so that no export name is declared in two libraries
+- [errno and _sigintr](../../../core/libs/prx/libkernel_sys/Export.cpp) (libkernel_sys) - the console's libkernel_sys exports both as data and the SDK's [stub table](https://github.com/ps5-payload-dev/sdk/blob/a7685ce8e97ce1f8a4f38253a41d54241c9124f1/sce_stubs/libkernel_sys.c) marks them `@object`, so a throwing function would be the wrong shape; no source establishes their size, type or storage, so neither is declared and a title that imports them cannot resolve them
+
 ### Functional
 
 - [fchdir](../../../core/libs/prx/libkernel_sys/Export.cpp) (libkernel_sys) changes the guest working directory to the descriptor's directory: on Windows through the path recorded when the descriptor was opened, on Linux through the `/proc/self/fd` link target. It returns `EBADF` for a descriptor that is not open and `ENOTDIR` for one that is not a directory. Outside Windows it checks search permission on the directory with `faccessat`, which fails with `EACCES` as FreeBSD `change_dir` does; on Windows that check is not modelled. A directory renamed after it was opened is still reached through the recorded path. Console behaviour is unverified

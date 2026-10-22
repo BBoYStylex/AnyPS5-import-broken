@@ -1,0 +1,6 @@
+# libkernel_web technical debt
+
+### Unknown function info
+
+- [libkernel_web pending exports](../../../core/libs/prx/libkernel_web/PendingExports.cpp) (libkernel_web) - 35 named callable exports are present in the public PS5 payload SDK's [stub table](https://github.com/ps5-payload-dev/sdk/blob/a7685ce8e97ce1f8a4f38253a41d54241c9124f1/sce_stubs/libkernel_web.c), which marks each of them a function. Their signatures and behavior are unverified; each declaration uses the no-parameter unknown-signature convention and throws through `NotImplemented_nid_no_patch`. The other 43 the console's libkernel_web lists are declared by open pull request #9485 under alias names that pin the same NIDs, so declaring them here as well would put two exports with one NID in this library
+- [errno and _sigintr](../../../core/libs/prx/libkernel_web/Export.cpp) (libkernel_web) - the console's libkernel_web exports both as data and the SDK's [stub table](https://github.com/ps5-payload-dev/sdk/blob/a7685ce8e97ce1f8a4f38253a41d54241c9124f1/sce_stubs/libkernel_web.c) marks them `@object`, so a throwing function would be the wrong shape; no source establishes their size, type or storage, so neither is declared and a title that imports them cannot resolve them
