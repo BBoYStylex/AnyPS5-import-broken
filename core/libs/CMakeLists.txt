@@ -309,12 +309,18 @@ if(BUILD_TESTING)
     target_link_libraries(guest_kernel_sys_tests PRIVATE libkernel_sys libkernel libc)
     configure_windows_unwind(guest_kernel_sys_tests)
     add_test(NAME guest_kernel_sys COMMAND guest_kernel_sys_tests)
+    add_test_executable(guest_kernel_sys_thread_defaults_tests tests/GuestKernelSysThreadDefaults.cpp)
+    target_include_directories(guest_kernel_sys_thread_defaults_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(guest_kernel_sys_thread_defaults_tests PRIVATE libkernel_sys libkernel libc)
+    configure_windows_unwind(guest_kernel_sys_thread_defaults_tests)
+    add_test(NAME guest_kernel_sys_thread_defaults COMMAND guest_kernel_sys_thread_defaults_tests)
+    set_tests_properties(guest_kernel_sys_thread_defaults PROPERTIES TIMEOUT 20)
     if(Python3_Interpreter_FOUND)
         add_test(NAME nid_verneed COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/nid/tests/test_verneed.py $<TARGET_FILE:nid_patcher>)
     endif()
     if(WIN32)
-        set_tests_properties(guest_kernel_sys PROPERTIES ENVIRONMENT_MODIFICATION
+        set_tests_properties(guest_kernel_sys guest_kernel_sys_thread_defaults PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libkernel_sys>")
     endif()
     if(APPLE)
@@ -370,6 +376,16 @@ if(BUILD_TESTING)
     if(WIN32)
         set_tests_properties(guest_voice_port_attr PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceVoice>")
+    endif()
+
+    add_test_executable(guest_gnm_neo_retail_tests tests/GuestGnmNeoRetail.cpp)
+    target_include_directories(guest_gnm_neo_retail_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(guest_gnm_neo_retail_tests PRIVATE libSceGnmDriverForNeoMode libc)
+    configure_windows_unwind(guest_gnm_neo_retail_tests)
+    add_test(NAME guest_gnm_neo_retail COMMAND guest_gnm_neo_retail_tests)
+    if(WIN32)
+        set_tests_properties(guest_gnm_neo_retail PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceGnmDriverForNeoMode>")
     endif()
 
     add_test_executable(guest_move_tests tests/GuestMove.cpp)

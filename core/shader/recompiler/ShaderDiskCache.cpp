@@ -1,5 +1,6 @@
 #include "ShaderDiskCache.hpp"
 #include "prx/libc/include/HostThread.hpp"
+#include "RdnaDecoder/RdnaInstructionDecoder.hpp"
 #include "CacheKey.hpp"
 #include "ShaderCachePack.hpp"
 #include "ShaderCacheDirectory.hpp"
@@ -504,6 +505,7 @@ void encodeArtifact(Writer& writer, const CompiledShaderArtifact& result) {
         out.Value(parameter.custom);
         out.Value(parameter.flatP10);
         out.Value(parameter.vertexOrder);
+        out.Value(parameter.flatP20);
     });
     writer.Value(result.barycentricEmulation.active);
     writer.Value(result.barycentricEmulation.smooth);
@@ -562,6 +564,7 @@ void decodeArtifact(Reader& reader, CompiledShaderArtifact& result) {
         in.Value(parameter.custom);
         in.Value(parameter.flatP10);
         in.Value(parameter.vertexOrder);
+        in.Value(parameter.flatP20);
     });
     reader.Value(result.barycentricEmulation.active);
     reader.Value(result.barycentricEmulation.smooth);
@@ -1781,6 +1784,7 @@ void BuildKey(const RecompileRequest& request, std::uint32_t hostSubgroupSize, s
     writer.Value(FileMagic);
     writer.Value(FormatVersion);
     writer.Value(SourceVersion());
+    writer.Value(static_cast<std::uint8_t>(GcnGuestShaders()));
     thread_local std::vector<std::uint64_t>* memoryKeySlot = nullptr;
     auto& memoryKey = ThreadOwned(memoryKeySlot);
     RecompileCacheKey::Build(request, memoryKey);
@@ -1801,6 +1805,7 @@ void BuildPlanKey(const RecompileRequest& request, std::uint32_t hostSubgroupSiz
     writer.Value(FileMagic);
     writer.Value(FormatVersion);
     writer.Value(SourceVersion());
+    writer.Value(static_cast<std::uint8_t>(GcnGuestShaders()));
     writer.Value(PlanEntryKind);
     thread_local std::vector<std::uint64_t>* memoryKeySlot = nullptr;
     auto& memoryKey = ThreadOwned(memoryKeySlot);
