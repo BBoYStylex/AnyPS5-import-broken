@@ -1,6 +1,7 @@
 #ifndef CORE_AOT_GRAPHICS_SHADERINSTRUCTIONDECODER_HPP
 #define CORE_AOT_GRAPHICS_SHADERINSTRUCTIONDECODER_HPP
 
+#include <graphics/ConsoleShaderExtractor.hpp>
 #include <cstdint>
 #include <vector>
 #include <span>
@@ -56,7 +57,8 @@ public:
     [[nodiscard]] std::vector<DecodedShaderInstruction> DecodeBytecode(std::span<const uint8_t> bytecode);
     [[nodiscard]] std::vector<uint32_t> GenerateSpirvFromInstructions(
         const std::vector<DecodedShaderInstruction>& instructions,
-        uint32_t executionModel
+        uint32_t executionModel,
+        std::span<const ResourceBindingInfo> bindings = {}
     );
 };
 

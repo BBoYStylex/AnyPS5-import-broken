@@ -1,4 +1,5 @@
 #include <graphics/ShaderTranspiler.hpp>
+#include <graphics/ShaderInstructionDecoder.hpp>
 #include <cstring>
 
 namespace Aot::Graphics {
@@ -66,66 +67,9 @@ std::optional<TranspiledShaderResult> ShaderTranspiler::Transpile(const Extracte
         }
     }
 
-    uint32_t boundId = 8 + static_cast<uint32_t>(package.ResourceBindings.size() * 2);
-    spirvWords = emitSpirvHeader(boundId);
-
-    spirvWords.push_back((2 << 16) | 17);
-    spirvWords.push_back(1);
-
-    spirvWords.push_back((3 << 16) | 14);
-    spirvWords.push_back(0);
-    spirvWords.push_back(1);
-
-    spirvWords.push_back((6 << 16) | 15);
-    spirvWords.push_back(executionModel);
-    spirvWords.push_back(1);
-    spirvWords.push_back(0x6e69616d);
-    spirvWords.push_back(0x00000000);
-    spirvWords.push_back(0);
-
-    if (stageFlag == VK_SHADER_STAGE_FRAGMENT_BIT) {
-        spirvWords.push_back((3 << 16) | 16);
-        spirvWords.push_back(1);
-        spirvWords.push_back(7);
-    }
-
-    uint32_t varId = 10;
-    for (const auto& binding : package.ResourceBindings) {
-        spirvWords.push_back((4 << 16) | 71);
-        spirvWords.push_back(varId);
-        spirvWords.push_back(33);
-        spirvWords.push_back(binding.Binding);
-
-        spirvWords.push_back((4 << 16) | 71);
-        spirvWords.push_back(varId);
-        spirvWords.push_back(34);
-        spirvWords.push_back(binding.DescriptorSet);
-        ++varId;
-    }
-
-    if (varId >= boundId) {
-        spirvWords[3] = varId + 1;
-    }
-
-    spirvWords.push_back((2 << 16) | 19);
-    spirvWords.push_back(2);
-
-    spirvWords.push_back((3 << 16) | 33);
-    spirvWords.push_back(3);
-    spirvWords.push_back(2);
-
-    spirvWords.push_back((5 << 16) | 54);
-    spirvWords.push_back(2);
-    spirvWords.push_back(1);
-    spirvWords.push_back(0);
-    spirvWords.push_back(3);
-
-    spirvWords.push_back((2 << 16) | 248);
-    spirvWords.push_back(4);
-
-    spirvWords.push_back((1 << 16) | 253);
-
-    spirvWords.push_back((1 << 16) | 56);
+    ShaderInstructionDecoder decoder;
+    std::vector<DecodedShaderInstruction> instructions = decoder.DecodeBytecode(package.RawBytecode);
+    spirvWords = decoder.GenerateSpirvFromInstructions(instructions, executionModel, package.ResourceBindings);
 
     return TranspiledShaderResult{
         .Stage = stageFlag,

@@ -22,25 +22,78 @@ int main() {
     assert(spirv.size() >= 5);
     assert(spirv[0] == 0x07230203);
 
+    bool foundEntryPoint = false;
+    bool foundTypeFloat = false;
+    bool foundTypeVector = false;
+
+    for (size_t i = 5; i < spirv.size(); ) {
+        uint32_t word = spirv[i];
+        uint16_t op = word & 0xFFFF;
+        uint16_t len = word >> 16;
+        if (len == 0) break;
+
+        if (op == 15) {
+            assert(len == 5);
+            foundEntryPoint = true;
+        } else if (op == 22) {
+            assert(len == 3);
+            foundTypeFloat = true;
+        } else if (op == 23) {
+            assert(len == 4);
+            foundTypeVector = true;
+        }
+        i += len;
+    }
+    if (!foundEntryPoint || !foundTypeFloat || !foundTypeVector) {
+        return 1;
+    }
+
     Aot::Graphics::ExtractedShaderPackage pkg{};
     pkg.Stage = Aot::Graphics::ConsoleShaderStage::Vertex;
     pkg.RawBytecode = dummyBytecode;
 
     Aot::Graphics::ShaderTranspiler transpiler;
     auto resultOpt = transpiler.Transpile(pkg);
-    assert(resultOpt.has_value());
-    assert(resultOpt->SpirvBytecode[0] == 0x07230203);
+    if (!resultOpt.has_value() || resultOpt->SpirvBytecode[0] != 0x07230203) {
+        return 2;
+    }
 
     std::vector<uint8_t> multiBytecode = {
         0x02, 0x00, 0x00, 0x00,
         0x00, 0x00, 0x80, 0xBF
     };
     auto multiDecoded = decoder.DecodeBytecode(multiBytecode);
-    assert(multiDecoded.size() == 2);
-    assert(multiDecoded[0].OpClass == Aot::Graphics::ShaderOpcodeClass::VectorAlu);
+    if (multiDecoded.size() != 2 || multiDecoded[0].OpClass != Aot::Graphics::ShaderOpcodeClass::VectorAlu) {
+        return 3;
+    }
 
     auto multiSpirv = decoder.GenerateSpirvFromInstructions(multiDecoded, 0);
-    assert(multiSpirv.size() > 5);
+    if (multiSpirv.size() <= 5) {
+        return 4;
+    }
+
+    Aot::Graphics::ExtractedShaderPackage multiPkg{};
+    multiPkg.Stage = Aot::Graphics::ConsoleShaderStage::Vertex;
+    multiPkg.RawBytecode = multiBytecode;
+    auto multiTranspiled = transpiler.Transpile(multiPkg);
+    if (!multiTranspiled.has_value()) {
+        return 5;
+    }
+
+    bool foundFAdd = false;
+    for (size_t i = 5; i < multiTranspiled->SpirvBytecode.size(); ) {
+        uint32_t word = multiTranspiled->SpirvBytecode[i];
+        uint16_t op = word & 0xFFFF;
+        uint16_t len = word >> 16;
+        if (len == 0) break;
+        if (op == 129) {
+            foundFAdd = true;
+        }
+        i += len;
+    }
+    if (!foundFAdd) {
+        return 6;
+    }
 
     Aot::Graphics::ExtractedShaderPackage bindingPkg{};
     bindingPkg.Stage = Aot::Graphics::ConsoleShaderStage::Fragment;
@@ -54,9 +107,29 @@ int main() {
     });
 
     auto bindingResult = transpiler.Transpile(bindingPkg);
-    assert(bindingResult.has_value());
-    assert(bindingResult->Bindings.size() == 1);
-    assert(bindingResult->SpirvBytecode[0] == 0x07230203);
+    if (!bindingResult.has_value() || bindingResult->Bindings.size() != 1) {
+        return 7;
+    }
+
+    bool foundOpVariable = false;
+    bool foundOpDecorateBinding = false;
+    for (size_t i = 5; i < bindingResult->SpirvBytecode.size(); ) {
+        uint32_t word = bindingResult->SpirvBytecode[i];
+        uint16_t op = word & 0xFFFF;
+        uint16_t len = word >> 16;
+        if (len == 0) break;
+        if (op == 59) {
+            foundOpVariable = true;
+        } else if (op == 71 && len >= 4) {
+            if (bindingResult->SpirvBytecode[i + 2] == 33 && bindingResult->SpirvBytecode[i + 3] == 1) {
+                foundOpDecorateBinding = true;
+            }
+        }
+        i += len;
+    }
+    if (!foundOpDecorateBinding || !foundOpVariable) {
+        return 8;
+    }
 
     Aot::Graphics::GraphicsDriver driver;
     Aot::Graphics::GraphicsProcessingOptions options{};

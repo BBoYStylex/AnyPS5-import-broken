@@ -87,13 +87,14 @@ std::vector<DecodedShaderInstruction> ShaderInstructionDecoder::DecodeBytecode(s
 
 std::vector<uint32_t> ShaderInstructionDecoder::GenerateSpirvFromInstructions(
     const std::vector<DecodedShaderInstruction>& instructions,
-    uint32_t executionModel) {
+    uint32_t executionModel,
+    std::span<const ResourceBindingInfo> bindings) {
     std::vector<uint32_t> spirv;
 
     spirv.push_back(0x07230203);
     spirv.push_back(0x00010300);
     spirv.push_back(0x00000000);
-    spirv.push_back(16);
+    spirv.push_back(32);
     spirv.push_back(0x00000000);
 
     spirv.push_back((2 << 16) | 17);
@@ -103,17 +104,30 @@ std::vector<uint32_t> ShaderInstructionDecoder::GenerateSpirvFromInstructions(
     spirv.push_back(0);
     spirv.push_back(1);
 
-    spirv.push_back((6 << 16) | 15);
+    spirv.push_back((5 << 16) | 15);
     spirv.push_back(executionModel);
     spirv.push_back(1);
     spirv.push_back(0x6e69616d);
     spirv.push_back(0x00000000);
-    spirv.push_back(0);
 
     if (executionModel == 4) {
         spirv.push_back((3 << 16) | 16);
         spirv.push_back(1);
         spirv.push_back(7);
+    }
+
+    uint32_t baseVarId = 11;
+    for (size_t i = 0; i < bindings.size(); ++i) {
+        uint32_t varId = baseVarId + static_cast<uint32_t>(i);
+        spirv.push_back((4 << 16) | 71);
+        spirv.push_back(varId);
+        spirv.push_back(33);
+        spirv.push_back(bindings[i].Binding);
+
+        spirv.push_back((4 << 16) | 71);
+        spirv.push_back(varId);
+        spirv.push_back(34);
+        spirv.push_back(bindings[i].DescriptorSet);
     }
 
     spirv.push_back((2 << 16) | 19);
@@ -123,14 +137,52 @@ std::vector<uint32_t> ShaderInstructionDecoder::GenerateSpirvFromInstructions(
     spirv.push_back(3);
     spirv.push_back(2);
 
-    spirv.push_back((3 << 16) | 21);
+    spirv.push_back((3 << 16) | 22);
     spirv.push_back(4);
     spirv.push_back(32);
 
-    spirv.push_back((4 << 16) | 22);
+    spirv.push_back((4 << 16) | 23);
     spirv.push_back(5);
     spirv.push_back(4);
     spirv.push_back(4);
+
+    spirv.push_back((4 << 16) | 43);
+    spirv.push_back(4);
+    spirv.push_back(6);
+    spirv.push_back(0x00000000);
+
+    spirv.push_back((4 << 16) | 43);
+    spirv.push_back(4);
+    spirv.push_back(7);
+    spirv.push_back(0x3F800000);
+
+    spirv.push_back((7 << 16) | 44);
+    spirv.push_back(5);
+    spirv.push_back(8);
+    spirv.push_back(6);
+    spirv.push_back(6);
+    spirv.push_back(6);
+    spirv.push_back(6);
+
+    if (!bindings.empty()) {
+        spirv.push_back((4 << 16) | 21);
+        spirv.push_back(9);
+        spirv.push_back(32);
+        spirv.push_back(0);
+
+        spirv.push_back((4 << 16) | 32);
+        spirv.push_back(10);
+        spirv.push_back(2);
+        spirv.push_back(9);
+
+        for (size_t i = 0; i < bindings.size(); ++i) {
+            uint32_t varId = baseVarId + static_cast<uint32_t>(i);
+            spirv.push_back((4 << 16) | 59);
+            spirv.push_back(10);
+            spirv.push_back(varId);
+            spirv.push_back(2);
+        }
+    }
 
     spirv.push_back((5 << 16) | 54);
     spirv.push_back(2);
@@ -138,10 +190,11 @@ std::vector<uint32_t> ShaderInstructionDecoder::GenerateSpirvFromInstructions(
     spirv.push_back(0);
     spirv.push_back(3);
 
+    uint32_t labelId = baseVarId + static_cast<uint32_t>(bindings.size());
     spirv.push_back((2 << 16) | 248);
-    spirv.push_back(6);
+    spirv.push_back(labelId);
 
-    uint32_t nextId = 7;
+    uint32_t nextId = labelId + 1;
     for (const auto& instr : instructions) {
         if (instr.IsEndProgram) {
             break;
@@ -151,42 +204,40 @@ std::vector<uint32_t> ShaderInstructionDecoder::GenerateSpirvFromInstructions(
             spirv.push_back((5 << 16) | 129);
             spirv.push_back(4);
             spirv.push_back(nextId++);
-            spirv.push_back(4);
-            spirv.push_back(4);
+            spirv.push_back(6);
+            spirv.push_back(7);
         } else if (instr.TargetSpirvOp == DecodedSpirvOp::FSub) {
             spirv.push_back((5 << 16) | 131);
             spirv.push_back(4);
             spirv.push_back(nextId++);
-            spirv.push_back(4);
-            spirv.push_back(4);
+            spirv.push_back(7);
+            spirv.push_back(6);
         } else if (instr.TargetSpirvOp == DecodedSpirvOp::FMul) {
             spirv.push_back((5 << 16) | 133);
             spirv.push_back(4);
             spirv.push_back(nextId++);
-            spirv.push_back(4);
-            spirv.push_back(4);
+            spirv.push_back(7);
+            spirv.push_back(7);
         } else if (instr.TargetSpirvOp == DecodedSpirvOp::FDiv) {
             spirv.push_back((5 << 16) | 135);
             spirv.push_back(4);
             spirv.push_back(nextId++);
-            spirv.push_back(4);
-            spirv.push_back(4);
+            spirv.push_back(7);
+            spirv.push_back(7);
         } else if (instr.TargetSpirvOp == DecodedSpirvOp::Dot) {
             spirv.push_back((5 << 16) | 148);
             spirv.push_back(4);
             spirv.push_back(nextId++);
-            spirv.push_back(5);
-            spirv.push_back(5);
+            spirv.push_back(8);
+            spirv.push_back(8);
         }
-    }
-
-    if (nextId >= 16) {
-        spirv[3] = nextId + 1;
     }
 
     spirv.push_back((1 << 16) | 253);
 
     spirv.push_back((1 << 16) | 56);
+
+    spirv[3] = nextId;
 
     return spirv;
 }
