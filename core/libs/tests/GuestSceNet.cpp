@@ -144,6 +144,7 @@ int APS5_VABI sceNetSysctl(const int*, std::uint32_t, void*, std::size_t*, const
 int APS5_VABI sysctl_nid_postfix(const int*, std::uint32_t, void*, std::size_t*, const void*, std::size_t);
 const char* APS5_VABI sceNetInetNtopWithScopeId(std::int32_t, const void*, char*, std::uint32_t, std::uint32_t);
 int APS5_VABI sceNetInetPtonWithScopeId(std::int32_t, const char*, void*, std::uint32_t*);
+int APS5_VABI sceNetConfigGetDefaultRoute(std::uint32_t*);
 void* APS5_VABI sceNetMemoryAllocate(std::int32_t, int);
 void APS5_VABI sceNetMemoryFree(void*);
 }
@@ -402,6 +403,31 @@ static void CheckScopeIdText() {
     Require(throws([&] { sceNetInetPtonWithScopeId(28, "fe80::1%lo0", address.data(), &scope); }));
     Require(throws([&] { sceNetInetPtonWithScopeId(2, "127.0.0.1", address.data(), &scope); }));
     Require(throws([&] { sceNetInetNtopWithScopeId(2, address.data(), text.data(), text.size(), 0); }));
+}
+
+static void CheckDefaultRoute() {
+    NetCtlInfo info{};
+    const int result = sceNetCtlGetInfo(16, &info);
+    const char* route = reinterpret_cast<const char*>(info.opaque);
+    std::uint32_t gateway = 0xa5a5a5a5u;
+    const auto throws = [](auto&& call) {
+        try {
+            call();
+        } catch (const std::runtime_error&) {
+            return true;
+        }
+        return false;
+    };
+    Require(throws([] { sceNetConfigGetDefaultRoute(nullptr); }));
+    if (result != 0 || std::strcmp(route, "0.0.0.0") == 0) {
+        Require(result == 0 || result == static_cast<int>(0x80412108));
+        Require(throws([&] { sceNetConfigGetDefaultRoute(&gateway); }) && gateway == 0xa5a5a5a5u);
+        return;
+    }
+    Require(sceNetConfigGetDefaultRoute(&gateway) == 0);
+    std::array<char, 16> text{};
+    Require(sceNetInetNtop(2, &gateway, text.data(), text.size()) == text.data());
+    Require(std::strcmp(text.data(), route) == 0);
 }
 
 static void CheckRandom() {
@@ -2010,6 +2036,7 @@ int main() {
     Require(sceNetCtlGetState(&state) == 0);
     Require(state == 0 || state == 3);
     Require(sceNetCtlGetIfStat(nullptr) == static_cast<int>(0x80412107));
+    CheckDefaultRoute();
     {
         const char* counterPath = "guest_sce_net_byte_counter.txt";
         std::FILE* counter = std::fopen(counterPath, "w");

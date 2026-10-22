@@ -489,6 +489,7 @@ extern "C" int APS5_VABI sysctl_nid_postfix(const int* name, std::uint32_t nameL
 extern "C" int APS5_VABI __inet_pton_nid_postfix(int family, const char* text, void* destination);
 extern "C" const char* APS5_VABI __inet_ntop_nid_postfix(int family, const void* source, char* destination, std::uint32_t capacity);
 extern "C" std::size_t NetCtlHostDnsServers_nid_no_patch(std::uint32_t* servers, std::size_t capacity);
+extern "C" bool NetCtlHostIpv4Gateway_nid_no_patch(std::uint32_t* gateway);
 
 void set_errno(int err) {
     *errno_slot() = err;
@@ -2768,7 +2769,10 @@ int APS5_VABI sceNetConfigDelRoute(const std::uint32_t* destination, const std::
 }
 
 int APS5_VABI sceNetConfigGetDefaultRoute(std::uint32_t* gateway) {
-    NotImplemented_nid_no_patch(__func__);
+    if (!gateway) throw std::runtime_error("sceNetConfigGetDefaultRoute: a null gateway is not supported");
+    std::uint32_t found = 0;
+    if (!NetCtlHostIpv4Gateway_nid_no_patch(&found)) throw std::runtime_error("sceNetConfigGetDefaultRoute: the answer without an IPv4 default route is not implemented");
+    *gateway = found;
     return 0;
 }
 
