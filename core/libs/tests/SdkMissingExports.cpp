@@ -150,8 +150,13 @@ void CheckLibrary(const std::filesystem::path& directory, const std::filesystem:
         const auto nid = Nid::ComputeNid(name, "");
         Require(std::find(exported.begin(), exported.end(), nid) != exported.end(), library + " does not export the NID of " + name);
         Require(std::find(exported.begin(), exported.end(), name) == exported.end(), library + " still exports " + name + " under its plain name");
+        const auto marker = std::filesystem::temp_directory_path() / "sdk-export-reached.txt";
+        std::filesystem::remove(marker);
         const int status = RunChild(self, directory, library, index);
-        Require(status != 0, library + " exports " + name + " as something other than a pending export");
+        std::string reached;
+        { std::ifstream file(marker); std::getline(file, reached); }
+        std::filesystem::remove(marker);
+        Require(status != 0 && reached == "reached", library + " exports " + name + " as something other than a pending export");
         ++refused;
     }
     Require(refused == names.size(), library + " did not refuse every export");
@@ -786,6 +791,7 @@ int main(int argc, char** argv) {
         const auto refuse = []() { std::_Exit(3); };
         if (guestSetTerminate != nullptr) guestSetTerminate(refuse);
         std::set_terminate(refuse);
+        { std::ofstream file(std::filesystem::temp_directory_path() / "sdk-export-reached.txt"); file << "reached"; }
         exportFunction();
         return 0;
     }
