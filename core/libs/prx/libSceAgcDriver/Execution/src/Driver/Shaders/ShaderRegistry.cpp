@@ -4,8 +4,10 @@
 #include "prx/libSceAgcDriver/Execution/include/Driver/Driver.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver/Draw/DrawPipeline.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver/Shaders/ShaderRegistry.hpp"
+#include "prx/libSceAgcDriver/Execution/include/Driver/Shaders/RegistrationPreparationBudget.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver/Diagnostics.hpp"
 #include "prx/libSceAgcDriver/Execution/include/GuestMemory.hpp"
+#include "prx/libSceAgcDriver/Execution/include/PerformanceOverlay.hpp"
 #include "CacheKey.hpp"
 #include "prx/libSceAgcDriver/Execution/include/ShaderPreparation.hpp"
 #include "prx/libSceAgcDriver/Execution/include/ShaderPreparationScope.hpp"
@@ -16,6 +18,8 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
+#include <cerrno>
 #include <set>
 #include <condition_variable>
 #include <cstdio>
@@ -31,6 +35,7 @@
 #include <list>
 #include <map>
 #include <mutex>
+#include <limits>
 #include <atomic>
 #include <pthread.h>
 #ifdef _WIN32
@@ -1329,14 +1334,45 @@ bool AsyncRegistrationPrepare() {
     return !sync;
 }
 
+std::uint64_t RegistrationPrepareCommitBudgetBytes() {
+    static const std::uint64_t budget = [] {
+        constexpr double GiB = 1024.0 * 1024.0 * 1024.0;
+        if (const auto* text = std::getenv("APS5_REGISTRATION_PREPARE_COMMIT_GB")) {
+            char* end = nullptr;
+            errno = 0;
+            const auto value = std::strtod(text, &end);
+            if (errno != 0 || end == text || *end != '\0' || !std::isfinite(value) || value < 0 || value >= static_cast<double>(std::numeric_limits<std::uint64_t>::max()) / GiB) {
+                throw std::runtime_error("APS5_REGISTRATION_PREPARE_COMMIT_GB must be a non-negative number of GiB");
+            }
+            return static_cast<std::uint64_t>(value * GiB);
+        }
+        if (const auto physical = ReadPhysicalMemoryBytes()) return *physical / 2;
+        return std::numeric_limits<std::uint64_t>::max();
+    }();
+    return budget;
+}
+
+bool RegistrationPrepareWithinMemoryBudget() {
+    const auto privateBytes = ReadProcessPrivateBytes();
+    return !privateBytes || RegistrationPreparationAllowed(*privateBytes, RegistrationPrepareCommitBudgetBytes());
+}
+
+void LogRegistrationPrepareDeferred() {
+    static std::atomic<bool> reported{false};
+    if (reported.exchange(true, std::memory_order_relaxed)) return;
+    APS5_LOG_OUT("%s", "process private memory reached the registered shader preparation budget; later registrations are prepared when first used (APS5_REGISTRATION_PREPARE_COMMIT_GB)");
+}
+
 void PrepareRegisteredInBackground(std::shared_ptr<const ShaderSnapshot> snapshot, std::shared_ptr<RegisteredPreparation> plan) {
     const auto* preparedKey = snapshot->prepared.get();
     SubmitRegistrationPreparation([snapshot = std::move(snapshot), plan = std::move(plan)] {
         PerformanceContext timingContext(FrameTiming::Preparation());
         std::vector<PreparedShaders::Entry> entries;
         std::exception_ptr failure;
+        bool deferred = false;
         try {
-            entries = PrepareRegistered(*plan);
+            if (RegistrationPrepareWithinMemoryBudget()) entries = PrepareRegistered(*plan);
+            else deferred = true;
         } catch (const std::exception& error) {
             APS5_LOG_ERR("Shader 0x%llx could not be prepared after registration: %s", static_cast<unsigned long long>(snapshot->codeAddress), error.what());
             failure = std::current_exception();
@@ -1347,10 +1383,12 @@ void PrepareRegisteredInBackground(std::shared_ptr<const ShaderSnapshot> snapsho
         {
             std::lock_guard lock(prepared.mutex);
             prepared.entries.insert(prepared.entries.end(), std::make_move_iterator(entries.begin()), std::make_move_iterator(entries.end()));
-            if (failure == nullptr && !plan->abiKey.empty()) prepared.registeredAbis.push_back(std::move(plan->abiKey));
+            if (failure == nullptr && !deferred && !plan->abiKey.empty()) prepared.registeredAbis.push_back(std::move(plan->abiKey));
+            prepared.deferred = prepared.deferred || deferred;
             prepared.failure = failure;
             prepared.pending = false;
         }
+        if (deferred) LogRegistrationPrepareDeferred();
         prepared.settled.notify_all();
     }, preparedKey);
 }
@@ -1855,6 +1893,9 @@ void Driver::RegisterShader(const Shader* shader) {
     if (lazy) {
         static_cast<void>(PlanRegistered(snapshot, *localDevice, registered, true, &snapshot.prepared->deferred));
         snapshot.prepared->deferred = true;
+    } else if (!RegistrationPrepareWithinMemoryBudget()) {
+        snapshot.prepared->deferred = true;
+        LogRegistrationPrepareDeferred();
     } else if (AsyncRegistrationPrepare()) {
         preparation = PlanRegistered(snapshot, *localDevice, registered, true, &snapshot.prepared->deferred);
         if (preparation != nullptr) preparation->prebuildDevice = localDevice;
