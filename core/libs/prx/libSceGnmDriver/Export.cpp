@@ -17,6 +17,7 @@
 #include "prx/libSceAgcDriver/Execution/include/VideoOutput.hpp"
 #include "prx/libSceAgcDriver/Eq/include/Event.hpp"
 #include "prx/libSceVideoOut/include/Buffer.hpp"
+#include "prx/libSceGnmDriver/include/CommandStream.hpp"
 
 namespace {
 
@@ -116,6 +117,7 @@ struct FrameStart {
 
 std::mutex g_submitMutex;
 bool g_frameStarted = false;
+bool g_workQueued = false;
 
 int CheckSubmission(std::uint32_t count, std::uint32_t* const* dcbs, const std::uint32_t* dcbBytes, std::uint32_t* const* ccbs, const std::uint32_t* ccbBytes) {
     if (count != 0 && (!dcbs || !dcbBytes)) return GNM_ERROR_SUBMISSION_FAILED_INVALID_ARGUMENT;
@@ -131,6 +133,10 @@ bool IsFiller(std::uint32_t header) {
     return (header >> 30) == 2;
 }
 
+}
+
+namespace GnmDriver {
+
 std::span<const std::uint32_t> PacketAt(std::span<const std::uint32_t> words, std::size_t at, const char* stream) {
     const auto header = words[at];
     if (IsFiller(header)) return words.subspan(at, 1);
@@ -144,6 +150,10 @@ std::span<const std::uint32_t> PacketAt(std::span<const std::uint32_t> words, st
     if (total > words.size() - at) throw std::runtime_error(std::string("GnmDriver: truncated packet in the ") + stream);
     return words.subspan(at, total);
 }
+
+}
+
+namespace {
 
 std::uint32_t Opcode(std::uint32_t header) {
     return (header >> 8) & 0xffu;
@@ -188,6 +198,10 @@ void Lower(std::vector<std::uint32_t>& out, std::span<const std::uint32_t> packe
 
 std::uint64_t g_constantCounter = 0;
 std::uint64_t g_drawCounter = 0;
+
+}
+
+namespace GnmDriver {
 
 std::vector<std::uint32_t> MergeEngines(std::span<const std::uint32_t> dcb, std::span<const std::uint32_t> ccb) {
     std::vector<std::uint32_t> out;
@@ -234,14 +248,18 @@ std::vector<std::uint32_t> MergeEngines(std::span<const std::uint32_t> dcb, std:
     return out;
 }
 
+}
+
+namespace {
+
 void SubmitLocked(std::uint32_t count, std::uint32_t* const* dcbs, const std::uint32_t* dcbBytes, std::uint32_t* const* ccbs, const std::uint32_t* ccbBytes) {
     static FrameStart frameStart;
     static const bool waitIdle = std::getenv("APS5_GNM_SUBMIT_WAIT_IDLE") != nullptr;
-    if (waitIdle && g_frameStarted) AgcDriverWaitIdle_nid_postfix();
+    if (waitIdle && g_workQueued) AgcDriverWaitIdle_nid_postfix();
     std::vector<std::vector<std::uint32_t>> merged;
     for (std::uint32_t i = 0; i < count; ++i) {
         const auto constantWords = ccbBytes ? ccbBytes[i] / 4 : 0;
-        merged.push_back(MergeEngines({dcbs[i], dcbBytes[i] / 4}, {constantWords != 0 ? ccbs[i] : nullptr, constantWords}));
+        merged.push_back(GnmDriver::MergeEngines({dcbs[i], dcbBytes[i] / 4}, {constantWords != 0 ? ccbs[i] : nullptr, constantWords}));
     }
     if (!g_frameStarted) {
         static const bool gcn = (AgcDriverUseGcnShaders_nid_postfix(), true);
@@ -250,6 +268,7 @@ void SubmitLocked(std::uint32_t count, std::uint32_t* const* dcbs, const std::ui
         g_frameStarted = true;
     }
     for (auto& commands : merged) AgcDriverSubmitGraphics_nid_postfix(commands.data(), static_cast<std::uint32_t>(commands.size()));
+    g_workQueued = true;
 }
 
 std::uintptr_t BufferLabel(std::uint32_t handle, std::uint32_t index) {
