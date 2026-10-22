@@ -605,7 +605,7 @@ CompiledVariant emitVariant(const RecompileRequest& request, IrProgram& program)
     targetOptions.robustBufferAccess2 = request.target.robustBufferAccess2;
     targetOptions.float32FlushToZero = request.target.float32FlushToZero;
     targetOptions.float32DenormPreserve = request.target.float32DenormPreserve;
-    targetOptions.meshBarycentricPixel = request.shader.stage == ShaderStage::Fragment && request.graphics && request.graphics->mesh;
+    targetOptions.meshBarycentricPixel = request.shader.stage == ShaderStage::Fragment && request.graphics && request.graphics->mesh && !request.target.meshAsCompute;
     if (request.shader.stage == ShaderStage::Mesh && request.graphics && request.graphics->meshBarycentrics) {
         const auto& paired = *request.graphics->meshBarycentrics;
         const auto emulated = DescribeEmulatedInterface(paired.parameters, paired.emulation, true);
@@ -639,6 +639,7 @@ CompiledVariant emitVariant(const RecompileRequest& request, IrProgram& program)
         if (budget.bytes > limits.maxOutputMemoryBytes) throw std::runtime_error("barycentric emulation on the mesh path needs " + std::to_string(budget.bytes) + " bytes of mesh output memory, the device allows " + std::to_string(limits.maxOutputMemoryBytes));
     }
     targetOptions.waveLdsMemoryBarriers = request.target.waveLdsMemoryBarriers;
+    targetOptions.meshAsCompute = request.target.meshAsCompute;
 
     constexpr SpirvEmitter spirvEmitter;
     CompiledShaderArtifact result;
@@ -679,9 +680,16 @@ CompiledVariant emitVariant(const RecompileRequest& request, IrProgram& program)
     result.instanceOffsetShared = program.Info().instanceOffsetShared;
     result.vertexOffsetConflict = program.Info().vertexOffsetConflict;
     result.instanceOffsetConflict = program.Info().instanceOffsetConflict;
+    std::uint32_t clipDistances = 0;
+    std::uint32_t cullDistances = 0;
+    bool layer = false;
     for (const auto& output : program.Info().outputs) {
         if (output.kind == StageOutputKind::Parameter) result.parameterExports.push_back(output.location);
+        if (output.kind == StageOutputKind::ClipDistance) clipDistances = std::max(clipDistances, output.index + 1u);
+        if (output.kind == StageOutputKind::CullDistance) cullDistances = std::max(cullDistances, output.index + 1u);
+        layer = layer || output.kind == StageOutputKind::Layer;
     }
+    if (targetOptions.meshAsCompute && request.shader.stage == ShaderStage::Mesh) result.meshRecordLayout = MeshRecordLayout(clipDistances, cullDistances, layer, inputInfo.vertex->mesh.provokingVertex, inputInfo.vertex->mesh.outputPrimitiveSize);
     if (request.shader.stage == ShaderStage::Fragment) {
         result.fragmentParameters = DescribeFragmentParameters(program, inputInfo);
         const auto& inputs = program.Info().inputs;
@@ -1008,6 +1016,7 @@ RecompileResult materializeResult(const CompiledVariant& variant, const Recompil
         .stencilReferences = artifact.stencilReferences,
         .stencilReplaySafe = artifact.stencilReplaySafe,
         .stencilReferenceDword = artifact.stencilReferenceDword,
+        .meshRecordLayout = artifact.meshRecordLayout,
         .variantId = artifact.variantId
     };
     for (const auto reg : variant.bindings.layout.userDataRegisters) {

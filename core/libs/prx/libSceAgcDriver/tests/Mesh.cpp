@@ -144,6 +144,7 @@ struct MeshDraw {
     VkCullModeFlags cull = VK_CULL_MODE_NONE;
     std::span<const std::uint32_t> code = {};
     std::uint32_t stagesRegister = 0x20u;
+    bool emulateBarycentrics = false;
 };
 
 bool ReadsNumWorkgroups(std::span<const std::uint32_t> words) {
@@ -167,7 +168,8 @@ bool ReadsNumWorkgroups(std::span<const std::uint32_t> words) {
 }
 
 void DrawMesh(AgcDriver::VulkanDevice& device, const MeshDraw& setup) {
-    const auto target = device.Target();
+    auto target = device.Target();
+    if (setup.emulateBarycentrics) target.fragmentShaderBarycentricEnabled = false;
     std::vector<std::uint32_t> userData(12, 0u);
     const auto index = AgcDriver::Graphics::MeshIndexBufferDescriptor(setup.draw);
     std::copy(index.begin(), index.end(), userData.begin() + ShaderRecompiler::MeshIndexBufferUserWord);
@@ -189,6 +191,12 @@ void DrawMesh(AgcDriver::VulkanDevice& device, const MeshDraw& setup) {
     ShaderRecompiler::ShaderPixelStageInfo pixel{};
     pixel.interpolatorCount = 1;
     pixel.interpolatorSettings[0] = 0x400u;
+    if (setup.emulateBarycentrics) {
+        pixel.interpolatorSettings[0] = 0;
+        pixel.inputAddr = ShaderRecompiler::PixelInputBit(ShaderRecompiler::PixelInput::PerspectiveCenter);
+        pixel.hasPerspectiveCenterVgpr = true;
+        pixel.executeOnNoop = true;
+    }
     pixel.targetOutputMode[0] = 9;
     pixel.targetExportMapping.fill(0xe4u);
     const std::array<ShaderRecompiler::MemoryRegion, 1> pixelMemory{{{reinterpret_cast<std::uintptr_t>(PixelCode.data()), std::as_bytes(std::span(PixelCode))}}};
@@ -200,10 +208,17 @@ void DrawMesh(AgcDriver::VulkanDevice& device, const MeshDraw& setup) {
         std::nullopt
     };
     const auto pixelResult = ShaderRecompiler::Recompile(fragment);
-    const std::array<AgcDriver::Graphics::CompiledShader, 2> shaders{{
+    std::vector<AgcDriver::Graphics::CompiledShader> shaders{
         {ShaderStage::Mesh, &meshResult, 0},
         {ShaderStage::Fragment, &pixelResult, PixelPushOffset(meshPush, target)}
-    }};
+    };
+    ShaderRecompiler::BarycentricTessellationShaders patches;
+    if (setup.emulateBarycentrics) {
+        Require(target.meshAsCompute && pixelResult.barycentricEmulation.active, "mesh barycentric fixture requires the compute fallback and active emulation");
+        const auto readback = ShaderRecompiler::BuildMeshReadbackVertexShader(meshResult, target.vulkanVersion);
+        patches = ShaderRecompiler::BuildBarycentricTessellationShaders(readback, pixelResult, target, device.MaxFragmentInputComponents(), 0u);
+        shaders.insert(shaders.begin() + 1, {{ShaderStage::TessellationControl, &patches.control, 0}, {ShaderStage::TessellationEvaluation, &patches.evaluation, 0}});
+    }
 
     AgcDriver::Graphics::State state{};
     state.stages = {AgcDriver::Graphics::ShaderPath::Geometry, setup.stagesRegister, setup.waveSize, 64, setup.mesh, std::nullopt};
@@ -338,7 +353,7 @@ int main() {
         if (!testDevice) return VulkanTestSkipped;
         auto& device = *testDevice;
         const auto target = device.Target();
-        if (!target.mesh.has_value()) {
+        if (!target.mesh.has_value() && !target.meshAsCompute) {
             std::puts("skipped, the device has no VK_EXT_mesh_shader");
             return VulkanTestSkipped;
         }
@@ -447,6 +462,34 @@ int main() {
         ClearPixels();
         DrawMesh(device, {SmallSubgroup, {0, static_cast<std::uint32_t>(Ordered.size()), 0, 1, 0, false}, VertexBufferDescriptor(Ordered.data(), static_cast<std::uint32_t>(Ordered.size())), 0});
         CheckTriangles("mesh program without push data");
+
+        if (device.Target().meshAsCompute && device.Target().tessellation.has_value()) {
+            MeshDraw emulated{SmallSubgroup, {0, static_cast<std::uint32_t>(Ordered.size()), 0, 1, 0, false}, VertexBufferDescriptor(Ordered.data(), static_cast<std::uint32_t>(Ordered.size()))};
+            emulated.emulateBarycentrics = true;
+            ClearPixels();
+            DrawMesh(device, emulated);
+            CheckTriangles("mesh compute fallback with per-vertex barycentric emulation");
+            emulated.draw = {reinterpret_cast<std::uintptr_t>(Indices.data()), static_cast<std::uint32_t>(Indices.size()), 2, 1, 0, true};
+            emulated.vertexBuffer = VertexBufferDescriptor(Scrambled.data(), static_cast<std::uint32_t>(Scrambled.size()));
+            ClearPixels();
+            DrawMesh(device, emulated);
+            CheckTriangles("indexed mesh compute fallback with barycentric emulation");
+            for (const auto cull : {VK_CULL_MODE_BACK_BIT, VK_CULL_MODE_FRONT_BIT}) {
+                emulated.cull = cull;
+                auto plain = emulated;
+                plain.emulateBarycentrics = false;
+                ClearPixels();
+                DrawMesh(device, plain);
+                const auto expected = Pixels;
+                ClearPixels();
+                DrawMesh(device, emulated);
+                for (std::uint32_t triangle = 0; triangle < Triangles; ++triangle) {
+                    const auto offset = CellPixel(triangle);
+                    Require(std::equal(Pixels.begin() + offset, Pixels.begin() + offset + 4u, expected.begin() + offset), "mesh fallback barycentric culling differs from the ordinary readback draw");
+                }
+            }
+            std::puts("Mesh fallback barycentric pixels and front/back culling passed");
+        }
 
         ClearPixels();
         const ShaderRecompiler::MeshConfiguration strip{6u, 3u, 5u, 9u, 3u, 64u, 1024u, 0u, 4u};
