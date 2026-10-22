@@ -29,6 +29,7 @@ constexpr int GetOwner = 5;
 constexpr int SetOwner = 6;
 constexpr std::uint64_t SetOwnerRequest = 0x8004667c;
 constexpr std::uint64_t GetOwnerRequest = 0x4004667b;
+constexpr std::uint64_t NonblockingRequest = 0x8004667e;
 constexpr int ReadOnly = 0;
 constexpr int Directory = 0x20000;
 
@@ -68,6 +69,10 @@ void Pipes(int process) {
     owner = process + 1;
     Require(ioctl_nid_postfix(ends[1], SetOwnerRequest, &owner) == -1 && Error() == Esrch && IoctlOwner(ends[1]) == process);
     Require(ioctl_nid_postfix(ends[1], GetOwnerRequest, nullptr) == -1 && Error() == Efault);
+    void* const unreadable = reinterpret_cast<void*>(std::uintptr_t{0x10});
+    Require(ioctl_nid_postfix(ends[1], SetOwnerRequest, nullptr) == -1 && Error() == Efault && IoctlOwner(ends[1]) == process);
+    Require(ioctl_nid_postfix(ends[1], SetOwnerRequest, unreadable) == -1 && Error() == Efault && IoctlOwner(ends[1]) == process);
+    Require(ioctl_nid_postfix(ends[1], NonblockingRequest, unreadable) == -1 && Error() == Efault);
     Require(close_nid_postfix(duplicate) == 0 && close_nid_postfix(ends[0]) == 0 && close_nid_postfix(ends[1]) == 0);
 }
 
