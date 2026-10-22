@@ -772,7 +772,7 @@ int main(int argc, char** argv) {
         if (module == nullptr) return 2;
         const auto& names = library == "libSceGLSlimVSH" ? libSceGLSlimVSHNames : libSceIpmiNames;
         std::size_t index = 0;
-        for (const char* digit = argv[3]; *digit != ' '; ++digit) {
+        for (const char* digit = argv[3]; *digit != '\0'; ++digit) {
             if (*digit < '0' || *digit > '9') return 4;
             index = index * 10u + static_cast<std::size_t>(*digit - '0');
         }
