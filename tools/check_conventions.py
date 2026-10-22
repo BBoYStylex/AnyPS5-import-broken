@@ -19,7 +19,7 @@ RULES = {
     "comment": ("error", "docs/dev/CONVENTIONS.md", "Comments are only for technical debt, so they need a change to docs/dev/TechnicalDebt.md or docs/dev/debt/ in the same pull request; #endif and namespace ends are always allowed"),
     "silent-stub": ("error", "CONTRIBUTING.md#code", "Unimplemented exports call NotImplemented_nid_no_patch(__func__); silent stubs are listed under Silent stubs in docs/dev/debt/<library>.md, by their file or by name with a path in their library"),
     "debt-file": ("error", "CONTRIBUTING.md#documentation", "Technical debt about one library or component goes in docs/dev/debt/<name>.md, named after the first core/ path it links: <library> for core/libs/prx/<library>, otherwise <component> for core/<component>; entries that link neither stay in docs/dev/TechnicalDebt.md"),
-    "duplicate-export": ("error", "CONTRIBUTING.md#code", "Already exported by another library: remove the copy, or use APS5_DUMMY_FUN if nothing is left"),
+    "duplicate-export": ("error", "CONTRIBUTING.md#code", "Two libraries provide the same export with a different body: one library provides it, and the other removes the copy or uses APS5_DUMMY_FUN if nothing is left"),
     "unknown-nid": ("error", "CONTRIBUTING.md#code", "An Unknown export has the NID of a symbol in core/libs/prx, so the NID is not unknown: name the export after that symbol, or give an AnyPS5 helper the _nid_no_patch suffix"),
     "system-dependency": ("error", "CONTRIBUTING.md#code", "Third-party code is a submodule under 3rdparty/ built from source, not found on the system"),
     "title-specific": ("error", "CONTRIBUTING.md#code", "Implement the general behaviour, not what one title needs; title-specific code belongs in its sce_module"),
@@ -212,12 +212,22 @@ class Check:
         if any(is_debt(path) for path in self.status):
             self.findings = [finding for finding in self.findings if finding[0] != "comment"]
 
+    def body_of(self, path, name):
+        """The body of the export `name` in `path`, with the comments masked."""
+        source = cpp_text(self.show(path)).split("\n")
+        for number, line in enumerate(source):
+            match = EXPORT.search(line)
+            if match and match.group(1) == name:
+                return function_body(source, number)
+        return None
+
     def duplicates(self, exports):
         if not exports:
             return
         paths = sorted(path for path in self.objects if path.startswith("core/libs/prx/") and
                        "tests" not in PurePosixPath(path).parts)
         self.read(paths)
+        bodies = {}
         for path in paths:
             text = self.show(path)
             if "APS5_VABI" not in text:
@@ -230,6 +240,10 @@ class Check:
                         continue
                     own, own_number = exports[name]
                     if library(path) != library(own) and function_body(source, number) is not None:
+                        if name not in bodies:
+                            bodies[name] = self.body_of(own, name)
+                        if bodies[name] == function_body(source, number):
+                            continue
                         self.report("duplicate-export", own, own_number, f"{name} is also in {library(path)}")
 
     def unknown_nids(self, unknowns, symbols):
