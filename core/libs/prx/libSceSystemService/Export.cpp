@@ -403,6 +403,22 @@ int APS5_VABI sceSystemServiceIsEyeToEyeDistanceAdjusted(std::uint32_t userId, s
     return sceShellCoreUtilIsEyeToEyeDistanceAdjusted(userId, adjusted);
 }
 
+bool APS5_VABI sceSystemStateMgrIsBdDriveReady() {
+    return false;
+}
+
+bool APS5_VABI sceShellCoreUtilIsUsbMassStorageMounted(std::uint32_t) {
+    return false;
+}
+
+bool APS5_VABI sceShellCoreUtilIsExternalStorageAppMoveInProgress() {
+    return false;
+}
+
+int APS5_VABI sceLncUtilIsPs2Emu(bool* emulated) {
+    return WriteStatus(emulated, false, __func__);
+}
+
 int APS5_VABI sceSystemServiceHideSplashScreen(void) {
  return SYSTEM_SERVICE_OK;
 }
