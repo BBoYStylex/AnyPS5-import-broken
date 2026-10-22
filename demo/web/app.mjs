@@ -56,6 +56,39 @@ const TRANSLATIONS = {
   }
 };
 
+const WARNING_TRANSLATIONS = {
+  ar: {
+    "sce_sys is missing. The Windows executable will have no app icon.": "مجلد sce_sys مفقود. لن يحتوي الملف التنفيذي لنظام Windows على أيقونة للتطبيق.",
+    "sce_sys/icon0.png is missing. The Windows executable will have no app icon.": "الملف sce_sys/icon0.png مفقود. لن يحتوي الملف التنفيذي لنظام Windows على أيقونة للتطبيق.",
+    "sce_module is missing. If the original app included this folder, leaving it out can prevent the app from starting.": "مجلد sce_module مفقود. إذا كان التطبيق الأصلي يتضمن هذا المجلد، فقد يؤدي تركه إلى منع التطبيق من بدء التشغيل."
+  }
+};
+
+const ERROR_TRANSLATIONS = {
+  ar: {
+    "Batch conversion accepts ZIP archives only. Choose one folder or select ZIP files.": "التحويل المجمع يقبل ملفات ZIP فقط. اختر مجلداً واحداً أو حدد ملفات ZIP.",
+    "Cancelled. Choose the ZIP or folder again to restart.": "تم الإلغاء. اختر ملف ZIP أو المجلد مجدداً لإعادة البدء.",
+    "No output folder is open": "لا يوجد مجلد مخرجات مفتوح",
+    "Invalid output path": "مسار المخرجات غير صالح",
+    "The converter worker stopped. Try a smaller app or use the native relinker.": "توقفت أداة التحويل في المتصفح. جرّب تطبيقاً أصغر أو استخدم أداة relinker الأصلية."
+  }
+};
+
+function formatWarning(message, isAr) {
+  if (!isAr) return message;
+  if (WARNING_TRANSLATIONS.ar[message]) return WARNING_TRANSLATIONS.ar[message];
+  if (message.endsWith("is a SELF container and was skipped: unwrap it to include that module.")) {
+    const name = message.split(" is a SELF container")[0];
+    return `الملف ${name} عبارة عن حاوية SELF وتم تجاوزه: قم بفك تشفيره لتضمين هذه الوحدة.`;
+  }
+  return message;
+}
+
+function formatError(message, isAr) {
+  if (!isAr) return message;
+  return ERROR_TRANSLATIONS.ar[message] || message;
+}
+
 function applyUiLanguage(lang) {
   const isAr = lang === "ar";
   document.documentElement.lang = isAr ? "ar" : "en";
@@ -219,20 +252,20 @@ async function fail(message) {
   const transaction = outputTransaction;
   outputTransaction = null;
   outputDirectory = null;
+  const isAr = document.documentElement.lang === "ar";
   if (transaction) {
     $("status").hidden = false;
-    $("phase").textContent = "Removing incomplete output folder";
+    $("phase").textContent = isAr ? "جارٍ إزالة مجلد المخرجات غير المكتمل" : "Removing incomplete output folder";
   }
   const activeSink = sink;
   sink = null;
   for (const failure of await abortAndDiscardOutput(transaction, activeSink)) message += `\n${failure}`;
-  $("error").textContent = message;
+  $("error").textContent = formatError(message, isAr);
   $("error").hidden = false;
   $("status").hidden = true;
   $("cancel").hidden = true;
   $("drop").hidden = false;
   $("selection").hidden = true;
-  const isAr = document.documentElement.lang === "ar";
   $("warnings").hidden = true;
   $("arabic-badge").hidden = true;
   $("language").value = "1";
@@ -271,16 +304,19 @@ async function onMessage({ data }) {
     } else if (data.type === "inspection-complete") {
       inspectionComplete = true;
       working = false;
+      const isAr = document.documentElement.lang === "ar";
       $("selection").hidden = false;
       $("drop").hidden = true;
-      $("archive-name").textContent = selectedInputs.length > 1 ? `${selectedInputs.length} app ZIPs` : selectedInputs[0].name;
+      $("archive-name").textContent = selectedInputs.length > 1 ? (isAr ? `${selectedInputs.length} حزم تطبيقات ZIP` : `${selectedInputs.length} app ZIPs`) : selectedInputs[0].name;
       $("app-list").replaceChildren(...selectedInputs.map((input, index) => {
         const item = document.createElement("li");
         const name = document.createElement("strong");
         name.textContent = input.name;
         const details = document.createElement("span");
         const summary = summaries[index];
-        details.textContent = `${summary.files} files · ${bytes(summary.totalBytes)} expanded · ${summary.modules} modules${summary.supportsArabic ? " · Arabic supported" : ""}`;
+        details.textContent = isAr
+          ? `${summary.files} ملفات · ${bytes(summary.totalBytes)} بعد الفك · ${summary.modules} وحدات${summary.supportsArabic ? " · تدعم اللغة العربية" : ""}`
+          : `${summary.files} files · ${bytes(summary.totalBytes)} expanded · ${summary.modules} modules${summary.supportsArabic ? " · Arabic supported" : ""}`;
         item.append(name, details);
         return item;
       }));
@@ -289,7 +325,8 @@ async function onMessage({ data }) {
       for (let index = 0; index < summaries.length; index++) {
         for (const message of summaries[index].warnings) {
           const item = document.createElement("li");
-          item.textContent = selectedInputs.length > 1 ? `${selectedInputs[index].name}: ${message}` : message;
+          const text = formatWarning(message, isAr);
+          item.textContent = selectedInputs.length > 1 ? `${selectedInputs[index].name}: ${text}` : text;
           warningItems.push(item);
         }
       }
@@ -297,7 +334,6 @@ async function onMessage({ data }) {
       $("warnings").hidden = warningItems.length === 0;
       $("status").hidden = true;
       $("cancel").hidden = true;
-      const isAr = document.documentElement.lang === "ar";
       const hasArabic = summaries.some(summary => summary.supportsArabic);
       const arabicBadge = $("arabic-badge");
       const arabicStatusText = $("arabic-status-text");
@@ -349,19 +385,21 @@ async function onMessage({ data }) {
       $("done").hidden = false;
       $("status").hidden = true;
       $("cancel").hidden = true;
-      $("result-info").textContent = `${data.apps > 1 ? `${data.apps} apps · ` : ""}${bytes(data.size)} ${data.mode === "disk" ? "files" : "ZIP"} · ${data.release} system libraries · ${data.apps > 1 ? "combined app bundle" : data.outputName}`;
+      const isAr = document.documentElement.lang === "ar";
+      $("result-info").textContent = isAr
+        ? `${data.apps > 1 ? `${data.apps} تطبيقات · ` : ""}${bytes(data.size)} ${data.mode === "disk" ? "ملفات" : "حزمة ZIP"} · مكتبات النظام ${data.release} · ${data.apps > 1 ? "حزمة تطبيقات مجمعة" : data.outputName}`
+        : `${data.apps > 1 ? `${data.apps} apps · ` : ""}${bytes(data.size)} ${data.mode === "disk" ? "files" : "ZIP"} · ${data.release} system libraries · ${data.apps > 1 ? "combined app bundle" : data.outputName}`;
       if (data.blob) {
         downloadUrl = URL.createObjectURL(data.blob);
         $("download").href = downloadUrl;
         $("download").download = `${data.outputName}.zip`;
         $("download").hidden = false;
       } else if (data.mode === "zip") {
-        $("result-info").textContent += " · ZIP saved to disk";
+        $("result-info").textContent += isAr ? " · تم حفظ ملف ZIP على القرص" : " · ZIP saved to disk";
       } else {
-        $("result-info").textContent += ` · Saved in ${outputTransaction.name}/`;
-        if (document.querySelector('input[name="target"]:checked').value === "linux") $("result-info").textContent += ` · On Linux, run chmod +x "${data.outputName}" before launching.`;
+        $("result-info").textContent += isAr ? ` · تم الحفظ في ${outputTransaction.name}/` : ` · Saved in ${outputTransaction.name}/`;
+        if (document.querySelector('input[name="target"]:checked').value === "linux") $("result-info").textContent += isAr ? ` · في نظام Linux، نفّذ الأمر chmod +x "${data.outputName}" قبل التشغيل.` : ` · On Linux, run chmod +x "${data.outputName}" before launching.`;
       }
-      const isAr = document.documentElement.lang === "ar";
       $("done").querySelector("h3").textContent = isAr ? "جاهز للتشغيل." : "Ready to run.";
       $("download").textContent = isAr ? "تنزيل ملف ZIP" : "Download ZIP";
       $("result-note").textContent = isAr
@@ -515,3 +553,5 @@ if (!("webkitdirectory" in $("folder"))) {
   $("choose-folder").disabled = true;
   $("choose-folder").title = "Folder selection is unavailable in this browser. Choose a ZIP instead.";
 }
+
+export { TRANSLATIONS, WARNING_TRANSLATIONS, ERROR_TRANSLATIONS, formatWarning, formatError, applyUiLanguage };
