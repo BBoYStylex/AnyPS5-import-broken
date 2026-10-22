@@ -17,14 +17,14 @@ inline constexpr std::int32_t ParameterInvalid = static_cast<std::int32_t>(0x8a7
 inline constexpr std::int32_t Error0004 = static_cast<std::int32_t>(0x8a720004);
 inline constexpr std::int32_t ReprojectionNotInitialized = static_cast<std::int32_t>(0x8a72000b);
 inline constexpr std::int32_t ReprojectionAlreadyInitialized = static_cast<std::int32_t>(0x8a72000c);
+inline constexpr std::int32_t VideoOutInvalidValue = static_cast<std::int32_t>(0x80290001);
+inline constexpr std::int32_t VideoOutNoDevice = static_cast<std::int32_t>(0x80290018);
 inline constexpr std::int32_t Error002C = static_cast<std::int32_t>(0x8a72002c);
 inline constexpr std::int32_t Error1002 = static_cast<std::int32_t>(0x8a721002);
 inline constexpr std::int32_t Error1003 = static_cast<std::int32_t>(0x8a721003);
 inline constexpr std::int32_t Error1010 = static_cast<std::int32_t>(0x8a721010);
 inline constexpr std::int32_t Error800d0203 = static_cast<std::int32_t>(0x800d0203);
 inline constexpr std::int32_t Error100F = static_cast<std::int32_t>(0x8a72100f);
-inline constexpr std::int32_t VideoOutInvalidValue = static_cast<std::int32_t>(0x80290001);
-inline constexpr std::int32_t VideoOutNoDevice = static_cast<std::int32_t>(0x80290018);
 
 inline constexpr std::uint32_t UserIdSdkVersion = 0x07000000;
 
@@ -78,36 +78,42 @@ struct ReprojectionState {
     std::uint32_t timingUs;
 };
 
-struct SizeAlign {
-    std::uint64_t size;
-    std::uint64_t align;
-};
-
-struct ReprojectionInitializeParam {
-    void* reprojectionBuffer;
-    void* displayBuffer;
-    std::int32_t threadPriority;
-    std::int32_t cpuAffinityMask;
-    std::uint32_t pipeId;
-    std::uint32_t queueId;
-    std::uint32_t type;
-    void* seeThroughBuffer;
-    std::int32_t reprojectionTiming;
-    std::int32_t reserved[5];
-};
-
 static_assert(sizeof(ReprojectionState) == 16);
 static_assert(alignof(ReprojectionState) == 8);
 static_assert(offsetof(ReprojectionState, timingUs) == 8);
+
+struct ReprojectionInitializeParameter {
+    void* workMemory;
+    void* displayMemory;
+    std::int32_t threadPriority;
+    std::uint32_t threadAffinity;
+    std::uint32_t queueParameter24;
+    std::uint32_t queueParameter28;
+    std::uint32_t renderingMode;
+    std::uint32_t reserved36;
+    void* auxiliaryMemory;
+    std::uint32_t timingInterval;
+    std::uint32_t reserved52[5];
+};
+
+static_assert(sizeof(ReprojectionInitializeParameter) == 72);
+static_assert(alignof(ReprojectionInitializeParameter) == 8);
+static_assert(offsetof(ReprojectionInitializeParameter, threadPriority) == 16);
+static_assert(offsetof(ReprojectionInitializeParameter, threadAffinity) == 20);
+static_assert(offsetof(ReprojectionInitializeParameter, renderingMode) == 32);
+static_assert(offsetof(ReprojectionInitializeParameter, auxiliaryMemory) == 40);
+static_assert(offsetof(ReprojectionInitializeParameter, timingInterval) == 48);
+
+struct SizeAlign {
+    std::uint64_t size;
+    std::uint64_t align;
+
+    constexpr SizeAlign(std::uint64_t size = 0, std::uint64_t align = 0) noexcept : size(size), align(align) {}
+};
+
 static_assert(sizeof(SizeAlign) == 16);
-static_assert(alignof(SizeAlign) == 8);
-static_assert(sizeof(ReprojectionInitializeParam) == 72);
-static_assert(alignof(ReprojectionInitializeParam) == 8);
-static_assert(offsetof(ReprojectionInitializeParam, threadPriority) == 16);
-static_assert(offsetof(ReprojectionInitializeParam, type) == 32);
-static_assert(offsetof(ReprojectionInitializeParam, seeThroughBuffer) == 40);
-static_assert(offsetof(ReprojectionInitializeParam, reprojectionTiming) == 48);
-static_assert(offsetof(ReprojectionInitializeParam, reserved) == 52);
+static_assert(offsetof(SizeAlign, size) == 0);
+static_assert(offsetof(SizeAlign, align) == 8);
 
 }
 
@@ -121,12 +127,7 @@ std::int32_t APS5_VABI sceHmd2GetDeviceInformationByHandle(std::int32_t handle, 
 std::int32_t APS5_VABI sceHmd2GetFieldOfView(std::int32_t handle, Hmd2::FieldOfView* fieldOfView);
 std::int32_t APS5_VABI sceHmd2GetFieldOfViewWithoutHandle(Hmd2::FieldOfView* fieldOfView);
 std::int32_t APS5_VABI sceHmd2SetVibration(std::int32_t handle, std::uint32_t level);
-std::int32_t APS5_VABI sceHmd2ReprojectionInitialize(const Hmd2::ReprojectionInitializeParam* param);
 Hmd2::SizeAlign APS5_VABI sceHmd2ReprojectionQueryBufferSizeAlign();
-std::int32_t APS5_VABI sceHmd2ReprojectionSetAllowPositionalReprojection(std::int32_t mode, std::uint64_t param, std::int32_t flags);
-std::int32_t APS5_VABI sceHmd2ReprojectionSetTiming(std::int32_t timing);
-std::int32_t APS5_VABI sceHmd2ReprojectionEnableVrMode(std::uint64_t outputMode);
-std::int32_t APS5_VABI sceHmd2ReprojectionTerminate();
 Hmd2::SizeAlign APS5_VABI sceHmd2ReprojectionQueryDisplayBufferSizeAlign();
 Hmd2::SizeAlign APS5_VABI sceHmd2ReprojectionQuerySeeThroughBufferSizeAlign();
 Hmd2::SizeAlign APS5_VABI sceHmd2ReprojectionGetMirroringDisplayBufferSizeAlign();
