@@ -7,6 +7,12 @@ extern "C" {
 const std::uint8_t* APS5_VABI sceCesRefersUcsProfileCp1252(void);
 const std::uint8_t* APS5_VABI sceCesRefersUcsProfileCp1251(void);
 const std::uint8_t* APS5_VABI sceCesRefersUcsProfileCp1250(void);
+const std::uint8_t* APS5_VABI sceCesRefersUcsProfileCp1253(void);
+const std::uint8_t* APS5_VABI sceCesRefersUcsProfileCp1254(void);
+const std::uint8_t* APS5_VABI sceCesRefersUcsProfileCp1255(void);
+const std::uint8_t* APS5_VABI sceCesRefersUcsProfileCp1256(void);
+const std::uint8_t* APS5_VABI sceCesRefersUcsProfileCp1257(void);
+const std::uint8_t* APS5_VABI sceCesRefersUcsProfileCp1258(void);
 int APS5_VABI sceCesMbcsUcsContextInit(void*, const void*);
 void* APS5_VABI sceCesUcsProfileInitEucJpCp51932(void*);
 int APS5_VABI sceCesUtf8StrToMbcsStr(void*, const std::uint8_t*, std::uint32_t, std::uint32_t*, std::uint8_t*, std::uint32_t, std::uint32_t*);
@@ -145,6 +151,53 @@ int main() {
     Require(sceCesMbcsStrToUtf8Str(latin2Context, reinterpret_cast<const std::uint8_t*>("\x80\xA3\xFF"), 3, &latin2Used, latin2Back, sizeof(latin2Back), &latin2Produced) == 0);
     Require(latin2Used == 3 && latin2Produced == 7 && std::memcmp(latin2Back, "\xE2\x82\xAC\xC5\x81\xCB\x99", 7) == 0);
     Require(sceCesMbcsStrGetUtf8Len(latin2Context, reinterpret_cast<const std::uint8_t*>("\x80\xA3\xFF"), 3, &latin2Used, &latin2Produced) == 0 && latin2Produced == 7);
+
+    const std::uint8_t* windows[6] = {
+        sceCesRefersUcsProfileCp1253(), sceCesRefersUcsProfileCp1254(), sceCesRefersUcsProfileCp1255(),
+        sceCesRefersUcsProfileCp1256(), sceCesRefersUcsProfileCp1257(), sceCesRefersUcsProfileCp1258(),
+    };
+    Require(windows[0] == sceCesRefersUcsProfileCp1253() && windows[5] == sceCesRefersUcsProfileCp1258());
+    for (int i = 0; i < 6; ++i) {
+        Require(windows[i] != nullptr && windows[i] != profile && windows[i] != cyrillic && windows[i] != latin2);
+        for (int j = 0; j < i; ++j) Require(windows[i] != windows[j]);
+        RequireSbcToUtf8(windows[i], 'A', "A");
+        RequireSbcToUtf8(windows[i], 0x80, "\xE2\x82\xAC");
+        for (int sbc = 1; sbc < 256; ++sbc) {
+            std::uint8_t cp[4] = {};
+            std::uint32_t cpLength = 0;
+            std::uint8_t back = 0;
+            Require(sceCesSbcToUtf8(windows[i], static_cast<std::uint8_t>(sbc), cp, sizeof(cp), &cpLength) == 0);
+            Require(sceCesUtf8ToSbc(cp, cpLength, &cpLength, windows[i], &back) == 0 && back == sbc);
+        }
+        Require(Utf8ToSbc(windows[i], "\xE3\x81\x82", 3) == unassignedCode);
+    }
+    RequireSbcToUtf8(windows[0], 0xC1, "\xCE\x91");
+    RequireSbcToUtf8(windows[0], 0xAA, "\xEF\xA3\xB9");
+    RequireSbcToUtf8(windows[1], 0xD0, "\xC4\x9E");
+    RequireSbcToUtf8(windows[1], 0xFD, "\xC4\xB1");
+    RequireSbcToUtf8(windows[2], 0xE0, "\xD7\x90");
+    RequireSbcToUtf8(windows[2], 0xA4, "\xE2\x82\xAA");
+    RequireSbcToUtf8(windows[3], 0xC7, "\xD8\xA7");
+    RequireSbcToUtf8(windows[3], 0x81, "\xD9\xBE");
+    RequireSbcToUtf8(windows[4], 0xC0, "\xC4\x84");
+    RequireSbcToUtf8(windows[4], 0x8D, "\xC2\xA8");
+    RequireSbcToUtf8(windows[5], 0xFE, "\xE2\x82\xAB");
+    RequireSbcToUtf8(windows[5], 0xCC, "\xCC\x80");
+    RequireUtf8ToSbc(windows[0], "\xCF\x89", 0xF9);
+    RequireUtf8ToSbc(windows[1], "\xC5\x9F", 0xFE);
+    RequireUtf8ToSbc(windows[2], "\xD7\xAA", 0xFA);
+    RequireUtf8ToSbc(windows[3], "\xD9\x8A", 0xED);
+    RequireUtf8ToSbc(windows[4], "\xC5\xBE", 0xFE);
+    RequireUtf8ToSbc(windows[5], "\xC6\xB0", 0xFD);
+    Require(Utf8ToSbc(windows[1], "\xCE\x91", 2) == unassignedCode);
+    Require(Utf8ToSbc(windows[0], "\xC4\x9E", 2) == unassignedCode);
+    char greekContext[256] = {};
+    Require(sceCesMbcsUcsContextInit(greekContext, windows[0]) == 0);
+    std::uint8_t greek[8] = {};
+    std::uint32_t greekUsed = 0;
+    std::uint32_t greekProduced = 0;
+    Require(sceCesUtf8StrToMbcsStr(greekContext, reinterpret_cast<const std::uint8_t*>("\xCE\x91\xCF\x89!"), 5, &greekUsed, greek, sizeof(greek), &greekProduced) == 0);
+    Require(greekUsed == 5 && greekProduced == 3 && std::memcmp(greek, "\xC1\xF9!", 3) == 0);
 
     char context[256] = {};
     Require(sceCesMbcsUcsContextInit(context, cyrillic) == 0);

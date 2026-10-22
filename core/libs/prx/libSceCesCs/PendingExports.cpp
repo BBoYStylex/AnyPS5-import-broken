@@ -377,36 +377,6 @@ int APS5_VABI sceCesRefersUcsProfileBs4730(void) {
     return 0;
 }
 
-int APS5_VABI sceCesRefersUcsProfileCp1253(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceCesRefersUcsProfileCp1254(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceCesRefersUcsProfileCp1255(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceCesRefersUcsProfileCp1256(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceCesRefersUcsProfileCp1257(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceCesRefersUcsProfileCp1258(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
 int APS5_VABI sceCesRefersUcsProfileCp437(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
