@@ -485,8 +485,8 @@ static void CheckNanConversions() {
 static void CheckFloatUnderflowErrno() {
     char* end = nullptr;
     errno = 7;
-    Require(strtod_nid_postfix("1e-310", &end) == 1e-310 && errno == 7);
-    Require(strtod_nid_postfix("-4.9406564584124654e-324", &end) == -0x1p-1074 && errno == 7);
+    Require(strtod_nid_postfix("1e-310", &end) == 1e-310 && errno == ERANGE);
+    Require(strtod_nid_postfix("-4.9406564584124654e-324", &end) == -0x1p-1074 && errno == ERANGE);
     Require(strtof_nid_postfix("1e-40", &end) == 1e-40f && errno == 7);
     Require(strtold_nid_postfix("1e-4940", &end) == 1e-4940L && errno == 7);
     Require(strtod_nid_postfix("1e-330", &end) == 0.0 && errno == ERANGE);
