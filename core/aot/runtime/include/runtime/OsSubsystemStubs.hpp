@@ -56,6 +56,13 @@ public:
     static int32_t NamedEventWait(uint64_t handle, uint64_t timeoutMicroseconds);
     static int32_t NamedEventClose(uint64_t handle);
 
+    static int32_t NamedSemaCreate(const char* name, uint32_t attributes, int32_t initCount, int32_t maxCount, uint64_t* outHandle);
+    static int32_t NamedSemaOpen(const char* name, uint32_t flags, uint64_t* outHandle);
+    static int32_t NamedSemaDelete(const char* name);
+    static int32_t NamedSemaWait(uint64_t handle, uint64_t timeoutMicroseconds);
+    static int32_t NamedSemaSignal(uint64_t handle, int32_t count);
+    static int32_t NamedSemaClose(uint64_t handle);
+
     static uint64_t GetMonotonicClockMicroseconds();
 
     static bool AtomicCompareExchange64(std::atomic<int64_t>* target, int64_t* expected, int64_t desired);

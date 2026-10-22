@@ -45,6 +45,12 @@ SyscallRegistry::SyscallRegistry() {
     Register(589, "aps5_sys_named_event_reset", 1, false);
     Register(590, "aps5_sys_named_event_wait", 2, false);
     Register(591, "aps5_sys_named_event_close", 1, false);
+    Register(574, "aps5_sys_named_sema_create", 5, false);
+    Register(575, "aps5_sys_named_sema_open", 3, false);
+    Register(576, "aps5_sys_named_sema_delete", 1, false);
+    Register(577, "aps5_sys_named_sema_wait", 2, false);
+    Register(578, "aps5_sys_named_sema_signal", 2, false);
+    Register(579, "aps5_sys_named_sema_close", 1, false);
 }
 
 void SyscallRegistry::Register(uint32_t syscallId, std::string_view nativeSymbol, uint32_t parameterCount, bool returnsVoid) {

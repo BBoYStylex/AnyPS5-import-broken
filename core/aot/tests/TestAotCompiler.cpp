@@ -38,6 +38,11 @@ int main() {
 
     Aot::Compiler::ElfRelocationResolver resolver;
     assert(resolver.GetRelocations().empty());
+    resolver.SetImportedSymbol("sceKernelExitProcess", 0x7FFF0000ULL);
+    auto foundSym = resolver.FindImportedSymbol("sceKernelExitProcess");
+    assert(foundSym.has_value());
+    assert(*foundSym == 0x7FFF0000ULL);
+    assert(!resolver.FindImportedSymbol("nonExistent").has_value());
 
     Aot::Compiler::CompilerOptions options{};
     assert(options.OptimizationLevel == 2);

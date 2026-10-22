@@ -166,5 +166,36 @@ int main() {
     aps5_sys_named_event_close(evtHandle);
     aps5_sys_named_event_delete("TestEventSync");
 
+    uint64_t semaHandle = 0;
+    int32_t semaRes = aps5_sys_named_sema_create("TestSemaSync", 0, 1, 5, &semaHandle);
+    assert(semaRes == 0);
+    assert(semaHandle != 0);
+
+    uint64_t openedSemaHandle = 0;
+    int32_t openSemaRes = aps5_sys_named_sema_open("TestSemaSync", 0, &openedSemaHandle);
+    assert(openSemaRes == 0);
+
+    int32_t semaWaitRes = aps5_sys_named_sema_wait(semaHandle, 0);
+    assert(semaWaitRes == 0);
+
+    semaWaitRes = aps5_sys_named_sema_wait(semaHandle, 0);
+    assert(semaWaitRes == -1);
+
+    int32_t semaSigRes = aps5_sys_named_sema_signal(openedSemaHandle, 2);
+    assert(semaSigRes == 0);
+
+    semaWaitRes = aps5_sys_named_sema_wait(semaHandle, 10000);
+    assert(semaWaitRes == 0);
+
+    semaWaitRes = aps5_sys_named_sema_wait(openedSemaHandle, 10000);
+    assert(semaWaitRes == 0);
+
+    semaWaitRes = aps5_sys_named_sema_wait(semaHandle, 0);
+    assert(semaWaitRes == -1);
+
+    aps5_sys_named_sema_close(openedSemaHandle);
+    aps5_sys_named_sema_close(semaHandle);
+    aps5_sys_named_sema_delete("TestSemaSync");
+
     return 0;
 }

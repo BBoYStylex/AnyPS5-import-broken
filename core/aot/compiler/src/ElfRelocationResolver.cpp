@@ -84,6 +84,18 @@ bool ElfRelocationResolver::LoadSymbolsAndRelocations(const ParsedElfBinary& bin
     return !relocations.empty() || !symbols.empty();
 }
 
+void ElfRelocationResolver::SetImportedSymbol(std::string_view name, uint64_t address) {
+    importedSymbols[std::string(name)] = address;
+}
+
+std::optional<uint64_t> ElfRelocationResolver::FindImportedSymbol(std::string_view name) const {
+    auto it = importedSymbols.find(std::string(name));
+    if (it != importedSymbols.end()) {
+        return it->second;
+    }
+    return std::nullopt;
+}
+
 size_t ElfRelocationResolver::ApplyRelocations(ParsedElfBinary& binary, uint64_t newBaseAddress) {
     size_t appliedCount = 0;
 
@@ -95,18 +107,33 @@ size_t ElfRelocationResolver::ApplyRelocations(ParsedElfBinary& binary, uint64_t
                 size_t offsetInSection = static_cast<size_t>(rel.Offset - section.VirtualAddress);
                 uint8_t* targetBytes = section.Data.data() + offsetInSection;
 
+                uint64_t symVal = 0;
+                if (rel.SymbolIndex < symbols.size()) {
+                    symVal = symbols[rel.SymbolIndex].Value;
+                    if (symVal == 0 && !symbols[rel.SymbolIndex].Name.empty()) {
+                        auto imported = FindImportedSymbol(symbols[rel.SymbolIndex].Name);
+                        if (imported.has_value()) {
+                            symVal = *imported;
+                        }
+                    }
+                }
+
                 if (rel.Type == X86RelocationType::Relative) {
                     uint64_t resolvedValue = newBaseAddress + static_cast<uint64_t>(rel.Addend);
                     std::memcpy(targetBytes, &resolvedValue, sizeof(uint64_t));
                     ++appliedCount;
-                } else if (rel.Type == X86RelocationType::Direct64 && rel.SymbolIndex < symbols.size()) {
-                    uint64_t symVal = symbols[rel.SymbolIndex].Value;
+                } else if (rel.Type == X86RelocationType::Direct64 ||
+                           rel.Type == X86RelocationType::GlobDat ||
+                           rel.Type == X86RelocationType::JumpSlot) {
                     uint64_t resolvedValue = (symVal != 0 ? symVal : newBaseAddress) + static_cast<uint64_t>(rel.Addend);
                     std::memcpy(targetBytes, &resolvedValue, sizeof(uint64_t));
                     ++appliedCount;
-                } else if (rel.Type == X86RelocationType::Direct32 && rel.SymbolIndex < symbols.size()) {
-                    uint64_t symVal = symbols[rel.SymbolIndex].Value;
+                } else if (rel.Type == X86RelocationType::Direct32) {
                     uint32_t resolvedValue = static_cast<uint32_t>((symVal != 0 ? symVal : newBaseAddress) + rel.Addend);
+                    std::memcpy(targetBytes, &resolvedValue, sizeof(uint32_t));
+                    ++appliedCount;
+                } else if (rel.Type == X86RelocationType::PcRelative32) {
+                    uint32_t resolvedValue = static_cast<uint32_t>((symVal != 0 ? symVal : newBaseAddress) + rel.Addend - rel.Offset);
                     std::memcpy(targetBytes, &resolvedValue, sizeof(uint32_t));
                     ++appliedCount;
                 }

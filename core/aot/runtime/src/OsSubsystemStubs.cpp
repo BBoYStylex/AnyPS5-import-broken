@@ -443,6 +443,143 @@ int32_t OsSubsystemStubs::NamedEventClose(uint64_t handle) {
     return gEventHandles.erase(handle) > 0 ? 0 : -1;
 }
 
+struct NamedSemaObject {
+    std::mutex Mutex;
+    std::condition_variable Cv;
+    int32_t Count{0};
+    int32_t MaxCount{1};
+    std::string Name;
+};
+
+static std::unordered_map<std::string, std::shared_ptr<NamedSemaObject>> gNamedSemas;
+static std::unordered_map<uint64_t, std::shared_ptr<NamedSemaObject>> gSemaHandles;
+static std::mutex gNamedSemaMutex;
+static std::atomic<uint64_t> gNextSemaHandle{3000};
+
+int32_t OsSubsystemStubs::NamedSemaCreate(const char* name, uint32_t attributes, int32_t initCount, int32_t maxCount, uint64_t* outHandle) {
+    static_cast<void>(attributes);
+    if (initCount < 0 || maxCount <= 0 || initCount > maxCount) {
+        return -1;
+    }
+
+    auto semaObj = std::make_shared<NamedSemaObject>();
+    semaObj->Count = initCount;
+    semaObj->MaxCount = maxCount;
+    if (name != nullptr) {
+        semaObj->Name = name;
+    }
+
+    uint64_t handle = gNextSemaHandle.fetch_add(1, std::memory_order_relaxed);
+    {
+        std::lock_guard<std::mutex> lock(gNamedSemaMutex);
+        gSemaHandles[handle] = semaObj;
+        if (name != nullptr && name[0] != '\0') {
+            gNamedSemas[semaObj->Name] = semaObj;
+        }
+    }
+
+    if (outHandle != nullptr) {
+        *outHandle = handle;
+    }
+    return 0;
+}
+
+int32_t OsSubsystemStubs::NamedSemaOpen(const char* name, uint32_t flags, uint64_t* outHandle) {
+    static_cast<void>(flags);
+    if (name == nullptr) {
+        return -1;
+    }
+
+    std::shared_ptr<NamedSemaObject> semaObj;
+    {
+        std::lock_guard<std::mutex> lock(gNamedSemaMutex);
+        auto it = gNamedSemas.find(name);
+        if (it == gNamedSemas.end()) {
+            return -1;
+        }
+        semaObj = it->second;
+        uint64_t handle = gNextSemaHandle.fetch_add(1, std::memory_order_relaxed);
+        gSemaHandles[handle] = semaObj;
+        if (outHandle != nullptr) {
+            *outHandle = handle;
+        }
+    }
+    return 0;
+}
+
+int32_t OsSubsystemStubs::NamedSemaDelete(const char* name) {
+    if (name == nullptr) {
+        return -1;
+    }
+    std::lock_guard<std::mutex> lock(gNamedSemaMutex);
+    gNamedSemas.erase(name);
+    return 0;
+}
+
+int32_t OsSubsystemStubs::NamedSemaWait(uint64_t handle, uint64_t timeoutMicroseconds) {
+    std::shared_ptr<NamedSemaObject> semaObj;
+    {
+        std::lock_guard<std::mutex> lock(gNamedSemaMutex);
+        auto it = gSemaHandles.find(handle);
+        if (it == gSemaHandles.end()) {
+            return -1;
+        }
+        semaObj = it->second;
+    }
+
+    std::unique_lock<std::mutex> lock(semaObj->Mutex);
+    if (timeoutMicroseconds == 0) {
+        if (semaObj->Count > 0) {
+            --semaObj->Count;
+            return 0;
+        }
+        return -1;
+    }
+
+    if (timeoutMicroseconds == UINT64_MAX) {
+        semaObj->Cv.wait(lock, [&] { return semaObj->Count > 0; });
+        --semaObj->Count;
+        return 0;
+    }
+
+    bool success = semaObj->Cv.wait_for(lock, std::chrono::microseconds(timeoutMicroseconds), [&] {
+        return semaObj->Count > 0;
+    });
+    if (success) {
+        --semaObj->Count;
+        return 0;
+    }
+    return -1;
+}
+
+int32_t OsSubsystemStubs::NamedSemaSignal(uint64_t handle, int32_t count) {
+    if (count <= 0) {
+        return -1;
+    }
+
+    std::shared_ptr<NamedSemaObject> semaObj;
+    {
+        std::lock_guard<std::mutex> lock(gNamedSemaMutex);
+        auto it = gSemaHandles.find(handle);
+        if (it == gSemaHandles.end()) {
+            return -1;
+        }
+        semaObj = it->second;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(semaObj->Mutex);
+        semaObj->Count = std::min(semaObj->MaxCount, semaObj->Count + count);
+    }
+    semaObj->Cv.notify_all();
+    return 0;
+}
+
+int32_t OsSubsystemStubs::NamedSemaClose(uint64_t handle) {
+    std::lock_guard<std::mutex> lock(gNamedSemaMutex);
+    return gSemaHandles.erase(handle) > 0 ? 0 : -1;
+}
+
 uint64_t OsSubsystemStubs::GetMonotonicClockMicroseconds() {
     auto now = std::chrono::steady_clock::now();
     return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count());

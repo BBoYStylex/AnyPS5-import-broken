@@ -53,6 +53,12 @@ int32_t aps5_sys_named_event_set(uint64_t eventHandle);
 int32_t aps5_sys_named_event_reset(uint64_t eventHandle);
 int32_t aps5_sys_named_event_wait(uint64_t eventHandle, uint64_t timeoutMicroseconds);
 int32_t aps5_sys_named_event_close(uint64_t eventHandle);
+int32_t aps5_sys_named_sema_create(const char* name, uint32_t attributes, int32_t initCount, int32_t maxCount, uint64_t* outSemaHandle);
+int32_t aps5_sys_named_sema_open(const char* name, uint32_t flags, uint64_t* outSemaHandle);
+int32_t aps5_sys_named_sema_delete(const char* name);
+int32_t aps5_sys_named_sema_wait(uint64_t semaHandle, uint64_t timeoutMicroseconds);
+int32_t aps5_sys_named_sema_signal(uint64_t semaHandle, int32_t count);
+int32_t aps5_sys_named_sema_close(uint64_t semaHandle);
 }
 
 #endif

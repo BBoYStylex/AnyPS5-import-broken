@@ -274,4 +274,28 @@ int32_t aps5_sys_named_event_close(uint64_t eventHandle) {
     return Aot::Runtime::OsSubsystemStubs::NamedEventClose(eventHandle);
 }
 
+int32_t aps5_sys_named_sema_create(const char* name, uint32_t attributes, int32_t initCount, int32_t maxCount, uint64_t* outSemaHandle) {
+    return Aot::Runtime::OsSubsystemStubs::NamedSemaCreate(name, attributes, initCount, maxCount, outSemaHandle);
+}
+
+int32_t aps5_sys_named_sema_open(const char* name, uint32_t flags, uint64_t* outSemaHandle) {
+    return Aot::Runtime::OsSubsystemStubs::NamedSemaOpen(name, flags, outSemaHandle);
+}
+
+int32_t aps5_sys_named_sema_delete(const char* name) {
+    return Aot::Runtime::OsSubsystemStubs::NamedSemaDelete(name);
+}
+
+int32_t aps5_sys_named_sema_wait(uint64_t semaHandle, uint64_t timeoutMicroseconds) {
+    return Aot::Runtime::OsSubsystemStubs::NamedSemaWait(semaHandle, timeoutMicroseconds);
+}
+
+int32_t aps5_sys_named_sema_signal(uint64_t semaHandle, int32_t count) {
+    return Aot::Runtime::OsSubsystemStubs::NamedSemaSignal(semaHandle, count);
+}
+
+int32_t aps5_sys_named_sema_close(uint64_t semaHandle) {
+    return Aot::Runtime::OsSubsystemStubs::NamedSemaClose(semaHandle);
+}
+
 }

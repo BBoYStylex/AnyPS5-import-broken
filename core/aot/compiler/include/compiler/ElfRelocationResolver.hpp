@@ -50,6 +50,9 @@ public:
     bool LoadSymbolsAndRelocations(const ParsedElfBinary& binary, std::span<const uint8_t> binaryData);
     size_t ApplyRelocations(ParsedElfBinary& binary, uint64_t newBaseAddress);
 
+    void SetImportedSymbol(std::string_view name, uint64_t address);
+    [[nodiscard]] std::optional<uint64_t> FindImportedSymbol(std::string_view name) const;
+
     [[nodiscard]] const std::vector<ElfSymbolInfo>& GetSymbols() const { return symbols; }
     [[nodiscard]] const std::vector<ElfRelocationEntry>& GetRelocations() const { return relocations; }
 
