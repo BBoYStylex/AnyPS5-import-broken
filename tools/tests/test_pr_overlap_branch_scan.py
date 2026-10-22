@@ -20,7 +20,8 @@ def run(*args):
 
 def write(path, text):
     Path(path).parent.mkdir(parents=True, exist_ok=True)
-    Path(path).write_text(text, encoding="utf-8", newline="\n")
+    with open(path, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(text)
 
 
 def commit_on_base(base, message, files):
