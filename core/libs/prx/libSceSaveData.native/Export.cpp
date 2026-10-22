@@ -18,6 +18,7 @@
 #include <string>
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
+#include "prx/libc/include/RemoveTree.hpp"
 #include "prx/libkernel/AppMetadata/include/AppMetadata.hpp"
 #include "SaveData.hpp"
 #include "prx/libSceSaveData/SaveDataFile.hpp"
@@ -340,7 +341,7 @@ static int deleteSave(const SaveDataDelete* del) {
     std::lock_guard lock(g_slots_mutex);
     if (isMountedDirectory(path)) return SAVE_DATA_ERROR_BUSY;
     if (std::filesystem::is_directory(path)) {
-        std::filesystem::remove_all(path);
+        RemoveTree(path);
     }
     std::error_code ec;
     std::filesystem::remove(param_path(path), ec);
@@ -360,7 +361,7 @@ int APS5_VABI sceSaveDataDeleteTransactionResource(int32_t resource) {
     return SAVE_DATA_OK;
 }
 
-static constexpr std::uint64_t SAVE_DATA_BLOCK_BYTES = 32768;
+static constexpr std::uint64_t SAVE_DATA_BLOCK_BYTES = 65536;
 
 static std::uint64_t save_blocks(const std::string& real_path) {
     std::ifstream file(blocks_path(real_path));
@@ -590,7 +591,7 @@ int APS5_VABI sceSaveDataInitialize3(const void* init) {
 int APS5_VABI sceSaveDataLoadIcon(const SaveDataMountPoint* mount_point, SaveDataIcon* icon) {
     (void)icon;
     if (mount_point == nullptr) {
-        throw std::runtime_error("sceSaveDataLoadIcon: null mount_point");
+        return SAVE_DATA_ERROR_PARAMETER;
     }
     std::lock_guard lock(g_slots_mutex);
     if (find_slot_by_mount_point(mount_point->data) == -1) {
@@ -672,7 +673,7 @@ int APS5_VABI sceSaveDataPrepare(const SaveDataMountPoint* mount_point, const Sa
 int APS5_VABI sceSaveDataSaveIcon(const SaveDataMountPoint* mount_point, const SaveDataIcon* icon) {
     (void)icon;
     if (mount_point == nullptr) {
-        throw std::runtime_error("sceSaveDataSaveIcon: null mount_point");
+        return SAVE_DATA_ERROR_PARAMETER;
     }
     std::lock_guard lock(g_slots_mutex);
     if (find_slot_by_mount_point(mount_point->data) == -1) {
@@ -689,7 +690,7 @@ int APS5_VABI sceSaveDataSaveIconByPath(const SaveDataMountPoint* mount_point, c
 
 static int setParam(const SaveDataMountPoint* mount_point, uint32_t param_type, const void* param_buf, size_t param_buf_size) {
     if (mount_point == nullptr || param_buf == nullptr) {
-        throw std::runtime_error("sceSaveDataSetParam: null argument");
+        return SAVE_DATA_ERROR_PARAMETER;
     }
     std::lock_guard lock(g_slots_mutex);
     const int slot = find_slot_by_mount_point(mount_point->data);
@@ -895,7 +896,7 @@ int APS5_VABI sceSaveDataTransferringMount(const SaveDataTransferringMount* moun
 static int umount2(uint32_t mode, const SaveDataMountPoint* mount_point) {
     (void)mode;
     if (mount_point == nullptr) {
-        throw std::runtime_error("sceSaveDataUmount2: null mount_point");
+        return SAVE_DATA_ERROR_PARAMETER;
     }
     std::lock_guard lock(g_slots_mutex);
     int slot = find_slot_by_mount_point(mount_point->data);
@@ -977,7 +978,7 @@ int APS5_VABI sceSaveDataGetConvertProgress(float* progress) {
     return rc;
 }
 
-int APS5_VABI sceSaveDataCancel() {
+int APS5_VABI sceSaveDataCancel(std::uint32_t cancelArgument) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -988,8 +989,44 @@ int APS5_VABI sceSaveDataDirNameSearch2(const SaveDataDirNameSearchCond* cond, S
     return rc;
 }
 
-int APS5_VABI sceSaveDataPrepareForTransferring() {
+int APS5_VABI sceSaveDataPrepareForTransferring(const SaveDataMountPoint* mountPoint, const SaveDataPrepareParam* param) {
     NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceSaveDataCheckIpmiIfSize() {
+    return 0;
+}
+
+int APS5_VABI sceSaveDataDebug() {
+    return 0;
+}
+
+int APS5_VABI sceSaveDataDebugCheckBackupData() {
+    return 0;
+}
+
+int APS5_VABI sceSaveDataDebugCleanMount() {
+    return 0;
+}
+
+int APS5_VABI sceSaveDataDebugCompiledSdkVersion() {
+    return 0;
+}
+
+int APS5_VABI sceSaveDataDebugCreateSaveDataRoot() {
+    return 0;
+}
+
+int APS5_VABI sceSaveDataDebugProspero() {
+    return 0;
+}
+
+int APS5_VABI sceSaveDataDebugRemoveSaveDataRoot() {
+    return 0;
+}
+
+int APS5_VABI sceSaveDataDebugTarget() {
     return 0;
 }
 

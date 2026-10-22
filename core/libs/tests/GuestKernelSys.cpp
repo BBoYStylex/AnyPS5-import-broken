@@ -1,4 +1,6 @@
+#include "SceTypes.hpp"
 #include "prx/libc/include/general/VabiMacros.hpp"
+#include "prx/libc/include/RemoveTree.hpp"
 #include "prx/libkernel/File/include/FileFlags.hpp"
 #include "SceTypes.hpp"
 #include <array>
@@ -54,6 +56,7 @@ int APS5_VABI mkdirat_nid_postfix(int, const char*, std::uint16_t);
 int APS5_VABI renameat_nid_postfix(int, const char*, int, const char*);
 int APS5_VABI fchmodat_nid_postfix(int, const char*, int, int);
 int APS5_VABI fchown_nid_postfix(int, std::uint32_t, std::uint32_t);
+int APS5_VABI fstatat_nid_postfix(int, const char*, FileStat*, int);
 std::int64_t APS5_VABI sceKernelRead(int, void*, std::size_t);
 std::uint16_t APS5_VABI umask_nid_postfix(std::uint16_t);
 int* APS5_VABI __error_nid_postfix();
@@ -295,8 +298,16 @@ int main() {
     Require(readlink_nid_postfix(file.c_str(), buffer, sizeof(buffer)) == -1 && Error() == 22);
     Require(readlink_nid_postfix(root.string().c_str(), buffer, sizeof(buffer)) == -1 && Error() == 22);
     Require(readlink_nid_postfix((root / "missing").string().c_str(), buffer, sizeof(buffer)) == -1 && Error() == 2);
+    Require(readlink_nid_postfix((root / "file.txt" / "child").string().c_str(), buffer, sizeof(buffer)) == -1 && Error() == 20);
     Require(readlink_nid_postfix("", buffer, sizeof(buffer)) == -1 && Error() == 2);
     Require(readlink_nid_postfix(nullptr, buffer, sizeof(buffer)) == -1 && Error() == 14);
+    constexpr auto hugeSize = static_cast<std::size_t>(-1);
+    Require(readlink_nid_postfix(nullptr, buffer, hugeSize) == -1 && Error() == 22);
+    Require(readlink_nid_postfix("", buffer, hugeSize) == -1 && Error() == 22);
+    Require(readlink_nid_postfix((root / "missing").string().c_str(), buffer, hugeSize) == -1 && Error() == 22);
+    Require(readlinkat_nid_postfix(-100, nullptr, buffer, hugeSize) == -1 && Error() == 22);
+    Require(readlinkat_nid_postfix(-100, "", buffer, hugeSize) == -1 && Error() == 22);
+    Require(readlinkat_nid_postfix(-100, nullptr, buffer, sizeof(buffer)) == -1 && Error() == 14);
 #ifndef _WIN32
     Require(readlink_nid_postfix((root / std::string(300, 'n')).string().c_str(), buffer, sizeof(buffer)) == -1 && Error() == 63);
 #endif
@@ -384,6 +395,12 @@ int main() {
     Require(chroot_nid_postfix((root / "file.txt" / "..").string().c_str()) == -1 && Error() == 20);
     Require(chroot_nid_postfix((root / std::string(256, 'n')).string().c_str()) == -1 && Error() == 63);
     Require(chroot_nid_postfix(("/" + std::string(1024, 'p')).c_str()) == -1 && Error() == 63);
+    const std::string throughFile = (root / "file.txt" / "child").string();
+    Require(pathconf_nid_postfix(throughFile.c_str(), 4) == -1 && Error() == 20);
+    Require(fchmodat_nid_postfix(-100, throughFile.c_str(), 0600, 0) == -1 && Error() == 20);
+    Require(symlink_nid_postfix("target", throughFile.c_str()) == -1 && Error() == 20);
+    Require(link_nid_postfix(file.c_str(), throughFile.c_str()) == -1 && Error() == 20);
+    Require(link_nid_postfix(throughFile.c_str(), (root / "linked").string().c_str()) == -1 && Error() == 20);
     Require(ChrootThrows(root.string()));
     Require(ChrootThrows("/" + root.filename().string() + "/."));
     const auto guestRoot = "/" + root.filename().string();
@@ -478,6 +495,12 @@ int main() {
     Require(sceKernelClose(made) == 0);
     Require(openat_nid_postfix(base, "made.bin", SCE_KERNEL_O_WRONLY | SCE_KERNEL_O_CREAT | SCE_KERNEL_O_EXCL, 0644) == -1 && Error() == 17);
     Require(openat_nid_postfix(base, "missing.bin", SCE_KERNEL_O_RDONLY) == -1 && Error() == 2);
+    Require(openat_nid_postfix(base, "file.txt", SCE_KERNEL_O_ACCMODE) == -1 && Error() == 22);
+    Require(openat_nid_postfix(base, "absent.bin", SCE_KERNEL_O_WRONLY | SCE_KERNEL_O_CREAT | SCE_KERNEL_O_EXCL | SCE_KERNEL_O_DIRECTORY, 0644) == -1 && Error() == 22);
+    Require(openat_nid_postfix(base, nullptr, SCE_KERNEL_O_ACCMODE) == -1 && Error() == 22);
+    Require(openat_nid_postfix(base, "", SCE_KERNEL_O_ACCMODE) == -1 && Error() == 22);
+    Require(openat_nid_postfix(9999, "", SCE_KERNEL_O_WRONLY | SCE_KERNEL_O_CREAT | SCE_KERNEL_O_EXCL | SCE_KERNEL_O_DIRECTORY, 0644) == -1 && Error() == 22);
+    Require(openat_nid_postfix(-100, nullptr, SCE_KERNEL_O_ACCMODE) == -1 && Error() == 22);
     const auto guestFile = "/" + root.filename().string() + "/file.txt";
     const int absolute = openat_nid_postfix(-1, guestFile.c_str(), SCE_KERNEL_O_RDONLY);
     Require(absolute >= 0 && sceKernelClose(absolute) == 0);
@@ -488,6 +511,7 @@ int main() {
     Require(openat_nid_postfix(plain, "file.txt", SCE_KERNEL_O_RDONLY) == -1 && Error() == 20);
     Require(readlinkat_nid_postfix(base, "file.txt", buffer, sizeof(buffer)) == -1 && Error() == 22);
     Require(readlinkat_nid_postfix(base, "missing.bin", buffer, sizeof(buffer)) == -1 && Error() == 2);
+    Require(readlinkat_nid_postfix(base, "file.txt/child", buffer, sizeof(buffer)) == -1 && Error() == 20);
     Require(readlinkat_nid_postfix(plain, "file.txt", buffer, sizeof(buffer)) == -1 && Error() == 20);
     Require(readlinkat_nid_postfix(-1, "file.txt", buffer, sizeof(buffer)) == -1 && Error() == 9);
     Require(readlinkat_nid_postfix(base, nullptr, buffer, sizeof(buffer)) == -1 && Error() == 14);
@@ -628,6 +652,29 @@ int main() {
     fchownThrew = false;
     try { fchown_nid_postfix(base, 0, 1); } catch (const std::exception&) { fchownThrew = true; }
     Require(fchownThrew);
+    FileStat stat{};
+    Require(fstatat_nid_postfix(base, "file.txt", &stat, 0) == 0 && (stat.st_mode & 0170000) == 0100000 && stat.st_size == 1);
+    Require(fstatat_nid_postfix(base, "other_dir", &stat, 0) == 0 && (stat.st_mode & 0170000) == 0040000);
+    Require(fstatat_nid_postfix(base, "other_dir/", &stat, 0) == 0 && (stat.st_mode & 0170000) == 0040000);
+    Require(fstatat_nid_postfix(base, "file.txt/", &stat, 0) == -1 && Error() == 20);
+    Require(fstatat_nid_postfix(base, "file.txt", &stat, 0x0200) == 0 && (stat.st_mode & 0170000) == 0100000);
+    Require(fstatat_nid_postfix(-100, file.c_str(), &stat, 0) == 0 && stat.st_size == 1);
+    Require(fstatat_nid_postfix(-1, guestFile.c_str(), &stat, 0) == 0 && stat.st_size == 1);
+    Require(fstatat_nid_postfix(base, "missing.bin", &stat, 0) == -1 && Error() == 2);
+    Require(fstatat_nid_postfix(base, "missing.bin", &stat, 0x0200) == -1 && Error() == 2);
+    Require(fstatat_nid_postfix(base, nullptr, &stat, 0) == -1 && Error() == 14);
+    Require(fstatat_nid_postfix(base, "", &stat, 0) == -1 && Error() == 2);
+    Require(fstatat_nid_postfix(base, "file.txt", &stat, 0x4000) == -1 && Error() == 22);
+    Require(fstatat_nid_postfix(-1, "file.txt", &stat, 0) == -1 && Error() == 9);
+    const int notDirectory = sceKernelOpen(file.c_str(), SCE_KERNEL_O_RDONLY, 0);
+    Require(notDirectory >= 0);
+    Require(fstatat_nid_postfix(notDirectory, "file.txt", &stat, 0) == -1 && Error() == 20);
+    Require(sceKernelClose(notDirectory) == 0);
+#ifndef _WIN32
+    Require(symlink_nid_postfix("file.txt", (root / "link.txt").string().c_str()) == 0);
+    Require(fstatat_nid_postfix(base, "link.txt", &stat, 0) == 0 && (stat.st_mode & 0170000) == 0100000 && stat.st_size == 1);
+    Require(fstatat_nid_postfix(base, "link.txt", &stat, 0x0200) == 0 && (stat.st_mode & 0170000) == 0120000);
+#endif
     Require(sceKernelClose(base) == 0);
 #ifdef _WIN32
     const auto junctionTarget = root / "junction-target";
@@ -658,16 +705,6 @@ int main() {
         Require(!std::filesystem::exists(std::filesystem::symlink_status(throughLink)));
     }
 #endif
-#ifdef _WIN32
-    // std::filesystem::remove_all loops forever when the tree contains a
-    // dangling symbolic link: fs::remove reports such a link as missing and
-    // clears the error, so recursive_directory_iterator::__erase keeps
-    // retrying it. The fixture always contains dangling links here, so
-    // remove it through the shell instead.
-    const auto cleanup = L"cmd /c rd /s /q \"" + root.wstring() + L"\"";
-    Require(_wsystem(cleanup.c_str()) == 0);
-#else
-    std::filesystem::remove_all(root);
-#endif
+    RemoveTree(root);
     return 0;
 }
