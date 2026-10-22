@@ -23,6 +23,7 @@
 - [sceNetPppoeStart](../../../core/libs/prx/libSceNet/Export.cpp): seven arguments are confirmed, including the parameter pointer on the stack. The 272-byte parameter contains two DNS addresses, two 128-byte credential arrays, MTU and flags. Callback arguments are user data, event and error; the two unused thread-option meanings remain unresolved.
 - [sceNetConfigRoutingStart](../../../core/libs/prx/libSceNet/Export.cpp): five pointer/scalar arguments are confirmed. Input address data is eight bytes; the mutable server parameter is 20 bytes and duplicates its first address when its count is one. Optional rules contain a count and pointer to 20-byte records with protocol, two address/port pairs and flags. Layouts are defined; rule flag meanings and protocol-specific port interpretation remain unresolved.
 - [sceNetConfigRoutingShowRoutingConfig](../../../core/libs/prx/libSceNet/Export.cpp) (libSceNet) - the native routine consumes no arguments; the throwing implementation remains unchanged.
+- [sceNetSocketInternal, sceNetGetsockoptEx and sceNetSetsockoptEx](../../../core/libs/prx/libSceNet/Export.cpp) (libSceNet) - forward to sceNetSocket, sceNetGetsockopt and sceNetSetsockopt. Their restored argument lists match the public ones, and nothing in the tree records how the console tells these entry points apart from the public ones (for example by the calling process).
 
 ### Functional
 

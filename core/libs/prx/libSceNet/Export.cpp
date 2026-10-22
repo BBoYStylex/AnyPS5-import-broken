@@ -2417,8 +2417,7 @@ int APS5_VABI sceNetGetRouteInfo(std::int32_t family, NetRouteInfo* routes, std:
 }
 
 int APS5_VABI sceNetGetsockoptEx(int socketId, int level, int option, void* value, std::uint32_t* valueSize) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return sceNetGetsockopt(socketId, level, option, value, valueSize);
 }
 
 void APS5_VABI sceNetGetSystemTime(std::uint64_t* output) {
@@ -2484,13 +2483,11 @@ int APS5_VABI sceNetSetDnsInfoToKernel(const NetDnsInfo* info, std::uint32_t fla
 }
 
 int APS5_VABI sceNetSetsockoptEx(int socketId, int level, int option, const void* value, std::uint32_t valueSize) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return sceNetSetsockopt(socketId, level, option, value, valueSize);
 }
 
 int APS5_VABI sceNetSocketInternal(const char* name, int domain, int type, int protocol) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return sceNetSocket(name, domain, type, protocol);
 }
 
 int APS5_VABI sceNetSyncCreate(NetSyncObject* sync, std::uint32_t signals, const char* name) {
