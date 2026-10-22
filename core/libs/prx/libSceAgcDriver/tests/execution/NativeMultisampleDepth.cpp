@@ -1716,7 +1716,7 @@ void SubmitDriverDmaFill(std::uint64_t address, std::uint32_t bytes, std::uint32
     }
 }
 
-enum class DriverFill { Whole, Partial };
+enum class DriverFill { Whole, Partial, Queued };
 
 class DriverDepthTarget {
 public:
@@ -1825,6 +1825,13 @@ void CheckDriverPathTarget(const Context& context, Recorder& recorder, std::uint
         std::printf("Native depth on the driver's device samples=%u clear=%u: a DMA_DATA fill over half its HTILE refused\n", fragments, one);
         return;
     }
+    if (fill == DriverFill::Queued) {
+        target.Fill(DriverMetadataSpan);
+        Require(AgcDriver::DriverDetail::dmaFills.load() == fillsBefore + 1u, "a DMA_DATA fill of 128 KiB from the HTILE was not queued as a buffer fill");
+        target.Sample(std::nullopt, std::nullopt, "a queued DMA_DATA fill of 128 KiB from the HTILE through the driver");
+        std::printf("Native depth on the driver's device samples=%u clear=%u: cleared by a queued DMA_DATA fill of 128 KiB from its HTILE through the driver and sampled\n", fragments, one);
+        return;
+    }
     target.Fill(target.HtileBytes());
     Require(AgcDriver::DriverDetail::dmaFills.load() == fillsBefore, "a whole-HTILE DMA_DATA fill of 64 KiB or less was stored as a queued buffer fill");
     target.Sample(std::nullopt, std::nullopt, "a whole-HTILE DMA_DATA fill through the driver");
@@ -1832,7 +1839,7 @@ void CheckDriverPathTarget(const Context& context, Recorder& recorder, std::uint
     std::printf("Native depth on the driver's device samples=%u clear=%u: drawn, cleared by a DMA_DATA fill of its HTILE through the driver and sampled\n", fragments, one);
 }
 
-int CheckDriverPath() {
+int CheckDriverPath(bool queued) {
 #ifdef _WIN32
     _putenv_s("APS5_PIPELINED_DRAWS", "1");
     _putenv_s("APS5_PIPELINE_DMA", "1");
@@ -1854,9 +1861,9 @@ int CheckDriverPath() {
     std::uint32_t checked = 0u, unavailable = 0u;
     for (const auto samples : {2u, 4u, 8u}) {
         if (!supported(samples)) { unavailable += 2u; continue; }
-        for (const bool one : {false, true}) { CheckDriverPathTarget(context, *recorder, samples, one, DriverFill::Whole); ++checked; }
+        for (const bool one : {false, true}) { CheckDriverPathTarget(context, *recorder, samples, one, queued ? DriverFill::Queued : DriverFill::Whole); ++checked; }
     }
-    CheckDriverPathTarget(context, *recorder, 4u, false, DriverFill::Partial);
+    if (!queued) CheckDriverPathTarget(context, *recorder, 4u, false, DriverFill::Partial);
     AgcDriverWaitIdle_nid_postfix();
     std::printf("Native depth on the driver's device cases checked=%u unavailable=%u\n", checked, unavailable);
     return 0;
@@ -1866,7 +1873,8 @@ int CheckDriverPath() {
 
 int main(int argc, char** argv) {
     try {
-        if (argc == 2 && std::string_view(argv[1]) == "--driver-path") return CheckDriverPath();
+        if (argc == 2 && std::string_view(argv[1]) == "--driver-path") return CheckDriverPath(false);
+        if (argc == 2 && std::string_view(argv[1]) == "--driver-queued-fill") return CheckDriverPath(true);
         std::unique_ptr<Device> device;
         try { device = std::make_unique<Device>(); }
         catch (const std::exception& error) {
