@@ -156,8 +156,7 @@ void CheckLibrary(const std::filesystem::path& directory, const std::filesystem:
         Require(std::find(exported.begin(), exported.end(), nid) != exported.end(), library + " does not export the NID of " + name);
         Require(std::find(exported.begin(), exported.end(), name) == exported.end(), library + " still exports " + name + " under its plain name");
         const int status = RunChild(self, directory, library, index);
-        if (status == 4) throw Skipped(library + " cannot be loaded outside the guest's loader, so the refusal cannot be called");
-        Require(status != 0, library + " exports " + name + " as something other than a pending export (the child ended with " + std::to_string(status) + ")");
+        Require(status != 0 && status != 4, library + " exports " + name + " as something other than a pending export (the child ended with " + std::to_string(status) + ")");
         ++refused;
     }
     Require(refused == names.size(), library + " did not refuse every export");
@@ -772,31 +771,26 @@ const std::vector<const char*> libSceIpmiNames{
 
 int main(int argc, char** argv) {
     if (argc == 4) {
-        const std::filesystem::path directory(argv[1]);
-        const std::string library(argv[2]);
-        const auto module = Load(directory / (library + ".prx"));
-        if (module == nullptr) return 4;
-        const auto& names = library == "libSceGLSlimVSH" ? libSceGLSlimVSHNames : libSceIpmiNames;
         std::size_t index = 0;
         for (const char* digit = argv[3]; *digit != '\0'; ++digit) {
             if (*digit < '0' || *digit > '9') return 4;
             index = index * 10u + static_cast<std::size_t>(*digit - '0');
         }
+        const auto& names = std::strcmp(argv[2], "libSceGLSlimVSH") == 0 ? libSceGLSlimVSHNames : libSceIpmiNames;
         if (index >= names.size()) return 4;
-        const auto nid = Nid::ComputeNid(names[index], "");
+        const auto libraryPath = std::filesystem::path(argv[1]) / (std::string(argv[2]) + ".prx");
+        char nid[64] = {};
+        std::snprintf(nid, sizeof(nid), "%s", Nid::ComputeNid(names[index], "").c_str());
+        const auto module = Load(libraryPath);
+        if (module == nullptr) return 4;
         const auto exportFunction = Resolve(module, nid);
         if (exportFunction == nullptr) return 4;
         using GuestSetTerminate = void (*)(void (*)());
         const auto guestSetTerminate = reinterpret_cast<GuestSetTerminate>(
-            Resolve(module, Nid::ComputeNid("_ZSt13set_terminatePFvvE", "")));
+            Resolve(module, "NG1phipELJE"));
         const auto refuse = []() { std::_Exit(3); };
         if (guestSetTerminate != nullptr) guestSetTerminate(refuse);
         std::set_terminate(refuse);
-        {
-            std::ofstream file(std::filesystem::temp_directory_path() / "sdk-export-reached.txt");
-            file << "reached";
-            file.flush();
-        }
         exportFunction();
         return 0;
     }
@@ -810,9 +804,6 @@ int main(int argc, char** argv) {
         CheckLibrary(directory, self, "libSceGLSlimVSH", libSceGLSlimVSHNames);
         CheckLibrary(directory, self, "libSceIpmi", libSceIpmiNames);
         std::cout << "SDK export coverage passed\n";
-    } catch (const Skipped& skipped) {
-        std::cout << "skipped, " << skipped.what() << '\n';
-        return 77;
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;

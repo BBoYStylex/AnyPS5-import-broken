@@ -708,6 +708,7 @@ if(BUILD_TESTING)
         ${PATCHED_DIR}/libc.prx ${PATCHED_DIR}/libkernel.prx)
     add_dependencies(sdk_missing_exports_tests sdk_missing_exports_libraries)
     add_test(NAME sdk_missing_exports COMMAND sdk_missing_exports_tests ${PATCHED_DIR})
+    set_tests_properties(sdk_missing_exports PROPERTIES SKIP_RETURN_CODE 77)
     if(WIN32)
         set_tests_properties(sdk_missing_exports PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${PATCHED_DIR}")
