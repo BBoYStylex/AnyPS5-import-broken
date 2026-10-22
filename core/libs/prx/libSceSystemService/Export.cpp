@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <ctime>
 #include <filesystem>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -57,6 +58,9 @@ ConsoleTimeZone HostTimeZone() {
 #endif
     return {static_cast<int>(offset.count()) - summerMinutes, summer};
 }
+
+std::mutex appSuspendBlockMutex;
+int appSuspendBlocks = 0;
 
 constexpr char MainExecutable[] = "/app0/eboot.bin";
 constexpr char ApplicationRoot[] = "/app0/";
@@ -292,6 +296,37 @@ int APS5_VABI sceSystemServiceGetStatus(SystemServiceStatus* status) {
  }
  *status = SystemServiceStatus{};
  return SYSTEM_SERVICE_OK;
+}
+
+int APS5_VABI sceLncUtilBlockAppSuspend(const char* reason) {
+    if (reason == nullptr) APS5_INVALID_ARG_EX;
+    std::lock_guard lock(appSuspendBlockMutex);
+    ++appSuspendBlocks;
+    return SYSTEM_SERVICE_OK;
+}
+
+int APS5_VABI sceLncUtilUnblockAppSuspend(const char* reason) {
+    if (reason == nullptr) APS5_INVALID_ARG_EX;
+    std::lock_guard lock(appSuspendBlockMutex);
+    if (appSuspendBlocks == 0) throw std::logic_error("sceLncUtilUnblockAppSuspend: no block to release");
+    --appSuspendBlocks;
+    return SYSTEM_SERVICE_OK;
+}
+
+int APS5_VABI sceLncUtilEnableSuspendNotification() {
+    return SYSTEM_SERVICE_OK;
+}
+
+int APS5_VABI sceLncUtilDisableSuspendNotification() {
+    return SYSTEM_SERVICE_OK;
+}
+
+int APS5_VABI sceSystemServiceEnableSuspendNotification() {
+    return sceLncUtilEnableSuspendNotification();
+}
+
+int APS5_VABI sceSystemServiceDisableSuspendNotification() {
+    return sceLncUtilDisableSuspendNotification();
 }
 
 int APS5_VABI sceSystemServiceHideSplashScreen(void) {

@@ -281,11 +281,6 @@ int APS5_VABI sceLncUtilAddLocalProcess(std::int32_t appId, const char* path, co
     return 0;
 }
 
-int APS5_VABI sceLncUtilBlockAppSuspend(const char* reason) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
 int APS5_VABI sceLncUtilBlockingGetEventForDaemon(LncDaemonEvent* event, std::uint64_t receiveArgument) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
@@ -307,16 +302,6 @@ int APS5_VABI sceLncUtilDeactivateCdlg() {
 }
 
 int APS5_VABI sceLncUtilDeclareReadyForSuspend() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceLncUtilDisableSuspendNotification() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceLncUtilEnableSuspendNotification() {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -642,11 +627,6 @@ int APS5_VABI sceLncUtilTerminate() {
 }
 
 int APS5_VABI sceLncUtilTryBlockAppSuspend(const char* reason) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceLncUtilUnblockAppSuspend(const char* reason) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -1928,11 +1908,6 @@ int APS5_VABI sceSystemServiceDisableSuspendConfirmationDialog() {
     return 0;
 }
 
-int APS5_VABI sceSystemServiceDisableSuspendNotification() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
 int APS5_VABI sceSystemServiceDisableVoiceRecognition() {
     return SystemServiceUnavailable;
 }
@@ -1943,11 +1918,6 @@ int APS5_VABI sceSystemServiceEnablePersonalEyeToEyeDistanceSetting() {
 }
 
 int APS5_VABI sceSystemServiceEnableSuspendConfirmationDialog() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceSystemServiceEnableSuspendNotification() {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
