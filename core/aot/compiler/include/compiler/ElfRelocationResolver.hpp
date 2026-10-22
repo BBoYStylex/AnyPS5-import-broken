@@ -23,7 +23,11 @@ enum class X86RelocationType : uint32_t {
     Relative = 8,
     GotPcRel = 9,
     Direct32 = 10,
-    Direct32Signed = 11
+    Direct32Signed = 11,
+    TpOff64 = 18,
+    GotTpOff = 22,
+    TpOff32 = 23,
+    Pc64 = 24
 };
 
 struct ElfSymbolInfo {
@@ -51,7 +55,16 @@ public:
     size_t ApplyRelocations(ParsedElfBinary& binary, uint64_t newBaseAddress);
 
     void SetImportedSymbol(std::string_view name, uint64_t address);
+    void SetImportedSymbols(const std::unordered_map<std::string, uint64_t>& symbols);
     [[nodiscard]] std::optional<uint64_t> FindImportedSymbol(std::string_view name) const;
+    [[nodiscard]] const std::unordered_map<std::string, uint64_t>& GetImportedSymbols() const { return importedSymbols; }
+
+    void SetTlsBaseAddress(uint64_t address);
+    [[nodiscard]] uint64_t GetTlsBaseAddress() const;
+
+    void AddRelocation(const ElfRelocationEntry& entry);
+    void AddSymbol(const ElfSymbolInfo& symbol);
+    void Clear();
 
     [[nodiscard]] const std::vector<ElfSymbolInfo>& GetSymbols() const { return symbols; }
     [[nodiscard]] const std::vector<ElfRelocationEntry>& GetRelocations() const { return relocations; }
@@ -60,6 +73,7 @@ private:
     std::vector<ElfSymbolInfo> symbols;
     std::vector<ElfRelocationEntry> relocations;
     std::unordered_map<std::string, uint64_t> importedSymbols;
+    uint64_t tlsBaseAddress = 0;
 };
 
 } // namespace Aot::Compiler

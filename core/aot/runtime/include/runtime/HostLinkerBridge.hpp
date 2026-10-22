@@ -20,9 +20,15 @@ public:
     void RegisterNid(std::string_view libraryName, std::string_view nid, HostFunctionPointer functionPtr);
 
     [[nodiscard]] HostFunctionPointer ResolveSymbol(std::string_view libraryName, std::string_view symbolName) const;
+    [[nodiscard]] HostFunctionPointer ResolveSymbol(std::string_view symbolName) const;
     [[nodiscard]] HostFunctionPointer ResolveNid(std::string_view libraryName, std::string_view nid) const;
+    [[nodiscard]] HostFunctionPointer ResolveNid(std::string_view nid) const;
+
+    [[nodiscard]] std::unordered_map<std::string, uint64_t> ExportSymbolTable() const;
 
     [[nodiscard]] size_t GetRegisteredCount() const;
+    [[nodiscard]] size_t GetExportCount() const;
+    [[nodiscard]] size_t GetNidCount() const;
 
 private:
     HostLinkerBridge();

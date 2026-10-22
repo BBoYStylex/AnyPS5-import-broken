@@ -88,6 +88,12 @@ void ElfRelocationResolver::SetImportedSymbol(std::string_view name, uint64_t ad
     importedSymbols[std::string(name)] = address;
 }
 
+void ElfRelocationResolver::SetImportedSymbols(const std::unordered_map<std::string, uint64_t>& symbols) {
+    for (const auto& [name, address] : symbols) {
+        importedSymbols[name] = address;
+    }
+}
+
 std::optional<uint64_t> ElfRelocationResolver::FindImportedSymbol(std::string_view name) const {
     auto it = importedSymbols.find(std::string(name));
     if (it != importedSymbols.end()) {
@@ -96,13 +102,45 @@ std::optional<uint64_t> ElfRelocationResolver::FindImportedSymbol(std::string_vi
     return std::nullopt;
 }
 
+void ElfRelocationResolver::SetTlsBaseAddress(uint64_t address) {
+    tlsBaseAddress = address;
+}
+
+uint64_t ElfRelocationResolver::GetTlsBaseAddress() const {
+    return tlsBaseAddress;
+}
+
+void ElfRelocationResolver::AddRelocation(const ElfRelocationEntry& entry) {
+    relocations.push_back(entry);
+}
+
+void ElfRelocationResolver::AddSymbol(const ElfSymbolInfo& symbol) {
+    symbols.push_back(symbol);
+}
+
+void ElfRelocationResolver::Clear() {
+    symbols.clear();
+    relocations.clear();
+    importedSymbols.clear();
+    tlsBaseAddress = 0;
+}
+
 size_t ElfRelocationResolver::ApplyRelocations(ParsedElfBinary& binary, uint64_t newBaseAddress) {
     size_t appliedCount = 0;
 
     for (const auto& rel : relocations) {
+        size_t requiredSize = (rel.Type == X86RelocationType::Direct32 ||
+                               rel.Type == X86RelocationType::Direct32Signed ||
+                               rel.Type == X86RelocationType::PcRelative32 ||
+                               rel.Type == X86RelocationType::Plt32 ||
+                               rel.Type == X86RelocationType::TpOff32 ||
+                               rel.Type == X86RelocationType::GotTpOff)
+                              ? sizeof(uint32_t)
+                              : sizeof(uint64_t);
+
         for (auto& section : binary.Sections) {
             if (rel.Offset >= section.VirtualAddress &&
-                rel.Offset + sizeof(uint64_t) <= section.VirtualAddress + section.Data.size()) {
+                rel.Offset + requiredSize <= section.VirtualAddress + section.Data.size()) {
 
                 size_t offsetInSection = static_cast<size_t>(rel.Offset - section.VirtualAddress);
                 uint8_t* targetBytes = section.Data.data() + offsetInSection;
@@ -128,12 +166,30 @@ size_t ElfRelocationResolver::ApplyRelocations(ParsedElfBinary& binary, uint64_t
                     uint64_t resolvedValue = (symVal != 0 ? symVal : newBaseAddress) + static_cast<uint64_t>(rel.Addend);
                     std::memcpy(targetBytes, &resolvedValue, sizeof(uint64_t));
                     ++appliedCount;
-                } else if (rel.Type == X86RelocationType::Direct32) {
+                } else if (rel.Type == X86RelocationType::Direct32 ||
+                           rel.Type == X86RelocationType::Direct32Signed) {
                     uint32_t resolvedValue = static_cast<uint32_t>((symVal != 0 ? symVal : newBaseAddress) + rel.Addend);
                     std::memcpy(targetBytes, &resolvedValue, sizeof(uint32_t));
                     ++appliedCount;
-                } else if (rel.Type == X86RelocationType::PcRelative32) {
+                } else if (rel.Type == X86RelocationType::PcRelative32 ||
+                           rel.Type == X86RelocationType::Plt32) {
                     uint32_t resolvedValue = static_cast<uint32_t>((symVal != 0 ? symVal : newBaseAddress) + rel.Addend - rel.Offset);
+                    std::memcpy(targetBytes, &resolvedValue, sizeof(uint32_t));
+                    ++appliedCount;
+                } else if (rel.Type == X86RelocationType::Pc64) {
+                    uint64_t resolvedValue = (symVal != 0 ? symVal : newBaseAddress) + static_cast<uint64_t>(rel.Addend) - rel.Offset;
+                    std::memcpy(targetBytes, &resolvedValue, sizeof(uint64_t));
+                    ++appliedCount;
+                } else if (rel.Type == X86RelocationType::TpOff32) {
+                    int32_t resolvedValue = static_cast<int32_t>((symVal != 0 ? symVal : 0) + rel.Addend - tlsBaseAddress);
+                    std::memcpy(targetBytes, &resolvedValue, sizeof(int32_t));
+                    ++appliedCount;
+                } else if (rel.Type == X86RelocationType::TpOff64) {
+                    int64_t resolvedValue = static_cast<int64_t>((symVal != 0 ? symVal : 0) + rel.Addend - tlsBaseAddress);
+                    std::memcpy(targetBytes, &resolvedValue, sizeof(int64_t));
+                    ++appliedCount;
+                } else if (rel.Type == X86RelocationType::GotTpOff) {
+                    uint32_t resolvedValue = static_cast<uint32_t>((symVal != 0 ? symVal : 0) + rel.Addend - rel.Offset);
                     std::memcpy(targetBytes, &resolvedValue, sizeof(uint32_t));
                     ++appliedCount;
                 }

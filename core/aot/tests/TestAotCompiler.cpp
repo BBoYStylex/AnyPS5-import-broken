@@ -4,6 +4,7 @@
 #include <compiler/AotCompilerDriver.hpp>
 #include <cassert>
 #include <vector>
+#include <cstring>
 
 int main() {
     auto& registry = Aot::Compiler::SyscallRegistry::Instance();
@@ -43,6 +44,132 @@ int main() {
     assert(foundSym.has_value());
     assert(*foundSym == 0x7FFF0000ULL);
     assert(!resolver.FindImportedSymbol("nonExistent").has_value());
+
+    std::unordered_map<std::string, uint64_t> batchSymbols = {
+        {"sceKernelCreateEqueue", 0x7FFF1000ULL},
+        {"sceKernelDeleteEqueue", 0x7FFF2000ULL}
+    };
+    resolver.SetImportedSymbols(batchSymbols);
+    assert(resolver.FindImportedSymbol("sceKernelCreateEqueue") == 0x7FFF1000ULL);
+    assert(resolver.FindImportedSymbol("sceKernelDeleteEqueue") == 0x7FFF2000ULL);
+    assert(resolver.GetImportedSymbols().size() == 3);
+
+    resolver.SetTlsBaseAddress(0x40);
+    assert(resolver.GetTlsBaseAddress() == 0x40);
+
+    resolver.AddSymbol(Aot::Compiler::ElfSymbolInfo{
+        .Name = "sceKernelExitProcess",
+        .Value = 0,
+        .Size = 8,
+        .Binding = 1,
+        .Type = 2,
+        .SectionIndex = 1
+    });
+    resolver.AddSymbol(Aot::Compiler::ElfSymbolInfo{
+        .Name = "tls_var_1",
+        .Value = 0x100,
+        .Size = 4,
+        .Binding = 1,
+        .Type = 6,
+        .SectionIndex = 2
+    });
+
+    resolver.AddRelocation(Aot::Compiler::ElfRelocationEntry{
+        .Offset = 0x1000,
+        .SymbolIndex = 0,
+        .Type = Aot::Compiler::X86RelocationType::Relative,
+        .Addend = 0x20
+    });
+    resolver.AddRelocation(Aot::Compiler::ElfRelocationEntry{
+        .Offset = 0x1008,
+        .SymbolIndex = 0,
+        .Type = Aot::Compiler::X86RelocationType::JumpSlot,
+        .Addend = 0
+    });
+    resolver.AddRelocation(Aot::Compiler::ElfRelocationEntry{
+        .Offset = 0x1010,
+        .SymbolIndex = 0,
+        .Type = Aot::Compiler::X86RelocationType::GlobDat,
+        .Addend = 0x10
+    });
+    resolver.AddRelocation(Aot::Compiler::ElfRelocationEntry{
+        .Offset = 0x1018,
+        .SymbolIndex = 0,
+        .Type = Aot::Compiler::X86RelocationType::Direct32,
+        .Addend = 0
+    });
+    resolver.AddRelocation(Aot::Compiler::ElfRelocationEntry{
+        .Offset = 0x1020,
+        .SymbolIndex = 0,
+        .Type = Aot::Compiler::X86RelocationType::PcRelative32,
+        .Addend = 0
+    });
+    resolver.AddRelocation(Aot::Compiler::ElfRelocationEntry{
+        .Offset = 0x1028,
+        .SymbolIndex = 1,
+        .Type = Aot::Compiler::X86RelocationType::TpOff32,
+        .Addend = 4
+    });
+    resolver.AddRelocation(Aot::Compiler::ElfRelocationEntry{
+        .Offset = 0x1030,
+        .SymbolIndex = 1,
+        .Type = Aot::Compiler::X86RelocationType::TpOff64,
+        .Addend = 8
+    });
+    resolver.AddRelocation(Aot::Compiler::ElfRelocationEntry{
+        .Offset = 0x1038,
+        .SymbolIndex = 0,
+        .Type = Aot::Compiler::X86RelocationType::Pc64,
+        .Addend = 0
+    });
+
+    Aot::Compiler::ElfSection synthSec{};
+    synthSec.VirtualAddress = 0x1000;
+    synthSec.Data.assign(64, 0);
+
+    Aot::Compiler::ParsedElfBinary synthBinary{};
+    synthBinary.Sections.push_back(synthSec);
+
+    size_t applied = resolver.ApplyRelocations(synthBinary, 0x400000ULL);
+    assert(applied == 8);
+
+    uint64_t val0 = 0;
+    std::memcpy(&val0, synthBinary.Sections[0].Data.data() + 0, sizeof(uint64_t));
+    assert(val0 == 0x400020ULL);
+
+    uint64_t val1 = 0;
+    std::memcpy(&val1, synthBinary.Sections[0].Data.data() + 8, sizeof(uint64_t));
+    assert(val1 == 0x7FFF0000ULL);
+
+    uint64_t val2 = 0;
+    std::memcpy(&val2, synthBinary.Sections[0].Data.data() + 16, sizeof(uint64_t));
+    assert(val2 == 0x7FFF0010ULL);
+
+    uint32_t val3 = 0;
+    std::memcpy(&val3, synthBinary.Sections[0].Data.data() + 24, sizeof(uint32_t));
+    assert(val3 == 0x7FFF0000U);
+
+    uint32_t val4 = 0;
+    std::memcpy(&val4, synthBinary.Sections[0].Data.data() + 32, sizeof(uint32_t));
+    assert(val4 == static_cast<uint32_t>(0x7FFF0000ULL - 0x1020ULL));
+
+    int32_t val5 = 0;
+    std::memcpy(&val5, synthBinary.Sections[0].Data.data() + 40, sizeof(int32_t));
+    assert(val5 == (0x100 + 4 - 0x40));
+
+    int64_t val6 = 0;
+    std::memcpy(&val6, synthBinary.Sections[0].Data.data() + 48, sizeof(int64_t));
+    assert(val6 == (0x100 + 8 - 0x40));
+
+    uint64_t val7 = 0;
+    std::memcpy(&val7, synthBinary.Sections[0].Data.data() + 56, sizeof(uint64_t));
+    assert(val7 == 0x7FFF0000ULL - 0x1038ULL);
+
+    resolver.Clear();
+    assert(resolver.GetSymbols().empty());
+    assert(resolver.GetRelocations().empty());
+    assert(resolver.GetImportedSymbols().empty());
+    assert(resolver.GetTlsBaseAddress() == 0);
 
     Aot::Compiler::CompilerOptions options{};
     assert(options.OptimizationLevel == 2);

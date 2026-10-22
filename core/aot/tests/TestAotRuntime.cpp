@@ -52,9 +52,26 @@ int main() {
     auto resolvedFunc = linker.ResolveSymbol("libkernel", "sceKernelExitProcess");
     assert(resolvedFunc == DummyExportFunction);
 
+    auto resolvedUnqualFunc = linker.ResolveSymbol("sceKernelExitProcess");
+    assert(resolvedUnqualFunc == DummyExportFunction);
+
     linker.RegisterNid("libkernel", "AC1FtjqMCL0", DummyExportFunction);
     auto resolvedNid = linker.ResolveNid("libkernel", "AC1FtjqMCL0");
     assert(resolvedNid == DummyExportFunction);
+
+    auto resolvedUnqualNid = linker.ResolveNid("AC1FtjqMCL0");
+    assert(resolvedUnqualNid == DummyExportFunction);
+
+    assert(linker.GetExportCount() >= 1);
+    assert(linker.GetNidCount() >= 1);
+    assert(linker.GetRegisteredCount() >= 2);
+
+    auto table = linker.ExportSymbolTable();
+    assert(table.contains("libkernel::sceKernelExitProcess"));
+    assert(table.contains("sceKernelExitProcess"));
+    assert(table.contains("libkernel::AC1FtjqMCL0"));
+    assert(table.contains("AC1FtjqMCL0"));
+    assert(table["sceKernelExitProcess"] == reinterpret_cast<uint64_t>(DummyExportFunction));
 
     std::atomic<int64_t> testAtomic{10};
     int64_t oldVal = Aot::Runtime::OsSubsystemStubs::AtomicAdd64(&testAtomic, 5);
