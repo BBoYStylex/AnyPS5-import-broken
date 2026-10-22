@@ -214,5 +214,48 @@ int main() {
     aps5_sys_named_sema_close(semaHandle);
     aps5_sys_named_sema_delete("TestSemaSync");
 
+    std::atomic<uint32_t> lockWord(0);
+    int32_t umtxTry = aps5_sys_umtx_op(&lockWord, 2, 0, nullptr, nullptr);
+    assert(umtxTry == 0);
+    assert(lockWord.load() == 1);
+
+    int32_t umtxTryFail = aps5_sys_umtx_op(&lockWord, 2, 0, nullptr, nullptr);
+    assert(umtxTryFail == -1);
+
+    int32_t umtxUnlock = aps5_sys_umtx_op(&lockWord, 4, 0, nullptr, nullptr);
+    assert(umtxUnlock == 0);
+    assert(lockWord.load() == 0);
+
+    int32_t umtxLock = aps5_sys_umtx_op(&lockWord, 3, 0, nullptr, nullptr);
+    assert(umtxLock == 0);
+    assert(lockWord.load() == 1);
+
+    umtxUnlock = aps5_sys_umtx_op(&lockWord, 4, 0, nullptr, nullptr);
+    assert(umtxUnlock == 0);
+
+    std::atomic<uint32_t> condVal(42);
+    int32_t umtxWaitMismatch = aps5_sys_umtx_op(&condVal, 0, 10, nullptr, nullptr);
+    assert(umtxWaitMismatch == -1);
+
+    uint64_t timeoutTs[2] = {0, 1000000};
+    int32_t umtxTimeout = aps5_sys_umtx_op(&condVal, 0, 42, nullptr, timeoutTs);
+    assert(umtxTimeout == -1);
+
+    int32_t umtxWake = aps5_sys_umtx_op(&condVal, 1, 1, nullptr, nullptr);
+    assert(umtxWake == 0);
+
+    std::atomic<uint32_t> semVal(1);
+    int32_t semWaitRes1 = aps5_sys_umtx_op(&semVal, 5, 0, nullptr, nullptr);
+    assert(semWaitRes1 == 0);
+    assert(semVal.load() == 0);
+
+    int32_t semWakeRes = aps5_sys_umtx_op(&semVal, 6, 0, nullptr, nullptr);
+    assert(semWakeRes == 0);
+    assert(semVal.load() == 1);
+
+    int32_t semWaitRes2 = aps5_sys_umtx_op(&semVal, 5, 0, nullptr, nullptr);
+    assert(semWaitRes2 == 0);
+    assert(semVal.load() == 0);
+
     return 0;
 }

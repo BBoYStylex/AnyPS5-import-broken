@@ -69,6 +69,8 @@ public:
     static int64_t AtomicAdd64(std::atomic<int64_t>* target, int64_t value);
     static int64_t AtomicExchange64(std::atomic<int64_t>* target, int64_t desired);
 
+    static int32_t UserMutexOperation(void* obj, int32_t op, uint64_t val, void* uaddr1, void* uaddr2);
+
 private:
     static std::atomic<bool> fallbackSuccess;
 };
@@ -77,6 +79,7 @@ private:
 
 extern "C" {
 int64_t aps5_syscall_unimplemented_fallback(uint32_t syscallId);
+int32_t aps5_sys_umtx_op(void* obj, int32_t op, uint64_t val, void* uaddr1, void* uaddr2);
 }
 
 #endif

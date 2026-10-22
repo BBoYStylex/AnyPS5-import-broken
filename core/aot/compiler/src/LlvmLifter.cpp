@@ -822,6 +822,41 @@ llvm::Function* LlvmLifter::liftFunctionAtAddress(
                     continue;
                 }
             }
+
+            if (regOp == 6 || regOp == 7) {
+                bool isSigned = (regOp == 7);
+                llvm::Value* divisor = nullptr;
+                size_t nextOffset = currentOffset + 2;
+                if (mod == 3) {
+                    divisor = lifterContext.ReadRegister(static_cast<X86Register>(rmField), builder);
+                } else {
+                    auto decoded = decodeAddress(codeBytes, currentOffset + 2, byteCount, mod, rmField, rexX, rexB, virtualAddress, builder, lifterContext);
+                    divisor = builder.CreateLoad(rexW ? builder.getInt64Ty() : builder.getInt32Ty(), decoded.Address);
+                    if (!rexW) {
+                        divisor = isSigned ? builder.CreateSExt(divisor, builder.getInt64Ty()) : builder.CreateZExt(divisor, builder.getInt64Ty());
+                    }
+                    nextOffset = currentOffset + 2 + decoded.ConsumedBytes;
+                }
+
+                llvm::Value* raxVal = lifterContext.ReadRegister(X86Register::Rax, builder);
+                llvm::Value* quot = nullptr;
+                llvm::Value* rem = nullptr;
+                if (rexW) {
+                    quot = isSigned ? builder.CreateSDiv(raxVal, divisor) : builder.CreateUDiv(raxVal, divisor);
+                    rem = isSigned ? builder.CreateSRem(raxVal, divisor) : builder.CreateURem(raxVal, divisor);
+                    lifterContext.WriteRegister(X86Register::Rax, quot, builder);
+                    lifterContext.WriteRegister(X86Register::Rdx, rem, builder);
+                } else {
+                    llvm::Value* eax = builder.CreateTrunc(raxVal, builder.getInt32Ty());
+                    llvm::Value* div32 = builder.CreateTrunc(divisor, builder.getInt32Ty());
+                    quot = isSigned ? builder.CreateSDiv(eax, div32) : builder.CreateUDiv(eax, div32);
+                    rem = isSigned ? builder.CreateSRem(eax, div32) : builder.CreateURem(eax, div32);
+                    lifterContext.WriteRegister(X86Register::Rax, builder.CreateZExt(quot, builder.getInt64Ty()), builder);
+                    lifterContext.WriteRegister(X86Register::Rdx, builder.CreateZExt(rem, builder.getInt64Ty()), builder);
+                }
+                offset = nextOffset;
+                continue;
+            }
         }
 
         if (currentOffset + 1 < byteCount) {
@@ -921,6 +956,21 @@ llvm::Function* LlvmLifter::liftFunctionAtAddress(
                     continue;
                 }
             }
+        }
+
+        if (byte == 0x99) {
+            llvm::Value* raxVal = lifterContext.ReadRegister(X86Register::Rax, builder);
+            if (rexW) {
+                llvm::Value* sign = builder.CreateAShr(raxVal, builder.getInt64(63));
+                lifterContext.WriteRegister(X86Register::Rdx, sign, builder);
+            } else {
+                llvm::Value* eax = builder.CreateTrunc(raxVal, builder.getInt32Ty());
+                llvm::Value* sign32 = builder.CreateAShr(eax, builder.getInt32(31));
+                llvm::Value* edx = builder.CreateSExt(sign32, builder.getInt64Ty());
+                lifterContext.WriteRegister(X86Register::Rdx, edx, builder);
+            }
+            offset = currentOffset + 1;
+            continue;
         }
 
         if (byte == 0xAA) {

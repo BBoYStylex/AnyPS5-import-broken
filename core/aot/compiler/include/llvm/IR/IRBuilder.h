@@ -130,6 +130,10 @@ public:
     Value* CreateShl(Value* lhs, Value* rhs) { return makeBinaryOp(lhs, rhs); }
     Value* CreateLShr(Value* lhs, Value* rhs) { return makeBinaryOp(lhs, rhs); }
     Value* CreateAShr(Value* lhs, Value* rhs) { return makeBinaryOp(lhs, rhs); }
+    Value* CreateUDiv(Value* lhs, Value* rhs) { return makeBinaryOp(lhs, rhs); }
+    Value* CreateSDiv(Value* lhs, Value* rhs) { return makeBinaryOp(lhs, rhs); }
+    Value* CreateURem(Value* lhs, Value* rhs) { return makeBinaryOp(lhs, rhs); }
+    Value* CreateSRem(Value* lhs, Value* rhs) { return makeBinaryOp(lhs, rhs); }
     Value* CreateFAdd(Value* lhs, Value* rhs) { return makeBinaryOp(lhs, rhs); }
     Value* CreateFSub(Value* lhs, Value* rhs) { return makeBinaryOp(lhs, rhs); }
     Value* CreateFMul(Value* lhs, Value* rhs) { return makeBinaryOp(lhs, rhs); }

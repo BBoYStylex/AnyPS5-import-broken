@@ -597,12 +597,166 @@ int64_t OsSubsystemStubs::AtomicExchange64(std::atomic<int64_t>* target, int64_t
     return target->exchange(desired, std::memory_order_seq_cst);
 }
 
+struct FutexObject {
+    std::mutex Mutex;
+    std::condition_variable Cv;
+};
+
+static std::unordered_map<void*, std::shared_ptr<FutexObject>> gFutexMap;
+static std::mutex gFutexMapMutex;
+
+static std::shared_ptr<FutexObject> GetOrCreateFutex(void* addr) {
+    std::lock_guard<std::mutex> lock(gFutexMapMutex);
+    auto it = gFutexMap.find(addr);
+    if (it != gFutexMap.end()) {
+        return it->second;
+    }
+    auto futex = std::make_shared<FutexObject>();
+    gFutexMap[addr] = futex;
+    return futex;
+}
+
+int32_t OsSubsystemStubs::UserMutexOperation(void* obj, int32_t op, uint64_t val, void* uaddr1, void* uaddr2) {
+    static_cast<void>(uaddr1);
+    if (obj == nullptr) {
+        return -1;
+    }
+
+    uint32_t rawOp = static_cast<uint32_t>(op) & 0xFF;
+    if (rawOp == 0 || rawOp == 15) {
+        auto* word = reinterpret_cast<std::atomic<uint32_t>*>(obj);
+        if (word->load(std::memory_order_relaxed) != static_cast<uint32_t>(val)) {
+            return -1;
+        }
+        auto futex = GetOrCreateFutex(obj);
+        std::unique_lock<std::mutex> lock(futex->Mutex);
+        if (word->load(std::memory_order_relaxed) != static_cast<uint32_t>(val)) {
+            return -1;
+        }
+        if (uaddr2 != nullptr) {
+            auto* timeoutTs = reinterpret_cast<const uint64_t*>(uaddr2);
+            uint64_t sec = timeoutTs[0];
+            uint64_t nsec = timeoutTs[1];
+            auto duration = std::chrono::seconds(sec) + std::chrono::nanoseconds(nsec);
+            if (futex->Cv.wait_for(lock, duration) == std::cv_status::timeout) {
+                return -1;
+            }
+        } else {
+            futex->Cv.wait(lock);
+        }
+        return 0;
+    }
+
+    if (rawOp == 1 || rawOp == 16) {
+        std::shared_ptr<FutexObject> futex;
+        {
+            std::lock_guard<std::mutex> lock(gFutexMapMutex);
+            auto it = gFutexMap.find(obj);
+            if (it != gFutexMap.end()) {
+                futex = it->second;
+            }
+        }
+        if (futex != nullptr) {
+            if (val == 1) {
+                futex->Cv.notify_one();
+            } else {
+                futex->Cv.notify_all();
+            }
+        }
+        return 0;
+    }
+
+    if (rawOp == 2) {
+        auto* word = reinterpret_cast<std::atomic<uint32_t>*>(obj);
+        uint32_t expected = 0;
+        if (word->compare_exchange_strong(expected, 1, std::memory_order_acquire)) {
+            return 0;
+        }
+        return -1;
+    }
+
+    if (rawOp == 3) {
+        auto* word = reinterpret_cast<std::atomic<uint32_t>*>(obj);
+        uint32_t expected = 0;
+        if (word->compare_exchange_strong(expected, 1, std::memory_order_acquire)) {
+            return 0;
+        }
+        auto futex = GetOrCreateFutex(obj);
+        std::unique_lock<std::mutex> lock(futex->Mutex);
+        while (true) {
+            expected = 0;
+            if (word->compare_exchange_strong(expected, 1, std::memory_order_acquire)) {
+                return 0;
+            }
+            futex->Cv.wait(lock);
+        }
+    }
+
+    if (rawOp == 4) {
+        auto* word = reinterpret_cast<std::atomic<uint32_t>*>(obj);
+        word->store(0, std::memory_order_release);
+        std::shared_ptr<FutexObject> futex;
+        {
+            std::lock_guard<std::mutex> lock(gFutexMapMutex);
+            auto it = gFutexMap.find(obj);
+            if (it != gFutexMap.end()) {
+                futex = it->second;
+            }
+        }
+        if (futex != nullptr) {
+            futex->Cv.notify_one();
+        }
+        return 0;
+    }
+
+    if (rawOp == 5) {
+        auto* word = reinterpret_cast<std::atomic<uint32_t>*>(obj);
+        while (true) {
+            uint32_t cur = word->load(std::memory_order_acquire);
+            if (cur > 0) {
+                if (word->compare_exchange_weak(cur, cur - 1, std::memory_order_acquire)) {
+                    return 0;
+                }
+                continue;
+            }
+            auto futex = GetOrCreateFutex(obj);
+            std::unique_lock<std::mutex> lock(futex->Mutex);
+            if (word->load(std::memory_order_relaxed) == 0) {
+                futex->Cv.wait(lock);
+            }
+        }
+    }
+
+    if (rawOp == 6) {
+        auto* word = reinterpret_cast<std::atomic<uint32_t>*>(obj);
+        word->fetch_add(1, std::memory_order_release);
+        std::shared_ptr<FutexObject> futex;
+        {
+            std::lock_guard<std::mutex> lock(gFutexMapMutex);
+            auto it = gFutexMap.find(obj);
+            if (it != gFutexMap.end()) {
+                futex = it->second;
+            }
+        }
+        if (futex != nullptr) {
+            futex->Cv.notify_one();
+        }
+        return 0;
+    }
+
+    return 0;
+}
+
 } // namespace Aot::Runtime
 
 extern "C" {
 
 int64_t aps5_syscall_unimplemented_fallback(uint32_t syscallId) {
     return Aot::Runtime::OsSubsystemStubs::HandleUnimplementedSyscall(syscallId);
+}
+
+int32_t aps5_sys_umtx_op(void* obj, int32_t op, uint64_t val, void* uaddr1, void* uaddr2) {
+    return Aot::Runtime::OsSubsystemStubs::UserMutexOperation(obj, op, val, uaddr1, uaddr2);
 }
 
 }

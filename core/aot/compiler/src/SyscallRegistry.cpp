@@ -51,6 +51,7 @@ SyscallRegistry::SyscallRegistry() {
     Register(577, "aps5_sys_named_sema_wait", 2, false);
     Register(578, "aps5_sys_named_sema_signal", 2, false);
     Register(579, "aps5_sys_named_sema_close", 1, false);
+    Register(454, "aps5_sys_umtx_op", 5, false);
 }
 
 void SyscallRegistry::Register(uint32_t syscallId, std::string_view nativeSymbol, uint32_t parameterCount, bool returnsVoid) {
