@@ -1,5 +1,6 @@
 #include "ElfFixture.hpp"
 #include "RelinkerProcess.hpp"
+#include "prx/libc/include/general/VabiMacros.hpp"
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -29,7 +30,7 @@ const Bytes kModuleCode = {
 constexpr std::uint64_t kSites[] = {10, 16};
 constexpr std::size_t kSiteLength = 6;
 
-using SseStub = std::uint64_t __attribute__((sysv_abi)) (std::uint64_t, std::uint64_t);
+using SseStub = std::uint64_t APS5_VABI (std::uint64_t, std::uint64_t);
 
 std::uint64_t expected(const std::uint64_t value, const std::uint64_t destination) {
     return (destination & ~0xFF0000ull) | (((value >> 8) & 0xFF) << 16);

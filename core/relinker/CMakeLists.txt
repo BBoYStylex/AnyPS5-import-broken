@@ -808,6 +808,7 @@ if(BUILD_TESTING)
         add_test_executable(to_intel_linux_stubs_tests
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/ToIntelLinuxStubsTests.cpp
         )
+        target_include_directories(to_intel_linux_stubs_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../libs)
         add_test(NAME to_intel_linux_stubs COMMAND to_intel_linux_stubs_tests $<TARGET_FILE:relinker>)
 
         add_test_executable(rela_bounds_tests
@@ -822,6 +823,7 @@ if(BUILD_TESTING)
         add_test_executable(guest_intel_trampolines_tests
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/GuestIntelTrampolinesTests.cpp
         )
+        target_include_directories(guest_intel_trampolines_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../libs)
         add_test(NAME guest_intel_trampolines_execution COMMAND guest_intel_trampolines_tests $<TARGET_FILE:relinker>)
 
         add_test_executable(dynamic_table_bounds_tests
