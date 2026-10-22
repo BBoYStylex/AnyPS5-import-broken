@@ -477,10 +477,6 @@ bool APS5_VABI sceGnmIsUserPaEnabled() {
     return false;
 }
 
-std::uint32_t APS5_VABI sceGnmLogicalCuMaskToPhysicalCuMask(std::int64_t, std::uint32_t logicalMask) {
-    return logicalMask;
-}
-
 bool APS5_VABI sceGnmDriverCaptureInProgress() {
     return false;
 }
@@ -539,6 +535,11 @@ int APS5_VABI sceGnmGetTheTessellationFactorRingBufferBaseAddress() {
 }
 
 int APS5_VABI sceGnmLogicalCuIndexToPhysicalCuIndex() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceGnmLogicalCuMaskToPhysicalCuMask() {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
