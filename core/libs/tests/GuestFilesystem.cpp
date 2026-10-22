@@ -792,7 +792,21 @@ int main() {
             { std::ifstream stream(directoryLink); std::string contents; std::getline(stream, contents); Require(contents == "moved"); }
             Require(std::filesystem::is_regular_file(linkedDirectory / "kept.txt"));
             Require(unlink_nid_postfix(directoryLink.string().c_str()) == 0);
+#ifdef _WIN32
+            Require(RemoveDirectoryW(occupiedFile.wstring().c_str()) != 0);
+#else
+            Require(unlink_nid_postfix(occupiedFile.string().c_str()) == 0);
+#endif
         } else {
+#ifdef _WIN32
+            RemoveDirectoryW(movingLink.wstring().c_str());
+            RemoveDirectoryW(directoryLink.wstring().c_str());
+#else
+            unlink_nid_postfix(movingLink.string().c_str());
+            unlink_nid_postfix(directoryLink.string().c_str());
+#endif
+            unlink_nid_postfix(occupiedFile.string().c_str());
+            unlink_nid_postfix(movingFile.string().c_str());
             std::fprintf(stderr, "symbolic links unavailable: the rename link cases not tested\n");
         }
 #ifdef _WIN32
@@ -814,16 +828,6 @@ int main() {
         Require(std::filesystem::is_regular_file(linkedDirectory / "kept.txt"));
         Require(RemoveDirectoryW(junctionOccupied.wstring().c_str()) && unlink_nid_postfix(directoryJunction.string().c_str()) == 0);
 #endif
-#ifdef _WIN32
-        RemoveDirectoryW(movingLink.wstring().c_str());
-        RemoveDirectoryW(directoryLink.wstring().c_str());
-        RemoveDirectoryW(occupiedFile.wstring().c_str());
-#else
-        unlink_nid_postfix(movingLink.string().c_str());
-        unlink_nid_postfix(directoryLink.string().c_str());
-#endif
-        unlink_nid_postfix(occupiedFile.string().c_str());
-        unlink_nid_postfix(movingFile.string().c_str());
         std::filesystem::remove_all(linkedDirectory);
         std::filesystem::remove(emptyDirectory);
     }
