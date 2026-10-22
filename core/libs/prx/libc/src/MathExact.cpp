@@ -256,6 +256,7 @@ short APS5_VABI _LDtest_nid_postfix(const long double* value) { return TestExten
 int APS5_VABI _Dclass_nid_postfix(double x) { return TestFloat(x); }
 int APS5_VABI _FDclass_nid_postfix(float x) { return TestFloat(x); }
 int APS5_VABI _LDclass_nid_postfix(long double x) { return TestExtended(Bits(x)); }
+short APS5_VABI _FDsign_nid_postfix(float x) { return std::signbit(x) ? static_cast<short>(0x8000) : static_cast<short>(0); }
 short APS5_VABI _LDsign_nid_postfix(long double x) { return static_cast<short>(Bits(x).signExponent & 0x8000); }
 
 }

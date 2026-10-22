@@ -33,6 +33,7 @@ int APS5_VABI __isnanl_nid_postfix(long double);
 int APS5_VABI __isnormall_nid_postfix(long double);
 short APS5_VABI _LDtest_nid_postfix(const long double*);
 int APS5_VABI _Dclass_nid_postfix(double);
+short APS5_VABI _FDsign_nid_postfix(float);
 short APS5_VABI _LDsign_nid_postfix(long double);
 }
 
@@ -130,6 +131,7 @@ static void CheckClassification() {
     Require(__isnormall_nid_postfix(1.0L) == 1 && __isnormall_nid_postfix(denormal) == 0);
     Require(_Dclass_nid_postfix(5e-324) == -2 && _Dclass_nid_postfix(-0.0) == 0);
     Require(_LDsign_nid_postfix(-2.0L) == -32768 && _LDsign_nid_postfix(2.0L) == 0);
+    Require(_FDsign_nid_postfix(-2.0f) == -32768 && _FDsign_nid_postfix(2.0f) == 0 && _FDsign_nid_postfix(-0.0f) == -32768 && _FDsign_nid_postfix(0.0f) == 0);
 }
 
 int main() {
