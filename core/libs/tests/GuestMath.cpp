@@ -1351,9 +1351,9 @@ int main() {
     randomState = 0x7fffffffu;
     Require(rand_r_nid_postfix(&randomState) == 0 && randomState == 0u);
     randomState = 0x7ffffffeu;
-    Require(rand_r_nid_postfix(&randomState) == 2147466840);
+    Require(rand_r_nid_postfix(&randomState) == 2147466840 && randomState == 2147466840u);
     randomState = 0xffffffffu;
-    Require(rand_r_nid_postfix(&randomState) == 2147466840);
+    Require(rand_r_nid_postfix(&randomState) == 2147466840 && randomState == 2147466840u);
     srand_nid_postfix(1);
     Require(rand_nid_postfix() == 408024109 && rand_nid_postfix() == 11635919 && rand_nid_postfix() == 196474438);
     srand_nid_postfix(0);
