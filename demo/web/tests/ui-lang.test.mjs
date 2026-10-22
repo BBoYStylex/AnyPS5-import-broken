@@ -85,6 +85,19 @@ test("translates runtime client errors for Arabic UI", () => {
   const selfErr = "eboot.bin is a SELF container, not an ELF: unwrap the app before converting it";
   assert(formatError(selfErr, true).includes("عبارة عن ملف SELF مشفر"));
 
+  const elfErr2 = "bundle.zip: Expected exactly one executable ELF in the app root; found 2";
+  assert(formatError(elfErr2, true).includes("تم العثور على 2 ملفات تنفيذية"));
+  assert(formatError(elfErr2, true).startsWith("bundle.zip: "));
+
+  const folderErr = "The folder my-app already exists. Choose another destination or rename the existing folder.";
+  assert(formatError(folderErr, true).includes("المجلد my-app موجود بالفعل"));
+
+  const unsafeErr = "archive.zip: Unsafe ZIP path: ../etc/passwd";
+  assert(formatError(unsafeErr, true).includes("مسار غير آمن في ملف ZIP: ../etc/passwd"));
+
+  const limitErr = "app.zip: Selected windows conversion input exceeds the 256 MiB conversion limit. Use the native relinker for this app.";
+  assert(formatError(limitErr, true).includes("تتجاوز مدخلات التحويل لنظام windows الحد المسموح به"));
+
   const unknownErr = "Custom backend failure occurred";
   assert.equal(formatError(unknownErr, true), unknownErr);
 });

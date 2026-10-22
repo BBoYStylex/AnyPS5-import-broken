@@ -22,6 +22,8 @@ const TRANSLATIONS = {
     "btn-change": "تغيير المدخلات",
     "ack-text": "أنا أفهم ذلك وأرغب في المتابعة مع هذه التطبيقات.",
     "convert-for": "التحويل إلى",
+    "target-win": "Windows · ويندوز",
+    "target-linux": "Linux · لينكس",
     "save-result": "طريقة حفظ النتيجة",
     "console-lang": "لغة جهاز الألعاب",
     "intel-text": "تحويل تعليمات AMD لتناسب معالجات Intel",
@@ -68,11 +70,60 @@ const ERROR_TRANSLATIONS = {
   ar: {
     "Batch conversion accepts ZIP archives only. Choose one folder or select ZIP files.": "التحويل المجمع يقبل ملفات ZIP فقط. اختر مجلداً واحداً أو حدد ملفات ZIP.",
     "Cancelled. Choose the ZIP or folder again to restart.": "تم الإلغاء. اختر ملف ZIP أو المجلد مجدداً لإعادة البدء.",
-    "No output folder is open": "لا يوجد مجلد مخرجات مفتوح",
-    "Invalid output path": "مسار المخرجات غير صالح",
-    "The converter worker stopped. Try a smaller app or use the native relinker.": "توقفت أداة التحويل في المتصفح. جرّب تطبيقاً أصغر أو استخدم أداة relinker الأصلية."
+    "No output folder is open": "لا يوجد مجلد مخرجات مفتوح.",
+    "No output file is open": "لا يوجد ملف مخرجات مفتوح.",
+    "Invalid output path": "مسار المخرجات غير صالح.",
+    "The converter worker stopped. Try a smaller app or use the native relinker.": "توقفت أداة التحويل في المتصفح. جرّب تطبيقاً أصغر أو استخدم أداة relinker الأصلية.",
+    "Choose at least one ZIP archive.": "اختر أرشيف ZIP واحداً على الأقل.",
+    "Inspect the selected apps before converting.": "افحص التطبيقات المحددة قبل التحويل.",
+    "ZIP directory metadata exceeds 16 MiB": "تتجاوز البيانات الوصفية لفهرس ZIP سعة 16 ميجابايت.",
+    "ZIP contains an unsupported file size": "يحتوي ملف ZIP على حجم ملف غير مدعوم.",
+    "Input contains more than 100,000 entries": "تحتوي المدخلات على أكثر من 100,000 عنصر.",
+    "No files were selected": "لم يتم تحديد أي ملفات.",
+    "Invalid library archive": "أرشيف مكتبات النظام غير صالح.",
+    "Invalid library archive layout": "تنسيق أرشيف مكتبات النظام غير صالح.",
+    "Invalid converted module path": "مسار وحدة برمجية محولة غير صالح.",
+    "Output directory transaction is no longer active": "عملية مجلد المخرجات لم تعد نشطة.",
+    "Invalid release manifest": "بيان الإصدار غير صالح.",
+    "A new release is being published to this site. Try again after the Pages build finishes.": "يتم حالياً نشر إصدار جديد على هذا الموقع. يُرجى المحاولة بعد اكتمال بناء الصفحات.",
+    "System library download is incomplete": "تنزيل مكتبات النظام غير مكتمل.",
+    "System library checksum mismatch": "عدم تطابق في المجموع الاختباري لمكتبات النظام (checksum).",
+    "Unknown save mode": "طريقة حفظ غير معروفة.",
+    "Windows folder output is unavailable because browsers block DLL creation. Choose a ZIP save mode.": "الحفظ في مجلد غير متاح لنظام Windows لأن المتصفحات تحظر إنشاء ملفات DLL. اختر طريقة حفظ ZIP.",
+    "Batch conversion requires a ZIP save mode.": "التحويل المجمع يتطلب طريقة حفظ ZIP.",
+    "A Windows icon exceeds 16 MiB. Choose Linux or use the native relinker.": "حجم أيقونة Windows يتجاوز 16 ميجابايت. اختر Linux أو استخدم أداة relinker الأصلية.",
+    "This result exceeds the 256 MiB memory-download budget. Use Save ZIP to disk in desktop Chrome or Edge.": "هذه النتيجة تتجاوز سعة التنزيل في الذاكرة (256 ميجابايت). استخدم حفظ ZIP على القرص في متصفح Chrome أو Edge على سطح المكتب.",
+    "The compressed ZIP exceeded 256 MiB. Use Save ZIP to disk.": "تجاوز ملف ZIP المضغوط 256 ميجابايت. استخدم حفظ ZIP على القرص.",
+    "Unknown worker request": "طلب غير معروف لأداة التحويل."
   }
 };
+
+const ERROR_RULES = [
+  [/^Expected exactly one executable ELF in the app root; found 0$/, () => "لم يتم العثور على أي ملف تنفيذي بصيغة ELF في المجلد الرئيسي؛ يلزم وجود ملف تنفيذي واحد مفكوك التشفير."],
+  [/^Expected exactly one executable ELF in the app root; found (\d+)$/, (_, count) => `تم العثور على ${count} ملفات تنفيذية بصيغة ELF؛ يلزم وجود ملف تنفيذي واحد فقط في المجلد الرئيسي.`],
+  [/^(.*) is a SELF container, not an ELF: unwrap the app before converting it$/, (_, name) => `${name} عبارة عن ملف SELF مشفر وليس ELF: يجب فك تشفير التطبيق قبل تحويله.`],
+  [/^Place the executable next to sce_sys and sce_module, not inside another folder$/, () => "ضع الملف التنفيذي بجانب مجلدي sce_sys و sce_module وليس داخل مجلد فرعي آخر."],
+  [/^Executable and modules exceed the 256 MiB conversion limit\. Use the native relinker for this app\.$/, () => "يتجاوز الملف التنفيذي والوحدات البرمجية الحد المسموح به للتحويل وهو 256 ميجابايت. استخدم أداة relinker الأصلية لهذا التطبيق."],
+  [/^Selected (windows|linux) conversion input exceeds the 256 MiB conversion limit\. Use the native relinker for this app\.$/, (_, target) => `تتجاوز مدخلات التحويل لنظام ${target} الحد المسموح به وهو 256 ميجابايت. استخدم أداة relinker الأصلية لهذا التطبيق.`],
+  [/^sce_sys\/icon0\.png exceeds 16 MiB$/, () => "حجم أيقونة sce_sys/icon0.png يتجاوز 16 ميجابايت."],
+  [/^Unsafe ZIP path: (.*)$/, (_, path) => `مسار غير آمن في ملف ZIP: ${path}`],
+  [/^(.*) exceeds the conversion memory limit$/, (_, file) => `يتجاوز ${file} الحد الأقصى للذاكرة المسموح به للتحويل.`],
+  [/^Unexpected expanded size: (.*)$/, (_, file) => `حجم غير متوقع للملف بعد فك الضغط: ${file}`],
+  [/^Incorrect expanded size: (.*)$/, (_, file) => `حجم غير صحيح للملف بعد فك الضغط: ${file}`],
+  [/^Invalid folder file: (.*)$/, (_, path) => `ملف غير صالح في المجلد: ${path}`],
+  [/^Duplicate ZIP path: (.*)$/, (_, path) => `مسار مكرر في ملف ZIP: ${path}`],
+  [/^Encrypted ZIP entries are not supported: (.*)$/, (_, file) => `الملفات المشفرة داخل ZIP غير مدعومة: ${file}`],
+  [/^Unsupported ZIP compression: (.*)$/, (_, file) => `نوع ضغط ZIP غير مدعوم: ${file}`],
+  [/^Links and special files are not supported: (.*)$/, (_, file) => `الروابط والملفات الخاصة غير مدعومة: ${file}`],
+  [/^A file is also used as a folder: (.*)$/, (_, file) => `يتم استخدام ملف كمجلد أيضاً: ${file}`],
+  [/^Unsupported conversion target: (.*)$/, (_, target) => `نظام التحويل المستهدف غير مدعوم: ${target}`],
+  [/^Output path collision: (.*)$/, (_, path) => `تعارض في مسار المخرجات: ${path}`],
+  [/^The folder (.*) already exists\. Choose another destination or rename the existing folder\.$/, (_, name) => `المجلد ${name} موجود بالفعل. اختر وجهة أخرى أو أعد تسمية المجلد الحالي.`],
+  [/^Cannot load release manifest \((\d+)\)$/, (_, status) => `تعذر تحميل بيان الإصدار (${status}).`],
+  [/^Cannot verify the latest release \((\d+)\)\. Try again later\.$/, (_, status) => `تعذر التحقق من أحدث إصدار (${status}). يُرجى المحاولة لاحقاً.`],
+  [/^Cannot download system libraries \((\d+)\)$/, (_, status) => `تعذر تنزيل مكتبات النظام (${status}).`],
+  [/^Cannot write (.*?): (.*)\. Choose ZIP output if the browser blocks this file type\.$/, (_, file, err) => `تعذرت كتابة ${file}: ${err}. اختر حفظ ZIP إذا كان المتصفح يحظر هذا النوع من الملفات.`]
+];
 
 function formatWarning(message, isAr) {
   if (!isAr) return message;
@@ -84,39 +135,48 @@ function formatWarning(message, isAr) {
   return message;
 }
 
+function formatSingleError(line) {
+  const trimmed = line.trim();
+  if (ERROR_TRANSLATIONS.ar[trimmed]) return ERROR_TRANSLATIONS.ar[trimmed];
+
+  for (const [regex, handler] of ERROR_RULES) {
+    const match = trimmed.match(regex);
+    if (match) return handler(...match);
+  }
+
+  const prefixMatch = line.match(/^([^:\n]+:\s+)(.*)$/);
+  if (prefixMatch) {
+    const prefix = prefixMatch[1];
+    const core = prefixMatch[2].trim();
+    if (ERROR_TRANSLATIONS.ar[core]) return `${prefix}${ERROR_TRANSLATIONS.ar[core]}`;
+    for (const [regex, handler] of ERROR_RULES) {
+      const match = core.match(regex);
+      if (match) return `${prefix}${handler(...match)}`;
+    }
+  }
+
+  return line;
+}
+
 function formatError(message, isAr) {
   if (!isAr || typeof message !== "string") return message;
-  if (ERROR_TRANSLATIONS.ar[message]) return ERROR_TRANSLATIONS.ar[message];
-  if (message.includes("Expected exactly one executable ELF in the app root; found ")) {
-    const parts = message.split("Expected exactly one executable ELF in the app root; found ");
-    const count = parts[1]?.trim() || "0";
-    const prefix = parts[0] || "";
-    const translated = count === "0"
-      ? "لم يتم العثور على أي ملف تنفيذي بصيغة ELF في المجلد الرئيسي؛ يلزم وجود ملف تنفيذي واحد مفكوك التشفير."
-      : `تم العثور على ${count} ملفات تنفيذية بصيغة ELF؛ يلزم وجود ملف تنفيذي واحد فقط في المجلد الرئيسي.`;
-    return `${prefix}${translated}`;
-  }
-  if (message.includes("is a SELF container, not an ELF: unwrap the app before converting it")) {
-    const parts = message.split(" is a SELF container");
-    return `${parts[0]} عبارة عن ملف SELF مشفر وليس ELF: يجب فك تشفير التطبيق قبل تحويله.`;
-  }
-  if (message.includes("Place the executable next to sce_sys and sce_module, not inside another folder")) {
-    const prefix = message.split("Place the executable")[0] || "";
-    return `${prefix}ضع الملف التنفيذي بجانب مجلدي sce_sys و sce_module وليس داخل مجلد فرعي آخر.`;
-  }
-  if (message.includes("Executable and modules exceed the 256 MiB conversion limit. Use the native relinker for this app.")) {
-    const prefix = message.split("Executable and modules")[0] || "";
-    return `${prefix}يتجاوز الملف التنفيذي والوحدات البرمجية الحد المسموح به للتحويل وهو 256 ميجابايت. استخدم أداة relinker الأصلية لهذا التطبيق.`;
-  }
-  return message;
+  return message.split("\n").map(formatSingleError).join("\n");
 }
 
 function applyUiLanguage(lang) {
   const isAr = lang === "ar";
   document.documentElement.lang = isAr ? "ar" : "en";
   document.documentElement.dir = isAr ? "rtl" : "ltr";
-  $("ui-lang").textContent = isAr ? "EN" : "AR";
-  $("ui-lang").title = isAr ? "Switch to English" : "التبديل إلى العربية";
+  document.title = isAr ? "AnyPS5 · المحول" : "AnyPS5 · Converter";
+  const uiLangBtn = $("ui-lang");
+  if (uiLangBtn) {
+    uiLangBtn.textContent = isAr ? "EN" : "AR";
+    uiLangBtn.title = isAr ? "Switch to English" : "التبديل إلى العربية";
+  }
+  const themeBtn = $("theme");
+  if (typeof themeBtn?.setAttribute === "function") {
+    themeBtn.setAttribute("aria-label", isAr ? "تبديل المظهر" : "Switch color theme");
+  }
   for (const el of document.querySelectorAll("[data-i18n]")) {
     const key = el.dataset.i18n;
     if (!el.dataset.en) el.dataset.en = el.innerHTML;
@@ -197,10 +257,11 @@ function update() {
     const totalBytes = sum(summaries.map(summary => summary.totalBytes));
     const modules = sum(summaries.map(summary => summary.modules));
     const sizeText = value => value === null ? (isAr ? "خارج النطاق المدعوم" : "beyond the supported size range") : bytes(value);
+    const targetNameAr = target === "windows" ? "Windows" : "Linux";
     $("archive-info").textContent = isAr
       ? (multi
-        ? `${selectedInputs.length} تطبيقات · ${sizeText(totalFiles)} ملفات · ${sizeText(totalBytes)} بعد الفك · ${sizeText(modules)} وحدات · ${sizeText(selectedBytes)} مدخلات التحويل لـ ${target}`
-        : `${summaries[0].files} ملفات · ${bytes(summaries[0].totalBytes)} بعد الفك · ${summaries[0].modules} وحدات · ${bytes(target === "windows" ? summaries[0].windowsSelectedBytes : summaries[0].selectedBytes)} مدخلات التحويل لـ ${target}` + (summaries[0].root ? ` · الجذر: ${summaries[0].root}` : ""))
+        ? `${selectedInputs.length} تطبيقات · ${sizeText(totalFiles)} ملفات · ${sizeText(totalBytes)} بعد الفك · ${sizeText(modules)} وحدات · ${sizeText(selectedBytes)} مدخلات التحويل لنظام ${targetNameAr}`
+        : `${summaries[0].files} ملفات · ${bytes(summaries[0].totalBytes)} بعد الفك · ${summaries[0].modules} وحدات · ${bytes(target === "windows" ? summaries[0].windowsSelectedBytes : summaries[0].selectedBytes)} مدخلات التحويل لنظام ${targetNameAr}` + (summaries[0].root ? ` · الجذر: ${summaries[0].root}` : ""))
       : (multi
         ? `${selectedInputs.length} apps · ${sizeText(totalFiles)} files · ${sizeText(totalBytes)} expanded · ${sizeText(modules)} modules · ${sizeText(selectedBytes)} ${target} conversion input`
         : `${summaries[0].files} files · ${bytes(summaries[0].totalBytes)} expanded · ${summaries[0].modules} modules · ${bytes(target === "windows" ? summaries[0].windowsSelectedBytes : summaries[0].selectedBytes)} ${target} conversion input` + (summaries[0].root ? ` · Root: ${summaries[0].root}` : ""));
