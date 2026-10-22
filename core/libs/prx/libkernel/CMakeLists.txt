@@ -1,4 +1,4 @@
-add_library(libkernel SHARED EXCLUDE_FROM_ALL
+add_library(libkernel SHARED EXCLUDE_FROM_ALL Pending.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Unimplemented.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/PendingExports.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/../libkernel_web/PendingExports.cpp
