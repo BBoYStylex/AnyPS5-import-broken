@@ -22,6 +22,7 @@
 #include <vector>
 
 #ifdef _WIN32
+#include "prx/libc/include/FileStream.hpp"
 #include "prx/libc/include/General.hpp"
 #include <fcntl.h>
 #include <io.h>
@@ -169,6 +170,21 @@ int OpenPlaceholder(const std::filesystem::path& path) {
     if (AppArchiveHasDirectory_nid_no_patch(path)) return ::open("/dev/null", O_RDONLY | O_CLOEXEC);
     return ::open(path.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
 }
+#endif
+
+#ifdef _WIN32
+int OpenStreamDirectory(const wchar_t* path) {
+    return File::OpenDirectoryDescriptor(path);
+}
+
+struct StreamRegistration {
+    StreamRegistration() { LibcRegisterDirectoryStreams_nid_no_patch(&OpenStreamDirectory, &File::ForgetDirectoryDescriptor); }
+    ~StreamRegistration() { LibcRegisterDirectoryStreams_nid_no_patch(nullptr, nullptr); }
+    StreamRegistration(const StreamRegistration&) = delete;
+    StreamRegistration& operator=(const StreamRegistration&) = delete;
+};
+
+const StreamRegistration g_streamRegistration;
 #endif
 
 }
