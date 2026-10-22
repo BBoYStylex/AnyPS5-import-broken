@@ -12,7 +12,8 @@ import unwrap_self
 DESCRIPTION = """Audit the imports of an extracted title before it is launched. Unwraps the dump's eboot.bin and the modules
 it ships (sce_module/, sce_modules/ and prx/, Unity's Media/Modules/ and Media/Plugins/, and .prx files beside
 eboot.bin) into a work directory, converts them with relinker --registry, and runs tools/import_audit.py on the
-registries with the unwrapped modules as --modules. The dump is only read. Exit code: that of import_audit.py, or 2
+registries with the unwrapped modules as --modules. The dump is only read; the source/ and output/ directories of a
+reused --work directory are emptied first. Exit code: that of import_audit.py, or 2
 when unwrapping or conversion fails."""
 
 STANDARD_DIRECTORIES = ("sce_module", "sce_modules", "prx")
@@ -35,7 +36,7 @@ def stage(source, destination):
 
 
 def modules_of(directory):
-    return sorted(path for path in directory.iterdir() if path.is_file() and path.suffix.lower() in MODULE_SUFFIXES)
+    return sorted(path for path in directory.iterdir() if (path.is_file() or path.is_symlink()) and path.suffix.lower() in MODULE_SUFFIXES)
 
 
 def prepare(dump, source, log=print):
@@ -92,6 +93,8 @@ def main(argv=None):
     with tempfile.TemporaryDirectory() as temporary:
         work = Path(args.work) if args.work else Path(temporary)
         source, output = work / "source", work / "output"
+        for generated in (source, output):
+            shutil.rmtree(generated, ignore_errors=True)
         output.mkdir(parents=True, exist_ok=True)
         try:
             module_directories, extra = prepare(dump, source)

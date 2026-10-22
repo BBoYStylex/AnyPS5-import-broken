@@ -1,5 +1,6 @@
 import contextlib
 import io
+import os
 import subprocess
 import sys
 import tempfile
@@ -100,6 +101,36 @@ class AuditDumpTests(unittest.TestCase):
         output = work / "output"
         self.assertEqual(argv[:2], [str(output / "app.libc.prx.guest.prx.registry.json"), str(output / "app.registry.json")])
         self.assertEqual(argv[2:], ["--libs", "libs-a", "--libs", "libs-b", "--modules", str(work / "source" / "sce_module"), "--json", "report.json"])
+
+    def test_a_reused_work_directory_does_not_audit_registries_left_by_an_earlier_run(self):
+        work = self.root / "work"
+        stale = work / "output" / "app.old.prx.guest.prx.registry.json"
+        stale.parent.mkdir(parents=True)
+        stale.write_text("[]")
+        (work / "source" / "sce_module").mkdir(parents=True)
+        (work / "source" / "sce_module" / "gone.prx").write_bytes(ELF)
+
+        def relink(command, capture_output, text):
+            (Path(command[-1]).parent / "app.registry.json").write_text("[]")
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        with mock.patch.object(subprocess, "run", side_effect=relink), mock.patch.object(audit_dump.import_audit, "main", return_value=0) as audit:
+            code, _ = self.run_main(self.dump, "--relinker", self.relinker, "--libs", "libs", "--work", work)
+        self.assertEqual(code, 0)
+        self.assertEqual(audit.call_args.args[0][:2], [str(work / "output" / "app.registry.json"), "--libs"])
+        self.assertFalse((work / "source" / "sce_module" / "gone.prx").exists())
+
+    def test_a_broken_module_link_fails_instead_of_being_skipped(self):
+        (self.dump / "sce_module").mkdir()
+        try:
+            os.symlink(self.dump / "sce_module" / "missing.prx", self.dump / "sce_module" / "libc.prx")
+        except OSError:
+            self.skipTest("symbolic links unavailable")
+        with mock.patch.object(subprocess, "run") as run:
+            code, errors = self.run_main(self.dump, "--relinker", self.relinker, "--libs", "libs")
+        self.assertEqual(code, 2)
+        self.assertIn("libc.prx", errors)
+        run.assert_not_called()
 
     def test_a_relinker_failure_returns_2_with_its_message(self):
         with mock.patch.object(subprocess, "run", return_value=subprocess.CompletedProcess([], 3, "", "bad input")), mock.patch.object(audit_dump.import_audit, "main") as audit:
