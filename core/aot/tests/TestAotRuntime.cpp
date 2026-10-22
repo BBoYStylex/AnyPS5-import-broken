@@ -92,5 +92,67 @@ int main() {
     assert(clockRes == 0);
     assert(clockTs[0] > 0);
 
+    uint64_t monoUs = Aot::Runtime::OsSubsystemStubs::GetMonotonicClockMicroseconds();
+    assert(monoUs > 0);
+
+    const char* testFileName = "test_aot_runtime_tmp.bin";
+    const char* testFileNameRenamed = "test_aot_runtime_tmp_renamed.bin";
+    int32_t fd = aps5_sys_open(testFileName, 0x0102, 0666);
+    if (fd < 0) {
+        fd = aps5_sys_open(testFileName, 2, 0666);
+    }
+    if (fd >= 0) {
+        const char msg[] = "AnyPS5_AOT_Runtime_Test_Data";
+        int64_t written = aps5_sys_write(fd, msg, sizeof(msg));
+        assert(written == static_cast<int64_t>(sizeof(msg)));
+
+        uint64_t fileSize = 0;
+        uint32_t fileMode = 0;
+        int32_t statRes = aps5_sys_fstat(fd, &fileSize, &fileMode);
+        assert(statRes == 0);
+        assert(fileSize == sizeof(msg));
+
+        char pbuf[8] = {};
+        int64_t preadRes = aps5_sys_pread(fd, pbuf, 6, 0);
+        assert(preadRes == 6);
+        assert(pbuf[0] == 'A' && pbuf[5] == '5');
+
+        int32_t truncRes = aps5_sys_ftruncate(fd, 6);
+        assert(truncRes == 0);
+
+        statRes = aps5_sys_fstat(fd, &fileSize, &fileMode);
+        assert(statRes == 0);
+        assert(fileSize == 6);
+
+        aps5_sys_close(fd);
+        aps5_sys_rename(testFileName, testFileNameRenamed);
+        aps5_sys_unlink(testFileNameRenamed);
+    }
+
+    uint64_t evtHandle = 0;
+    int32_t evtRes = aps5_sys_named_event_create("TestEventSync", 0, &evtHandle);
+    assert(evtRes == 0);
+    assert(evtHandle != 0);
+
+    uint64_t openedEvtHandle = 0;
+    int32_t openEvtRes = aps5_sys_named_event_open("TestEventSync", 0, &openedEvtHandle);
+    assert(openEvtRes == 0);
+
+    int32_t waitRes = aps5_sys_named_event_wait(evtHandle, 0);
+    assert(waitRes == -1);
+
+    int32_t setRes = aps5_sys_named_event_set(openedEvtHandle);
+    assert(setRes == 0);
+
+    waitRes = aps5_sys_named_event_wait(evtHandle, 10000);
+    assert(waitRes == 0);
+
+    waitRes = aps5_sys_named_event_wait(evtHandle, 0);
+    assert(waitRes == -1);
+
+    aps5_sys_named_event_close(openedEvtHandle);
+    aps5_sys_named_event_close(evtHandle);
+    aps5_sys_named_event_delete("TestEventSync");
+
     return 0;
 }

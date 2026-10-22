@@ -31,6 +31,20 @@ SyscallRegistry::SyscallRegistry() {
     Register(240, "aps5_sys_nanosleep", 2, false);
     Register(327, "aps5_sys_sched_yield", 0, false);
     Register(585, "aps5_sys_named_event_create", 3, false);
+    Register(475, "aps5_sys_pread", 4, false);
+    Register(476, "aps5_sys_pwrite", 4, false);
+    Register(478, "aps5_sys_lseek", 3, false);
+    Register(188, "aps5_sys_fstat", 2, false);
+    Register(480, "aps5_sys_ftruncate", 2, false);
+    Register(10, "aps5_sys_unlink", 1, false);
+    Register(128, "aps5_sys_rename", 2, false);
+    Register(136, "aps5_sys_mkdir", 2, false);
+    Register(586, "aps5_sys_named_event_open", 3, false);
+    Register(587, "aps5_sys_named_event_delete", 1, false);
+    Register(588, "aps5_sys_named_event_set", 1, false);
+    Register(589, "aps5_sys_named_event_reset", 1, false);
+    Register(590, "aps5_sys_named_event_wait", 2, false);
+    Register(591, "aps5_sys_named_event_close", 1, false);
 }
 
 void SyscallRegistry::Register(uint32_t syscallId, std::string_view nativeSymbol, uint32_t parameterCount, bool returnsVoid) {

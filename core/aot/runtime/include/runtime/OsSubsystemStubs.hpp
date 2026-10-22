@@ -40,6 +40,23 @@ public:
     static int64_t FileWrite(int32_t fileDescriptor, const void* buffer, size_t byteCount);
     static int64_t FileSeek(int32_t fileDescriptor, int64_t offset, int32_t whence);
     static int32_t FileClose(int32_t fileDescriptor);
+    static int32_t FileStat(int32_t fileDescriptor, uint64_t* outSize, uint32_t* outMode);
+    static int32_t FileTruncate(int32_t fileDescriptor, int64_t length);
+    static int32_t FileUnlink(const char* path);
+    static int32_t FileRename(const char* oldPath, const char* newPath);
+    static int32_t FileMkdir(const char* path, int32_t mode);
+    static int64_t FilePread(int32_t fileDescriptor, void* buffer, size_t byteCount, int64_t offset);
+    static int64_t FilePwrite(int32_t fileDescriptor, const void* buffer, size_t byteCount, int64_t offset);
+
+    static int32_t NamedEventCreate(const char* name, uint32_t attributes, uint64_t* outHandle);
+    static int32_t NamedEventOpen(const char* name, uint32_t flags, uint64_t* outHandle);
+    static int32_t NamedEventDelete(const char* name);
+    static int32_t NamedEventSet(uint64_t handle);
+    static int32_t NamedEventReset(uint64_t handle);
+    static int32_t NamedEventWait(uint64_t handle, uint64_t timeoutMicroseconds);
+    static int32_t NamedEventClose(uint64_t handle);
+
+    static uint64_t GetMonotonicClockMicroseconds();
 
     static bool AtomicCompareExchange64(std::atomic<int64_t>* target, int64_t* expected, int64_t desired);
     static int64_t AtomicAdd64(std::atomic<int64_t>* target, int64_t value);

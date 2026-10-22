@@ -8,14 +8,23 @@
 #include <io.h>
 #include <fcntl.h>
 #include <share.h>
+#include <direct.h>
+#include <sys/stat.h>
 #else
 #include <pthread.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <sys/stat.h>
 #endif
 
 #include <iostream>
 #include <string>
+#include <cstdio>
+#include <chrono>
+#include <mutex>
+#include <condition_variable>
+#include <unordered_map>
+#include <memory>
 
 extern "C" void NotImplemented_nid_no_patch(const char* name) {
     static_cast<void>(name);
@@ -190,6 +199,253 @@ int32_t OsSubsystemStubs::FileClose(int32_t fileDescriptor) {
 #else
     return close(fileDescriptor);
 #endif
+}
+
+int32_t OsSubsystemStubs::FileStat(int32_t fileDescriptor, uint64_t* outSize, uint32_t* outMode) {
+#if defined(_WIN32)
+    struct _stat64 st{};
+    int res = _fstat64(fileDescriptor, &st);
+    if (res != 0) {
+        return -1;
+    }
+    if (outSize != nullptr) {
+        *outSize = static_cast<uint64_t>(st.st_size);
+    }
+    if (outMode != nullptr) {
+        *outMode = static_cast<uint32_t>(st.st_mode);
+    }
+    return 0;
+#else
+    struct stat st{};
+    int res = fstat(fileDescriptor, &st);
+    if (res != 0) {
+        return -1;
+    }
+    if (outSize != nullptr) {
+        *outSize = static_cast<uint64_t>(st.st_size);
+    }
+    if (outMode != nullptr) {
+        *outMode = static_cast<uint32_t>(st.st_mode);
+    }
+    return 0;
+#endif
+}
+
+int32_t OsSubsystemStubs::FileTruncate(int32_t fileDescriptor, int64_t length) {
+#if defined(_WIN32)
+    return (_chsize_s(fileDescriptor, length) == 0) ? 0 : -1;
+#else
+    return ftruncate(fileDescriptor, length);
+#endif
+}
+
+int32_t OsSubsystemStubs::FileUnlink(const char* path) {
+#if defined(_WIN32)
+    return _unlink(path);
+#else
+    return unlink(path);
+#endif
+}
+
+int32_t OsSubsystemStubs::FileRename(const char* oldPath, const char* newPath) {
+    return std::rename(oldPath, newPath);
+}
+
+int32_t OsSubsystemStubs::FileMkdir(const char* path, int32_t mode) {
+#if defined(_WIN32)
+    static_cast<void>(mode);
+    return _mkdir(path);
+#else
+    return mkdir(path, static_cast<mode_t>(mode));
+#endif
+}
+
+int64_t OsSubsystemStubs::FilePread(int32_t fileDescriptor, void* buffer, size_t byteCount, int64_t offset) {
+#if defined(_WIN32)
+    int64_t original = _lseeki64(fileDescriptor, 0, SEEK_CUR);
+    if (original < 0) {
+        return -1;
+    }
+    if (_lseeki64(fileDescriptor, offset, SEEK_SET) < 0) {
+        return -1;
+    }
+    int64_t bytesRead = _read(fileDescriptor, buffer, static_cast<unsigned int>(byteCount));
+    _lseeki64(fileDescriptor, original, SEEK_SET);
+    return bytesRead;
+#else
+    return pread(fileDescriptor, buffer, byteCount, offset);
+#endif
+}
+
+int64_t OsSubsystemStubs::FilePwrite(int32_t fileDescriptor, const void* buffer, size_t byteCount, int64_t offset) {
+#if defined(_WIN32)
+    int64_t original = _lseeki64(fileDescriptor, 0, SEEK_CUR);
+    if (original < 0) {
+        return -1;
+    }
+    if (_lseeki64(fileDescriptor, offset, SEEK_SET) < 0) {
+        return -1;
+    }
+    int64_t bytesWritten = _write(fileDescriptor, buffer, static_cast<unsigned int>(byteCount));
+    _lseeki64(fileDescriptor, original, SEEK_SET);
+    return bytesWritten;
+#else
+    return pwrite(fileDescriptor, buffer, byteCount, offset);
+#endif
+}
+
+struct NamedEventObject {
+    std::mutex Mutex;
+    std::condition_variable Cv;
+    bool Signaled{false};
+    bool ManualReset{false};
+    std::string Name;
+};
+
+static std::unordered_map<std::string, std::shared_ptr<NamedEventObject>> gNamedEvents;
+static std::unordered_map<uint64_t, std::shared_ptr<NamedEventObject>> gEventHandles;
+static std::mutex gNamedEventMutex;
+static std::atomic<uint64_t> gNextEventHandle{2000};
+
+int32_t OsSubsystemStubs::NamedEventCreate(const char* name, uint32_t attributes, uint64_t* outHandle) {
+    auto eventObj = std::make_shared<NamedEventObject>();
+    eventObj->ManualReset = (attributes & 1) != 0;
+    if (name != nullptr) {
+        eventObj->Name = name;
+    }
+
+    uint64_t handle = gNextEventHandle.fetch_add(1, std::memory_order_relaxed);
+    {
+        std::lock_guard<std::mutex> lock(gNamedEventMutex);
+        gEventHandles[handle] = eventObj;
+        if (name != nullptr && name[0] != '\0') {
+            gNamedEvents[eventObj->Name] = eventObj;
+        }
+    }
+
+    if (outHandle != nullptr) {
+        *outHandle = handle;
+    }
+    return 0;
+}
+
+int32_t OsSubsystemStubs::NamedEventOpen(const char* name, uint32_t flags, uint64_t* outHandle) {
+    static_cast<void>(flags);
+    if (name == nullptr) {
+        return -1;
+    }
+
+    std::shared_ptr<NamedEventObject> eventObj;
+    {
+        std::lock_guard<std::mutex> lock(gNamedEventMutex);
+        auto it = gNamedEvents.find(name);
+        if (it == gNamedEvents.end()) {
+            return -1;
+        }
+        eventObj = it->second;
+        uint64_t handle = gNextEventHandle.fetch_add(1, std::memory_order_relaxed);
+        gEventHandles[handle] = eventObj;
+        if (outHandle != nullptr) {
+            *outHandle = handle;
+        }
+    }
+    return 0;
+}
+
+int32_t OsSubsystemStubs::NamedEventDelete(const char* name) {
+    if (name == nullptr) {
+        return -1;
+    }
+    std::lock_guard<std::mutex> lock(gNamedEventMutex);
+    gNamedEvents.erase(name);
+    return 0;
+}
+
+int32_t OsSubsystemStubs::NamedEventSet(uint64_t handle) {
+    std::shared_ptr<NamedEventObject> eventObj;
+    {
+        std::lock_guard<std::mutex> lock(gNamedEventMutex);
+        auto it = gEventHandles.find(handle);
+        if (it == gEventHandles.end()) {
+            return -1;
+        }
+        eventObj = it->second;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(eventObj->Mutex);
+        eventObj->Signaled = true;
+    }
+    eventObj->Cv.notify_all();
+    return 0;
+}
+
+int32_t OsSubsystemStubs::NamedEventReset(uint64_t handle) {
+    std::shared_ptr<NamedEventObject> eventObj;
+    {
+        std::lock_guard<std::mutex> lock(gNamedEventMutex);
+        auto it = gEventHandles.find(handle);
+        if (it == gEventHandles.end()) {
+            return -1;
+        }
+        eventObj = it->second;
+    }
+
+    std::lock_guard<std::mutex> lock(eventObj->Mutex);
+    eventObj->Signaled = false;
+    return 0;
+}
+
+int32_t OsSubsystemStubs::NamedEventWait(uint64_t handle, uint64_t timeoutMicroseconds) {
+    std::shared_ptr<NamedEventObject> eventObj;
+    {
+        std::lock_guard<std::mutex> lock(gNamedEventMutex);
+        auto it = gEventHandles.find(handle);
+        if (it == gEventHandles.end()) {
+            return -1;
+        }
+        eventObj = it->second;
+    }
+
+    std::unique_lock<std::mutex> lock(eventObj->Mutex);
+    if (timeoutMicroseconds == 0) {
+        if (eventObj->Signaled) {
+            if (!eventObj->ManualReset) {
+                eventObj->Signaled = false;
+            }
+            return 0;
+        }
+        return -1;
+    }
+
+    if (timeoutMicroseconds == UINT64_MAX) {
+        eventObj->Cv.wait(lock, [&] { return eventObj->Signaled; });
+        if (!eventObj->ManualReset) {
+            eventObj->Signaled = false;
+        }
+        return 0;
+    }
+
+    bool success = eventObj->Cv.wait_for(lock, std::chrono::microseconds(timeoutMicroseconds), [&] {
+        return eventObj->Signaled;
+    });
+    if (success) {
+        if (!eventObj->ManualReset) {
+            eventObj->Signaled = false;
+        }
+        return 0;
+    }
+    return -1;
+}
+
+int32_t OsSubsystemStubs::NamedEventClose(uint64_t handle) {
+    std::lock_guard<std::mutex> lock(gNamedEventMutex);
+    return gEventHandles.erase(handle) > 0 ? 0 : -1;
+}
+
+uint64_t OsSubsystemStubs::GetMonotonicClockMicroseconds() {
+    auto now = std::chrono::steady_clock::now();
+    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count());
 }
 
 bool OsSubsystemStubs::AtomicCompareExchange64(std::atomic<int64_t>* target, int64_t* expected, int64_t desired) {

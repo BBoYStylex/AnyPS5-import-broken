@@ -39,6 +39,20 @@ int32_t aps5_sys_sched_yield();
 int32_t aps5_sys_nanosleep(const void* rqtp, void* rmtp);
 int32_t aps5_sys_getpid();
 int32_t aps5_sys_clock_gettime(int32_t clockId, void* timeSpec);
+int64_t aps5_sys_pread(int32_t fileDescriptor, void* buffer, size_t count, int64_t offset);
+int64_t aps5_sys_pwrite(int32_t fileDescriptor, const void* buffer, size_t count, int64_t offset);
+int64_t aps5_sys_lseek(int32_t fileDescriptor, int64_t offset, int32_t whence);
+int32_t aps5_sys_fstat(int32_t fileDescriptor, uint64_t* outSize, uint32_t* outMode);
+int32_t aps5_sys_ftruncate(int32_t fileDescriptor, int64_t length);
+int32_t aps5_sys_unlink(const char* path);
+int32_t aps5_sys_rename(const char* oldPath, const char* newPath);
+int32_t aps5_sys_mkdir(const char* path, int32_t mode);
+int32_t aps5_sys_named_event_open(const char* name, uint32_t flags, uint64_t* outEventHandle);
+int32_t aps5_sys_named_event_delete(const char* name);
+int32_t aps5_sys_named_event_set(uint64_t eventHandle);
+int32_t aps5_sys_named_event_reset(uint64_t eventHandle);
+int32_t aps5_sys_named_event_wait(uint64_t eventHandle, uint64_t timeoutMicroseconds);
+int32_t aps5_sys_named_event_close(uint64_t eventHandle);
 }
 
 #endif
