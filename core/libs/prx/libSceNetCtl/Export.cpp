@@ -16,6 +16,7 @@
 #include <netpacket/packet.h>
 #endif
 #ifdef __APPLE__
+#include <net/if_mib.h>
 #include <sys/sysctl.h>
 #endif
 #endif
@@ -421,7 +422,8 @@ static void HostTraffic(std::uint64_t& sent, std::uint64_t& received) {
     }
     freeifaddrs(interfaces);
 #elif defined(__APPLE__)
-    // The routing socket's interface list carries 64-bit counters (if_data64), unlike getifaddrs' 32-bit if_data.
+    // For an unprivileged process both getifaddrs and NET_RT_IFLIST2 return the counters reduced to their low 32 bits;
+    // the interface MIB returns the full 64-bit values, so list the interfaces here and read each one from the MIB.
     int request[] = {CTL_NET, PF_ROUTE, 0, 0, NET_RT_IFLIST2, 0};
     std::size_t length = 0;
     if (sysctl(request, 6, nullptr, &length, nullptr, 0) != 0) throw std::runtime_error("sceNetCtlGetIfStat: the host interface list is unavailable");
@@ -435,8 +437,12 @@ static void HostTraffic(std::uint64_t& sent, std::uint64_t& received) {
             if_msghdr2 entry;
             std::memcpy(&entry, list.data() + offset, sizeof(entry));
             if ((entry.ifm_flags & IFF_UP) && !(entry.ifm_flags & IFF_LOOPBACK)) {
-                sent += entry.ifm_data.ifi_obytes;
-                received += entry.ifm_data.ifi_ibytes;
+                int mib[] = {CTL_NET, PF_LINK, NETLINK_GENERIC, IFMIB_IFDATA, entry.ifm_index, IFDATA_GENERAL};
+                ifmibdata data{};
+                std::size_t size = sizeof(data);
+                if (sysctl(mib, 6, &data, &size, nullptr, 0) != 0) throw std::runtime_error("sceNetCtlGetIfStat: the host interface counters are unavailable");
+                sent += data.ifmd_data.ifi_obytes;
+                received += data.ifmd_data.ifi_ibytes;
             }
         }
         offset += header.ifm_msglen;
