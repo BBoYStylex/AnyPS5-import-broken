@@ -35,6 +35,17 @@ struct PointerHop {
     bool operator==(const PointerHop& other) const = default;
 };
 
+inline constexpr std::uint32_t MaxPointerChaseDepth = 4;
+
+struct PointerChase {
+    std::uint32_t offset = 0;
+    std::uint32_t immediate = 0;
+    std::uint32_t readOffset = 0;
+    std::uint32_t readImmediate = 0;
+
+    bool operator==(const PointerChase& other) const = default;
+};
+
 struct TableColumn {
     std::uint32_t heapSource = 0;
     std::uint32_t stride = 0;
@@ -51,6 +62,8 @@ struct TableColumn {
     std::uint32_t indirectOffset = 0;
     std::uint32_t indirectImmediate = 0;
     std::vector<PointerHop> pointerHops;
+    std::vector<PointerChase> pointerChases;
+    std::uint32_t pointerChaseDepth = 0;
     std::uint32_t foldedAddend = 0;
     std::uint32_t foldedCarry = 0;
     bool selected = false;
@@ -58,7 +71,7 @@ struct TableColumn {
     bool pointerKeyed = false;
 
     bool operator==(const TableColumn& other) const {
-        return heapSource == other.heapSource && stride == other.stride && addend == other.addend && offset == other.offset && dwordCount == other.dwordCount && sampler == other.sampler && address == other.address && buffer == other.buffer && indirect == other.indirect && indirectOffset == other.indirectOffset && indirectImmediate == other.indirectImmediate && pointerHops == other.pointerHops && foldedAddend == other.foldedAddend && foldedCarry == other.foldedCarry && selected == other.selected && selection == other.selection && pointerKeyed == other.pointerKeyed;
+        return heapSource == other.heapSource && stride == other.stride && addend == other.addend && offset == other.offset && dwordCount == other.dwordCount && sampler == other.sampler && address == other.address && buffer == other.buffer && indirect == other.indirect && indirectOffset == other.indirectOffset && indirectImmediate == other.indirectImmediate && pointerHops == other.pointerHops && pointerChases == other.pointerChases && pointerChaseDepth == other.pointerChaseDepth && foldedAddend == other.foldedAddend && foldedCarry == other.foldedCarry && selected == other.selected && selection == other.selection && pointerKeyed == other.pointerKeyed;
     }
 };
 
