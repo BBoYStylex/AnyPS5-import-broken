@@ -781,16 +781,17 @@ int main(int argc, char** argv) {
         const auto libraryPath = std::filesystem::path(argv[1]) / (std::string(argv[2]) + ".prx");
         char nid[64] = {};
         std::snprintf(nid, sizeof(nid), "%s", Nid::ComputeNid(names[index], "").c_str());
+        char guestTerminate[64] = {};
+        std::snprintf(guestTerminate, sizeof(guestTerminate), "%s", Nid::ComputeNid("_ZSt13set_terminatePFvvE", "").c_str());
+        using GuestSetTerminate = void (*)(void (*)());
+        const auto refuse = []() { std::_Exit(3); };
+        std::set_terminate(refuse);
         const auto module = Load(libraryPath);
         if (module == nullptr) return 4;
         const auto exportFunction = Resolve(module, nid);
         if (exportFunction == nullptr) return 4;
-        using GuestSetTerminate = void (*)(void (*)());
-        const auto guestSetTerminate = reinterpret_cast<GuestSetTerminate>(
-            Resolve(module, "NG1phipELJE"));
-        const auto refuse = []() { std::_Exit(3); };
+        const auto guestSetTerminate = reinterpret_cast<GuestSetTerminate>(Resolve(module, guestTerminate));
         if (guestSetTerminate != nullptr) guestSetTerminate(refuse);
-        std::set_terminate(refuse);
         exportFunction();
         return 0;
     }
