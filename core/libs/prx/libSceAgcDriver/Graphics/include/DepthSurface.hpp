@@ -20,8 +20,15 @@ class StorageTexture;
 VkImageView DepthSurfaceView(const Context& context, const DepthTarget& target, bool depthWritten = true);
 SampleOrderTarget DepthSurfaceOrderTarget(const Context& context, const DepthTarget& target);
 DepthSampleLocations DepthSurfaceSampleLocations(const Context& context, const DepthTarget& target);
-std::vector<std::pair<std::uint64_t, std::uint64_t>> FlushDepthPlanes(std::uint64_t address, std::size_t bytes);
+enum class DepthPlaneScope { Overlapped, Whole };
+std::vector<std::pair<std::uint64_t, std::uint64_t>> FlushDepthPlanes(std::uint64_t address, std::size_t bytes, DepthPlaneScope scope = DepthPlaneScope::Overlapped);
 bool DepthPlanesStale();
+struct DepthPlaneStoreStatistics {
+    std::uint64_t stores = 0;
+    std::uint64_t units = 0;
+    std::uint64_t bytes = 0;
+};
+DepthPlaneStoreStatistics DepthPlaneStoreCounts();
 bool SampleLocationsCompatibleDepth(const Context& context, VkFormat format, std::uint32_t samples);
 std::uint64_t DepthSurfacesSerial();
 std::uint64_t DepthSurfacesReleased();
@@ -65,6 +72,7 @@ VkFormat HostDepthFormat(const Context& context, VkFormat format);
 float HostDepthBiasConstant(const Context& context, VkFormat format, float constant);
 std::shared_ptr<StorageTexture> DepthSurfaceStorage(const Context& context, std::span<const std::uint32_t> words, const GuestTextureResource& resource, std::uint32_t mip);
 bool DepthSurfaceStoreBack(const Context& context, const StorageTexture& storage);
+void CopyDepthSample(const Context& context, std::uint64_t depthAddress, std::uint32_t samples, std::uint32_t sample, StorageTexture& destination, VkImageView destinationView, VkExtent2D extent);
 
 struct StorageImageClear {
     std::array<std::uint32_t, 8> image{};
