@@ -3814,7 +3814,7 @@ void ResourceCache::Insert(const Key& key, std::shared_ptr<ShaderResources> reso
     while (entries.size() > capacity) {
         noteEvicted(entries.back().first);
         if (evicted != nullptr) evicted->push_back(std::move(entries.back().second));
-        index.erase(entries.back().first);
+        eraseEntry(std::prev(entries.end()));
         entries.pop_back();
     }
     if (entries.front().second->TableElements() == 0) return;
@@ -3828,7 +3828,7 @@ void ResourceCache::Insert(const Key& key, std::shared_ptr<ShaderResources> reso
         }
         tables -= elements;
         if (evicted != nullptr) evicted->push_back(std::move(it->second));
-        index.erase(it->first);
+        eraseEntry(it);
         it = std::prev(entries.erase(it));
     }
 }
@@ -3850,7 +3850,7 @@ void ResourceCache::RemoveImage(const StorageTexture* image, std::vector<std::sh
             continue;
         }
         if (evicted != nullptr) evicted->push_back(std::move(it->second));
-        index.erase(it->first);
+        eraseEntry(it);
         it = entries.erase(it);
     }
 }
@@ -3863,7 +3863,7 @@ void ResourceCache::dropReleasedTextures(std::vector<std::shared_ptr<ShaderResou
             continue;
         }
         if (evicted != nullptr) evicted->push_back(std::move(it->second));
-        index.erase(it->first);
+        eraseEntry(it);
         it = entries.erase(it);
     }
 }
@@ -3931,6 +3931,20 @@ std::uint64_t ResourceCache::TableElements() const {
     std::uint64_t tables = 0;
     for (const auto& entry : entries) tables += entry.second->TableElements();
     return tables;
+}
+
+void ResourceCache::eraseEntry(std::list<std::pair<Key, std::shared_ptr<ShaderResources>>>::iterator it) {
+    const auto found = index.find(it->first);
+    if (found != index.end()) {
+        index.erase(found);
+        return;
+    }
+    for (auto mapIt = index.begin(); mapIt != index.end(); ++mapIt) {
+        if (mapIt->second == it) {
+            index.erase(mapIt);
+            break;
+        }
+    }
 }
 
 void ResourceCache::erase(const Key& key) {

@@ -714,6 +714,7 @@ public:
 
 private:
     void erase(const Key& key);
+    void eraseEntry(std::list<std::pair<Key, std::shared_ptr<ShaderResources>>>::iterator it);
     void noteMiss(const Key& key);
     void dropReleasedTextures(std::vector<std::shared_ptr<ShaderResources>>* evicted);
     void noteEvicted(const Key& key);
