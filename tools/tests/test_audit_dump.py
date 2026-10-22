@@ -150,13 +150,15 @@ class AuditDumpTests(unittest.TestCase):
         locked.mkdir(parents=True)
         (locked / "stale.registry.json").write_text("[]")
         locked.chmod(0o500)
-        self.addCleanup(locked.chmod, 0o700)
-        with mock.patch.object(audit_dump, "convert") as convert, mock.patch.object(audit_dump.import_audit, "main", return_value=0) as audit:
-            code, errors = self.run_main(self.dump, "--relinker", self.relinker, "--libs", "libs", "--work", work)
-        self.assertEqual(code, 2)
-        self.assertIn("cannot empty", errors)
-        convert.assert_not_called()
-        audit.assert_not_called()
+        try:
+            with mock.patch.object(audit_dump, "convert") as convert, mock.patch.object(audit_dump.import_audit, "main", return_value=0) as audit:
+                code, errors = self.run_main(self.dump, "--relinker", self.relinker, "--libs", "libs", "--work", work)
+            self.assertEqual(code, 2)
+            self.assertIn("cannot empty", errors)
+            convert.assert_not_called()
+            audit.assert_not_called()
+        finally:
+            locked.chmod(0o700)
 
     def test_a_generated_directory_that_survives_removal_stops_before_conversion(self):
         work = self.root / "work"
