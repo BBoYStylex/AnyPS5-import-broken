@@ -7,6 +7,7 @@ target_sources(libSceLibcInternal PRIVATE Err.cpp)
 configure_windows_unwind(libSceLibcInternal)
 target_sources(libSceLibcInternal PRIVATE FilesystemStatistics.cpp PathStatistics.cpp)
 target_sources(libSceLibcInternal PRIVATE Inet.cpp)
+target_sources(libSceLibcInternal PRIVATE InventoryExports6.cpp)
 
 if(BUILD_TESTING)
     add_test_executable(guest_statvfs_tests ${LIBS_INCLUDE_DIR}/tests/GuestStatvfs.cpp)
