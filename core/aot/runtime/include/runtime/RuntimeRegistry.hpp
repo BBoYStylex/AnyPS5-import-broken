@@ -59,6 +59,7 @@ int32_t aps5_sys_named_sema_delete(const char* name);
 int32_t aps5_sys_named_sema_wait(uint64_t semaHandle, uint64_t timeoutMicroseconds);
 int32_t aps5_sys_named_sema_signal(uint64_t semaHandle, int32_t count);
 int32_t aps5_sys_named_sema_close(uint64_t semaHandle);
+int32_t aps5_sys_umtx_op(void* obj, int32_t op, uint64_t val, void* uaddr1, void* uaddr2);
 }
 
 #endif
