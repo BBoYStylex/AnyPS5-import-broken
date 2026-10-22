@@ -2683,15 +2683,15 @@ void sweepMirrors() {
     state.pinnedVersion = state.version;
 }
 
-void releaseImportedMirrors(const Context& context, const std::vector<std::uint64_t>& imported) {
+void releaseImportedMirrors(const Context& context, const std::vector<std::pair<std::uint64_t, std::uint64_t>>& imported) {
     if (imported.empty()) return;
     std::vector<std::shared_ptr<ImageMirror>> released;
     auto& state = Mirrors();
     std::lock_guard lock(state.mutex);
     if (state.device != context.device || state.entries.empty()) return;
-    for (const auto base : imported) {
+    for (const auto& [base, bytes] : imported) {
         const auto found = state.entries.find(base);
-        if (found == state.entries.end() || !found->second->heap) continue;
+        if (found == state.entries.end() || !found->second->heap || found->second->reserved > bytes) continue;
         state.heapBytes -= found->second->bytes;
         ++state.heapImported;
         state.heapImportedBytes += found->second->bytes;
@@ -3670,7 +3670,7 @@ void GuestBufferMemory::AcquireRegistered() {
         // must not happen under it.
         regions.reserve(lease.size());
         std::vector<AddressCopy> copies;
-        std::vector<std::uint64_t> imported;
+        std::vector<std::pair<std::uint64_t, std::uint64_t>> imported;
         const HostImport* covering = nullptr;
         std::uint64_t coveredBegin = 0;
         std::uint64_t coveredEnd = 0;
@@ -3697,7 +3697,7 @@ void GuestBufferMemory::AcquireRegistered() {
                 // Reused by Upload while no import was dropped since (see importsEpoch).
                 region.direct = entry;
                 regions.push_back(std::move(region));
-                imported.push_back(range->address);
+                imported.emplace_back(range->address, range->bytes);
                 continue;
             }
             if (mirrorsEnabled()) {
