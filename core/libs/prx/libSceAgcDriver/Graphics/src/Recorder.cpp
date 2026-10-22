@@ -3082,6 +3082,9 @@ bool Recorder::PendingWriteSettled(std::uint64_t address, std::size_t bytes) con
     for (const auto& batch : inFlight) {
         if (overlaps(*batch, address, end) && !signaled(*batch)) return false;
     }
+    for (const auto* batch : finishing) {
+        if (overlaps(*batch, address, end)) return false;
+    }
     return true;
 }
 

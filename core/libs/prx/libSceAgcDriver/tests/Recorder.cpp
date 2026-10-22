@@ -1198,7 +1198,10 @@ void writeSettledTests(const Device& device, Recorder& recorder) {
     Require(recorder.PendingWriteOverlaps(0x50000, 0x100) && recorder.PendingWriteSettled(0x50000, 0x100), "a signaled batch's write is not settled");
     recorder.NotePendingWrite(0x50080, 0x10);
     Require(!recorder.PendingWriteSettled(0x50000, 0x100) && recorder.PendingWriteSettled(0x50000, 0x80), "a later open write over the range still counts as settled");
+    bool settledDuringCompletion = true;
+    recorder.OnComplete([&] { settledDuringCompletion = recorder.PendingWriteSettled(0x50000, 0x100); });
     recorder.Sync();
+    Require(!settledDuringCompletion, "a batch whose write-back has not run counts as settled");
     Require(recorder.Idle() && !recorder.PendingWriteOverlaps(0x50000, 0x100), "writes outlived their batches");
 }
 

@@ -2,6 +2,7 @@
 #include <cstddef>
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
+#include "prx/libSceFsInternalForVsh/include/FsInternalForVsh.hpp"
 
 extern "C" {
 
@@ -730,7 +731,7 @@ int APS5_VABI sceFsInitMountPprPkgOpt() {
     return 0;
 }
 
-int APS5_VABI sceFsInitMountSaveDataOpt() {
+int APS5_VABI sceFsInitMountSaveDataOpt(void* opt) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -765,7 +766,7 @@ int APS5_VABI sceFsInitUmountPprPkgOpt() {
     return 0;
 }
 
-int APS5_VABI sceFsInitUmountSaveDataOpt() {
+int APS5_VABI sceFsInitUmountSaveDataOpt(void* opt) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -875,7 +876,7 @@ int APS5_VABI sceFsMountPprPkg() {
     return 0;
 }
 
-int APS5_VABI sceFsMountSaveData() {
+int APS5_VABI sceFsMountSaveData(void* opt, const char* volumePath, const char* mountPath, std::uint8_t* key) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -1170,7 +1171,7 @@ int APS5_VABI sceFsUmountLwfsCompat() {
     return 0;
 }
 
-int APS5_VABI sceFsUmountSaveData() {
+int APS5_VABI sceFsUmountSaveData(void* opt, const char* mountPath, int handle, int ignoreErrors) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
