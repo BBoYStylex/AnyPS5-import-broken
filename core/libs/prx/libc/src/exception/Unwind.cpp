@@ -105,13 +105,26 @@ extern "C" void _Unwind_DeleteException(_Unwind_Exception*);
 #endif
 
 namespace LibcUnwind {
+#ifdef _WIN32
+static bool Readable(Word address, std::size_t size) {
+    for (Word cursor = address; cursor - address < size;) {
+        MEMORY_BASIC_INFORMATION memory{};
+        if (VirtualQuery(reinterpret_cast<const void*>(cursor), &memory, sizeof(memory)) != sizeof(memory)) return false;
+        if (memory.State != MEM_COMMIT || (memory.Protect & (PAGE_NOACCESS | PAGE_GUARD)) != 0 || (memory.Protect & 0xff) == PAGE_EXECUTE) return false;
+        cursor = reinterpret_cast<Word>(memory.BaseAddress) + memory.RegionSize;
+    }
+    return true;
+}
+#endif
+
 _Unwind_Reason_Code CallPersonality(Word personality, _Unwind_Action actions, _Unwind_Exception* exception, _Unwind_Context* context) {
 #ifdef _WIN32
     const auto* code = reinterpret_cast<const Byte*>(personality);
-    if (code[0] == 0xff && code[1] == 0x25) {
+    if (Readable(personality, 6) && code[0] == 0xff && code[1] == 0x25) {
         std::int32_t displacement;
         std::memcpy(&displacement, code + 2, 4);
-        std::memcpy(&personality, code + 6 + displacement, sizeof(personality));
+        const Word slot = personality + 6 + displacement;
+        if (Readable(slot, sizeof(personality))) std::memcpy(&personality, reinterpret_cast<const void*>(slot), sizeof(personality));
     }
 #endif
     if (personality == reinterpret_cast<Word>(__gxx_personality_v0_nid_postfix) || personality == reinterpret_cast<Word>(__gxx_personality_v0))
