@@ -84,6 +84,8 @@ int main() {
         Run("first listed", true, false);
         List(path, Hex(Second.data()) + " # the first is not listed any more\n");
         Run("second listed", false, true);
+        List(path, Hex(First.data()) + "zz 1" + std::string(16, '0') + " 0x" + Hex(Second.data()) + "\n");
+        Run("malformed and overflowing tokens", false, true);
         List(path, "");
         Run("none listed", false, false);
         AgcDriverShutdown_nid_postfix();

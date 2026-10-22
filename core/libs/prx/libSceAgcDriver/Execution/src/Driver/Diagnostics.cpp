@@ -2,15 +2,18 @@
 #include "prx/libSceAgcDriver/Execution/include/Driver/Diagnostics.hpp"
 #include <array>
 #include <atomic>
+#include <charconv>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <stdexcept>
 #include <string_view>
+#include <system_error>
 
 namespace AgcDriver::DriverDetail {
 
@@ -24,6 +27,14 @@ namespace {
 constexpr std::size_t MaxSkippedShaders = 256;
 std::array<std::atomic<std::uint64_t>, MaxSkippedShaders> skippedShaders{};
 std::atomic<std::size_t> skippedShaderCount{0};
+
+std::optional<std::uint64_t> programAddress(std::string_view word) {
+    if (word.starts_with("0x") || word.starts_with("0X")) word.remove_prefix(2);
+    std::uint64_t address = 0;
+    const auto [end, error] = std::from_chars(word.data(), word.data() + word.size(), address, 16);
+    if (word.empty() || error != std::errc{} || end != word.data() + word.size()) return std::nullopt;
+    return address;
+}
 
 void ReloadSkippedShaders(const char* path) {
     static std::mutex reload;
@@ -42,7 +53,12 @@ void ReloadSkippedShaders(const char* path) {
             std::getline(file, word);
             continue;
         }
-        if (const auto address = std::strtoull(word.c_str(), nullptr, 16); address != 0) skippedShaders[count++].store(address, std::memory_order_relaxed);
+        const auto address = programAddress(word);
+        if (!address) {
+            std::fprintf(stderr, "[skip-shader] ignoring '%s' in %s: not a hexadecimal program address\n", word.c_str(), path);
+            continue;
+        }
+        if (*address != 0) skippedShaders[count++].store(*address, std::memory_order_relaxed);
     }
     skippedShaderCount.store(count, std::memory_order_release);
     std::fprintf(stderr, "[skip-shader] %zu programs listed in %s\n", count, path);
