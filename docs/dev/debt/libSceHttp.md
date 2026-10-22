@@ -30,6 +30,8 @@
 
 ### Functional
 
+- [Context and epoll allocation](../../../core/libs/prx/libSceHttp/Export.cpp): PS5 out-of-memory errors and failed-call output values remain unverified. Host bookkeeping uses the C++ allocator and can throw `std::bad_alloc`; the guest HTTP memory pool is not used for these allocations.
+
 - [sceHttpUriParse, sceHttpUriBuild, sceHttpUriMerge](../../../core/libs/prx/libSceHttp/src/Uri.cpp) - console behavior for non-ASCII scheme and hostname bytes remains unmeasured. ASCII character classification and scheme case folding follow [RFC 3986 sections 3.1 and 3.2](https://www.rfc-editor.org/rfc/rfc3986#section-3.1), independently of the host locale; parsing retains the existing C-locale rejection of those bytes.
 
 - [sceHttpUriEscape](../../../core/libs/prx/libSceHttp/src/Uri.cpp) escapes every byte except the ASCII unreserved set in [RFC 3986 section 2.3](https://www.rfc-editor.org/rfc/rfc3986#section-2.3), independently of the host locale. Console behaviour for non-ASCII input remains unmeasured.
