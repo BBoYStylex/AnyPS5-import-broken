@@ -771,7 +771,12 @@ int main(int argc, char** argv) {
         const auto module = Load(directory / (library + ".prx"));
         if (module == nullptr) return 2;
         const auto& names = library == "libSceGLSlimVSH" ? libSceGLSlimVSHNames : libSceIpmiNames;
-        const auto index = std::stoi(argv[3]);
+        std::size_t index = 0;
+        for (const char* digit = argv[3]; *digit != ' '; ++digit) {
+            if (*digit < '0' || *digit > '9') return 4;
+            index = index * 10u + static_cast<std::size_t>(*digit - '0');
+        }
+        if (index >= names.size()) return 4;
         const auto nid = Nid::ComputeNid(names[index], "");
         const auto exportFunction = Resolve(module, nid);
         if (exportFunction == nullptr) return 2;
@@ -781,11 +786,7 @@ int main(int argc, char** argv) {
         const auto refuse = []() { std::_Exit(3); };
         if (guestSetTerminate != nullptr) guestSetTerminate(refuse);
         std::set_terminate(refuse);
-        try {
-            exportFunction();
-        } catch (...) {
-            std::_Exit(3);
-        }
+        exportFunction();
         return 0;
     }
     if (argc != 2) {
