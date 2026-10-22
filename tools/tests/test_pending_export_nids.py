@@ -601,6 +601,22 @@ LIBRARIES = {
         "sceKernelMapperSetPageTablePoolOccupancyNotificationThreshold",
         "scePthreadRegisterThreadDeathHook",
     ],
+    "libSceAgc": [
+        "sceAgcSuspendPointAndCheckStatus",
+    ],
+    "libSceAudioOut": [
+        "sceAudioDeviceControlGet",
+        "sceAudioDeviceControlSet",
+    ],
+    "libSceHttp2": [
+        "_Z5dummyv",
+    ],
+    "libSceRegMgr": [
+        "sceRegMgrLogStart",
+    ],
+    "libSceRemoteplay": [
+        "sceRemoteplayNotifyCanWakeup",
+    ],
 }
 SOURCES = {
     "libSceCamera": [
@@ -629,6 +645,21 @@ SOURCES = {
     ],
     "libkernel": [
         "libkernel/Pending.cpp",
+    ],
+    "libSceAgc": [
+        "libSceAgc/Export.cpp",
+    ],
+    "libSceAudioOut": [
+        "libSceAudioOut/src/Unimplemented.cpp",
+    ],
+    "libSceHttp2": [
+        "libSceHttp2/Export.cpp",
+    ],
+    "libSceRegMgr": [
+        "libSceRegMgr/Export.cpp",
+    ],
+    "libSceRemoteplay": [
+        "libSceRemoteplay/Export.cpp",
     ],
 }
 PENDING = re.compile(
