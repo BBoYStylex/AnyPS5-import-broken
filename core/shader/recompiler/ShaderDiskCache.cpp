@@ -1,4 +1,5 @@
 #include "ShaderDiskCache.hpp"
+#include "RdnaDecoder/RdnaInstructionDecoder.hpp"
 #include "CacheKey.hpp"
 #include "ShaderCachePack.hpp"
 #include "ShaderCacheDirectory.hpp"
@@ -1669,6 +1670,11 @@ private:
         const auto stamp = directory / "last-used";
         std::ofstream(stamp, std::ios::binary | std::ios::trunc).close();
         std::filesystem::last_write_time(stamp, std::filesystem::file_time_type::clock::now(), error);
+#ifdef _WIN32
+        auto nativeRoot = root;
+        nativeRoot.make_preferred();
+        if (nativeRoot.native().starts_with(L"\\\\?\\") || nativeRoot.native().starts_with(L"\\\\.\\")) return;
+#endif
         const auto now = std::filesystem::file_time_type::clock::now();
         for (std::filesystem::directory_iterator it(root, error), end; !error && it != end; it.increment(error)) {
             const auto name = it->path().filename().string();
@@ -1775,6 +1781,7 @@ void BuildKey(const RecompileRequest& request, std::uint32_t hostSubgroupSize, s
     writer.Value(FileMagic);
     writer.Value(FormatVersion);
     writer.Value(SourceVersion());
+    writer.Value(static_cast<std::uint8_t>(GcnGuestShaders()));
     thread_local std::vector<std::uint64_t>* memoryKeySlot = nullptr;
     auto& memoryKey = ThreadOwned(memoryKeySlot);
     RecompileCacheKey::Build(request, memoryKey);
@@ -1795,6 +1802,7 @@ void BuildPlanKey(const RecompileRequest& request, std::uint32_t hostSubgroupSiz
     writer.Value(FileMagic);
     writer.Value(FormatVersion);
     writer.Value(SourceVersion());
+    writer.Value(static_cast<std::uint8_t>(GcnGuestShaders()));
     writer.Value(PlanEntryKind);
     thread_local std::vector<std::uint64_t>* memoryKeySlot = nullptr;
     auto& memoryKey = ThreadOwned(memoryKeySlot);

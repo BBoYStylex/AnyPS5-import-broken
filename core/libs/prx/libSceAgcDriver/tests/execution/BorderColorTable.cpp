@@ -125,7 +125,7 @@ std::vector<std::array<float, 4>> Run(AgcDriver::VulkanDevice& device, const std
     };
     request.useCache = false;
     const auto result = ShaderRecompiler::Recompile(request);
-    device.Dispatch(result, 1, 1, 1, {}, reinterpret_cast<std::uintptr_t>(code.data()), nullptr, nullptr, table);
+    device.Dispatch(result, 1, 1, 1, {}, reinterpret_cast<std::uintptr_t>(code.data()), nullptr, nullptr, std::nullopt, table);
     device.WaitIdle();
     std::vector<std::array<float, 4>> samples;
     for (std::uint32_t lane = 0; lane < coordinates.size(); ++lane) {
