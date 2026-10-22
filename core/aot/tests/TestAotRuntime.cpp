@@ -30,6 +30,18 @@ int main() {
     assert(memory.GetTotalCommittedBytes() >= 32768);
     assert(memory.GetCommittedBytesByPool(Aot::Runtime::MemoryPoolType::HostRam) >= 32768);
 
+    bool protOk = memory.Protect(addr, 16384, Aot::Runtime::MemoryProtection::Read);
+    assert(protOk);
+    queryOk = memory.QueryMemoryBlock(addr, block);
+    assert(queryOk);
+    assert(block.Protection == Aot::Runtime::MemoryProtection::Read);
+
+    int32_t sysProtRes = aps5_sys_mprotect(addr, 16384, 3);
+    assert(sysProtRes == 0);
+    queryOk = memory.QueryMemoryBlock(addr, block);
+    assert(queryOk);
+    assert(block.Protection == Aot::Runtime::MemoryProtection::ReadWrite);
+
     bool freeOk = memory.Deallocate(addr);
     assert(freeOk);
 

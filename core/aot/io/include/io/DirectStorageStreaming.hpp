@@ -47,6 +47,13 @@ struct StreamRequest {
     std::function<void(uint64_t, bool)> CompletionCallback;
 };
 
+struct StreamingStatistics {
+    uint64_t TotalRequests{0};
+    uint64_t CompletedRequests{0};
+    uint64_t FailedRequests{0};
+    uint64_t TotalBytesStreamed{0};
+};
+
 class DirectStorageStreaming {
 public:
     static DirectStorageStreaming& Instance();
@@ -62,7 +69,9 @@ public:
 
     uint64_t EnqueueRequest(StreamRequest request);
     void WaitForRequest(uint64_t requestId);
-    bool IsHardwareDecompressionSupported() const;
+    [[nodiscard]] bool IsRequestCompleted(uint64_t requestId, bool* outSuccess = nullptr) const;
+    [[nodiscard]] bool IsHardwareDecompressionSupported() const;
+    [[nodiscard]] StreamingStatistics GetStatistics() const;
 
     bool RegisterExternalGpuMemory(const ExternalGpuMemoryResource& resource);
     void UnregisterExternalGpuMemory(uint64_t resourceId);
@@ -85,6 +94,10 @@ private:
     std::atomic<bool> hardwareDecompressionAvailable{false};
     std::atomic<bool> workerRunning{false};
     std::atomic<uint64_t> nextRequestId{1};
+    std::atomic<uint64_t> statTotalRequests{0};
+    std::atomic<uint64_t> statCompletedRequests{0};
+    std::atomic<uint64_t> statFailedRequests{0};
+    std::atomic<uint64_t> statTotalBytesStreamed{0};
 
     std::mutex queueMutex;
     std::condition_variable queueCondition;

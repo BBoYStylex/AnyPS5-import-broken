@@ -16,10 +16,21 @@ enum class MemoryPoolType {
     DeviceLocalVram
 };
 
+enum class MemoryProtection : uint32_t {
+    None = 0,
+    Read = 1,
+    Write = 2,
+    Execute = 4,
+    ReadWrite = 3,
+    ReadExecute = 5,
+    ReadWriteExecute = 7
+};
+
 struct MemoryBlock {
     uint64_t GuestVirtualAddress;
     size_t Size;
     MemoryPoolType PoolType;
+    MemoryProtection Protection;
     bool Committed;
 };
 
@@ -42,6 +53,7 @@ public:
 
     uint64_t Allocate(size_t size, MemoryPoolType poolType, size_t alignment = StandardPageSize);
     bool Deallocate(uint64_t guestVirtualAddress);
+    bool Protect(uint64_t guestVirtualAddress, size_t size, MemoryProtection protection);
 
     void* TranslateGuestToHost(uint64_t guestVirtualAddress) const;
     [[nodiscard]] uint64_t TranslateHostToGuest(const void* hostPointer) const;

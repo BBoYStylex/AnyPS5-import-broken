@@ -47,8 +47,18 @@ int main() {
     assert(!stillHasRes);
     static_cast<void>(stillHasRes);
 
+    bool completed = streaming.IsRequestCompleted(reqId);
+    assert(completed);
+
+    auto stats = streaming.GetStatistics();
+    assert(stats.TotalRequests >= 1);
+
     Aot::Io::FileStreamQueue queue;
+    assert(queue.GetActiveRequestCount() == 0);
+    uint64_t queuedId = queue.QueueAssetLoad("", 0, 0, 0, destBuffer.data());
+    assert(queuedId > 0);
     queue.Flush();
+    assert(queue.GetActiveRequestCount() == 0);
 
     streaming.Shutdown();
 

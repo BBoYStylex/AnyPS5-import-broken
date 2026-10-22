@@ -63,6 +63,7 @@ void DirectStorageStreaming::Shutdown() {
 uint64_t DirectStorageStreaming::EnqueueRequest(StreamRequest request) {
     uint64_t id = nextRequestId.fetch_add(1, std::memory_order_relaxed);
     request.RequestId = id;
+    statTotalRequests.fetch_add(1, std::memory_order_relaxed);
 
     {
         std::lock_guard<std::mutex> lock(queueMutex);
@@ -84,8 +85,29 @@ void DirectStorageStreaming::WaitForRequest(uint64_t requestId) {
     });
 }
 
+bool DirectStorageStreaming::IsRequestCompleted(uint64_t requestId, bool* outSuccess) const {
+    std::lock_guard<std::mutex> lock(const_cast<std::mutex&>(completionMutex));
+    auto it = completedRequests.find(requestId);
+    if (it != completedRequests.end()) {
+        if (outSuccess != nullptr) {
+            *outSuccess = it->second;
+        }
+        return true;
+    }
+    return false;
+}
+
 bool DirectStorageStreaming::IsHardwareDecompressionSupported() const {
     return hardwareDecompressionAvailable.load(std::memory_order_acquire);
+}
+
+StreamingStatistics DirectStorageStreaming::GetStatistics() const {
+    return StreamingStatistics{
+        .TotalRequests = statTotalRequests.load(std::memory_order_relaxed),
+        .CompletedRequests = statCompletedRequests.load(std::memory_order_relaxed),
+        .FailedRequests = statFailedRequests.load(std::memory_order_relaxed),
+        .TotalBytesStreamed = statTotalBytesStreamed.load(std::memory_order_relaxed)
+    };
 }
 
 bool DirectStorageStreaming::RegisterExternalGpuMemory(const ExternalGpuMemoryResource& resource) {
@@ -169,6 +191,13 @@ void DirectStorageStreaming::workerThreadLoop() {
         }
 
         bool success = processRequestCpuFallback(request);
+
+        if (success) {
+            statCompletedRequests.fetch_add(1, std::memory_order_relaxed);
+            statTotalBytesStreamed.fetch_add(request.UncompressedSize, std::memory_order_relaxed);
+        } else {
+            statFailedRequests.fetch_add(1, std::memory_order_relaxed);
+        }
 
         if (request.CompletionCallback) {
             request.CompletionCallback(request.RequestId, success);

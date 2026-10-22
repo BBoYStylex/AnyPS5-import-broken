@@ -143,6 +143,7 @@ uint64_t MemoryBridge::Allocate(size_t size, MemoryPoolType poolType, size_t ali
         .GuestVirtualAddress = allocatedGuestAddress,
         .Size = alignedSize,
         .PoolType = poolType,
+        .Protection = MemoryProtection::ReadWrite,
         .Committed = true
     };
 
@@ -168,6 +169,63 @@ bool MemoryBridge::Deallocate(uint64_t guestVirtualAddress) {
 #endif
 
     activeBlocks.erase(iterator);
+    return true;
+}
+
+bool MemoryBridge::Protect(uint64_t guestVirtualAddress, size_t size, MemoryProtection protection) {
+    std::lock_guard<std::mutex> lock(allocationMutex);
+    if (hostBasePointer == nullptr || size == 0) {
+        return false;
+    }
+    if (!IsValidGuestAddress(guestVirtualAddress)) {
+        return false;
+    }
+
+    uint64_t offset = guestVirtualAddress - baseGuestAddress;
+    uint8_t* targetHostAddress = static_cast<uint8_t*>(hostBasePointer) + offset;
+    size_t alignedSize = (size + StandardPageSize - 1) & ~(StandardPageSize - 1);
+
+#if defined(_WIN32)
+    DWORD winProtect = PAGE_NOACCESS;
+    uint32_t protVal = static_cast<uint32_t>(protection);
+    if ((protVal & static_cast<uint32_t>(MemoryProtection::Execute)) != 0) {
+        if ((protVal & static_cast<uint32_t>(MemoryProtection::Write)) != 0) {
+            winProtect = PAGE_EXECUTE_READWRITE;
+        } else if ((protVal & static_cast<uint32_t>(MemoryProtection::Read)) != 0) {
+            winProtect = PAGE_EXECUTE_READ;
+        } else {
+            winProtect = PAGE_EXECUTE;
+        }
+    } else if ((protVal & static_cast<uint32_t>(MemoryProtection::Write)) != 0) {
+        winProtect = PAGE_READWRITE;
+    } else if ((protVal & static_cast<uint32_t>(MemoryProtection::Read)) != 0) {
+        winProtect = PAGE_READONLY;
+    }
+
+    DWORD oldProtect = 0;
+    if (!VirtualProtect(targetHostAddress, alignedSize, winProtect, &oldProtect)) {
+        return false;
+    }
+#else
+    int posixProt = PROT_NONE;
+    uint32_t protVal = static_cast<uint32_t>(protection);
+    if ((protVal & static_cast<uint32_t>(MemoryProtection::Read)) != 0) posixProt |= PROT_READ;
+    if ((protVal & static_cast<uint32_t>(MemoryProtection::Write)) != 0) posixProt |= PROT_WRITE;
+    if ((protVal & static_cast<uint32_t>(MemoryProtection::Execute)) != 0) posixProt |= PROT_EXEC;
+
+    if (mprotect(targetHostAddress, alignedSize, posixProt) != 0) {
+        return false;
+    }
+#endif
+
+    for (auto& [baseAddr, block] : activeBlocks) {
+        if (guestVirtualAddress >= block.GuestVirtualAddress &&
+            guestVirtualAddress < (block.GuestVirtualAddress + block.Size)) {
+            block.Protection = protection;
+            break;
+        }
+    }
+
     return true;
 }
 

@@ -121,10 +121,14 @@ int32_t aps5_sys_ioctl(int32_t fileDescriptor, uint64_t request, void* argument)
 }
 
 int32_t aps5_sys_mprotect(uint64_t address, size_t length, int32_t protection) {
-    static_cast<void>(address);
-    static_cast<void>(length);
-    static_cast<void>(protection);
-    return 0;
+    if (!Aot::Runtime::gInitialized) {
+        Aot::Runtime::RuntimeRegistry::Initialize();
+    }
+    return Aot::Runtime::gMemoryBridge.Protect(
+        address,
+        length,
+        static_cast<Aot::Runtime::MemoryProtection>(protection)
+    ) ? 0 : -1;
 }
 
 int32_t aps5_sys_regmgr_call(uint32_t category, uint32_t propertyId, void* outBuffer, size_t bufferSize, uint32_t type) {

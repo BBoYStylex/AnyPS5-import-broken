@@ -63,4 +63,9 @@ void FileStreamQueue::Flush() {
     }
 }
 
+size_t FileStreamQueue::GetActiveRequestCount() const {
+    std::lock_guard<std::mutex> lock(const_cast<std::mutex&>(queueMutex));
+    return activeRequestIds.size();
+}
+
 } // namespace Aot::Io

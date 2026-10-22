@@ -32,6 +32,7 @@ public:
 
     void WaitForBatch(const std::vector<uint64_t>& requestIds);
     void Flush();
+    [[nodiscard]] size_t GetActiveRequestCount() const;
 
 private:
     DirectStorageStreaming& streamingEngine;
