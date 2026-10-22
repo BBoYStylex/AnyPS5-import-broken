@@ -257,8 +257,9 @@ void RefusedDevicePlacement() {
 
 void MappedDevicePlacement() {
     constexpr auto mapped = HostVisible | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-    const auto placed = [&](std::size_t bytes) {
+    const auto placed = [&](std::size_t bytes, bool budget = true) {
         auto context = budgetContext();
+        if (!budget) context.memoryProperties2 = nullptr;
         context.memory.memoryTypeCount = 3;
         context.memory.memoryTypes[2] = {mapped, 0};
         Buffer buffer(context, bytes, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, mapped);
@@ -281,6 +282,13 @@ void MappedDevicePlacement() {
     Expect(placed(9 * MiB) == 1, "a mapped device-local buffer still refused device memory after reclaiming the pool was not placed in host memory");
     mock.results = {VK_ERROR_OUT_OF_DEVICE_MEMORY};
     Expect(placed(4096) == 1, "a mapped device-local slab still refused device memory after reclaiming the pool was not placed in host memory");
+    mock.memoryTypeBits = 3;
+    Expect(placed(9 * MiB) == 1, "a mapped device-local buffer whose memory types exclude the BAR type was not placed in the host type");
+    Expect(placed(4096) == 1, "a mapped device-local slab whose memory types exclude the BAR type was not placed in the host type");
+    Expect(placed(9 * MiB, false) == 1, "a mapped device-local buffer whose memory types exclude the BAR type was not placed in the host type without the memory budget extension");
+    Expect(placed(4096, false) == 1, "a mapped device-local slab whose memory types exclude the BAR type was not placed in the host type without the memory budget extension");
+    mock.memoryTypeBits = 7;
+    Expect(placed(9 * MiB, false) == 2, "a mapped device-local buffer without the memory budget extension was not placed in its device-local type");
     Expect(mock.results.empty() && mock.liveBytes == 0 && mock.liveBuffers.empty(), "mapped buffer placement left a refusal unused or leaked memory");
 }
 

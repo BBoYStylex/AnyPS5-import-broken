@@ -308,10 +308,15 @@ struct Context {
         return SnapshotMemoryProperties(memory, disabled);
     }
 
-    std::uint32_t MemoryType(std::uint32_t mask, VkMemoryPropertyFlags flags) const {
+    std::optional<std::uint32_t> MatchingMemoryType(std::uint32_t mask, VkMemoryPropertyFlags flags) const {
         for (std::uint32_t i = 0; i < memory.memoryTypeCount; ++i) {
             if ((mask & (1u << i)) != 0 && (memory.memoryTypes[i].propertyFlags & flags) == flags) return i;
         }
+        return std::nullopt;
+    }
+
+    std::uint32_t MemoryType(std::uint32_t mask, VkMemoryPropertyFlags flags) const {
+        if (const auto type = MatchingMemoryType(mask, flags)) return *type;
         throw std::runtime_error("AGC graphics: required Vulkan memory type is unavailable");
     }
 
@@ -375,12 +380,20 @@ struct Context {
     }
 
     VkMemoryPropertyFlags MappedBufferProperties(std::uint32_t mask, VkMemoryPropertyFlags flags, VkDeviceSize bytes) const {
-        if ((flags & MappedDeviceProperties) != MappedDeviceProperties || memoryProperties2 == nullptr || physical == VK_NULL_HANDLE) return flags;
+        if ((flags & MappedDeviceProperties) != MappedDeviceProperties) return flags;
+        const auto mapped = MatchingMemoryType(mask, flags);
+        if (!mapped) {
+            static std::atomic<std::uint64_t> placements{0};
+            const auto count = placements.fetch_add(1) + 1;
+            if (count <= 5 || (count & (count - 1)) == 0) std::fprintf(stderr, "[gpu] mapped buffer: none of the buffer's memory types (mask 0x%x) is mapped device-local, placed in host memory; %llu such allocations\n", mask, static_cast<unsigned long long>(count));
+            return HostBufferProperties;
+        }
+        if (memoryProperties2 == nullptr || physical == VK_NULL_HANDLE) return flags;
         VkPhysicalDeviceMemoryBudgetPropertiesEXT reported{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT};
         VkPhysicalDeviceMemoryProperties2 properties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2};
         properties.pNext = &reported;
         memoryProperties2(physical, &properties);
-        const auto heap = memory.memoryTypes[MemoryType(mask, flags)].heapIndex;
+        const auto heap = memory.memoryTypes[*mapped].heapIndex;
         const auto budget = reported.heapBudget[heap];
         const auto usage = reported.heapUsage[heap];
         if (budget == 0 || (usage < budget && bytes <= budget - usage)) return flags;
