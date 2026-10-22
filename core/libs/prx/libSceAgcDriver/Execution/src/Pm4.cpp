@@ -226,8 +226,7 @@ std::string_view UnsupportedReason(std::uint32_t header) {
             return "graphics draw, shader stages and guest render-target materialization are not implemented";
         case 0x33: case 0x3f: return "nested command buffers, branching and nested flip reservation are not implemented";
         case 0x3c: case 0x93: return {};
-        case 0x39:
-            return "cooperative command-queue waits are not implemented";
+        case 0x39: return {};
         case 0x59: return {};
         case 0x84: case 0x85: case 0x86: case 0x88:
             return "separate CE/DE execution and counter synchronization are not implemented";
@@ -458,6 +457,12 @@ void Validate(std::span<const std::uint32_t> packet, std::uint32_t queue) {
             require((packet[1] & 7u) <= 6u, "invalid WAIT_REG_MEM compare function");
             break;
         }
+        case 0x39:
+            size(4);
+            require((packet[3] >> 29u) == 6u || (packet[3] >> 29u) == 7u, "invalid MEM_SEMAPHORE operation");
+            require(address(packet[1], packet[2]) != 0 && (packet[1] & 7u) == 0, "null or misaligned MEM_SEMAPHORE address");
+            require((packet[3] & 0x10000u) == 0, "MEM_SEMAPHORE mailbox waits are not implemented");
+            break;
         case 0x45: {
             size(9);
             require((packet[1] & ~0x317u) == 0, "COND_WRITE reserved fields are not implemented");
@@ -716,6 +721,7 @@ std::vector<PacketStore> DecodeStores(std::span<const std::uint32_t> packet) {
             if (!label.has_value()) return {};
             return {known(label->address, label->Bytes())};
         }
+        case 0x39: return {runTime(address(packet[1], packet[2]), 8)};
         case 0x40: {
             require(packet.size() == 6, "invalid COPY_DATA size");
             if (CopyDataToRegister(packet)) return {};
@@ -771,7 +777,7 @@ bool UsesGpuCacheBarrier(std::span<const std::uint32_t> packet) {
 
 bool AccessesMemory(std::uint32_t header) {
     switch ((header >> 8u) & 0xffu) {
-        case 0x22: case 0x27: case 0x3c: case 0x93: case 0x49: case 0x16: case 0x2d: case 0x35: case 0x24: case 0x25: case 0x2c: case 0x38: case 0x37: case 0x40: case 0x45: case 0x50: case 0x63: case 0x64: case 0x83: case 0x91: case 0x9f: return true;
+        case 0x22: case 0x27: case 0x39: case 0x3c: case 0x93: case 0x49: case 0x16: case 0x2d: case 0x35: case 0x24: case 0x25: case 0x2c: case 0x38: case 0x37: case 0x40: case 0x45: case 0x50: case 0x63: case 0x64: case 0x83: case 0x91: case 0x9f: return true;
         default: return false;
     }
 }
@@ -1070,6 +1076,35 @@ void Execute(std::span<const std::uint32_t> packet, QueueState& queue) {
                                  static_cast<unsigned long long>(address(packet[2] & (WaitAwaitedBytes(packet) == 8 ? ~7u : ~3u), packet[3])), packet[1] & 7u, packet[4], packet[5]);
                 }
             }
+            return;
+        }
+        case 0x39: {
+            const auto semaphore = address(packet[1], packet[2]);
+            std::uint64_t value = 0;
+            const auto read = [&] {
+                const GuestMemory::ReadSiteScope site(GuestMemory::ReadSite::Wait);
+                GuestMemory::Read(semaphore, std::as_writable_bytes(std::span(&value, 1)), 8);
+            };
+            if ((packet[3] >> 29u) == 6u) {
+                if ((packet[3] & 0x100000u) != 0) {
+                    value = 1;
+                } else {
+                    read();
+                    ++value;
+                }
+            } else {
+                const auto start = std::chrono::steady_clock::now();
+                bool warned = false;
+                for (read(); value == 0; read()) {
+                    PreciseSleepUs(50);
+                    if (!warned && std::chrono::steady_clock::now() - start > std::chrono::seconds(5)) {
+                        warned = true;
+                        std::fprintf(stderr, "[gpu] MEM_SEMAPHORE wait at 0x%llx still waiting after 5s\n", static_cast<unsigned long long>(semaphore));
+                    }
+                }
+                --value;
+            }
+            GuestMemory::Write(semaphore, std::as_bytes(std::span(&value, 1)), 8);
             return;
         }
         case 0x49: {
