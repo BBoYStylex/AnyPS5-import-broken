@@ -208,6 +208,8 @@ int ScanGuest(const char* buffer, const char* format, bool secure, NextPointer n
                 if (!accepts(point)) break;
                 char16_t units[2] = {};
                 const std::size_t count = LibcDetail::EncodeWideScanCharacter(point, units);
+                if (kind == 'c' && !secure && count != 1)
+                    NotImplemented_nid_no_patch("scanf 16-bit wide conversion of a character outside the BMP in an unsized %lc field");
                 if (text.size() + count > limit) {
                     overflowed = true;
                     break;

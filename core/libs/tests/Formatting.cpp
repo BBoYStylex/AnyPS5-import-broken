@@ -327,7 +327,7 @@ __attribute__((noinline)) static void APS5_VABI RunChecks() {
             try { sscanf_nid_postfix(input, format, untouched); } catch (const std::runtime_error&) { return untouched[0] == u'!'; }
             return false;
         };
-        Require(rejects("\xff", "%ls") && rejects("a b", "%2$ls"));
+        Require(rejects("\xff", "%ls") && rejects("a b", "%2$ls") && rejects("\xf0\x9f\x98\x80", "%lc") && rejects("\xf0\x9f\x98\x80", "%2lc"));
         Require(sscanf_nid_postfix("\xf0\x9f\x98\x80", "%ls", first) == 1 && std::u16string(first) == u"\U0001F600");
         Require(sscanf_nid_postfix("a\xf0\x9f\x98\x80" "b", "%2ls", first) == 1 && std::u16string(first) == u"a\U0001F600");
         char16_t supplementary[4] = {};
