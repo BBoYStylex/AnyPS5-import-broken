@@ -9,6 +9,19 @@ import import_audit
 import nid_names
 
 LIBRARIES = {
+    "libSceNpSessionSignaling": [
+        "sceNpSessionSignalingActivate",
+        "sceNpSessionSignalingCrossplayCreateContext",
+        "sceNpSessionSignalingCrossplayDestroyContext",
+        "sceNpSessionSignalingCrossplayGetMemoryInfo",
+        "sceNpSessionSignalingCrossplayInitialize",
+        "sceNpSessionSignalingCrossplayTerminate",
+        "sceNpSessionSignalingManualUdpAbortConnection",
+        "sceNpSessionSignalingManualUdpCreateJoin",
+        "sceNpSessionSignalingManualUdpEstablishConnection",
+        "sceNpSessionSignalingManualUdpJoin",
+        "sceNpSessionSignalingRegisterInternalCallback",
+    ],
     "libSceVideoOut": [
         "sceVideoOutAddBuffer",
         "sceVideoOutAddBuffer4k2kPrivilege",
