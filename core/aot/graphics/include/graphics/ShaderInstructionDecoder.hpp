@@ -34,6 +34,8 @@ enum class DecodedSpirvOp : uint16_t {
     Load = 61,
     Store = 62,
     ImageSample = 87,
+    ImageRead = 98,
+    ImageWrite = 99,
     Branch = 249,
     BranchConditional = 250,
     Return = 253

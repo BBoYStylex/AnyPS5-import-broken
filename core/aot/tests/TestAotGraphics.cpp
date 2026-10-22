@@ -138,6 +138,124 @@ int main() {
         return 8;
     }
 
+    std::vector<uint8_t> samplerBytecode = {
+        0x00, 0x00, 0x00, 0xF0,
+        0x00, 0x00, 0x81, 0xBF
+    };
+    Aot::Graphics::ExtractedShaderPackage samplerPkg{};
+    samplerPkg.Stage = Aot::Graphics::ConsoleShaderStage::Fragment;
+    samplerPkg.RawBytecode = samplerBytecode;
+    samplerPkg.ResourceBindings.push_back(Aot::Graphics::ResourceBindingInfo{
+        .Binding = 0,
+        .DescriptorSet = 0,
+        .DescriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .StageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+        .Count = 1
+    });
+
+    auto samplerResult = transpiler.Transpile(samplerPkg);
+    if (!samplerResult.has_value() || samplerResult->Bindings.empty()) {
+        return 19;
+    }
+
+    bool foundOpTypeImage = false;
+    bool foundOpTypeSampledImage = false;
+    bool foundOpImageSample = false;
+    for (size_t i = 5; i < samplerResult->SpirvBytecode.size(); ) {
+        uint32_t word = samplerResult->SpirvBytecode[i];
+        uint16_t op = word & 0xFFFF;
+        uint16_t len = word >> 16;
+        if (len == 0) break;
+        if (op == 25) {
+            foundOpTypeImage = true;
+        } else if (op == 27) {
+            foundOpTypeSampledImage = true;
+        } else if (op == 87) {
+            foundOpImageSample = true;
+        }
+        i += len;
+    }
+    if (!foundOpTypeImage || !foundOpTypeSampledImage || !foundOpImageSample) {
+        return 20;
+    }
+
+    std::vector<uint8_t> intAluBytecode = {
+        0x00, 0x00, 0x00, 0x80,
+        0x00, 0x00, 0x80, 0x80,
+        0x00, 0x00, 0x00, 0x81,
+        0x00, 0x00, 0x80, 0x81,
+        0x00, 0x00, 0x81, 0xBF
+    };
+    Aot::Graphics::ExtractedShaderPackage intPkg{};
+    intPkg.Stage = Aot::Graphics::ConsoleShaderStage::Compute;
+    intPkg.RawBytecode = intAluBytecode;
+    auto intResult = transpiler.Transpile(intPkg);
+    if (!intResult.has_value()) {
+        return 21;
+    }
+
+    bool foundIAdd = false;
+    bool foundISub = false;
+    bool foundIMul = false;
+    bool foundSelect = false;
+    for (size_t i = 5; i < intResult->SpirvBytecode.size(); ) {
+        uint32_t word = intResult->SpirvBytecode[i];
+        uint16_t op = word & 0xFFFF;
+        uint16_t len = word >> 16;
+        if (len == 0) break;
+        if (op == 128) {
+            foundIAdd = true;
+        } else if (op == 130) {
+            foundISub = true;
+        } else if (op == 132) {
+            foundIMul = true;
+        } else if (op == 169) {
+            foundSelect = true;
+        }
+        i += len;
+    }
+    if (!foundIAdd || !foundISub || !foundIMul || !foundSelect) {
+        return 22;
+    }
+
+    std::vector<uint8_t> storageImgBytecode = {
+        0x00, 0x00, 0x00, 0xF4,
+        0x00, 0x00, 0x00, 0xF8,
+        0x00, 0x00, 0x81, 0xBF
+    };
+    Aot::Graphics::ExtractedShaderPackage storagePkg{};
+    storagePkg.Stage = Aot::Graphics::ConsoleShaderStage::Compute;
+    storagePkg.RawBytecode = storageImgBytecode;
+    storagePkg.ResourceBindings.push_back(Aot::Graphics::ResourceBindingInfo{
+        .Binding = 2,
+        .DescriptorSet = 0,
+        .DescriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+        .StageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+        .Count = 1
+    });
+    auto storageResult = transpiler.Transpile(storagePkg);
+    if (!storageResult.has_value()) {
+        return 23;
+    }
+
+    bool foundImageRead = false;
+    bool foundImageWrite = false;
+    for (size_t i = 5; i < storageResult->SpirvBytecode.size(); ) {
+        uint32_t word = storageResult->SpirvBytecode[i];
+        uint16_t op = word & 0xFFFF;
+        uint16_t len = word >> 16;
+        if (len == 0) break;
+        if (op == 98) {
+            foundImageRead = true;
+        } else if (op == 99) {
+            foundImageWrite = true;
+        }
+        i += len;
+    }
+    if (!foundImageRead || !foundImageWrite) {
+        return 24;
+    }
+
     Aot::Graphics::GraphicsDriver driver;
     Aot::Graphics::GraphicsProcessingOptions options{};
     options.WarmupPipelines = true;
