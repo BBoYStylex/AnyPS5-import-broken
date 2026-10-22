@@ -268,6 +268,12 @@ std::uint16_t APS5_VABI umask_nid_postfix(std::uint16_t mask) {
     return File::ExchangeCreationMask_nid_no_patch(mask);
 }
 
+int APS5_VABI flock_nid_postfix(int d, int operation);
+
+int APS5_VABI sceKernelFlock(int d, int operation) {
+    return flock_nid_postfix(d, operation) == 0 ? 0 : SceKernelError(*__error_nid_postfix());
+}
+
 int APS5_VABI _fstatfs_nid_postfix(int d, void* buf);
 
 int APS5_VABI fstatfs_nid_postfix(int d, void* buf) {
