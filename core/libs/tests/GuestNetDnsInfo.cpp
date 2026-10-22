@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <stdexcept>
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -34,6 +35,16 @@ constexpr int kErrorBase = static_cast<int>(0x80410100);
 constexpr int kEfault = 14;
 constexpr int kEinval = 22;
 
+template <typename Call>
+bool Throws(Call call) {
+    try {
+        call();
+    } catch (const std::runtime_error&) {
+        return true;
+    }
+    return false;
+}
+
 bool Failed(int result, int error) { return result == (kErrorBase | error) && *sceNetErrnoLoc() == error; }
 
 void CheckDns() {
@@ -52,8 +63,8 @@ void CheckDns() {
     Require(sceNetGetDnsInfo(&read, 0) >= 0);
 
     NetDns6Info info6{};
-    Require(Failed(sceNetGetDns6Info(nullptr, 0), kEinval));
-    Require(Failed(sceNetGetDns6Info(&info6, 1), kEinval));
+    Require(Throws([] { NetDns6Info unused{}; sceNetGetDns6Info(&unused, 1); }));
+    Require(Throws([] { sceNetGetDns6Info(nullptr, 0); }));
     std::memset(&info6, 0xff, sizeof(info6));
     Require(sceNetGetDns6Info(&info6, 0) == 0);
     for (const auto byte : info6.primaryAddress) Require(byte == 0);

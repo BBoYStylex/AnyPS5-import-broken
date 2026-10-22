@@ -2616,7 +2616,8 @@ int APS5_VABI sceNetInetPtonWithScopeId(std::int32_t family, const char* text, v
 }
 
 int APS5_VABI sceNetGetDns6Info(NetDns6Info* info, std::uint32_t flags) {
-    if (!info || flags != 0) return fail(NET_EINVAL);
+    if (flags != 0) throw std::runtime_error("sceNetGetDns6Info: flags " + std::to_string(flags) + " are not supported");
+    if (!info) throw std::runtime_error("sceNetGetDns6Info: a null info is not supported");
     std::lock_guard lock(g_dnsLock);
     *info = g_dns6Override;
     if (IsZeroAddress(info->primaryAddress)) return 0;
