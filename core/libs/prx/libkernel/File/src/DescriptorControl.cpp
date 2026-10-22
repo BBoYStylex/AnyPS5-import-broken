@@ -467,8 +467,13 @@ int File::PipeProcessGroup(int fd) {
     return -GetSigioOwner(fd, Kind::Pipe, "tcgetpgrp", "TIOCGPGRP");
 }
 
+static int SetProcessGroup(int fd, Kind kind, int group, const char* function, const char* request) {
+    if (group == std::numeric_limits<int>::min()) return Fail(GuestEsrch);
+    return SetSigioOwner(fd, kind, -group, function, request);
+}
+
 int File::SetPipeProcessGroup(int fd, int group) {
-    return SetSigioOwner(fd, Kind::Pipe, -group, "tcsetpgrp", "TIOCSPGRP");
+    return SetProcessGroup(fd, Kind::Pipe, group, "tcsetpgrp", "TIOCSPGRP");
 }
 
 namespace File {
@@ -633,7 +638,11 @@ int Ioctl(int fd, std::uint64_t request, void* argument) {
         return 0;
     }
     if ((command == SetGroupRequest || command == GetGroupRequest) && *kind == Kind::Pipe && fd > 2) {
-        if (command == SetGroupRequest) return SetSigioOwner(fd, *kind, -*static_cast<const int*>(argument), "ioctl", "TIOCSPGRP");
+        if (command == SetGroupRequest) {
+            int group = 0;
+            if (!ReadGuestInt(argument, &group)) return Fail(GuestEfault);
+            return SetProcessGroup(fd, *kind, group, "ioctl", "TIOCSPGRP");
+        }
         const int group = -GetSigioOwner(fd, *kind, "ioctl", "TIOCGPGRP");
         if (argument == nullptr) return Fail(GuestEfault);
         const GuestArena::HostWrite destination(argument, sizeof(group));

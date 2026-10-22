@@ -1,6 +1,7 @@
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include <chrono>
 #include <cstdint>
+#include <limits>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -120,10 +121,12 @@ int main() {
         Require(tcgetpgrp_nid_postfix(end) == 0);
         Require(tcsetpgrp_nid_postfix(end, process) == 0 && tcgetpgrp_nid_postfix(end) == process);
         Require(Fails(tcsetpgrp_nid_postfix(end, process + 1), NoSuchProcess) && tcgetpgrp_nid_postfix(end) == process);
+        Require(Fails(tcsetpgrp_nid_postfix(end, std::numeric_limits<int>::min()), NoSuchProcess) && tcgetpgrp_nid_postfix(end) == process);
         Require(fcntl_nid_postfix(end, 6, process) == 0 && tcgetpgrp_nid_postfix(end) == -process);
         Require(fcntl_nid_postfix(end, 5) == process);
         int group = process;
         Require(ioctl_nid_postfix(end, 0x80047476, &group) == 0 && fcntl_nid_postfix(end, 5) == -process);
+        Require(Fails(ioctl_nid_postfix(end, 0x80047476, reinterpret_cast<void*>(std::uintptr_t{0x10})), BadAddress) && fcntl_nid_postfix(end, 5) == -process);
         group = 0;
         Require(ioctl_nid_postfix(end, 0x40047477, &group) == 0 && group == process);
         Require(tcsetpgrp_nid_postfix(end, 0) == 0 && tcgetpgrp_nid_postfix(end) == 0);
