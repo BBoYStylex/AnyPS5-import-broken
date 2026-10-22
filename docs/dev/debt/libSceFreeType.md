@@ -10,6 +10,8 @@
 
 - [FT_New_Memory_Face, FT_Done_Face and FT_Done_FreeType](../../../core/libs/prx/libSceFreeType/Export.cpp) (libSceFreeType) - console signatures, errors and generic-finalizer ordering are unverified; they follow the bundled [FreeType 2.13.3](https://github.com/freetype/freetype/blob/42608f77f20749dd6ddc9e0536788eaad70ea4b5/include/freetype/freetype.h) with LP64 guest arguments. Caller-owned font bytes must remain valid until the face is freed.
 
+- [FT_Outline_Check, FT_Outline_Get_CBox](../../../core/libs/prx/libSceFreeType/src/Outline.cpp) (libSceFreeType) - console signatures, count signedness and errors are unverified; the adapter follows bundled [FreeType 2.13.3](https://github.com/freetype/freetype/blob/42608f77f20749dd6ddc9e0536788eaad70ea4b5/src/base/ftoutln.c), including its unsigned 16-bit counts and contour endpoints. Control-box coordinates use the existing guest LP64 layout and retain their full 64-bit range on Windows; contour checking does not validate point tags
+
 ### Functional
 
 - [libSceFreeType](../../../core/libs/prx/libSceFreeType/src/GuestObjects.cpp) (libSceFreeType) - private fields (`driver`, `memory`, `stream`, `sizes_list`, `extensions`) and `subglyphs` stay null. Face, size and glyph-slot records are copies. Only edits to outline points and flags are written back before `FT_Render_Glyph`; replacing arrays or exceeding the host `FT_Pos` range throws. `FT_New_Face` reads the whole file into memory and throws for files of 2 GiB or more on Windows. On macOS, native FreeType symbols remain exported and could resolve guest imports without adaptation; Windows and Linux hide them with `--exclude-libs`.
