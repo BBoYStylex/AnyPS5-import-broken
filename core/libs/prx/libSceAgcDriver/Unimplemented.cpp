@@ -16,6 +16,46 @@ constexpr std::size_t TOOL_MEMORY_RANGE_SIZE = 12;
 
 extern "C" {
 
+int APS5_VABI sceAgcDriverDeregisterCaptureInterface(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceAgcDriverIsCoredumpValid(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceAgcDriverIsSuspendPointInFlightDirect(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceAgcDriverRegisterCaptureInterface(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceAgcDriverReleaseRazorACQ(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceAgcDriverResetGc(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceAgcDriverSdmaCopyLinearBlocking(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceAgcDriverSetTFRingDirect(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
 int APS5_VABI sceAgcDriverGetShaderDebuggingStatus() {
     return 1;
 }
