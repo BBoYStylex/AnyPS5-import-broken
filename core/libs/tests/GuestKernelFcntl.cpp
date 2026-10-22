@@ -281,7 +281,7 @@ static void FileFlagsRoundTrip() {
     Require(fcntl_nid_postfix(appending, SetFlags, 0) == 0);
     Require(fcntl_nid_postfix(appending, GetFlags) == WriteOnly);
 #endif
-    Require(ThrowsWith([appending] { fcntl_nid_postfix(appending, SetFlags, Append | 0x80); }, "fcntl: changing O_FSYNC on a file is not implemented"));
+    Require(fcntl_nid_postfix(appending, SetFlags, Append | 0x80) == 0 && fcntl_nid_postfix(appending, GetFlags) == (WriteOnly | Append | 0x80));
     Require(sceKernelClose(appending) == 0);
     std::remove("kernel_fcntl_probe.bin");
 }
