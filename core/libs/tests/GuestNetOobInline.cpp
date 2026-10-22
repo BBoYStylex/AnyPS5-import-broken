@@ -47,9 +47,51 @@ static void CheckFlag(int socket, int expected) {
     }
 }
 
+static void CheckInheritance(int family, int beforeListen, bool changeAfterListen) {
+    std::fprintf(stderr, "inheritance family=%d beforeListen=%d changeAfterListen=%d\n",
+        family, beforeListen, changeAfterListen);
+    const int listener = sceNetSocket("inheritance-listener", family, 1, 6);
+    const int client = sceNetSocket("inheritance-client", family, 1, 6);
+    Require(listener >= 0 && client >= 0);
+    Require(sceNetSetsockopt(listener, 0xffff, 0x100, &beforeListen, sizeof(beforeListen)) == 0);
+    CheckFlag(listener, beforeListen != 0 ? 256 : 0);
+    std::array<std::uint8_t, 28> address{};
+    std::uint32_t size = family == 2 ? 16 : 28;
+    address[0] = size;
+    address[1] = family;
+    if (family == 2) { address[4] = 127; address[7] = 1; }
+    else address[23] = 1;
+    Require(sceNetBind_nid_postfix(listener, address.data(), size) == 0);
+    Require(sceNetListen(listener, 1) == 0);
+    const int setting = changeAfterListen ? 1 - beforeListen : beforeListen;
+    if (changeAfterListen)
+        Require(sceNetSetsockopt(listener, 0xffff, 0x100, &setting, sizeof(setting)) == 0);
+    CheckFlag(listener, setting != 0 ? 256 : 0);
+    Require(sceNetGetsockname(listener, address.data(), &size) == 0);
+    Require(sceNetConnect(client, address.data(), size) == 0);
+    const int accepted = sceNetAccept(listener, nullptr, nullptr);
+    Require(accepted >= 0);
+    CheckFlag(accepted, setting != 0 ? 256 : 0);
+    CheckFlag(client, 0);
+    const int opposite = 1 - setting;
+    Require(sceNetSetsockopt(listener, 0xffff, 0x100, &opposite, sizeof(opposite)) == 0);
+    CheckFlag(listener, opposite != 0 ? 256 : 0);
+    CheckFlag(accepted, setting != 0 ? 256 : 0);
+    Require(sceNetSetsockopt(listener, 0xffff, 0x100, &setting, sizeof(setting)) == 0);
+    Require(sceNetSetsockopt(accepted, 0xffff, 0x100, &opposite, sizeof(opposite)) == 0);
+    CheckFlag(accepted, opposite != 0 ? 256 : 0);
+    CheckFlag(listener, setting != 0 ? 256 : 0);
+    CheckFlag(client, 0);
+    for (const int socket : {accepted, client, listener}) Require(sceNetSocketClose(socket) == 0);
+}
+
 int main() {
     Require(sceNetInit_nid_postfix() == 0);
     for (const int family : {2, 28}) {
+        for (const int beforeListen : {0, 1}) {
+            for (const bool changeAfterListen : {false, true})
+                CheckInheritance(family, beforeListen, changeAfterListen);
+        }
         const int datagram = sceNetSocket("inline-datagram", family, 2, 17);
         const int listener = sceNetSocket("inline-listener", family, 1, 6);
         const int client = sceNetSocket("inline-client", family, 1, 6);
