@@ -2,7 +2,7 @@
 
 ### Silent stubs
 
-- [sceShellCoreUtilActivateAbort, sceShellCoreUtilActivateStart, sceShellCoreUtilActivateStartAsync, sceShellCoreUtilActivateTerm](../../../core/libs/prx/libSceSystemService/PendingExports.cpp) return zero with the recovered handle argument. Activation service state is not modeled.
+- [sceShellCoreUtilActivateAbort, sceShellCoreUtilActivateGetStatus, sceShellCoreUtilActivateInit, sceShellCoreUtilActivateIsActivated, sceShellCoreUtilActivateRecordActivation, sceShellCoreUtilActivateStart, sceShellCoreUtilActivateStartAsync, sceShellCoreUtilActivateTerm](../../../core/libs/prx/libSceSystemService/PendingExports.cpp) return zero with valid arguments; pointer getters validate non-null outputs. Activation service state is not modeled.
 
 - [libSceSystemService](../../../core/libs/prx/libSceSystemService/Export.cpp) - `sceSystemServicePowerTick`, `sceSystemServiceReportAbnormalTermination`, `sceSystemServiceDisableMusicPlayer`, `sceSystemServiceReenableMusicPlayer`, `sceSystemServiceDisableMediaPlay` and `sceSystemServiceReenableMediaPlay` return success and do nothing: the host has no auto power-off timer to reset, no system crash reporter to notify, no system music player to pause or resume and no system media playback to disable. PPSA01521 calls `sceSystemServiceDisableMediaPlay` during start-up, and its wrappers for both pass no arguments
 - [sceSystemServiceLaunchWebBrowser](../../../core/libs/prx/libSceSystemService/Export.cpp) (libSceSystemService) - AnyPS5 launches no web browser, so the call fails and nothing is shown. RommPS PPSA76677 then tells the player to scan its QR code instead
