@@ -36,6 +36,7 @@ constexpr int SCE_AJM_ERROR_INVALID_BATCH = static_cast<int>(0x80930004);
 constexpr int SCE_AJM_ERROR_INVALID_PARAMETER = static_cast<int>(0x80930005);
 constexpr int SCE_AJM_ERROR_OUT_OF_RESOURCES = static_cast<int>(0x80930007);
 constexpr int SCE_AJM_ERROR_MALFORMED_BATCH = static_cast<int>(0x80930011);
+constexpr int SCE_AJM_ERROR_INVALID_ADDRESS = static_cast<int>(0x80930016);
 
 constexpr std::int32_t AJM_RESULT_NOT_INITIALIZED = 0x00000001;
 constexpr std::int32_t AJM_RESULT_INVALID_DATA = 0x00000002;
@@ -1771,17 +1772,38 @@ void* EndConsoleJob(std::uint8_t* job, std::uint8_t* end, std::uint32_t instance
     return end;
 }
 
-// Runs one console job as the job of this file's kind it describes. The return address is only kept by
-// the console for error reports. Returns false for a job whose chunks overrun it or that has no flags.
-bool RunConsoleJob(std::uint32_t instance, const std::uint8_t* at, const std::uint8_t* end) {
-    JobHeader job{};
-    job.instance = instance;
+struct ConsoleJob {
+    JobHeader header;
+    std::vector<AjmBuffer> buffers;
+};
+
+// What sceAjmBatchStartBuffer reports in the AjmBatchError when it refuses a batch: the error, the job
+// chunk, the offending chunk's offset in the job and the job's return address, as a PS4 fills them for a
+// buffer chunk with a null address and a nonzero size (INVALID_ADDRESS, nothing of the batch run). The
+// other refusals here report MALFORMED_BATCH the same way; they were not measured.
+struct ConsoleRefusal {
+    std::int32_t code = SCE_AJM_ERROR_MALFORMED_BATCH;
+    const std::uint8_t* job = nullptr;
+    std::uint32_t offset = 0;
+    const void* returnAddress = nullptr;
+};
+
+// Reads one console job: the chunks between the job header at `job` and `end`. A buffer chunk of size
+// zero is dropped whatever its address, as a PS4 does. Returns false with the refusal filled for a null
+// address with a nonzero size, for chunks that overrun the job and for a job without flags.
+bool ReadConsoleJob(std::uint32_t instance, const std::uint8_t* job, const std::uint8_t* end, ConsoleJob& out, ConsoleRefusal& refusal) {
+    out.header = JobHeader{};
+    out.header.instance = instance;
     std::vector<AjmBuffer> inputs;
     std::vector<AjmBuffer> outputs;
     AjmBuffer controlInput{};
     AjmBuffer controlOutput{};
     ConsoleChunk flagsKind = ConsoleChunk::Job;
+    refusal = ConsoleRefusal{};
+    refusal.job = job;
+    const std::uint8_t* at = job + 2 * sizeof(std::uint32_t);
     while (at < end) {
+        refusal.offset = static_cast<std::uint32_t>(at - job);
         if (end - at < 8) return false;
         std::uint32_t words[2];
         std::memcpy(words, at, sizeof(words));
@@ -1789,7 +1811,7 @@ bool RunConsoleJob(std::uint32_t instance, const std::uint8_t* at, const std::ui
         if (kind == ConsoleChunk::ControlFlags || kind == ConsoleChunk::RunFlags) {
             if (flagsKind != ConsoleChunk::Job) return false;
             flagsKind = kind;
-            job.flags = (std::uint64_t{ConsoleChunkPayload(words[0])} << 32) | words[1];
+            out.header.flags = (std::uint64_t{ConsoleChunkPayload(words[0])} << 32) | words[1];
             at += sizeof(words);
             continue;
         }
@@ -1800,34 +1822,44 @@ bool RunConsoleJob(std::uint32_t instance, const std::uint8_t* at, const std::ui
         AjmBuffer buffer{nullptr, words[1]};
         std::memcpy(&buffer.ptr, at + sizeof(words), sizeof(buffer.ptr));
         at += 16;
-        if (kind == ConsoleChunk::InputRunBuffer && buffer.size) inputs.push_back(buffer);
-        if (kind == ConsoleChunk::OutputRunBuffer && buffer.ptr && buffer.size) outputs.push_back(buffer);
+        if (kind == ConsoleChunk::ReturnAddress) {
+            refusal.returnAddress = buffer.ptr;
+            continue;
+        }
+        if (buffer.size == 0) continue;
+        if (!buffer.ptr) {
+            refusal.code = SCE_AJM_ERROR_INVALID_ADDRESS;
+            return false;
+        }
+        if (kind == ConsoleChunk::InputRunBuffer) inputs.push_back(buffer);
+        if (kind == ConsoleChunk::OutputRunBuffer) outputs.push_back(buffer);
         if (kind == ConsoleChunk::InputControlBuffer) controlInput = buffer;
         if (kind == ConsoleChunk::OutputControlBuffer) controlOutput = buffer;
     }
+    refusal.offset = static_cast<std::uint32_t>(end - job);
     if (flagsKind == ConsoleChunk::Job) return false;
-    job.sideband = controlOutput.ptr;
-    job.sidebandSize = controlOutput.size;
+    JobHeader& header = out.header;
+    header.sideband = controlOutput.ptr;
+    header.sidebandSize = controlOutput.size;
     if (instance == CONSOLE_STATISTICS_INSTANCE) {
-        job.kind = JobKind::GetStatistics;
+        header.kind = JobKind::GetStatistics;
     } else if (flagsKind == ConsoleChunk::ControlFlags) {
         constexpr std::uint64_t implemented = CONSOLE_FLAGS_VERSION_AND_CODEC | CONTROL_RESET | CONTROL_INITIALIZE | SIDEBAND_GAPLESS_DECODE;
-        if ((job.flags & ~implemented) != 0) NotImplemented_nid_no_patch("sceAjmBatchStartBuffer (control job flags other than RESET, INITIALIZE and SIDEBAND_GAPLESS_DECODE)");
+        if ((header.flags & ~implemented) != 0) NotImplemented_nid_no_patch("sceAjmBatchStartBuffer (control job flags other than RESET, INITIALIZE and SIDEBAND_GAPLESS_DECODE)");
         if (!inputs.empty() || !outputs.empty()) NotImplemented_nid_no_patch("sceAjmBatchStartBuffer (control job with run buffers)");
-        job.kind = JobKind::Control;
+        header.kind = JobKind::Control;
         if (controlInput.size) inputs.push_back(controlInput);
     } else {
         if (controlInput.size) NotImplemented_nid_no_patch("sceAjmBatchStartBuffer (run job with an input control buffer)");
-        job.kind = JobKind::Run;
+        header.kind = JobKind::Run;
     }
-    job.inputCount = static_cast<std::uint32_t>(inputs.size());
-    job.outputCount = static_cast<std::uint32_t>(outputs.size());
-    AJM_TRACE("[ajm] console job: instance %u, %s flags 0x%llx, %u input and %u output buffers, control input %llu and output %llu bytes\n", instance, flagsKind == ConsoleChunk::ControlFlags ? "control" : "run", static_cast<unsigned long long>(job.flags), job.inputCount, job.outputCount, static_cast<unsigned long long>(controlInput.size), static_cast<unsigned long long>(controlOutput.size));
-    inputs.insert(inputs.end(), outputs.begin(), outputs.end());
-    Execute(job, inputs.data(), inputs.data() + job.inputCount);
+    header.inputCount = static_cast<std::uint32_t>(inputs.size());
+    header.outputCount = static_cast<std::uint32_t>(outputs.size());
+    AJM_TRACE("[ajm] console job: instance %u, %s flags 0x%llx, %u input and %u output buffers, control input %llu and output %llu bytes\n", instance, flagsKind == ConsoleChunk::ControlFlags ? "control" : "run", static_cast<unsigned long long>(header.flags), header.inputCount, header.outputCount, static_cast<unsigned long long>(controlInput.size), static_cast<unsigned long long>(controlOutput.size));
+    out.buffers = std::move(inputs);
+    out.buffers.insert(out.buffers.end(), outputs.begin(), outputs.end());
     return true;
 }
-
 }
 
 extern "C" {
@@ -2112,23 +2144,38 @@ int APS5_VABI sceAjmBatchStartBuffer(uint32_t context, const uint8_t* batch, uin
     if (context == 0 || context >= g_nextContext.load(std::memory_order_relaxed)) return SCE_AJM_ERROR_INVALID_CONTEXT;
     if (!batch_id || (!batch && batch_size)) return SCE_AJM_ERROR_INVALID_PARAMETER;
     AJM_TRACE("[ajm] batch start buffer: context %u, priority %d, %u bytes\n", context, priority, batch_size);
-    if (batch_size % 8 != 0) return SCE_AJM_ERROR_MALFORMED_BATCH;
+    std::vector<ConsoleJob> jobs;
+    ConsoleRefusal refusal;
     const std::uint8_t* at = batch;
     const std::uint8_t* end = batch + batch_size;
-    while (at < end) {
-        if (end - at < 8) return SCE_AJM_ERROR_MALFORMED_BATCH;
+    bool accepted = batch_size % 8 == 0;
+    while (accepted && at < end) {
+        refusal = ConsoleRefusal{};
+        refusal.job = at;
+        if (end - at < 8) {
+            accepted = false;
+            break;
+        }
         std::uint32_t words[2];
         std::memcpy(words, at, sizeof(words));
         const std::uint8_t* body = at + sizeof(words);
-        if (words[1] > static_cast<std::size_t>(end - body)) return SCE_AJM_ERROR_MALFORMED_BATCH;
+        if (words[1] > static_cast<std::size_t>(end - body)) {
+            accepted = false;
+            break;
+        }
         const auto kind = ConsoleChunkKind(words[0]);
         if (kind == ConsoleChunk::Job) {
-            if (!RunConsoleJob(ConsoleChunkPayload(words[0]), body, body + words[1])) return SCE_AJM_ERROR_MALFORMED_BATCH;
+            accepted = ReadConsoleJob(ConsoleChunkPayload(words[0]), at, body + words[1], jobs.emplace_back(), refusal);
         } else if (kind != ConsoleChunk::InlineBuffer) {
             NotImplemented_nid_no_patch(("sceAjmBatchStartBuffer (batch chunk kind " + std::to_string(static_cast<unsigned>(kind)) + ")").c_str());
         }
         at = body + words[1];
     }
+    if (!accepted) {
+        if (error) *error = AjmBatchError{refusal.code, refusal.job, refusal.offset, refusal.returnAddress};
+        return SCE_AJM_ERROR_MALFORMED_BATCH;
+    }
+    for (const ConsoleJob& job : jobs) Execute(job.header, job.buffers.data(), job.buffers.data() + job.header.inputCount);
     return RegisterBatch(context, error, batch_id);
 }
 
