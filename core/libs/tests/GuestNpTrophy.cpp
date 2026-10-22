@@ -14,6 +14,7 @@ int APS5_VABI sceNpTrophyCreateContext(int* context, int userId, std::uint32_t s
 int APS5_VABI sceNpTrophyDestroyContext(int context);
 int APS5_VABI sceNpTrophyCreateHandle(int* handle);
 int APS5_VABI sceNpTrophyDestroyHandle(int handle);
+int APS5_VABI sceNpTrophyAbortHandle(int handle);
 int APS5_VABI sceNpTrophyRegisterContext(int context, int handle, std::uint64_t options);
 int APS5_VABI sceNpTrophyGetTrophyUnlockState(int context, int handle, std::uint32_t* flags, std::uint32_t* count);
 int APS5_VABI sceNpTrophyUnlockTrophy(int context, int handle, int trophyId, int* platinumId);
@@ -25,6 +26,7 @@ namespace {
 
 constexpr int InvalidArgument = static_cast<int>(0x80551604u);
 constexpr int InsufficientBuffer = static_cast<int>(0x80551605u);
+constexpr int InvalidHandle = static_cast<int>(0x80551608u);
 constexpr int InvalidContext = static_cast<int>(0x80551609u);
 constexpr int InvalidTrophyId = static_cast<int>(0x8055160au);
 constexpr int AlreadyUnlocked = static_cast<int>(0x8055160cu);
@@ -109,7 +111,10 @@ int main() {
     Require(sceNpTrophyCreateContext(&missing, 1, 1, 0) == 0, "context for a label without a package");
     Require(sceNpTrophyRegisterContext(missing, handle, 0) == TitleConfNotInstalled, "register without a trophy package");
     Require(sceNpTrophyDestroyContext(missing) == 0, "destroy the second context");
+    Require(sceNpTrophyAbortHandle(handle) == 0, "abort a live handle");
+    Require(sceNpTrophyAbortHandle(999) == InvalidHandle && sceNpTrophyAbortHandle(-1) == InvalidHandle, "abort an unknown handle");
     Require(sceNpTrophyDestroyHandle(handle) == 0 && sceNpTrophyDestroyContext(context) == 0, "destroy the handle and context");
+    Require(sceNpTrophyAbortHandle(handle) == InvalidHandle, "abort a destroyed handle");
     Require(sceNpTrophyDestroyContext(context) == InvalidContext, "destroy the context twice");
 
     std::filesystem::current_path(root.parent_path());
