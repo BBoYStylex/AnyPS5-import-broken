@@ -336,12 +336,15 @@ std::uint32_t EmitAttributeValue(SpirvEmitterState& state, std::uint32_t attr, s
 }
 
 std::uint32_t EmitInterpolationParameterValue(SpirvEmitterState& state, std::uint32_t attr, std::uint32_t chan, std::uint32_t mode) {
-    if (PixelParameterIsDefault(state, attr)) {
-        return mode == 2u ? EmitAttributeValue(state, attr, chan) : ConstantU32(state, 0u);
+    if (state.inputInfo.pixel == nullptr) {
+        throw std::runtime_error("interpolation parameter refers to an undefined attribute");
+    }
+    if (attr >= state.inputInfo.pixel->inputNum || PixelParameterIsDefault(state, attr)) {
+        return mode == 2u ? ConstantU32(state, state.inputInfo.pixel->InputDefaultBits(attr, chan & 3u)) : ConstantU32(state, 0u);
     }
     const auto* input = SpirvInputBindingForParameter(state, attr);
     if (input == nullptr) {
-        throw std::runtime_error("interpolation parameter refers to an undefined attribute");
+        return mode == 2u ? ConstantU32(state, state.inputInfo.pixel->InputDefaultBits(attr, chan & 3u)) : ConstantU32(state, 0u);
     }
     if (!input->perVertex) {
         return EmitAttributeValue(state, attr, chan);
@@ -837,6 +840,20 @@ std::uint32_t TessellationPointer(SpirvValueEmitContext& ctx, const IrValue& ins
         state.module.AddFunction(spv::OpAccessChain, type, pointer, variable, vertex, ConstantU32(state, constant % stride / 16u), ConstantU32(state, constant % stride % 16u / 4u));
         return pointer;
     }
+    if (inst.Argument(1)->HasImmediate()) {
+        const auto value = inst.Argument(1)->ImmediateU32();
+        const auto offset = patch ? value : value % stride;
+        const auto attribute = ConstantU32(state, offset >> 4u);
+        const auto component = ConstantU32(state, (offset >> 2u) & 3u);
+        if (kind == TessellationAttribute::LocalOutput || patch) {
+            state.module.AddFunction(spv::OpAccessChain, type, pointer, variable, attribute, component);
+            return pointer;
+        }
+        const bool own = kind == TessellationAttribute::ControlOutput || (kind == TessellationAttribute::ControlShared && !sharedRead);
+        const auto controlPoint = kind == TessellationAttribute::ControlInput ? std::min(value / stride, state.inputInfo.vertex->tess.inputControlPoints - 1u) : kind == TessellationAttribute::EvaluationInput ? std::min(value / stride, state.inputInfo.vertex->tess.outputControlPoints - 1u) : value / stride;
+        state.module.AddFunction(spv::OpAccessChain, type, pointer, variable, own ? EmitLaneId(state) : ConstantU32(state, controlPoint), attribute, component);
+        return pointer;
+    }
     const auto offset = patch ? address : EmitBinaryU32(state, spv::OpUMod, address, ConstantU32(state, stride));
     const auto attribute = EmitBinaryU32(state, spv::OpShiftRightLogical, offset, ConstantU32(state, 4u));
     const auto component = EmitBinaryU32(state, spv::OpBitwiseAnd, EmitBinaryU32(state, spv::OpShiftRightLogical, offset, ConstantU32(state, 2u)), ConstantU32(state, 3u));
@@ -1023,11 +1040,11 @@ void DefineMeshOutputs(SpirvEmitterState& state) {
     }
     state.meshAllocation = MeshArray(state, spv::StorageClassWorkgroup, TypeU32(state), 2u);
     state.meshPrimitiveData = MeshArray(state, spv::StorageClassPrivate, TypeU32(state), state.laneCount);
-    state.meshPrimitives = MeshArray(state, spv::StorageClassOutput, TypeU32Vector(state, mesh.outputPrimitiveSize), mesh.maxPrimitives);
+    state.meshPrimitives = MeshArray(state, spv::StorageClassOutput, mesh.outputPrimitiveSize == 1u ? TypeU32(state) : TypeU32Vector(state, mesh.outputPrimitiveSize), mesh.maxPrimitives);
     state.meshCull = MeshArray(state, spv::StorageClassOutput, TypeBool(state), mesh.maxPrimitives);
     state.interfaceVariables.push_back(state.meshPrimitives);
     state.interfaceVariables.push_back(state.meshCull);
-    state.module.AddAnnotation(spv::OpDecorate, state.meshPrimitives, spv::DecorationBuiltIn, mesh.outputPrimitiveSize == 2u ? spv::BuiltInPrimitiveLineIndicesEXT : spv::BuiltInPrimitiveTriangleIndicesEXT);
+    state.module.AddAnnotation(spv::OpDecorate, state.meshPrimitives, spv::DecorationBuiltIn, mesh.outputPrimitiveSize == 1u ? spv::BuiltInPrimitivePointIndicesEXT : mesh.outputPrimitiveSize == 2u ? spv::BuiltInPrimitiveLineIndicesEXT : spv::BuiltInPrimitiveTriangleIndicesEXT);
     state.module.AddAnnotation(spv::OpDecorate, state.meshCull, spv::DecorationBuiltIn, spv::BuiltInCullPrimitiveEXT);
     state.module.AddAnnotation(spv::OpDecorate, state.meshCull, spv::DecorationPerPrimitiveEXT);
     if (state.numWorkgroupsVariable == 0u) {
@@ -1140,16 +1157,25 @@ void EmitMeshEntryPoint(SpirvEmitterState& state) {
         EmitIfCondition(state, isPrimitive, [&]() {
             const auto packed = MeshLoad(state, state.meshPrimitiveData, spv::StorageClassPrivate, TypeU32(state), ConstantU32(state, half));
             std::array<std::uint32_t, 3> vertex {};
-            for (std::uint32_t component = 0; component < mesh.outputPrimitiveSize; component++) {
+            if (mesh.outputPrimitiveSize == 1u) {
                 const auto field = state.module.AllocateId();
-                state.module.AddFunction(spv::OpBitFieldUExtract, TypeU32(state), field, packed, ConstantU32(state, component * 10u), ConstantU32(state, 9u));
-                vertex.at(component) = state.module.AllocateId();
-                state.module.AddFunction(spv::OpExtInst, TypeU32(state), vertex.at(component), GlslStd450(state), GLSLstd450UMin, field, lastVertex);
+                state.module.AddFunction(spv::OpBitFieldUExtract, TypeU32(state), field, packed, ConstantU32(state, 0u), ConstantU32(state, 9u));
+                vertex.at(0) = state.module.AllocateId();
+                state.module.AddFunction(spv::OpExtInst, TypeU32(state), vertex.at(0), GlslStd450(state), GLSLstd450UMin, field, lastVertex);
+                const auto indicesPointer = MeshElement(state, state.meshPrimitives, spv::StorageClassOutput, TypeU32(state), index);
+                state.module.AddFunction(spv::OpStore, indicesPointer, vertex.at(0));
+            } else {
+                for (std::uint32_t component = 0; component < mesh.outputPrimitiveSize; component++) {
+                    const auto field = state.module.AllocateId();
+                    state.module.AddFunction(spv::OpBitFieldUExtract, TypeU32(state), field, packed, ConstantU32(state, component * 10u), ConstantU32(state, 9u));
+                    vertex.at(component) = state.module.AllocateId();
+                    state.module.AddFunction(spv::OpExtInst, TypeU32(state), vertex.at(component), GlslStd450(state), GLSLstd450UMin, field, lastVertex);
+                }
+                const auto indices = state.module.AllocateId();
+                state.module.AddFunction(spv::OpCompositeConstruct, TypeU32Vector(state, mesh.outputPrimitiveSize), indices, std::span<const std::uint32_t>(vertex.data(), mesh.outputPrimitiveSize));
+                const auto indicesPointer = MeshElement(state, state.meshPrimitives, spv::StorageClassOutput, TypeU32Vector(state, mesh.outputPrimitiveSize), index);
+                state.module.AddFunction(spv::OpStore, indicesPointer, indices);
             }
-            const auto indices = state.module.AllocateId();
-            state.module.AddFunction(spv::OpCompositeConstruct, TypeU32Vector(state, mesh.outputPrimitiveSize), indices, std::span<const std::uint32_t>(vertex.data(), mesh.outputPrimitiveSize));
-            const auto indicesPointer = MeshElement(state, state.meshPrimitives, spv::StorageClassOutput, TypeU32Vector(state, mesh.outputPrimitiveSize), index);
-            state.module.AddFunction(spv::OpStore, indicesPointer, indices);
             const auto nullBit = EmitBinaryU32(state, spv::OpBitwiseAnd, packed, ConstantU32(state, 0x80000000u));
             const auto culled = state.module.AllocateId();
             state.module.AddFunction(spv::OpINotEqual, TypeBool(state), culled, nullBit, ConstantU32(state, 0u));
