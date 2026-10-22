@@ -607,13 +607,9 @@ SOURCES = {
         "libSceCamera/Export.cpp",
     ],
     "libkernel_sys": [
-        "libkernel_sys/PendingExports.cpp",
-        "libkernel/PendingExports.cpp",
-        "libkernel_web/PendingExports.cpp",
         "libkernel_sys/Pending.cpp",
     ],
     "libkernel_web": [
-        "libkernel_web/PendingExports.cpp",
         "libkernel_web/Pending.cpp",
     ],
     "libSceNpSessionSignaling": [
