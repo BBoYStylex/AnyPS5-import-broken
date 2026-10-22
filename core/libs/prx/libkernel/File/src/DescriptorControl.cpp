@@ -96,6 +96,8 @@ constexpr std::uint32_t NonblockingRequest = 0x8004667e;
 constexpr std::uint32_t ReadableRequest = 0x4004667f;
 constexpr std::uint32_t SetOwnerRequest = 0x8004667c;
 constexpr std::uint32_t GetOwnerRequest = 0x4004667b;
+constexpr std::uint32_t SetGroupRequest = 0x80047476;
+constexpr std::uint32_t GetGroupRequest = 0x40047477;
 constexpr std::uint32_t RequestIn = 0x80000000u;
 constexpr std::uint32_t RequestOut = 0x40000000u;
 constexpr std::uint32_t RequestVoid = 0x20000000u;
@@ -454,6 +456,14 @@ int ReadAheadControl(int fd, int command, std::intptr_t argument) {
 
 }
 
+int File::PipeProcessGroup(int fd) {
+    return -GetSigioOwner(fd, Kind::Pipe, "tcgetpgrp", "TIOCGPGRP");
+}
+
+int File::SetPipeProcessGroup(int fd, int group) {
+    return SetSigioOwner(fd, Kind::Pipe, -group, "tcsetpgrp", "TIOCSPGRP");
+}
+
 namespace File {
 
 FcntlArgument FcntlArgumentOf(int command) {
@@ -586,6 +596,15 @@ int Ioctl(int fd, std::uint64_t request, void* argument) {
         const GuestArena::HostWrite destination(argument, sizeof(owner));
         if (!destination.Open()) return Fail(GuestEfault);
         std::memcpy(argument, &owner, sizeof(owner));
+        return 0;
+    }
+    if ((command == SetGroupRequest || command == GetGroupRequest) && *kind == Kind::Pipe && fd > 2) {
+        if (command == SetGroupRequest) return SetSigioOwner(fd, *kind, -*static_cast<const int*>(argument), "ioctl", "TIOCSPGRP");
+        const int group = -GetSigioOwner(fd, *kind, "ioctl", "TIOCGPGRP");
+        if (argument == nullptr) return Fail(GuestEfault);
+        const GuestArena::HostWrite destination(argument, sizeof(group));
+        if (!destination.Open()) return Fail(GuestEfault);
+        std::memcpy(argument, &group, sizeof(group));
         return 0;
     }
     if (((command >> 8) & 0xff) == TerminalGroup) return Fail(GuestEnotty);

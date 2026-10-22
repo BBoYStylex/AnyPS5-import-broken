@@ -24,6 +24,9 @@ int APS5_VABI socketpair_nid_postfix(int, int, int, int*);
 int APS5_VABI mkdir_nid_postfix(const char*, unsigned short);
 int APS5_VABI close_nid_postfix(int);
 int* APS5_VABI __error_nid_postfix();
+int APS5_VABI getpid_nid_postfix(void);
+int APS5_VABI fcntl_nid_postfix(int, int, ...);
+int APS5_VABI ioctl_nid_postfix(int, std::uint64_t, void*);
 }
 
 static void Check(bool value, int line) {
@@ -44,6 +47,7 @@ constexpr int InvalidArgument = 22;
 constexpr int BadAddress = 14;
 constexpr int AddressNotAvailable = 49;
 constexpr int OperationNotSupported = 45;
+constexpr int NoSuchProcess = 3;
 
 static bool Fails(int result, int error) { return result == -1 && *__error_nid_postfix() == error; }
 
@@ -110,10 +114,19 @@ int main() {
 
     int ends[2] = {-1, -1};
     Require(pipe_nid_postfix(ends) == 0);
+    const int process = getpid_nid_postfix();
     for (const int end : ends) {
         RequireNotTerminal(end);
-        Require(Throws([end] { tcgetpgrp_nid_postfix(end); }));
-        Require(Throws([end] { tcsetpgrp_nid_postfix(end, 0); }));
+        Require(tcgetpgrp_nid_postfix(end) == 0);
+        Require(tcsetpgrp_nid_postfix(end, process) == 0 && tcgetpgrp_nid_postfix(end) == process);
+        Require(Fails(tcsetpgrp_nid_postfix(end, process + 1), NoSuchProcess) && tcgetpgrp_nid_postfix(end) == process);
+        Require(fcntl_nid_postfix(end, 6, process) == 0 && tcgetpgrp_nid_postfix(end) == -process);
+        Require(fcntl_nid_postfix(end, 5) == process);
+        int group = process;
+        Require(ioctl_nid_postfix(end, 0x80047476, &group) == 0 && fcntl_nid_postfix(end, 5) == -process);
+        group = 0;
+        Require(ioctl_nid_postfix(end, 0x40047477, &group) == 0 && group == process);
+        Require(tcsetpgrp_nid_postfix(end, 0) == 0 && tcgetpgrp_nid_postfix(end) == 0);
     }
 
     const int socket = socket_nid_postfix(2, 2, 0);
