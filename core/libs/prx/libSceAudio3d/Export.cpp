@@ -199,22 +199,17 @@ int APS5_VABI sceAudio3dPortGetQueueLevel(uint32_t port_id, uint32_t* queue_leve
     return 0;
 }
 
-int APS5_VABI sceAudio3dPortGetAttributesSupported(uint32_t port_id, uint32_t* attributes, uint32_t* num_attributes) {
+int APS5_VABI sceAudio3dPortGetAttributesSupported(uint32_t portId, uint32_t* attributes, uint32_t* numAttributes) {
     std::lock_guard lock(g_mutex);
-    if (num_attributes == nullptr) return AUDIO3D_ERROR_INVALID_PARAMETER;
-    if (!PortIsOpen(port_id)) return AUDIO3D_ERROR_INVALID_PORT;
+    if (!PortIsOpen(portId)) return AUDIO3D_ERROR_INVALID_PORT;
+    if (numAttributes == nullptr) return AUDIO3D_ERROR_INVALID_PARAMETER;
     constexpr std::uint32_t supported[]{
         AUDIO3D_ATTRIBUTE_LATE_REVERB_LEVEL,
         AUDIO3D_ATTRIBUTE_DOWNMIX_SPREAD_RADIUS,
         AUDIO3D_ATTRIBUTE_DOWNMIX_SPREAD_HEIGHT_AWARE,
     };
-    if (attributes == nullptr) {
-        *num_attributes = std::size(supported);
-        return 0;
-    }
-    const std::uint32_t count = std::min<std::uint32_t>(*num_attributes, std::size(supported));
-    std::copy_n(std::begin(supported), count, attributes);
-    *num_attributes = count;
+    *numAttributes = std::size(supported);
+    if (attributes != nullptr) std::copy(std::begin(supported), std::end(supported), attributes);
     return 0;
 }
 
@@ -439,6 +434,66 @@ int APS5_VABI sceAudio3dAudioOutOutputs(AudioOutOutputParam* param, uint32_t num
         const int result = sceAudio3dAudioOutOutput(param[i].handle, param[i].ptr);
         if (result < 0) return result;
     }
+    return 0;
+}
+
+int APS5_VABI sceAudio3dStrError(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceAudio3dPortOpenEx(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceAudio3dPortCreate(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceAudio3dPortDestroy(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceAudio3dPortGetStatus(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceAudio3dReportRegisterHandler(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceAudio3dReportUnregisterHandler(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceAudio3dGetSpeakerArrayMemorySize(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceAudio3dCreateSpeakerArray(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceAudio3dDeleteSpeakerArray(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceAudio3dGetSpeakerArrayMixCoefficients(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceAudio3dGetSpeakerArrayMixCoefficients2(void) {
+    NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 

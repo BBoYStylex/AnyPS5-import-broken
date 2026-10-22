@@ -3,6 +3,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from itertools import combinations
 from pathlib import Path
@@ -10,6 +11,7 @@ from urllib.parse import quote, urlencode
 
 PARENT = 'if .parent then "\\(.parent.owner.login)/\\(.parent.name)" else .nameWithOwner end'
 EXPORT = re.compile(r"^\+.*\bAPS5_VABI\s+(\w+)\s*\(")
+NID_DISAMBIG = re.compile(r"_nid_disambig[0-9]+$")
 DEPENDS = re.compile(r'Depends on:[ \t]*((?:#\d+\b(?:(?:[ \t]*,[ \t]*(?:and[ \t]+)?|[ \t]+and[ \t]+)#\d+\b)*|none\b)?(?:\r?\n[ \t]*[-*][ \t]*#\d+\b[^\r\n]*)*)')
 PLAIN_DEPENDS = re.compile(r'Depends on[ \t]+(#\d+\b(?:(?:[ \t]*,[ \t]*(?:and[ \t]+)?|[ \t]+and[ \t]+)#\d+\b)*)')
 HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))?", re.M)
@@ -40,9 +42,14 @@ def upstream():
 
 def depends_on(body):
     body = re.sub(r"<!--.*?-->", "", body or "", flags=re.S)
+    repo = re.escape(globals().get("REPO", "boykopovar/AnyPS5"))
+    repo_pattern = rf"(?:{repo}|boykopovar/AnyPS5)"
+    body = re.sub(rf"\[([^\]]*)\]\(https?://github\.com/{repo_pattern}/pull/(\d+)(?:[#/?][^)\s]*)?\)", r"#\2", body, flags=re.IGNORECASE)
+    body = re.sub(rf"\[([^\]]*)\]\(https?://github\.com/(?!{repo_pattern}/)[^/\s]+/[^/\s]+/pull/\d+[^)\s]*\)", "", body, flags=re.IGNORECASE)
+    body = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", body)
+    body = re.sub(rf"https?://github\.com/{repo_pattern}/pull/(\d+)\b(?:/[^\s]*)?", r"#\1", body, flags=re.IGNORECASE)
     match = next((match for match in DEPENDS.finditer(body) if match.group(1).strip()), None) or PLAIN_DEPENDS.search(body)
     return {int(n) for n in re.findall(r"#(\d+)", match.group(1))} if match else set()
-
 
 def open_prs(base):
     query = urlencode({"state": "open", "base": base, "per_page": 100})
@@ -110,7 +117,8 @@ def exports(diff):
             text += nxt[1:]
         semi, brace = text.find(";"), text.find("{")
         if semi < 0 or 0 <= brace < semi:
-            found.add(m.group(1))
+            name = m.group(1).removesuffix("_nid_postfix")
+            found.add(NID_DISAMBIG.sub("", name))
     return found
 
 
@@ -245,18 +253,23 @@ def describe_failure(error):
     return f"pr_overlap: {command} failed with exit code {error.returncode}: {message}"
 
 
-if __name__ == "__main__":
+def main(argv=None):
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="backslashreplace")
     parser = argparse.ArgumentParser(description="report open pull requests that overlap each other")
     parser.add_argument("--base", default="main")
     parser.add_argument("--out", type=Path, help="write <number>.md for every open pull request (empty when clean)")
     parser.add_argument("--branch", help="check a local branch against the open pull requests instead")
     parser.add_argument("--repo", help="owner/name; defaults to the upstream of the current checkout")
     parser.add_argument("--jobs", type=int, default=4, help="number of pull request comparisons to run at once")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if bool(args.out) == bool(args.branch):
         parser.error("pass exactly one of --out or --branch")
     if args.jobs < 1:
         parser.error("--jobs must be at least 1")
+    global REPO
     try:
         REPO = args.repo or upstream()
         prs = open_prs(args.base)
@@ -276,5 +289,10 @@ if __name__ == "__main__":
         raise SystemExit(describe_failure(error))
     if args.branch:
         print(report(rows[0], blob) or "No overlap with open pull requests.", end="")
-        raise SystemExit
+        return 0
     write_reports(args.out, rows, blob)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
