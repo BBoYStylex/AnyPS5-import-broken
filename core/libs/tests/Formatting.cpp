@@ -426,7 +426,8 @@ static void CheckHexFloat() {
     Require(snprintf_nid_postfix(buffer, 6, "%a", 1.5) == 8 && std::strcmp(buffer, "0x1.8") == 0);
 #ifdef _WIN32
     for (const char* format : {"%.2147483648a", "%.2147483649A", "%.9999999999a",
-            "%.9999999999999999999999999999999999999999A", "%.0002147483648a", "%-+20.2147483648A"}) {
+            "%.9999999999999999999999999999999999999999A", "%.0002147483648a", "%-+20.2147483648A",
+            "%2147483648a", "%999999999999999999999999a", "%.2147483647a", "%.2147483641a", "%+.2147483640A"}) {
         bool rejected = false;
         try {
             snprintf_nid_postfix(buffer, sizeof(buffer), format, 1.5);

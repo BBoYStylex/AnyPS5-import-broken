@@ -173,8 +173,12 @@ inline std::string HexFloat(const std::string& spec, char conversion, double val
         zero |= spec[index] == '0';
     }
     std::size_t width = 0;
-    for (; index < spec.size() && spec[index] >= '0' && spec[index] <= '9'; ++index)
-        width = width <= static_cast<std::size_t>(INT_MAX) / 10 ? width * 10 + static_cast<std::size_t>(spec[index] - '0') : static_cast<std::size_t>(INT_MAX);
+    for (; index < spec.size() && spec[index] >= '0' && spec[index] <= '9'; ++index) {
+        const auto digit = static_cast<std::size_t>(spec[index] - '0');
+        if (width > (static_cast<std::size_t>(INT_MAX) - digit) / 10)
+            throw std::overflow_error("Formatted output exceeds INT_MAX");
+        width = width * 10 + digit;
+    }
     int precision = -1;
     if (index < spec.size() && spec[index] == '.') {
         precision = 0;
@@ -216,16 +220,21 @@ inline std::string HexFloat(const std::string& spec, char conversion, double val
         for (; digits > 0 && (fraction & 0xf) == 0; --digits) fraction >>= 4;
     }
     const char* hex = upper ? "0123456789ABCDEF" : "0123456789abcdef";
-    std::string body(1, hex[lead]);
-    if (digits > 0 || precision > 13 || alternate) body += '.';
-    for (int digit = digits - 1; digit >= 0; --digit) body += hex[(fraction >> (digit * 4)) & 0xf];
-    if (precision > 13) body.append(static_cast<std::size_t>(precision - 13), '0');
-    body += upper ? 'P' : 'p';
-    body += exponent < 0 ? '-' : '+';
-    body += std::to_string(exponent < 0 ? -exponent : exponent);
+    std::string suffix = upper ? "P" : "p";
+    suffix += exponent < 0 ? '-' : '+';
+    suffix += std::to_string(exponent < 0 ? -exponent : exponent);
     std::string prefix = (bits >> 63) != 0 ? "-" : plus ? "+" : space ? " " : "";
     prefix += upper ? "0X" : "0x";
-    const std::size_t length = prefix.size() + body.size();
+    const auto fractionalDigits = static_cast<std::size_t>(precision > 13 ? precision : digits);
+    const bool point = fractionalDigits != 0 || alternate;
+    const std::size_t length = prefix.size() + 1 + point + fractionalDigits + suffix.size();
+    if (length > static_cast<std::size_t>(INT_MAX))
+        throw std::overflow_error("Formatted output exceeds INT_MAX");
+    std::string body(1, hex[lead]);
+    if (point) body += '.';
+    for (int digit = digits - 1; digit >= 0; --digit) body += hex[(fraction >> (digit * 4)) & 0xf];
+    if (precision > 13) body.append(static_cast<std::size_t>(precision - 13), '0');
+    body += suffix;
     if (length >= width) return prefix + body;
     const std::string padding(width - length, left || !zero ? ' ' : '0');
     if (left) return prefix + body + padding;
