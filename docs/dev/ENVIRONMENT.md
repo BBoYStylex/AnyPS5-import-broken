@@ -49,6 +49,8 @@ The code reads environment names through `getenv`, `IsEnvironmentSet`, `kibSetti
 | `APS5_RAYTRACING` | string | `core/shader/recompiler/Translation/src/DispatchInstructions.cpp` |  | selects the image_bvh_intersect_ray behaviour: strict throws and miss writes 0xffffffff |
 | `APS5_SAVEEXEC_WRITE_FIRST` | presence | `core/shader/recompiler/Translation/src/ControlFlowInstructions.cpp` |  | writes the saved exec to the destination before reading the source in s_*_saveexec |
 | `APS5_SINGLE_LANE` | string | `core/shader/recompiler/Recompiler.cpp` |  | hex code addresses (comma separated, or all) of wave64 programs kept at one guest lane per invocation |
+| `APS5_SPECIALIZED_DISK_CACHE_ENTRIES` | integer | `core/shader/recompiler/ShaderDiskCache.cpp` | 65536 | most specialized shader modules kept in the on-disk shader cache; the least recently used are removed past it |
+| `APS5_SPECIALIZED_DISK_CACHE_MAX_MIB` | integer | `core/shader/recompiler/ShaderDiskCache.cpp` | 2048 | most MiB of specialized shader modules kept in the on-disk shader cache; the least recently used are removed past it |
 | `APS5_SRT_DEBUG` | presence | `core/shader/recompiler/Optimization/src/RequestMemoryView.cpp` |  | prints extra SRT descriptor-walk debug output, such as guest reads outside the request memory |
 | `APS5_TRACE_BDA` | presence | `core/shader/recompiler/Optimization/src/ResourceTracker.cpp` |  | prints the first few accesses that make a program take the address-based path |
 | `APS5_TRACE_BUFFER_WRITTEN` | presence | `core/shader/recompiler/Optimization/src/DescriptorBindingBuilder.cpp` |  | prints how many guest buffer elements a program may store to and how many it only loads |

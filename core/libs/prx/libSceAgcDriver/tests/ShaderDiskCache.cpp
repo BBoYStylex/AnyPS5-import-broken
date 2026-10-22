@@ -1259,6 +1259,64 @@ void verifyFailureMemoSwitch(const char* self) {
     require(std::system(command.c_str()) == 0, "the process with APS5_NO_FAILURE_MEMO=1 failed");
 }
 
+ShaderDiskCache::StoredSpecialization specializedModule(std::uint8_t seed) {
+    ShaderDiskCache::StoredSpecialization module;
+    module.spirv = {0x07230203u, 0x00010300u, 0u, 8u + seed, 0u, seed};
+    module.bindings = {seed, seed + 1u};
+    module.pushData = (seed & 1u) != 0u;
+    return module;
+}
+
+std::vector<std::byte> specializedModuleKey(std::uint8_t seed) {
+    return {std::byte{0x53}, std::byte{0x50}, std::byte{seed}};
+}
+
+bool loadsSpecialized(std::uint8_t seed) {
+    ShaderDiskCache::StoredSpecialization loaded;
+    if (!ShaderDiskCache::LoadSpecialized(specializedModuleKey(seed), loaded)) return false;
+    const auto expected = specializedModule(seed);
+    require(loaded.spirv == expected.spirv && loaded.bindings == expected.bindings && loaded.pushData == expected.pushData, "a specialized module loaded with other contents");
+    return true;
+}
+
+void verifySpecializedStore() {
+    const auto before = ShaderDiskCache::Totals();
+    require(!loadsSpecialized(1), "a specialized module loaded before it was stored");
+    ShaderDiskCache::StoreSpecialized(specializedModuleKey(1), specializedModule(1));
+    ShaderDiskCache::Flush();
+    require(loadsSpecialized(1), "a stored specialized module did not load");
+    require(!loadsSpecialized(2), "another key loaded the stored specialized module");
+    const auto after = ShaderDiskCache::Totals();
+    require(after.specializedWrites == before.specializedWrites + 1 && after.specializedHits == before.specializedHits + 1 && after.specializedMisses == before.specializedMisses + 2, "the specialized module counters did not count one write, one hit and two misses");
+}
+
+int runSpecializedEviction() {
+    ShaderDiskCache::StoreSpecialized(specializedModuleKey(10), specializedModule(10));
+    ShaderDiskCache::StoreSpecialized(specializedModuleKey(11), specializedModule(11));
+    ShaderDiskCache::Flush();
+    require(loadsSpecialized(10), "a stored specialized module did not load");
+    ShaderDiskCache::StoreSpecialized(specializedModuleKey(12), specializedModule(12));
+    ShaderDiskCache::Flush();
+    require(!loadsSpecialized(11), "the least recently used specialized module was kept past APS5_SPECIALIZED_DISK_CACHE_ENTRIES");
+    require(loadsSpecialized(10) && loadsSpecialized(12), "a recently used specialized module was evicted");
+    std::size_t files = 0;
+    for (const auto& entry : std::filesystem::directory_iterator(ShaderDiskCache::EntryDirectory() / "specialized")) files += entry.is_regular_file() ? 1u : 0u;
+    require(files == 2u, "the specialized module directory holds " + std::to_string(files) + " files instead of 2");
+    require(ShaderDiskCache::Totals().specializedEvictions == 1u, "the specialized module eviction was not counted");
+    std::cout << "APS5_SPECIALIZED_DISK_CACHE_ENTRIES=2 kept the two most recently used specialized modules\n";
+    return 0;
+}
+
+void verifySpecializedEviction(const char* self, const std::filesystem::path& directory) {
+    setEnvironment("APS5_SPECIALIZED_DISK_CACHE_ENTRIES", "2");
+    setEnvironment("ANYPS5_SHADER_CACHE_DIR", (directory / "eviction").string());
+    const std::string command = "\"" + std::string(self) + "\" --specialized-eviction";
+    const auto status = std::system(command.c_str());
+    setEnvironment("ANYPS5_SHADER_CACHE_DIR", directory.string());
+    setEnvironment("APS5_SPECIALIZED_DISK_CACHE_ENTRIES", "0");
+    require(status == 0, "the process with APS5_SPECIALIZED_DISK_CACHE_ENTRIES=2 failed");
+}
+
 void verifyInvocationIsolation() {
     ComputeRequest request(true);
     const auto first = Recompile(request.request);
@@ -2491,6 +2549,7 @@ int main(int argc, char** argv) {
         if (argc == 2 && std::string_view(argv[1]) == "--load") return runLoadingProcess();
         if (argc == 2 && std::string_view(argv[1]) == "--load-prebuilt") return runPrebuiltLoadingProcess();
         if (argc == 2 && std::string_view(argv[1]) == "--no-failure-memo") return runWithoutFailureMemo();
+        if (argc == 2 && std::string_view(argv[1]) == "--specialized-eviction") return runSpecializedEviction();
         if (argc == 2 && std::string_view(argv[1]).starts_with("--load-plan")) return runPlanLoadingProcess(argv[1]);
         const auto directory = std::filesystem::temp_directory_path() / ("aps5-shader-disk-cache-test-" + std::to_string(std::random_device{}()));
         std::filesystem::remove_all(directory);
@@ -2514,6 +2573,8 @@ int main(int argc, char** argv) {
         verifyPlanAcrossProcesses(argv[0]);
         verifyEmissionFailureMemo();
         verifyFailureMemoSwitch(argv[0]);
+        verifySpecializedStore();
+        verifySpecializedEviction(argv[0], directory);
         verifyInvocationIsolation();
         verifyBufferAlignmentSpecialization();
         verifyBindingPlanSelection();

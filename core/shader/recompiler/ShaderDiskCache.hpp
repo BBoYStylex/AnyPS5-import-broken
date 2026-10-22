@@ -37,6 +37,10 @@ struct Counters {
     std::uint64_t prebuiltHits = 0;
     std::uint64_t prebuiltMisses = 0;
     std::uint64_t prebuiltRejected = 0;
+    std::uint64_t specializedHits = 0;
+    std::uint64_t specializedMisses = 0;
+    std::uint64_t specializedWrites = 0;
+    std::uint64_t specializedEvictions = 0;
     std::uint64_t lookupNanoseconds = 0;
     std::uint64_t readNanoseconds = 0;
     std::uint64_t decodeNanoseconds = 0;
