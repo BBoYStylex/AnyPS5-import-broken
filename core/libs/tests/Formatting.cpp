@@ -424,6 +424,18 @@ static void CheckHexFloat() {
     char buffer[32];
     Require(snprintf_nid_postfix(buffer, sizeof(buffer), "[%*a]", -12, 1.5) == 14 && std::strcmp(buffer, "[0x1.8p+0    ]") == 0);
     Require(snprintf_nid_postfix(buffer, 6, "%a", 1.5) == 8 && std::strcmp(buffer, "0x1.8") == 0);
+#ifdef _WIN32
+    for (const char* format : {"%.2147483648a", "%.2147483649A", "%.9999999999a",
+            "%.9999999999999999999999999999999999999999A", "%.0002147483648a", "%-+20.2147483648A"}) {
+        bool rejected = false;
+        try {
+            snprintf_nid_postfix(buffer, sizeof(buffer), format, 1.5);
+        } catch (const std::overflow_error&) {
+            rejected = true;
+        }
+        Require(rejected);
+    }
+#endif
 }
 
 int main() { CheckSizeLimits(); RunChecks(); CheckHexFloat(); CheckAllocatingFormat(); return CheckWidePrecision() ? 0 : 1; }

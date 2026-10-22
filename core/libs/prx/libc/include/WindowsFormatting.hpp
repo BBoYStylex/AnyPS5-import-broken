@@ -178,8 +178,12 @@ inline std::string HexFloat(const std::string& spec, char conversion, double val
     int precision = -1;
     if (index < spec.size() && spec[index] == '.') {
         precision = 0;
-        for (++index; index < spec.size(); ++index)
-            precision = precision <= INT_MAX / 10 ? precision * 10 + (spec[index] - '0') : INT_MAX;
+        for (++index; index < spec.size(); ++index) {
+            const int digit = spec[index] - '0';
+            if (precision > (INT_MAX - digit) / 10)
+                throw std::overflow_error("Floating precision exceeds int range");
+            precision = precision * 10 + digit;
+        }
     }
     const bool upper = conversion == 'A';
     const std::uint64_t bits = std::bit_cast<std::uint64_t>(value);
