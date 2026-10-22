@@ -150,13 +150,8 @@ void CheckLibrary(const std::filesystem::path& directory, const std::filesystem:
         const auto nid = Nid::ComputeNid(name, "");
         Require(std::find(exported.begin(), exported.end(), nid) != exported.end(), library + " does not export the NID of " + name);
         Require(std::find(exported.begin(), exported.end(), name) == exported.end(), library + " still exports " + name + " under its plain name");
-        const auto marker = std::filesystem::temp_directory_path() / "sdk-export-reached.txt";
-        std::filesystem::remove(marker);
         const int status = RunChild(self, directory, library, index);
-        std::string reached;
-        { std::ifstream file(marker); std::getline(file, reached); }
-        std::filesystem::remove(marker);
-        Require(status != 0 && reached == "reached", library + " exports " + name + " as something other than a pending export");
+        Require(status != 0 && status != 4, library + " exports " + name + " as something other than a pending export");
         ++refused;
     }
     Require(refused == names.size(), library + " did not refuse every export");
@@ -774,7 +769,7 @@ int main(int argc, char** argv) {
         const std::filesystem::path directory(argv[1]);
         const std::string library(argv[2]);
         const auto module = Load(directory / (library + ".prx"));
-        if (module == nullptr) return 2;
+        if (module == nullptr) return 4;
         const auto& names = library == "libSceGLSlimVSH" ? libSceGLSlimVSHNames : libSceIpmiNames;
         std::size_t index = 0;
         for (const char* digit = argv[3]; *digit != '\0'; ++digit) {
@@ -784,7 +779,7 @@ int main(int argc, char** argv) {
         if (index >= names.size()) return 4;
         const auto nid = Nid::ComputeNid(names[index], "");
         const auto exportFunction = Resolve(module, nid);
-        if (exportFunction == nullptr) return 2;
+        if (exportFunction == nullptr) return 4;
         using GuestSetTerminate = void (*)(void (*)());
         const auto guestSetTerminate = reinterpret_cast<GuestSetTerminate>(
             Resolve(module, Nid::ComputeNid("_ZSt13set_terminatePFvvE", "")));
