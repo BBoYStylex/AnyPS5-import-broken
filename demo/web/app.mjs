@@ -85,8 +85,30 @@ function formatWarning(message, isAr) {
 }
 
 function formatError(message, isAr) {
-  if (!isAr) return message;
-  return ERROR_TRANSLATIONS.ar[message] || message;
+  if (!isAr || typeof message !== "string") return message;
+  if (ERROR_TRANSLATIONS.ar[message]) return ERROR_TRANSLATIONS.ar[message];
+  if (message.includes("Expected exactly one executable ELF in the app root; found ")) {
+    const parts = message.split("Expected exactly one executable ELF in the app root; found ");
+    const count = parts[1]?.trim() || "0";
+    const prefix = parts[0] || "";
+    const translated = count === "0"
+      ? "لم يتم العثور على أي ملف تنفيذي بصيغة ELF في المجلد الرئيسي؛ يلزم وجود ملف تنفيذي واحد مفكوك التشفير."
+      : `تم العثور على ${count} ملفات تنفيذية بصيغة ELF؛ يلزم وجود ملف تنفيذي واحد فقط في المجلد الرئيسي.`;
+    return `${prefix}${translated}`;
+  }
+  if (message.includes("is a SELF container, not an ELF: unwrap the app before converting it")) {
+    const parts = message.split(" is a SELF container");
+    return `${parts[0]} عبارة عن ملف SELF مشفر وليس ELF: يجب فك تشفير التطبيق قبل تحويله.`;
+  }
+  if (message.includes("Place the executable next to sce_sys and sce_module, not inside another folder")) {
+    const prefix = message.split("Place the executable")[0] || "";
+    return `${prefix}ضع الملف التنفيذي بجانب مجلدي sce_sys و sce_module وليس داخل مجلد فرعي آخر.`;
+  }
+  if (message.includes("Executable and modules exceed the 256 MiB conversion limit. Use the native relinker for this app.")) {
+    const prefix = message.split("Executable and modules")[0] || "";
+    return `${prefix}يتجاوز الملف التنفيذي والوحدات البرمجية الحد المسموح به للتحويل وهو 256 ميجابايت. استخدم أداة relinker الأصلية لهذا التطبيق.`;
+  }
+  return message;
 }
 
 function applyUiLanguage(lang) {

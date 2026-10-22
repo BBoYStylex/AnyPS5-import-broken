@@ -77,6 +77,14 @@ test("translates runtime client errors for Arabic UI", () => {
   assert.equal(formatError(batchErr, false), batchErr);
   assert(formatError(batchErr, true).includes("التحويل المجمع يقبل ملفات ZIP فقط"));
 
+  const elfErr = "app.zip: Expected exactly one executable ELF in the app root; found 0";
+  assert.equal(formatError(elfErr, false), elfErr);
+  assert(formatError(elfErr, true).includes("لم يتم العثور على أي ملف تنفيذي"));
+  assert(formatError(elfErr, true).startsWith("app.zip: "));
+
+  const selfErr = "eboot.bin is a SELF container, not an ELF: unwrap the app before converting it";
+  assert(formatError(selfErr, true).includes("عبارة عن ملف SELF مشفر"));
+
   const unknownErr = "Custom backend failure occurred";
   assert.equal(formatError(unknownErr, true), unknownErr);
 });
