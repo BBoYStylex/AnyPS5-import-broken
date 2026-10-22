@@ -1344,6 +1344,101 @@ void CheckAliasedStencil(Context context, std::uint32_t fragments, AliasCase whi
     std::printf("Native depth over a stencil plane aliased by an R8 colour target samples=%u case=%u: %s, refilled from its fill, refused once the colour target drew\n", fragments, static_cast<std::uint32_t>(which), which == AliasCase::Cleared ? "imported from the colour target's clear" : "imported unproven and proven by a whole-plane fill the colour target absorbed");
 }
 
+enum class DepthAliasCase { Mismatched, Matching, Partial, UnprovenWord, OtherClearWord, OtherSamples, DrawnAfterImport, NewTargetAfterImport, Unchanged, DrawnBeforeImport };
+
+constexpr std::string_view depthAliasRefusal = "native multisample depth or HTILE aliases a multisampled colour target whose samples are only on the host";
+constexpr std::string_view unprovenHtileRefusal = "native multisample depth initial HTILE does not prove its clear value";
+
+void CheckAliasedDepth(Context context, std::uint32_t fragments, bool one, DepthAliasCase which, std::uint32_t colorFragments = 0u) {
+    const VkExtent2D extent{5u, 3u};
+    const auto bytes = static_cast<std::size_t>(MultisampledDepthBytes_nid_no_patch(extent, 4u, fragments));
+    const auto stencilBytes = static_cast<std::size_t>(MultisampledDepthBytes_nid_no_patch(extent, 1u, fragments));
+    TargetMemory memory(bytes), stencil(stencilBytes), metadata(65536u);
+    const auto metadataBytes = static_cast<std::size_t>(HtileMetadataBytes(extent));
+    const std::uint32_t proving = one ? 0xfffffff0u : 0u;
+    const auto storeWords = [](std::uint64_t address, std::size_t size, std::uint32_t word) { std::fill_n(reinterpret_cast<std::uint32_t*>(address), size / sizeof(std::uint32_t), word); };
+    std::memset(memory.Data(), 0x5c, bytes);
+    std::memset(stencil.Data(), 0, stencilBytes);
+    storeWords(metadata.Address(), metadataBytes, which == DepthAliasCase::OtherClearWord ? proving ^ 0xfffffff0u : proving);
+    if (which == DepthAliasCase::UnprovenWord) storeWords(metadata.Address() + metadataBytes - sizeof(std::uint32_t), sizeof(std::uint32_t), proving | 15u);
+    DepthTarget target{memory.Address(), stencil.Address(), extent, VK_FORMAT_D32_SFLOAT_S8_UINT, one ? 1.0f : 0.0f, 0u, metadata.Address(), false, fragments};
+    target.depthSwizzle = 24u;
+    target.iterate256 = target.htilePipeAligned = true;
+    target.htileDepthOnly = true;
+    ColorTarget color{};
+    color.address = color.surfaceAddress = memory.Address();
+    color.extent = color.surfaceExtent = extent;
+    color.format = VK_FORMAT_R32_SFLOAT;
+    color.elementBytes = 4u;
+    color.tileMode = which == DepthAliasCase::Partial ? ColorTileMode::Standard4KB : ColorTileMode::RenderTarget;
+    color.samples = which == DepthAliasCase::OtherSamples ? colorFragments : fragments;
+    color.bytes = static_cast<std::size_t>(extent.width) * extent.height * color.elementBytes;
+    const auto colorBytes = static_cast<std::size_t>(MultisampledColorBytes(color));
+    Recorder recorder(context);
+    recorder.Activate();
+    struct Cleanup {
+        Recorder& recorder;
+        Context context;
+        ~Cleanup() { recorder.Sync(); ClearCachedTextures(context.device); ClearDepthSurfaces(context.device); ClearMultisampleTargets(context.device); }
+    } cleanup{recorder, context};
+    const auto fill = [&](std::uint64_t address, std::size_t size, std::uint32_t word) {
+        NoteDepthMetadataFill(address, size, word);
+        NoteColorMetadataFill(address, size, word);
+        AgcDriver::GuestMemory::StoreOwnBytes(address, size, [&] { storeWords(address, size, word); });
+    };
+    const float aliasValue = which == DepthAliasCase::Matching ? target.clearDepth : 0.25f;
+    const auto aliasPattern = std::bit_cast<std::uint32_t>(aliasValue);
+    MaterializeMultisampleTargetClear(context, color);
+    Require(MultisampledColorFillAbsorbs(color.address, colorBytes, aliasPattern), "the colour target over the depth plane did not absorb its clear");
+    NoteDepthMetadataFill(color.address, colorBytes, aliasPattern);
+    NoteColorMetadataFill(color.address, colorBytes, aliasPattern);
+    MaterializeMultisampleTargetClear(context, color);
+    const auto alias = MultisampleColorTargetOver(memory.Address(), bytes);
+    Require(alias && alias->newest == MultisampleColorContent::Clear && alias->value && alias->value->float32[0] == aliasValue && alias->address == memory.Address() && alias->samples == color.samples && (which == DepthAliasCase::Partial ? alias->bytes < bytes : alias->bytes == bytes), "the R32F colour target over the depth plane does not hold its clear over the range the case needs");
+    if (which == DepthAliasCase::DrawnBeforeImport) MultisampleTargetView(context, color);
+    DepthSurfaceView(context, target);
+    fill(target.htileAddress, metadataBytes, proving);
+    fill(target.stencilAddress, stencilBytes, 0u);
+    const auto words = DepthSampleWords(target);
+    auto texture = CachedSampledTexture(context, words);
+    Require(texture != nullptr, "native depth over a depth plane aliased by a colour target was not imported");
+    recorder.Sync();
+    const auto count = extent.width * extent.height * fragments;
+    Buffer output(context, (count + 2u) * 16u, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+    const Fetch fetch(context, *texture, output, FetchShader(extent.width, extent.height, fragments, false, true));
+    const auto read = [&] {
+        std::memset(output.Bytes().data(), 0xa5, output.Bytes().size());
+        CommandBatch batch(context);
+        fetch.Run(batch.Handle(), count);
+        RecordMemoryBarrier(context, batch.Handle(), VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_HOST_BIT, VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_HOST_READ_BIT);
+        batch.SubmitAndWait();
+        output.Invalidate();
+        for (std::uint32_t index = 0u; index < count; ++index) {
+            std::array<float, 4> result{};
+            std::memcpy(result.data(), output.Bytes().data() + (index + 1u) * 16u, 16u);
+            Require(result == std::array<float, 4>{target.clearDepth, 0.0f, 0.0f, 1.0f}, "native depth over an aliased depth plane did not read DB_DEPTH_CLEAR in every sample");
+        }
+    };
+    read();
+    if (which == DepthAliasCase::Unchanged) {
+        Require(CachedSampledTexture(context, words) == texture, "a second sample of native depth over an unchanged aliased depth plane replaced its view");
+        recorder.Sync();
+        read();
+    }
+    if (which == DepthAliasCase::DrawnAfterImport) MultisampleTargetView(context, color);
+    if (which == DepthAliasCase::NewTargetAfterImport) {
+        auto other = color;
+        other.format = VK_FORMAT_R16G16_SFLOAT;
+        MultisampleTargetView(context, other);
+    }
+    if (which == DepthAliasCase::DrawnAfterImport || which == DepthAliasCase::NewTargetAfterImport) TargetRefuses([&] { CachedSampledTexture(context, words); }, depthAliasRefusal);
+    Require(std::all_of(memory.Data(), memory.Data() + bytes, [](auto value) { return value == std::byte{0x5c}; }), "native depth over an aliased depth plane read or wrote the guest depth plane");
+    Require(std::all_of(stencil.Data(), stencil.Data() + stencilBytes, [](auto value) { return value == std::byte{0}; }), "native depth over an aliased depth plane changed the guest stencil plane");
+    texture.reset();
+    const char* after = which == DepthAliasCase::Unchanged ? ", sampled again unchanged" : which == DepthAliasCase::DrawnAfterImport ? ", refused once the colour target drew" : which == DepthAliasCase::NewTargetAfterImport ? ", refused once a second colour target covered the plane" : "";
+    std::printf("Native depth over a depth plane aliased by an R32F colour target holding %g samples=%u clear=%u case=%u: imported with every HTILE word proving the clear, read DB_DEPTH_CLEAR in every sample%s\n", aliasValue, fragments, one, static_cast<std::uint32_t>(which), after);
+}
+
 void CheckExpandGate(Context context, std::uint32_t fragments, bool stencilPlane) {
     const VkExtent2D extent{5u, 3u};
     const auto bytes = static_cast<std::size_t>(MultisampledDepthBytes_nid_no_patch(extent, 4u, fragments));
@@ -1839,6 +1934,31 @@ int main(int argc, char** argv) {
                 }
             }
             std::printf("Native depth with an aliased stencil plane cases checked=%u unavailable=%u\n", checked, unavailable);
+            return 0;
+        }
+        if (argc == 2 && std::string_view(argv[1]) == "--aliased-depth") {
+            const auto supported = [&](std::uint32_t samples) { return DepthSupported(context, VK_FORMAT_D32_SFLOAT_S8_UINT, samples) && (context.limits.framebufferStencilSampleCounts & samples) != 0u && (context.limits.framebufferColorSampleCounts & samples) != 0u; };
+            Require(supported(4u), "the aliased depth plane regression requires sampled D32S8 and multisampled colour with four samples");
+            std::uint32_t checked = 0u, unavailable = 0u;
+            for (const auto samples : {2u, 4u, 8u}) {
+                if (!supported(samples)) { unavailable += 22u; continue; }
+                for (const bool one : {false, true}) {
+                    for (const auto which : {DepthAliasCase::Mismatched, DepthAliasCase::Matching, DepthAliasCase::Partial, DepthAliasCase::Unchanged, DepthAliasCase::DrawnBeforeImport, DepthAliasCase::DrawnAfterImport, DepthAliasCase::NewTargetAfterImport}) { CheckAliasedDepth(context, samples, one, which); ++checked; }
+                    for (const auto which : {DepthAliasCase::UnprovenWord, DepthAliasCase::OtherClearWord}) {
+                        TargetRefuses([&] { CheckAliasedDepth(context, samples, one, which); }, unprovenHtileRefusal);
+                        std::printf("Native depth with an aliased depth plane samples=%u clear=%u case=%u refused: %s\n", samples, one, static_cast<std::uint32_t>(which), unprovenHtileRefusal.data());
+                        ++checked;
+                    }
+                    for (const auto colorSamples : {2u, 4u, 8u}) {
+                        if (colorSamples == samples) continue;
+                        if ((context.limits.framebufferColorSampleCounts & colorSamples) == 0u) { ++unavailable; continue; }
+                        TargetRefuses([&] { CheckAliasedDepth(context, samples, one, DepthAliasCase::OtherSamples, colorSamples); }, depthAliasRefusal);
+                        std::printf("Native depth with an aliased depth plane samples=%u colour samples=%u clear=%u refused: %s\n", samples, colorSamples, one, depthAliasRefusal.data());
+                        ++checked;
+                    }
+                }
+            }
+            std::printf("Native depth with an aliased depth plane cases checked=%u unavailable=%u\n", checked, unavailable);
             return 0;
         }
         if (argc == 2 && std::string_view(argv[1]) == "--expand-gate") {
