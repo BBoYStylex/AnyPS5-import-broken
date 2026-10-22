@@ -34,6 +34,7 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
@@ -2570,13 +2571,45 @@ int APS5_VABI sceNetShowNetstatExForBuffer(char* buffer, std::int32_t bufferSize
 }
 
 const char* APS5_VABI sceNetInetNtopWithScopeId(std::int32_t family, const void* address, char* text, std::uint32_t size, std::uint32_t scopeId) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    if (address == nullptr || text == nullptr) {
+        set_errno(NET_EINVAL);
+        return nullptr;
+    }
+    if (family != NET_AF_INET6) throw std::runtime_error("sceNetInetNtopWithScopeId: family " + std::to_string(family) + " is not implemented");
+    std::array<char, 64> unscoped{};
+    if (sceNetInetNtop(family, address, unscoped.data(), static_cast<std::uint32_t>(unscoped.size())) == nullptr) return nullptr;
+    std::string scoped(unscoped.data());
+    if (scopeId != 0) scoped += "%" + std::to_string(scopeId);
+    if (scoped.size() >= size) {
+        set_errno(NET_ENOSPC);
+        return nullptr;
+    }
+    std::memcpy(text, scoped.c_str(), scoped.size() + 1);
+    return text;
 }
 
 int APS5_VABI sceNetInetPtonWithScopeId(std::int32_t family, const char* text, void* address, std::uint32_t* scopeId) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    if (text == nullptr || address == nullptr || scopeId == nullptr) return fail(NET_EINVAL);
+    if (family != NET_AF_INET6) throw std::runtime_error("sceNetInetPtonWithScopeId: family " + std::to_string(family) + " is not implemented");
+    const char* percent = std::strchr(text, '%');
+    std::uint64_t zone = 0;
+    if (percent != nullptr) {
+        const std::string_view digits(percent + 1);
+        if (digits.empty()) return 0;
+        if (!std::all_of(digits.begin(), digits.end(), [](char digit) { return digit >= '0' && digit <= '9'; }))
+            throw std::runtime_error("sceNetInetPtonWithScopeId: the interface name zone in " + std::string(text) + " is not implemented");
+        for (const char digit : digits) {
+            zone = zone * 10 + static_cast<std::uint64_t>(digit - '0');
+            if (zone > 0xffffffffull) return 0;
+        }
+    }
+    const std::string unscoped = percent != nullptr ? std::string(text, percent) : std::string(text);
+    std::array<unsigned char, 16> parsed{};
+    const int converted = sceNetInetPton(family, unscoped.c_str(), parsed.data());
+    if (converted != 1) return converted;
+    std::memcpy(address, parsed.data(), parsed.size());
+    *scopeId = static_cast<std::uint32_t>(zone);
+    return 1;
 }
 
 int APS5_VABI sceNetGetDns6Info(NetDns6Info* info, std::uint32_t flags) {

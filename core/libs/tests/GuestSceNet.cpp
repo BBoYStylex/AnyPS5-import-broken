@@ -142,6 +142,8 @@ int APS5_VABI sceNetGetsockoptEx(int, int, int, void*, std::uint32_t*);
 int APS5_VABI sceNetSetsockoptEx(int, int, int, const void*, std::uint32_t);
 int APS5_VABI sceNetSysctl(const int*, std::uint32_t, void*, std::size_t*, const void*, std::size_t);
 int APS5_VABI sysctl_nid_postfix(const int*, std::uint32_t, void*, std::size_t*, const void*, std::size_t);
+const char* APS5_VABI sceNetInetNtopWithScopeId(std::int32_t, const void*, char*, std::uint32_t, std::uint32_t);
+int APS5_VABI sceNetInetPtonWithScopeId(std::int32_t, const char*, void*, std::uint32_t*);
 void* APS5_VABI sceNetMemoryAllocate(std::int32_t, int);
 void APS5_VABI sceNetMemoryFree(void*);
 }
@@ -359,6 +361,47 @@ static void CheckSysctl() {
     std::uint8_t truncated = 0;
     std::size_t truncatedSize = sizeof(truncated);
     Require(Failed(sceNetSysctl(pageSize.data(), 2, &truncated, &truncatedSize, nullptr, 0), 12) && truncatedSize == sizeof(truncated));
+}
+
+static void CheckScopeIdText() {
+    std::array<std::uint8_t, 16> address{};
+    std::uint32_t scope = 0xa5a5a5a5u;
+    Require(sceNetInetPtonWithScopeId(28, "fe80::1%2", address.data(), &scope) == 1 && scope == 2);
+    std::array<std::uint8_t, 16> plain{};
+    Require(sceNetInetPton(28, "fe80::1", plain.data()) == 1 && address == plain);
+    std::array<char, 32> text{};
+    Require(sceNetInetNtopWithScopeId(28, address.data(), text.data(), text.size(), scope) == text.data());
+    Require(std::strcmp(text.data(), "fe80::1%2") == 0);
+    text.fill('x');
+    *sceNetErrnoLoc() = 123;
+    Require(sceNetInetNtopWithScopeId(28, address.data(), text.data(), 9, 2) == nullptr && *sceNetErrnoLoc() == 28 && text[0] == 'x');
+    Require(sceNetInetNtopWithScopeId(28, address.data(), text.data(), 10, 2) == text.data() && std::strcmp(text.data(), "fe80::1%2") == 0);
+    Require(sceNetInetNtopWithScopeId(28, address.data(), text.data(), text.size(), 0) == text.data() && std::strcmp(text.data(), "fe80::1") == 0);
+    scope = 7;
+    Require(sceNetInetPtonWithScopeId(28, "fe80::1", address.data(), &scope) == 1 && scope == 0 && address == plain);
+    Require(sceNetInetPtonWithScopeId(28, "ff02::1%4294967295", address.data(), &scope) == 1 && scope == 0xffffffffu);
+    Require(sceNetInetNtopWithScopeId(28, address.data(), text.data(), text.size(), scope) == text.data());
+    Require(std::strcmp(text.data(), "ff02::1%4294967295") == 0);
+    for (const char* rejected : {"fe80::1%", "fe80::1%4294967296", "fe80::g%2", "1.2.3.4%2"}) {
+        address.fill(0xa5);
+        scope = 0xa5a5a5a5u;
+        Require(sceNetInetPtonWithScopeId(28, rejected, address.data(), &scope) == 0);
+        Require(scope == 0xa5a5a5a5u && address[0] == 0xa5 && address[15] == 0xa5);
+    }
+    Require(Failed(sceNetInetPtonWithScopeId(28, "fe80::1%2", address.data(), nullptr), 22));
+    *sceNetErrnoLoc() = 123;
+    Require(sceNetInetNtopWithScopeId(28, nullptr, text.data(), text.size(), 2) == nullptr && *sceNetErrnoLoc() == 22);
+    const auto throws = [](auto&& call) {
+        try {
+            call();
+        } catch (const std::runtime_error&) {
+            return true;
+        }
+        return false;
+    };
+    Require(throws([&] { sceNetInetPtonWithScopeId(28, "fe80::1%lo0", address.data(), &scope); }));
+    Require(throws([&] { sceNetInetPtonWithScopeId(2, "127.0.0.1", address.data(), &scope); }));
+    Require(throws([&] { sceNetInetNtopWithScopeId(2, address.data(), text.data(), text.size(), 0); }));
 }
 
 static void CheckRandom() {
@@ -1541,6 +1584,7 @@ int main() {
     CheckIfName();
     CheckExForwards();
     CheckSysctl();
+    CheckScopeIdText();
     CheckRandom();
     CheckNetMemory();
     CheckNetstat();
