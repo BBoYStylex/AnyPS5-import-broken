@@ -29,7 +29,10 @@ static thread_local unsigned allocationAttempts = 0;
 void* operator new(std::size_t bytes) {
     if (allocationBudget >= 0) {
         ++allocationAttempts;
-        if (allocationBudget == 0) throw std::bad_alloc();
+        if (allocationBudget == 0) {
+            allocationBudget = -1;
+            throw std::bad_alloc();
+        }
         --allocationBudget;
     }
     if (void* memory = std::malloc(bytes ? bytes : 1)) return memory;
