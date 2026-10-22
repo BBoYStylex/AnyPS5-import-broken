@@ -1,8 +1,12 @@
 #include <nid/NidCompute.hpp>
+#include <nid/NidPatcherUtils.hpp>
+#include <nid/ElfPatcher.hpp>
+#include <nid/PeNidPatcher.hpp>
+#include <algorithm>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <fstream>
-#include <cstdlib>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -13,6 +17,8 @@
 #include <windows.h>
 #else
 #include <dlfcn.h>
+#include <sys/wait.h>
+#include <unistd.h>
 #endif
 
 namespace {
@@ -25,35 +31,127 @@ using Export = void (*)();
 
 #ifdef _WIN32
 using Module = HMODULE;
-Module Load(const std::filesystem::path& path) { return LoadLibraryExW(path.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH); }
-Export Resolve(Module module, const std::string& name) { return reinterpret_cast<Export>(GetProcAddress(module, name.c_str())); }
 #else
 using Module = void*;
+#endif
+
+std::vector<std::uint8_t> ReadFile(const std::filesystem::path& path) {
+    std::ifstream file(path, std::ios::binary);
+    if (!file) throw std::runtime_error(path.string() + " cannot be read");
+    return std::vector<std::uint8_t>(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+}
+
+#ifdef _WIN32
+std::vector<std::string> ExportedNames(const std::filesystem::path& path) {
+    using namespace Nid;
+    const auto pe = ReadFile(path);
+    const auto peOffset = static_cast<std::size_t>(Internal::Read<std::uint16_t>(pe, 0x3cu));
+    Require(pe.size() > peOffset + 6u && pe[peOffset] == 'P' && pe[peOffset + 1u] == 'E', path.string() + " is not a PE file");
+    const auto coffOffset = peOffset + 4u;
+    const auto numberOfSections = Internal::Read<std::uint16_t>(pe, coffOffset + 2u);
+    const auto sizeOfOptionalHeader = Internal::Read<std::uint16_t>(pe, coffOffset + 16u);
+    const auto optionalHeaderOffset = coffOffset + 20u;
+    const auto magic = Internal::Read<std::uint16_t>(pe, optionalHeaderOffset);
+    Require(magic == 0x20bu || magic == 0x10bu, path.string() + " has an unsupported optional header");
+    const auto dataDirectoryOffset = optionalHeaderOffset + (magic == 0x20bu ? 112u : 96u);
+    const auto exportRva = Internal::Read<std::uint32_t>(pe, dataDirectoryOffset);
+    if (exportRva == 0u) return {};
+    const auto sectionOffset = optionalHeaderOffset + sizeOfOptionalHeader;
+    const auto rvaToOffset = [&](std::uint32_t rva) {
+        for (std::uint16_t i = 0; i < numberOfSections; ++i) {
+            const auto header = Internal::Read<PeSectionHeader>(pe, sectionOffset + i * sizeof(PeSectionHeader));
+            const auto size = std::max<std::uint32_t>(header.VirtualSize, header.SizeOfRawData);
+            if (rva >= header.VirtualAddress && rva < header.VirtualAddress + size)
+                return static_cast<std::size_t>(header.PointerToRawData + (rva - header.VirtualAddress));
+        }
+        throw std::runtime_error(path.string() + " has an export rva outside its sections");
+    };
+    const auto directory = Internal::Read<PeExportDirectory>(pe, rvaToOffset(exportRva));
+    std::vector<std::string> names;
+    names.reserve(directory.NumberOfNames);
+    for (std::uint32_t i = 0; i < directory.NumberOfNames; ++i) {
+        const auto nameRva = Internal::Read<std::uint32_t>(pe, rvaToOffset(directory.AddressOfNames) + i * 4u);
+        names.push_back(Internal::ReadCStr(pe, rvaToOffset(nameRva)));
+    }
+    return names;
+}
+#else
+std::vector<std::string> ExportedNames(const std::filesystem::path& path) {
+    using namespace Nid;
+    const auto elf = ReadFile(path);
+    Require(elf.size() >= sizeof(Elf64_Ehdr) && elf[4] == 2, path.string() + " is not an ELF64 file");
+    const auto header = Internal::Read<Elf64_Ehdr>(elf, 0u);
+    std::size_t dynSymOffset = 0u, dynSymSize = 0u, dynStrOffset = 0u;
+    for (std::uint16_t i = 0; i < header.e_shnum; ++i) {
+        const auto offset = static_cast<std::size_t>(header.e_shoff) + i * sizeof(Elf64_Shdr);
+        const auto section = Internal::Read<Elf64_Shdr>(elf, offset);
+        if (section.sh_type != 11u) continue;
+        dynSymOffset = static_cast<std::size_t>(section.sh_offset);
+        dynSymSize = static_cast<std::size_t>(section.sh_size);
+        const auto strings = Internal::Read<Elf64_Shdr>(elf, static_cast<std::size_t>(header.e_shoff) +
+            static_cast<std::size_t>(section.sh_link) * sizeof(Elf64_Shdr));
+        dynStrOffset = static_cast<std::size_t>(strings.sh_offset);
+    }
+    Require(dynSymOffset != 0u, path.string() + " has no .dynsym section");
+    std::vector<std::string> names;
+    for (std::size_t offset = 0; offset < dynSymSize; offset += sizeof(Elf64_Sym)) {
+        const auto symbol = Internal::Read<Elf64_Sym>(elf, dynSymOffset + offset);
+        if (symbol.st_name == 0u) continue;
+        names.push_back(Internal::ReadCStr(elf, dynStrOffset + symbol.st_name));
+    }
+    return names;
+}
+#endif
+
+#ifdef _WIN32
+Module Load(const std::filesystem::path& path) { return LoadLibraryExW(path.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH); }
+Export Resolve(Module module, const std::string& name) { return reinterpret_cast<Export>(GetProcAddress(module, name.c_str())); }
+int RunChild(const std::filesystem::path& self, const std::filesystem::path& directory, const std::string& library, std::size_t index) {
+    std::string command = "\"" + self.string() + "\" \"" + directory.string() + "\" " + library + " " + std::to_string(index);
+    STARTUPINFOA startup{};
+    startup.cb = sizeof(startup);
+    startup.dwFlags = STARTF_USESTDHANDLES;
+    startup.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
+    startup.hStdError = GetStdHandle(STD_ERROR_HANDLE);
+    PROCESS_INFORMATION process{};
+    std::vector<char> buffer(command.begin(), command.end());
+    buffer.push_back('\0');
+    if (!CreateProcessA(nullptr, buffer.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &startup, &process)) return -1;
+    WaitForSingleObject(process.hProcess, 30000);
+    DWORD status = 0;
+    GetExitCodeProcess(process.hProcess, &status);
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+    return static_cast<int>(status);
+}
+#else
 Module Load(const std::filesystem::path& path) { return dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL); }
 Export Resolve(Module module, const std::string& name) { return reinterpret_cast<Export>(dlsym(module, name.c_str())); }
+int RunChild(const std::filesystem::path& self, const std::filesystem::path& directory, const std::string& library, std::size_t index) {
+    const auto child = fork();
+    if (child == 0) {
+        const auto indexText = std::to_string(index);
+        const auto libraryText = library.c_str();
+        const auto directoryText = directory.c_str();
+        execl(self.c_str(), self.c_str(), directoryText, libraryText, indexText, static_cast<char*>(nullptr));
+        _exit(127);
+    }
+    int status = 0;
+    waitpid(child, &status, 0);
+    return WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
+}
 #endif
 
 void CheckLibrary(const std::filesystem::path& directory, const std::filesystem::path& self, const std::string& library, const std::vector<const char*>& names) {
-    const auto module = Load(directory / (library + ".prx"));
-    Require(module != nullptr, library + " does not load");
+    const auto exported = ExportedNames(directory / (library + ".prx"));
     std::size_t refused = 0;
     for (std::size_t index = 0; index < names.size(); ++index) {
         const auto* name = names[index];
         const auto nid = Nid::ComputeNid(name, "");
-        const auto exportFunction = Resolve(module, nid);
-        Require(exportFunction != nullptr, library + " does not export the NID of " + name);
-        const auto report = std::filesystem::temp_directory_path() / "sdk-export-report.txt";
-        std::filesystem::remove(report);
-        auto command = "\"" + self.string() + "\" \"" + directory.string() + "\" " + library + " " + std::to_string(index) + " \"" + report.string() + "\"";
-#ifdef _WIN32
-        command = "\"" + command + "\"";
-#endif
-        const int status = std::system(command.c_str());
-        std::string text;
-        { std::ifstream file(report); std::getline(file, text); }
-        std::filesystem::remove(report);
-        Require(status != 0 && text.find("loaded") != std::string::npos && text.find("returned") == std::string::npos,
-            library + " exports " + name + " as something other than a pending export");
+        Require(std::find(exported.begin(), exported.end(), nid) != exported.end(), library + " does not export the NID of " + name);
+        Require(std::find(exported.begin(), exported.end(), name) == exported.end(), library + " still exports " + name + " under its plain name");
+        const int status = RunChild(self, directory, library, index);
+        Require(status != 0, library + " exports " + name + " as something other than a pending export");
         ++refused;
     }
     Require(refused == names.size(), library + " did not refuse every export");
@@ -667,7 +765,7 @@ const std::vector<const char*> libSceIpmiNames{
 } // namespace
 
 int main(int argc, char** argv) {
-    if (argc == 5) {
+    if (argc == 4) {
         const std::filesystem::path directory(argv[1]);
         const std::string library(argv[2]);
         const auto module = Load(directory / (library + ".prx"));
@@ -677,9 +775,17 @@ int main(int argc, char** argv) {
         const auto nid = Nid::ComputeNid(names[index], "");
         const auto exportFunction = Resolve(module, nid);
         if (exportFunction == nullptr) return 2;
-        { std::ofstream file(argv[4]); file << "loaded"; }
-        exportFunction();
-        { std::ofstream file(argv[4], std::ios::app); file << " returned"; }
+        using GuestSetTerminate = void (*)(void (*)());
+        const auto guestSetTerminate = reinterpret_cast<GuestSetTerminate>(
+            Resolve(module, Nid::ComputeNid("_ZSt13set_terminatePFvvE", "")));
+        const auto refuse = []() { std::_Exit(3); };
+        if (guestSetTerminate != nullptr) guestSetTerminate(refuse);
+        std::set_terminate(refuse);
+        try {
+            exportFunction();
+        } catch (...) {
+            std::_Exit(3);
+        }
         return 0;
     }
     if (argc != 2) {
