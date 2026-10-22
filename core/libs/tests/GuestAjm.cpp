@@ -42,6 +42,10 @@ int APS5_VABI sceAjmBatchJobSetResampleParameters(AjmBatchInfo*, std::uint32_t, 
 int APS5_VABI sceAjmBatchJobGetResampleInfo(AjmBatchInfo*, std::uint32_t, void*);
 int APS5_VABI sceAjmBatchJobSetResampleParametersEx(AjmBatchInfo*, std::uint32_t, float, float, std::uint32_t, void*);
 int APS5_VABI sceAjmBatchJobDecodeSplit(AjmBatchInfo*, std::uint32_t, const AjmBuffer*, std::size_t, const AjmBuffer*, std::size_t, void*);
+void* APS5_VABI sceAjmBatchJobControlBufferRa(void*, std::uint32_t, std::uint64_t, const void*, std::size_t, void*, std::size_t, void*);
+void* APS5_VABI sceAjmBatchJobRunBufferRa(void*, std::uint32_t, std::uint64_t, const void*, std::size_t, void*, std::size_t, void*, std::size_t, void*);
+void* APS5_VABI sceAjmBatchJobRunSplitBufferRa(void*, std::uint32_t, std::uint64_t, const AjmBuffer*, std::size_t, const AjmBuffer*, std::size_t, void*, std::size_t, void*);
+int APS5_VABI sceAjmBatchStartBuffer(std::uint32_t, const std::uint8_t*, std::uint32_t, int, AjmBatchError*, std::uint32_t*);
 }
 
 static void Require(bool value) { if (!value) std::abort(); }
@@ -780,7 +784,7 @@ void TestGetInfo(std::uint32_t context) {
     Require(sceAjmBatchJobGetInfo(&info, instance, &at9) == 0);
     Submit(context, info);
     Require(initResult[0] == 0);
-    Require(at9.result == 0 && at9.internalResult == 0 && at9.numChannels == 2 && at9.channelMask == 0x3 && at9.sampleRate == 48000 && at9.sampleEncoding == 0 && at9.reserved == 0);
+    Require(at9.result == 0 && at9.internalResult == 0 && at9.numChannels == 2 && at9.channelMask == 0x3 && at9.sampleRate == 48000 && at9.sampleEncoding == 0 && at9.bitrate == 1024 * 8 * 48000 / (4 * 256) && at9.reserved == 0);
     Require(sceAjmInstanceDestroy(context, instance) == 0);
 
     Require(sceAjmInstanceCreate(context, 0, 0, &instance) == 0);
@@ -943,7 +947,8 @@ std::vector<std::int16_t> DecodeAt9Superframe(std::uint32_t context, const std::
     Require(sceAjmBatchJobRun(&info, instance, sidebandStream | runMultipleFrames, superframe.data(), superframe.size(), pcm.data(), pcm.size() * sizeof(std::int16_t), &decoded, sizeof(decoded)) == 0);
     Submit(context, info);
     Require(initResult[0] == 0);
-    Require(decoded.stream.result == 0 && static_cast<std::size_t>(decoded.stream.inputConsumed) == superframe.size());
+    // one superframe into exactly its 1024 samples: PARTIAL_INPUT | NOT_ENOUGH_ROOM as on the console
+    Require(decoded.stream.result == 0x18 && static_cast<std::size_t>(decoded.stream.inputConsumed) == superframe.size());
     Require(static_cast<std::size_t>(decoded.stream.outputWritten) == pcm.size() * sizeof(std::int16_t) && decoded.stream.totalDecodedSamples == 1024 && decoded.frames == 4);
     Require(sceAjmInstanceDestroy(context, instance) == 0);
     return pcm;
@@ -1470,7 +1475,8 @@ ResampledStream Stream(std::uint32_t context, std::uint32_t instance, const std:
         Require(sceAjmBatchJobDecode(&info, instance, stream + offset, size - offset, pcm.data(), pcm.size() * sizeof(std::int16_t), &sideband) == 0);
         Submit(context, info);
         if (ratio > 0) Require(setResult[0] == 0);
-        Require(sideband.result == 0 || (offset == size && sideband.outputWritten == 0));
+        // 0x8 / 0x10 / 0x18: which of input and room ran out (what the console reports, see TestAt9FlagRules)
+        Require(sideband.result == 0 || sideband.result == 0x8 || sideband.result == 0x10 || sideband.result == 0x18 || (offset == size && sideband.outputWritten == 0));
         offset += static_cast<std::size_t>(sideband.inputConsumed);
         if (offset < size && static_cast<std::size_t>(sideband.outputWritten) < pcm.size() * sizeof(std::int16_t)) ++out.shortJobs;
         out.pcm.insert(out.pcm.end(), pcm.begin(), pcm.begin() + sideband.outputWritten / static_cast<std::int32_t>(sizeof(std::int16_t)));
@@ -1690,7 +1696,7 @@ At9Run RunAt9Job(std::uint32_t context, std::uint32_t instance, std::uint64_t fl
     const std::size_t sidebandSize = (flags & runMultipleFrames) != 0 ? sizeof(decoded) : sizeof(decoded.stream);
     Require(sceAjmBatchJobRun(&info, instance, sidebandStream | flags, input, inputSize, pcm.data(), pcm.size() * sizeof(std::int16_t), &decoded, sidebandSize) == 0);
     Submit(context, info);
-    Require(decoded.stream.result == 0);
+    Require(decoded.stream.result == 0 || decoded.stream.result == 0x8 || decoded.stream.result == 0x18);   // which side ran out, see TestAt9FlagRules
     return decoded;
 }
 
@@ -1724,7 +1730,218 @@ void TestAt9RunDecodesWholeInput(std::uint32_t context) {
     RunControl(context, instance, CONTROL_START, &start, sizeof(start), result);
     Require(result[0] == 0);
     const auto run = RunAt9Job(context, instance, 0, stream.data(), stream.size());
-    Require(static_cast<std::size_t>(run.stream.inputConsumed) == stream.size() && run.stream.outputWritten == 1024 * 2);
+    // 1024 bytes decode into exactly the 1024 samples of room: the console reports PARTIAL_INPUT | NOT_ENOUGH_ROOM
+    Require(run.stream.result == 0x18 && static_cast<std::size_t>(run.stream.inputConsumed) == stream.size() && run.stream.outputWritten == 1024 * 2);
+    Require(sceAjmInstanceDestroy(context, instance) == 0);
+}
+
+// The result flags say which side ran out, as a PS4 reports them for a title's ATRAC9 stream: the input
+// (PARTIAL_INPUT, even on a superframe boundary) with room left, the room (NOT_ENOUGH_ROOM) with input
+// left after some frames or with a zero room before any, or both at once (0x18).
+void TestAt9FlagRules(std::uint32_t context) {
+    constexpr std::uint64_t runMultipleFrames = 1ull << 12;
+    constexpr std::uint64_t sidebandStream = 1ull << 47;
+    std::vector<std::uint8_t> stream(2048, 0);
+    std::memcpy(stream.data(), AT9_MONO_SILENT_SUPERFRAME, sizeof(AT9_MONO_SILENT_SUPERFRAME));
+    std::memcpy(stream.data() + 1024, AT9_MONO_SILENT_SUPERFRAME, sizeof(AT9_MONO_SILENT_SUPERFRAME));
+    const At9Control start{{0, 0, 0}, {0xFE, 0x70, 0x1F, 0xF0}, 0};
+    const auto run = [&](std::size_t inputSize, std::size_t roomSamples, At9Run& decoded) {
+        std::uint32_t instance = 0;
+        Require(sceAjmInstanceCreate(context, 1, 0, &instance) == 0);
+        std::int32_t result[2] = {-1, -1};
+        RunControl(context, instance, CONTROL_START, &start, sizeof(start), result);
+        Require(result[0] == 0);
+        std::vector<std::uint8_t> batch(4096);
+        std::vector<std::int16_t> pcm(roomSamples + 1);
+        AjmBatchInfo info{};
+        Require(sceAjmBatchInitialize(batch.data(), batch.size(), &info) == 0);
+        Require(sceAjmBatchJobRun(&info, instance, sidebandStream | runMultipleFrames, stream.data(), inputSize, pcm.data(), roomSamples * sizeof(std::int16_t), &decoded, sizeof(decoded)) == 0);
+        Submit(context, info);
+        Require(sceAjmInstanceDestroy(context, instance) == 0);
+    };
+    At9Run inputRanOut{{-1, -1, 0, 0, 0}, 0, 0};
+    run(1024, 2048, inputRanOut);
+    Require(inputRanOut.stream.result == 0x8 && inputRanOut.stream.inputConsumed == 1024 && inputRanOut.stream.outputWritten == 1024 * 2 && inputRanOut.frames == 4);
+    At9Run roomRanOut{{-1, -1, 0, 0, 0}, 0, 0};
+    run(2048, 1024, roomRanOut);
+    Require(roomRanOut.stream.result == 0x10 && roomRanOut.stream.inputConsumed == 1024 && roomRanOut.stream.outputWritten == 1024 * 2 && roomRanOut.frames == 4);
+    At9Run halfRoom{{-1, -1, 0, 0, 0}, 0, 0};
+    run(1024, 512, halfRoom);
+    Require(halfRoom.stream.result == 0x10 && halfRoom.stream.inputConsumed > 0 && halfRoom.stream.inputConsumed < 1024 && halfRoom.stream.outputWritten == 512 * 2 && halfRoom.frames == 2);
+    At9Run noRoom{{-1, -1, 0, 0, 0}, 0, 0};
+    run(1024, 0, noRoom);
+    Require(noRoom.stream.result == 0x10 && noRoom.stream.inputConsumed == 0 && noRoom.stream.outputWritten == 0 && noRoom.frames == 0);
+    At9Run both{{-1, -1, 0, 0, 0}, 0, 0};
+    run(1024, 1024, both);
+    Require(both.stream.result == 0x18 && both.stream.inputConsumed == 1024 && both.stream.outputWritten == 1024 * 2 && both.frames == 4);
+}
+
+int StartBuffer(std::uint32_t context, const void* batch, std::size_t size) {
+    std::uint32_t id = 0;
+    AjmBatchError error{};
+    const int started = sceAjmBatchStartBuffer(context, static_cast<const std::uint8_t*>(batch), static_cast<std::uint32_t>(size), 0, &error, &id);
+    if (started == 0) Require(sceAjmBatchWait(context, id, 0, &error) == 0);
+    return started;
+}
+
+std::uint32_t BatchWord(const std::vector<std::uint8_t>& batch, std::size_t offset) {
+    std::uint32_t word = 0;
+    std::memcpy(&word, batch.data() + offset, sizeof(word));
+    return word;
+}
+
+void TestConsoleBufferJobs(std::uint32_t context) {
+    constexpr std::uint64_t version = 1;
+    constexpr std::uint64_t runMultipleFrames = 1ull << 12;
+    constexpr std::uint64_t sidebandStream = 1ull << 47;
+    std::vector<std::uint8_t> stream(2048, 0);
+    std::memcpy(stream.data(), AT9_MONO_SILENT_SUPERFRAME, sizeof(AT9_MONO_SILENT_SUPERFRAME));
+    std::memcpy(stream.data() + 1024, AT9_MONO_SILENT_SUPERFRAME, sizeof(AT9_MONO_SILENT_SUPERFRAME));
+    std::uint32_t instance = 0;
+    Require(sceAjmInstanceCreate(context, 1, 0, &instance) == 0);
+    const At9Control start{{0, 0, 0}, {0xFE, 0x70, 0x1F, 0xF0}, 0};
+    std::int32_t result[2] = {-1, -1};
+    std::vector<std::int16_t> pcm(2048, 0x55);
+    At9Run single{{-1, -1, 0, 0, 0}, 0, 0};
+    At9Run split{{-1, -1, 0, 0, 0}, 0, 0};
+    const AjmBuffer inputs[2] = {{stream.data() + 1024, 300}, {stream.data() + 1324, 724}};
+    const AjmBuffer outputs[2] = {{pcm.data() + 1024, 600 * 2}, {pcm.data() + 1624, 424 * 2}};
+    std::vector<std::uint8_t> batch(4096, 0xCD);
+
+    void* at = sceAjmBatchJobControlBufferRa(batch.data(), instance, version | CONTROL_START, &start, sizeof(start), result, sizeof(result), &context);
+    Require(at == batch.data() + 64);
+    Require(BatchWord(batch, 0) == instance << 6 && BatchWord(batch, 4) == 56);
+    Require(BatchWord(batch, 8) == 6 && BatchWord(batch, 24) == 2 && BatchWord(batch, 28) == sizeof(start));
+    Require(BatchWord(batch, 40) == (3u | (0x2000u << 6)) && BatchWord(batch, 44) == 0x6001 && BatchWord(batch, 48) == 18);
+    at = sceAjmBatchJobRunBufferRa(at, instance, version | sidebandStream | runMultipleFrames, stream.data(), 1024, pcm.data(), 1024 * 2, &single, sizeof(single), nullptr);
+    Require(at == batch.data() + 128);
+    Require(BatchWord(batch, 68) == 56 && BatchWord(batch, 72) == 1 && BatchWord(batch, 88) == (4u | (0x8000u << 6)) && BatchWord(batch, 96) == 17 && BatchWord(batch, 112) == 18);
+    at = sceAjmBatchJobRunSplitBufferRa(at, instance, version | sidebandStream | runMultipleFrames, inputs, 2, outputs, 2, &split, sizeof(split), nullptr);
+    Require(at == batch.data() + 224 && BatchWord(batch, 132) == 88);
+    Require(StartBuffer(context, batch.data(), static_cast<std::uint8_t*>(at) - batch.data()) == 0);
+
+    Require(result[0] == 0 && result[1] == 0);
+    // input and output both end with the fourth frame: the console reports PARTIAL_INPUT | NOT_ENOUGH_ROOM
+    constexpr std::int32_t exactFit = 0x18;
+    Require(single.stream.result == exactFit && single.stream.inputConsumed == 1024 && single.stream.outputWritten == 1024 * 2 && single.frames == 4 && single.stream.totalDecodedSamples == 1024);
+    Require(split.stream.result == exactFit && split.stream.inputConsumed == 1024 && split.stream.outputWritten == 1024 * 2 && split.frames == 4 && split.stream.totalDecodedSamples == 2048);
+    Require(std::all_of(pcm.begin(), pcm.end(), [](std::int16_t sample) { return sample == 0; }));
+    Require(sceAjmInstanceDestroy(context, instance) == 0);
+}
+
+class ConsoleBatch {
+public:
+    void Word(std::uint32_t word) { words.push_back(word); }
+    void Chunk(std::uint32_t kind, std::uint32_t payload, std::uint32_t word) {
+        Word(kind | (payload << 6));
+        Word(word);
+    }
+    void Buffer(std::uint32_t kind, const void* address, std::size_t size) {
+        Chunk(kind, 0, static_cast<std::uint32_t>(size));
+        const auto value = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(address));
+        Word(static_cast<std::uint32_t>(value));
+        Word(static_cast<std::uint32_t>(value >> 32));
+    }
+    const std::uint32_t* Data() const { return words.data(); }
+    std::size_t Bytes() const { return words.size() * sizeof(std::uint32_t); }
+
+private:
+    std::vector<std::uint32_t> words;
+};
+
+void TestConsoleHandWrittenJobs(std::uint32_t context) {
+    std::vector<std::uint8_t> stream(1024, 0);
+    std::memcpy(stream.data(), AT9_MONO_SILENT_SUPERFRAME, sizeof(AT9_MONO_SILENT_SUPERFRAME));
+    std::uint32_t instance = 0;
+    Require(sceAjmInstanceCreate(context, 1, 0, &instance) == 0);
+    std::int32_t result[2] = {-1, -1};
+    std::int32_t statistics[6] = {-1, -1, -1, -1, -1, -1};
+    std::vector<std::int16_t> pcm(1024, 0x55);
+    At9Run decoded{{-1, -1, 0, 0, 0}, 0, 0};
+    const std::uint8_t initialize[8] = {0xFE, 0x70, 0x1F, 0xF0, 0, 0, 0, 0};
+    std::uint32_t inlined[2];
+    std::memcpy(inlined, initialize, sizeof(initialize));
+
+    ConsoleBatch batch;
+    batch.Chunk(7, 0, sizeof(initialize));
+    batch.Word(inlined[0]);
+    batch.Word(inlined[1]);
+    batch.Chunk(0, instance, 40);
+    batch.Buffer(2, nullptr, sizeof(initialize));
+    batch.Chunk(3, 0, 0x6001);
+    batch.Buffer(18, result, sizeof(result));
+    batch.Chunk(0, instance, 56);
+    batch.Buffer(1, stream.data(), stream.size());
+    batch.Chunk(4, 0x8000, 0x1001);
+    batch.Buffer(17, pcm.data(), pcm.size() * sizeof(std::int16_t));
+    batch.Buffer(18, &decoded, sizeof(decoded));
+    batch.Chunk(0, 0x80000, 24);
+    batch.Chunk(3, 0, 0x8007);
+    batch.Buffer(18, statistics, sizeof(statistics));
+    std::vector<std::uint32_t> words(batch.Data(), batch.Data() + batch.Bytes() / sizeof(std::uint32_t));
+    const auto inlineAddress = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(words.data() + 2));
+    words[8] = static_cast<std::uint32_t>(inlineAddress);
+    words[9] = static_cast<std::uint32_t>(inlineAddress >> 32);
+    Require(StartBuffer(context, words.data(), words.size() * sizeof(std::uint32_t)) == 0);
+    Require(result[0] == 0 && result[1] == 0 && statistics[0] == 0 && statistics[1] == 0);
+    Require(decoded.stream.result == 0x18 && decoded.stream.inputConsumed == 1024 && decoded.stream.outputWritten == 1024 * 2 && decoded.frames == 4);
+    Require(std::all_of(pcm.begin(), pcm.end(), [](std::int16_t sample) { return sample == 0; }));
+
+    constexpr int malformedBatch = static_cast<int>(0x80930011);
+    Require(StartBuffer(context, words.data(), 12) == malformedBatch);
+    ConsoleBatch flagless;
+    flagless.Chunk(0, instance, 16);
+    flagless.Buffer(18, result, sizeof(result));
+    Require(StartBuffer(context, flagless.Data(), flagless.Bytes()) == malformedBatch);
+    ConsoleBatch overrun;
+    overrun.Chunk(0, instance, 32);
+    overrun.Chunk(3, 0, 0x2001);
+    overrun.Buffer(18, result, sizeof(result));
+    Require(StartBuffer(context, overrun.Data(), overrun.Bytes()) == malformedBatch);
+    ConsoleBatch unknown;
+    unknown.Chunk(0, instance, 16);
+    unknown.Chunk(3, 0, 0x2001);
+    unknown.Chunk(5, 0, 0);
+    bool unknownThrows = false;
+    try {
+        static_cast<void>(StartBuffer(context, unknown.Data(), unknown.Bytes()));
+    } catch (const std::runtime_error&) {
+        unknownThrows = true;
+    }
+    Require(unknownThrows);
+    Require(sceAjmInstanceDestroy(context, instance) == 0);
+}
+
+// A batch whose headers carry the previous batch's bytes in the bits the console's builders never write
+// (a PS4 trace of Knowledge is Power: Decades, whose Wwise reuses one batch buffer): bit 5 and bits 26,
+// 27 and 31 of a job header, bits 4, 5 and 26 of a flags header, bits 5-31 of a buffer header and bits
+// 4-31 of a return address header. It must run exactly as the clean batch does.
+void TestConsoleStaleHeaderBits(std::uint32_t context) {
+    std::vector<std::uint8_t> stream(1024, 0);
+    std::memcpy(stream.data(), AT9_MONO_SILENT_SUPERFRAME, sizeof(AT9_MONO_SILENT_SUPERFRAME));
+    std::uint32_t instance = 0;
+    Require(sceAjmInstanceCreate(context, 1, 0, &instance) == 0);
+    std::int32_t result[2] = {-1, -1};
+    std::vector<std::int16_t> pcm(1024, 0x55);
+    At9Run decoded{{-1, -1, 0, 0, 0}, 0, 0};
+    const std::uint8_t initialize[8] = {0xFE, 0x70, 0x1F, 0xF0, 0, 0, 0, 0};
+
+    ConsoleBatch batch;
+    batch.Chunk(0x8C000030u, instance, 56);
+    batch.Buffer(0xFFFFFFF6u, &context, 0);
+    batch.Buffer(0xFFFFFFE2u, initialize, sizeof(initialize));
+    batch.Chunk(0x04000033u, 0, 0x6001);
+    batch.Buffer(0xFFFFFFF2u, result, sizeof(result));
+    batch.Chunk(0x8C000020u, instance, 72);
+    batch.Buffer(0xFFFFFFF6u, &context, 0);
+    batch.Buffer(0xFFFFFFE1u, stream.data(), stream.size());
+    batch.Chunk(0x04000034u, 0x8000, 0x1001);
+    batch.Buffer(0xFFFFFFF1u, pcm.data(), pcm.size() * sizeof(std::int16_t));
+    batch.Buffer(0xFFFFFFF2u, &decoded, sizeof(decoded));
+    Require(StartBuffer(context, batch.Data(), batch.Bytes()) == 0);
+    Require(result[0] == 0 && result[1] == 0);
+    Require(decoded.stream.result == 0x18 && decoded.stream.inputConsumed == 1024 && decoded.stream.outputWritten == 1024 * 2 && decoded.frames == 4);
+    Require(std::all_of(pcm.begin(), pcm.end(), [](std::int16_t sample) { return sample == 0; }));
     Require(sceAjmInstanceDestroy(context, instance) == 0);
 }
 
@@ -1977,6 +2194,10 @@ int main() {
     TestResampleAt9(context);
     TestAt9GaplessSegments(context);
     TestAt9RunDecodesWholeInput(context);
+    TestAt9FlagRules(context);
     TestPcmResample(context);
+    TestConsoleBufferJobs(context);
+    TestConsoleHandWrittenJobs(context);
+    TestConsoleStaleHeaderBits(context);
     Require(sceAjmFinalize(context) == 0);
 }
