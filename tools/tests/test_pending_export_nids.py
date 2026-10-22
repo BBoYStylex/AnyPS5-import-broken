@@ -11,11 +11,6 @@ import nid_names
 LIBRARIES = {
     "libSceNpSessionSignaling": [
         "sceNpSessionSignalingActivate",
-        "sceNpSessionSignalingCrossplayCreateContext",
-        "sceNpSessionSignalingCrossplayDestroyContext",
-        "sceNpSessionSignalingCrossplayGetMemoryInfo",
-        "sceNpSessionSignalingCrossplayInitialize",
-        "sceNpSessionSignalingCrossplayTerminate",
         "sceNpSessionSignalingManualUdpAbortConnection",
         "sceNpSessionSignalingManualUdpCreateJoin",
         "sceNpSessionSignalingManualUdpEstablishConnection",
