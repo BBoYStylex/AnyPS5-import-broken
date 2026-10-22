@@ -296,6 +296,12 @@ bool endFound(InputStream& stream) {
     }
 }
 
+bool mayBecomeHeader(InputStream& stream) {
+    if (stream.data.size() < 2) return true;
+    if (stream.data[0] != 0xFF || stream.data[1] != 0xD8) return false;
+    return !endFound(stream);
+}
+
 std::int32_t parseStream(const Context* context, const JpegDecInputControlParam* param, JpegDecImageInfo* imageInfo) {
     if (!imageInfo) return SCE_JPEG_DEC_ERROR_INVALID_ADDR;
     requireDecodeMode("sceJpegDecDecodeWithInputControl", param->operation & 1);
@@ -306,7 +312,7 @@ std::int32_t parseStream(const Context* context, const JpegDecInputControlParam*
     }();
     stream.input = param->input;
     stream.argument = param->input_argument;
-    while (!(stream.header = Decoder::Jpeg::ParseHeader(stream.data)) && stream.status == 0) pull(stream, INPUT_BLOCK_SIZE);
+    while (!(stream.header = Decoder::Jpeg::ParseHeader(stream.data)) && stream.status == 0 && mayBecomeHeader(stream)) pull(stream, INPUT_BLOCK_SIZE);
     if (stream.status < 0) return stream.status;
     if (!stream.header) return SCE_JPEG_DEC_ERROR_INVALID_DATA;
     stream.downScale = param->down_scale;
