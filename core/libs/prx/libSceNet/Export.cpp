@@ -484,6 +484,8 @@ int* errno_slot() {
 }
 
 extern "C" int* APS5_VABI __error_nid_postfix();
+extern "C" int APS5_VABI __inet_pton_nid_postfix(int family, const char* text, void* destination);
+extern "C" const char* APS5_VABI __inet_ntop_nid_postfix(int family, const void* source, char* destination, std::uint32_t capacity);
 extern "C" std::size_t NetCtlHostDnsServers_nid_no_patch(std::uint32_t* servers, std::size_t capacity);
 
 void set_errno(int err) {
@@ -891,6 +893,19 @@ bool SetSocketOptionForKernel(int descriptor, int level, int option, const void*
 }
 
 const bool g_socketOptionSetterRegistered = (KernelSetSocketOptionSetter_nid_no_patch(&SetSocketOptionForKernel), true);
+
+extern "C" int APS5_VABI sceNetGetsockopt(int s, int level, int optname, void* optval, uint32_t* optlen);
+
+bool GetSocketOptionForKernel(int descriptor, int level, int option, void* value, std::uint32_t* length, int* error) {
+    {
+        std::lock_guard lk(g_mutex);
+        if (g_socks.count(descriptor) == 0) return false;
+    }
+    *error = sceNetGetsockopt(descriptor, level, option, value, length) == 0 ? 0 : *errno_slot();
+    return true;
+}
+
+const bool g_socketOptionGetterRegistered = (KernelSetSocketOptionGetter_nid_no_patch(&GetSocketOptionForKernel), true);
 
 constexpr int GuestFcntlGetStatus = 3;
 constexpr int GuestFcntlSetStatus = 4;
@@ -1563,6 +1578,15 @@ int APS5_VABI sceNetGetsockopt(int s, int level, int optname, void* optval, uint
         case NET_SO_RCVTIMEO: value = socket.native->receiveTimeout; break;
         case NET_SO_SNDTIMEO: value = socket.native->sendTimeout; break;
         case NET_SO_ONESBCAST: value = socket.onesbcast; break;
+        case NET_SO_REUSEADDR:
+        case NET_SO_BROADCAST: {
+            int enabled = 0;
+            NativeLength size = sizeof(enabled);
+            if (::getsockopt(socket.native->value, SOL_SOCKET, optname == NET_SO_REUSEADDR ? SO_REUSEADDR : SO_BROADCAST, reinterpret_cast<char*>(&enabled), &size) != 0)
+                return fail(native_error());
+            value = enabled != 0 ? optname : 0;
+            break;
+        }
         case NET_SO_ERROR: {
             int pending = 0;
             NativeLength size = sizeof(pending);
@@ -1942,9 +1966,9 @@ int APS5_VABI sceNetInetPton(int af, const char* src, void* dst) {
     const std::string text = af == NET_AF_INET ? std::string(src, std::strcspn(src, " \t\n\v\f\r")) : std::string(src);
     std::array<unsigned char, 16> address{};
 #ifdef _WIN32
-    const int converted = InetPtonA(af == NET_AF_INET ? AF_INET : AF_INET6, text.c_str(), address.data());
+    const int converted = af == NET_AF_INET6 ? __inet_pton_nid_postfix(af, text.c_str(), address.data()) : InetPtonA(AF_INET, text.c_str(), address.data());
 #else
-    const int converted = ::inet_pton(af == NET_AF_INET ? AF_INET : AF_INET6, text.c_str(), address.data());
+    const int converted = af == NET_AF_INET6 ? __inet_pton_nid_postfix(af, text.c_str(), address.data()) : ::inet_pton(AF_INET, text.c_str(), address.data());
 #endif
     if (converted == 1) {
         std::memcpy(dst, address.data(), af == NET_AF_INET ? 4 : 16);
@@ -1963,9 +1987,9 @@ const char* APS5_VABI sceNetInetNtop(int af, const void* src, char* dst, uint32_
     }
     char text[INET6_ADDRSTRLEN];
 #ifdef _WIN32
-    const auto* result = InetNtopA(af == NET_AF_INET ? AF_INET : AF_INET6, const_cast<void*>(src), text, sizeof(text));
+    const auto* result = af == NET_AF_INET6 ? __inet_ntop_nid_postfix(af, src, text, sizeof(text)) : InetNtopA(AF_INET, const_cast<void*>(src), text, sizeof(text));
 #else
-    const auto* result = ::inet_ntop(af == NET_AF_INET ? AF_INET : AF_INET6, src, text, sizeof(text));
+    const auto* result = af == NET_AF_INET6 ? __inet_ntop_nid_postfix(af, src, text, sizeof(text)) : ::inet_ntop(AF_INET, src, text, sizeof(text));
 #endif
     if (!result) {
         set_errno(native_error());
