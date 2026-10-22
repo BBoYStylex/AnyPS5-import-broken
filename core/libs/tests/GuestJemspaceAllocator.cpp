@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <limits>
+#include <string>
 #include <thread>
 
 extern "C" {
@@ -21,6 +22,8 @@ void* APS5_VABI sceJemspaceReallocalign(void*, void*, std::size_t, std::size_t);
 int APS5_VABI sceJemspacePosixMemalign(void*, void**, std::size_t, std::size_t);
 std::size_t APS5_VABI sceJemspaceMallocUsableSize(const void*);
 void APS5_VABI sceJemspaceGetStats(const void*, void*);
+int APS5_VABI sceJemspacePurge(void*);
+void APS5_VABI sceJemspacePrintStats(void(APS5_VABI*)(void*, const char*), void*, const char*);
 }
 
 namespace {
@@ -116,6 +119,35 @@ void CheckLimitIsolation() {
     Require(sceJemspaceDestroy(independent) == 0, "Destroy must release an independent arena");
 }
 
+void APS5_VABI CaptureStats(void* opaque, const char* text) {
+    static_cast<std::string*>(opaque)->append(text);
+}
+
+void CheckReporting() {
+    sceJemspacePrintStats(nullptr, reinterpret_cast<void*>(std::uintptr_t{1}),
+                         reinterpret_cast<const char*>(std::uintptr_t{1}));
+    std::string output;
+    sceJemspacePrintStats(CaptureStats, &output, "Jgmdablx");
+    Require(output.find("\"jemalloc\"") != std::string::npos && output.front() == '{' && output.back() == '\n',
+            "PrintStats must forward JSON options and callback state");
+    output.clear();
+    sceJemspacePrintStats(CaptureStats, &output, nullptr);
+    Require(output.find("Begin jemalloc statistics") != std::string::npos &&
+                output.find("End jemalloc statistics") != std::string::npos,
+            "Null options must produce a complete text statistics report");
+    void* space = sceJemspaceCreate("purge", 0, 0);
+    Require(space != nullptr, "Create an arena for purge");
+    void* live = sceJemspaceMalloc(space, 65536);
+    Require(live != nullptr, "Allocate before purge");
+    std::memset(live, 0x46, 65536);
+    Require(sceJemspacePurge(space) == 0 && sceJemspacePurge(nullptr) == 0,
+            "Purge must accept an explicit arena and all arenas");
+    CheckBytes(live, 65536, 0x46);
+    sceJemspaceFree(space, live);
+    Require(sceJemspacePurge(space) == 0, "Purge must accept an arena after free");
+    Require(sceJemspaceDestroy(space) == 0, "Destroy after purge");
+}
+
 void CheckThreads() {
     void* space = sceJemspaceCreate("shared", 0, 0);
     Require(space != nullptr, "A shared arena must be creatable");
@@ -161,4 +193,5 @@ int main() {
     Require(sceJemspaceDestroy(space) == 0, "Destroy the replacement arena");
     CheckLimitIsolation();
     CheckThreads();
+    CheckReporting();
 }

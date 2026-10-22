@@ -31,6 +31,15 @@ struct Space {
 };
 static_assert(sizeof(Space) == 152);
 static_assert(offsetof(Space, limit) == 104);
+using StatsWriter = void(APS5_VABI*)(void*, const char*);
+struct StatsOutput {
+    StatsWriter write;
+    void* opaque;
+};
+void WriteStats(void* opaque, const char* text) {
+    auto& output = *static_cast<StatsOutput*>(opaque);
+    output.write(output.opaque, text);
+}
 std::recursive_mutex apiMutex;
 void Peaks(Space& s) {
     s.peakCommitted = std::max(s.peakCommitted, s.committed);
@@ -251,6 +260,24 @@ int APS5_VABI sceJemspacePosixMemalign(void* p, void** allocation, std::size_t a
 std::size_t APS5_VABI sceJemspaceMallocUsableSize(const void* allocation) {
     std::lock_guard lock(apiMutex);
     return allocation ? anyps5_jemspace_sallocx(allocation, 0) : 0;
+}
+int APS5_VABI sceJemspacePurge(void* p) {
+    std::lock_guard lock(apiMutex);
+    char command[64];
+    std::snprintf(command, sizeof(command), "arena.%u.purge", p ? static_cast<Space*>(p)->arena : 4096U);
+    const int error = anyps5_jemspace_mallctl(command, nullptr, nullptr, nullptr, 0);
+    if (error) {
+        std::fprintf(stderr, "jemallctl() with arenas.purge failed. error = %s\n", std::strerror(error));
+    }
+    return 0;
+}
+void APS5_VABI sceJemspacePrintStats(StatsWriter write, void* opaque, const char* options) {
+    std::lock_guard lock(apiMutex);
+    if (!write) {
+        return;
+    }
+    StatsOutput output{write, opaque};
+    anyps5_jemspace_malloc_stats_print(WriteStats, &output, options);
 }
 void APS5_VABI sceJemspaceGetStats(const void* p, void* stats) {
     std::lock_guard lock(apiMutex);

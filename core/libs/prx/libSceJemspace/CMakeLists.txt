@@ -10,7 +10,7 @@ target_link_libraries(libSceJemspace PRIVATE jemspace_allocator)
 set(jemspaceExports
     sceJemspaceCalloc sceJemspaceCreate sceJemspaceDestroy sceJemspaceFree sceJemspaceGetStats
     sceJemspaceMalloc sceJemspaceMallocUsableSize sceJemspaceMemalign sceJemspacePosixMemalign
-    sceJemspaceRealloc sceJemspaceReallocalign)
+    sceJemspaceRealloc sceJemspaceReallocalign sceJemspacePurge sceJemspacePrintStats)
 if(APPLE)
     set(exportList "")
     foreach(symbol IN LISTS jemspaceExports)

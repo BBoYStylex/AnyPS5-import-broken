@@ -1,3 +1,9 @@
+get_filename_component(toolDirectory "${AUTOCONF}" DIRECTORY)
+if(WIN32)
+    set(ENV{PATH} "${toolDirectory};$ENV{PATH}")
+else()
+    set(ENV{PATH} "${toolDirectory}:$ENV{PATH}")
+endif()
 if(EXISTS "${BINARY}/Makefile")
     execute_process(COMMAND "${MAKE}" clean WORKING_DIRECTORY "${BINARY}" COMMAND_ERROR_IS_FATAL ANY)
 endif()
@@ -28,9 +34,3 @@ execute_process(
     WORKING_DIRECTORY "${BINARY}"
     COMMAND_ERROR_IS_FATAL ANY
 )
-get_filename_component(toolDirectory "${AUTOCONF}" DIRECTORY)
-if(WIN32)
-    set(ENV{PATH} "${toolDirectory};$ENV{PATH}")
-else()
-    set(ENV{PATH} "${toolDirectory}:$ENV{PATH}")
-endif()
