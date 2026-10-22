@@ -52,7 +52,7 @@ static void CheckCallingThread() {
     KernelSchedParam reported{-1};
     REQUIRE(sched_getparam_nid_postfix(0, &reported) == 0 && reported.sched_priority == expected.sched_priority);
 
-    for (const int priority : {256, 767, 500, 896, 959}) {
+    for (const int priority : {256, 767, 500}) {
         const KernelSchedParam set{priority};
         REQUIRE(sched_setparam_nid_postfix(0, &set) == 0);
         REQUIRE(sched_getparam_nid_postfix(0, &reported) == 0 && reported.sched_priority == priority);
@@ -68,10 +68,16 @@ static void CheckCallingThread() {
     const KernelSchedParam lowered{300};
     REQUIRE(sched_setparam_nid_postfix(0, &lowered) == 0 && sched_getscheduler_nid_postfix(0) == SCHED_RR_POLICY);
     REQUIRE(sched_getparam_nid_postfix(0, &reported) == 0 && reported.sched_priority == 300);
-    for (const int priority : {255, 768, 895, 960, 0, -1}) {
+    for (const int priority : {255, 768, 895, 896, 959, 960, 0, -1}) {
         const KernelSchedParam outside{priority};
         REQUIRE(Throws([&] { sched_setparam_nid_postfix(0, &outside); }));
     }
+    REQUIRE(sched_getparam_nid_postfix(0, &reported) == 0 && reported.sched_priority == 300);
+    const KernelSchedParam upperBand{900};
+    REQUIRE(pthread_setschedparam_nid_postfix(scePthreadSelf(), SCHED_RR_POLICY, &upperBand) == 0);
+    REQUIRE(Throws([&] { sched_getparam_nid_postfix(0, &reported); }));
+    REQUIRE(sched_getscheduler_nid_postfix(0) == SCHED_RR_POLICY);
+    REQUIRE(pthread_setschedparam_nid_postfix(scePthreadSelf(), SCHED_RR_POLICY, &lowered) == 0);
     REQUIRE(sched_getparam_nid_postfix(0, &reported) == 0 && reported.sched_priority == 300);
     REQUIRE(pthread_setschedparam_nid_postfix(scePthreadSelf(), policy, &expected) == 0);
 }

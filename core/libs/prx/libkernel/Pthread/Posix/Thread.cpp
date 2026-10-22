@@ -59,6 +59,8 @@ int APS5_VABI scePthreadGetaffinity(Pthread thread, KernelCpumask* mask);
 int APS5_VABI scePthreadSetaffinity(Pthread thread, KernelCpumask mask);
 KernelCpumask APS5_VABI sceKernelGetAvailableCpumask(void);
 int APS5_VABI getpid_nid_postfix(void);
+int APS5_VABI sched_get_priority_max_nid_postfix(int policy);
+int APS5_VABI sched_get_priority_min_nid_postfix(int policy);
 
 int APS5_VABI cpuset_getaffinity_nid_postfix(int level, int which, std::int64_t id, std::size_t size, void* mask) {
     constexpr int LevelWhich = 3, WhichThread = 1, WhichProcess = 2;
@@ -216,12 +218,19 @@ static int SchedFailure(int error) {
     return -1;
 }
 
+static bool InSchedRange(int policy, int priority) {
+    if (policy != GUEST_SCHED_FIFO && policy != GUEST_SCHED_RR) return false;
+    return priority >= sched_get_priority_min_nid_postfix(policy) && priority <= sched_get_priority_max_nid_postfix(policy);
+}
+
 int APS5_VABI sched_getparam_nid_postfix(int pid, KernelSchedParam* param) {
     const Pthread thread = SchedTarget(pid, "sched_getparam");
     if (!thread) return SchedFailure(PosixThread::GUEST_ESRCH);
     int policy = 0;
     KernelSchedParam current{};
     if (const int error = PosixThread::ToErrno(scePthreadGetschedparam(thread, &policy, &current))) return SchedFailure(error);
+    if (!InSchedRange(policy, current.sched_priority))
+        throw std::runtime_error("sched_getparam: the thread's priority " + std::to_string(current.sched_priority) + " is outside the sched_get_priority_min to sched_get_priority_max range of policy " + std::to_string(policy) + "; what the console reports is unverified");
     if (!param) return SchedFailure(PosixThread::GUEST_EFAULT);
     *param = current;
     return 0;
@@ -241,8 +250,8 @@ int APS5_VABI sched_setparam_nid_postfix(int pid, const KernelSchedParam* param)
     const Pthread thread = SchedTarget(pid, "sched_setparam");
     if (!thread) return SchedFailure(PosixThread::GUEST_ESRCH);
     const int policy = thread->schedPolicy.load(std::memory_order_relaxed);
-    if (!AcceptsSchedParam(policy, param->sched_priority))
-        throw std::runtime_error("sched_setparam: priority " + std::to_string(param->sched_priority) + " is outside the range of policy " + std::to_string(policy) + "; FreeBSD answers EPERM and the console's answer is unverified");
+    if (!InSchedRange(policy, param->sched_priority))
+        throw std::runtime_error("sched_setparam: priority " + std::to_string(param->sched_priority) + " is outside the sched_get_priority_min to sched_get_priority_max range of policy " + std::to_string(policy) + "; FreeBSD answers EPERM and the console's answer is unverified");
     if (const int error = PosixThread::ToErrno(scePthreadSetprio(thread, param->sched_priority))) return SchedFailure(error);
     return 0;
 }
