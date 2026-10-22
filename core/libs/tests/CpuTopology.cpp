@@ -66,7 +66,6 @@ int main() {
     const std::uint64_t first = layout.process & (~layout.process + 1);
     Require(CpuTopology::Pin(nullptr, first) == first, "pin to one cpu of the process");
 #ifdef _WIN32
-    // SetThreadAffinityMask returns the mask it replaces, which is the pinned one.
     Require(SetThreadAffinityMask(GetCurrentThread(), static_cast<DWORD_PTR>(first)) == first, "thread runs on the pinned cpu only");
     Require(CpuTopology::Pin(nullptr, ~layout.process) == 0, "mask outside the process is not applied");
     Require(CpuTopology::Pin(GetCurrentThread(), layout.process) == layout.process, "threads are pinned by handle");
