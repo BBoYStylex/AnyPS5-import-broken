@@ -18,6 +18,7 @@ namespace {
 constexpr std::array<const char*, static_cast<std::size_t>(DrawPipeline::DrainReason::Count)> DrainNames{"packet", "flush", "labels", "capture", "indirect", "submission"};
 
 std::atomic<unsigned> runningCommitters{0};
+std::atomic<unsigned> runningReapers{0};
 
 std::uint64_t elapsedNs(std::chrono::steady_clock::time_point since) {
     return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - since).count());
@@ -70,6 +71,10 @@ void DrawPipeline::FollowEpoch(std::uint64_t token) {
 
 unsigned DrawPipeline::Committers() {
     return runningCommitters.load(std::memory_order_acquire);
+}
+
+unsigned DrawPipeline::Reapers() {
+    return runningReapers.load(std::memory_order_acquire);
 }
 
 void DrawPipeline::rethrowFailure() {
@@ -189,6 +194,7 @@ void DrawPipeline::run() {
         }
         retire(std::move(done));
     }
+    runningCommitters.fetch_sub(1, std::memory_order_acq_rel);
 }
 
 void DrawPipeline::retire(Item&& item) {
@@ -198,26 +204,37 @@ void DrawPipeline::retire(Item&& item) {
         return;
     }
     constexpr std::size_t ReapBatch = 64;
-    std::lock_guard lock(retireMutex);
+    std::unique_lock lock(retireMutex);
+    if (reaperStopping) {
+        lock.unlock();
+        const Item dropped = std::move(item);
+        return;
+    }
     retired.push_back(std::move(item));
-    if (!reaper.joinable()) reaper = std::thread([this] { reap(); });
+    if (!reaper.joinable()) {
+        runningReapers.fetch_add(1, std::memory_order_acq_rel);
+        reaper = std::thread([this] { reap(); });
+    }
     if (retired.size() >= ReapBatch && reaperWaiting) reapWake.notify_one();
 }
 
 void DrawPipeline::reap() {
     for (;;) {
         std::deque<Item> batch;
+        bool last = false;
         {
             std::unique_lock lock(retireMutex);
             reaperWaiting = true;
-            reapWake.wait_for(lock, std::chrono::milliseconds(2), [&] { return retired.size() >= 64; });
+            reapWake.wait_for(lock, std::chrono::milliseconds(2), [&] { return retired.size() >= 64 || reaperStopping; });
             reaperWaiting = false;
-            if (retired.empty()) continue;
+            last = reaperStopping;
+            if (retired.empty() && !last) continue;
             batch.swap(retired);
         }
         batch.clear();
+        if (last) break;
     }
-    runningCommitters.fetch_sub(1, std::memory_order_acq_rel);
+    runningReapers.fetch_sub(1, std::memory_order_acq_rel);
 }
 
 void DrawPipeline::Stop() {
@@ -228,9 +245,18 @@ void DrawPipeline::Stop() {
         committer = std::move(thread);
     }
     wake.notify_all();
-    if (!committer.joinable()) return;
-    if (committer.get_id() == std::this_thread::get_id()) committer.detach();
-    else committer.join();
+    if (committer.joinable()) {
+        if (committer.get_id() == std::this_thread::get_id()) committer.detach();
+        else committer.join();
+    }
+    std::thread stoppedReaper;
+    {
+        std::lock_guard lock(retireMutex);
+        reaperStopping = true;
+        stoppedReaper = std::move(reaper);
+    }
+    reapWake.notify_all();
+    if (stoppedReaper.joinable()) stoppedReaper.join();
 }
 
 void DrawPipeline::Drain(DrainReason reason, std::uint32_t opcode) {

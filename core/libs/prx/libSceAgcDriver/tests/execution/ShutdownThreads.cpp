@@ -104,17 +104,22 @@ void ShutdownJoinsDrawCommitter() {
     std::promise<void> gate;
     auto opened = gate.get_future().share();
     bool queuedRan = false;
+    auto held = std::make_shared<int>(0);
+    const std::weak_ptr<int> retiredClosure = held;
     pipeline.Enqueue([&started, opened] {
         started.set_value(std::this_thread::get_id());
         opened.wait();
     }, {});
-    pipeline.Enqueue([&] { queuedRan = true; }, {});
+    pipeline.Enqueue([&queuedRan, held] { queuedRan = true; }, {});
+    held.reset();
     Require(startedOn.get() != caller, "a pipelined commit ran on the caller instead of the draw committer");
     Require(DrawPipeline::Committers() == 1, "a pipelined commit started no draw committer");
     gate.set_value();
     AgcDriverShutdown_nid_postfix();
     Require(DrawPipeline::Committers() == 0, "the driver's shutdown left the draw committer running");
     Require(queuedRan, "the driver's shutdown dropped a pipelined commit");
+    Require(DrawPipeline::Reapers() == 0, "the driver's shutdown left the commit reaper running");
+    Require(retiredClosure.expired(), "a finished commit outlived the driver's shutdown");
     bool ranHere = false;
     pipeline.Enqueue([&] { ranHere = std::this_thread::get_id() == caller; }, {});
     Require(ranHere, "a commit enqueued after the shutdown ran on another thread");

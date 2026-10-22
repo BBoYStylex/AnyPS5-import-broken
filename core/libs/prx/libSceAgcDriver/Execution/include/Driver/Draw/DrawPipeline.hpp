@@ -31,6 +31,7 @@ public:
     static std::atomic<std::uint64_t>& EpochToken();
     static void FollowEpoch(std::uint64_t token);
     static unsigned Committers();
+    static unsigned Reapers();
 
     void Enqueue(Commit commit, std::vector<Range> writes, std::uint64_t labelAddress = 0, std::vector<std::byte> labelBytes = {}, std::vector<Range> reads = {});
     void Drain(DrainReason reason, std::uint32_t opcode = 0x100);
@@ -74,6 +75,7 @@ private:
     std::deque<Item> retired;
     std::thread reaper;
     bool reaperWaiting = false;
+    bool reaperStopping = false;
     std::uint64_t commits = 0;
     std::uint64_t commitNs = 0;
     std::uint64_t commitErrors = 0;
