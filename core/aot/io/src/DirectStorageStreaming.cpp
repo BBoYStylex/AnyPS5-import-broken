@@ -85,6 +85,13 @@ void DirectStorageStreaming::WaitForRequest(uint64_t requestId) {
     });
 }
 
+void DirectStorageStreaming::WaitForAllRequests() {
+    std::unique_lock<std::mutex> lock(queueMutex);
+    queueCondition.wait(lock, [this]() {
+        return pendingRequests.empty();
+    });
+}
+
 bool DirectStorageStreaming::IsRequestCompleted(uint64_t requestId, bool* outSuccess) const {
     std::lock_guard<std::mutex> lock(const_cast<std::mutex&>(completionMutex));
     auto it = completedRequests.find(requestId);
@@ -108,6 +115,13 @@ StreamingStatistics DirectStorageStreaming::GetStatistics() const {
         .FailedRequests = statFailedRequests.load(std::memory_order_relaxed),
         .TotalBytesStreamed = statTotalBytesStreamed.load(std::memory_order_relaxed)
     };
+}
+
+void DirectStorageStreaming::ResetStatistics() {
+    statTotalRequests.store(0, std::memory_order_relaxed);
+    statCompletedRequests.store(0, std::memory_order_relaxed);
+    statFailedRequests.store(0, std::memory_order_relaxed);
+    statTotalBytesStreamed.store(0, std::memory_order_relaxed);
 }
 
 bool DirectStorageStreaming::RegisterExternalGpuMemory(const ExternalGpuMemoryResource& resource) {

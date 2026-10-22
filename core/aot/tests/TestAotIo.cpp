@@ -53,6 +53,12 @@ int main() {
     auto stats = streaming.GetStatistics();
     assert(stats.TotalRequests >= 1);
 
+    streaming.WaitForAllRequests();
+    streaming.ResetStatistics();
+    stats = streaming.GetStatistics();
+    assert(stats.TotalRequests == 0);
+    assert(stats.CompletedRequests == 0);
+
     Aot::Io::FileStreamQueue queue;
     assert(queue.GetActiveRequestCount() == 0);
     uint64_t queuedId = queue.QueueAssetLoad("", 0, 0, 0, destBuffer.data());

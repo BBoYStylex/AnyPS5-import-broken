@@ -69,9 +69,11 @@ public:
 
     uint64_t EnqueueRequest(StreamRequest request);
     void WaitForRequest(uint64_t requestId);
+    void WaitForAllRequests();
     [[nodiscard]] bool IsRequestCompleted(uint64_t requestId, bool* outSuccess = nullptr) const;
     [[nodiscard]] bool IsHardwareDecompressionSupported() const;
     [[nodiscard]] StreamingStatistics GetStatistics() const;
+    void ResetStatistics();
 
     bool RegisterExternalGpuMemory(const ExternalGpuMemoryResource& resource);
     void UnregisterExternalGpuMemory(uint64_t resourceId);

@@ -67,10 +67,12 @@ int main() {
 
     std::vector<uint8_t> multiBytecode = {
         0x02, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x18,
+        0x00, 0x00, 0x00, 0x1A,
         0x00, 0x00, 0x80, 0xBF
     };
     auto multiDecoded = decoder.DecodeBytecode(multiBytecode);
-    if (multiDecoded.size() != 2 || multiDecoded[0].OpClass != Aot::Graphics::ShaderOpcodeClass::VectorAlu) {
+    if (multiDecoded.size() != 4 || multiDecoded[0].OpClass != Aot::Graphics::ShaderOpcodeClass::VectorAlu) {
         return 3;
     }
 
@@ -88,6 +90,8 @@ int main() {
     }
 
     bool foundFAdd = false;
+    bool foundFMod = false;
+    bool foundUDiv = false;
     for (size_t i = 5; i < multiTranspiled->SpirvBytecode.size(); ) {
         uint32_t word = multiTranspiled->SpirvBytecode[i];
         uint16_t op = word & 0xFFFF;
@@ -95,10 +99,14 @@ int main() {
         if (len == 0) break;
         if (op == 129) {
             foundFAdd = true;
+        } else if (op == 141) {
+            foundFMod = true;
+        } else if (op == 134) {
+            foundUDiv = true;
         }
         i += len;
     }
-    if (!foundFAdd) {
+    if (!foundFAdd || !foundFMod || !foundUDiv) {
         return 6;
     }
 

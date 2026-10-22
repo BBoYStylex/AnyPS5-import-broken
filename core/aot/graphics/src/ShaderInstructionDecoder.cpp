@@ -45,6 +45,10 @@ std::vector<DecodedShaderInstruction> ShaderInstructionDecoder::DecodeBytecode(s
                 instr.TargetSpirvOp = DecodedSpirvOp::Dot;
             } else if (opId == 11) {
                 instr.TargetSpirvOp = DecodedSpirvOp::Select;
+            } else if (opId == 12) {
+                instr.TargetSpirvOp = DecodedSpirvOp::FMod;
+            } else if (opId == 13) {
+                instr.TargetSpirvOp = DecodedSpirvOp::UDiv;
             } else {
                 instr.TargetSpirvOp = DecodedSpirvOp::FAdd;
             }
@@ -86,6 +90,8 @@ std::vector<DecodedShaderInstruction> ShaderInstructionDecoder::DecodeBytecode(s
                 instr.TargetSpirvOp = DecodedSpirvOp::Load;
             } else if (scalarOp == 5) {
                 instr.TargetSpirvOp = DecodedSpirvOp::Store;
+            } else if (scalarOp == 6) {
+                instr.TargetSpirvOp = DecodedSpirvOp::UDiv;
             } else {
                 instr.TargetSpirvOp = DecodedSpirvOp::Load;
             }
@@ -358,6 +364,18 @@ std::vector<uint32_t> ShaderInstructionDecoder::GenerateSpirvFromInstructions(
             spirv.push_back(nextId++);
             spirv.push_back(7);
             spirv.push_back(7);
+        } else if (instr.TargetSpirvOp == DecodedSpirvOp::FMod) {
+            spirv.push_back((5 << 16) | 141);
+            spirv.push_back(4);
+            spirv.push_back(nextId++);
+            spirv.push_back(7);
+            spirv.push_back(7);
+        } else if (instr.TargetSpirvOp == DecodedSpirvOp::UDiv) {
+            spirv.push_back((5 << 16) | 134);
+            spirv.push_back(9);
+            spirv.push_back(nextId++);
+            spirv.push_back(11);
+            spirv.push_back(11);
         } else if (instr.TargetSpirvOp == DecodedSpirvOp::Dot) {
             spirv.push_back((5 << 16) | 148);
             spirv.push_back(4);
