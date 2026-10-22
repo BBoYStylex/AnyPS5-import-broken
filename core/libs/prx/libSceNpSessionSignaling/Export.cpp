@@ -292,7 +292,37 @@ int APS5_VABI sceNpSessionSignalingGetConnectionFromNetAddress2(std::uint32_t co
     return 0;
 }
 
+int APS5_VABI sceNpSessionSignalingActivate(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
 int APS5_VABI sceNpSessionSignalingCreateJoinActivate() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNpSessionSignalingCrossplayCreateContext(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNpSessionSignalingCrossplayDestroyContext(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNpSessionSignalingCrossplayGetMemoryInfo(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNpSessionSignalingCrossplayInitialize(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNpSessionSignalingCrossplayTerminate(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -318,6 +348,31 @@ int APS5_VABI sceNpSessionSignalingInitializeWithPort() {
 }
 
 int APS5_VABI sceNpSessionSignalingJoinActivate() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNpSessionSignalingManualUdpAbortConnection(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNpSessionSignalingManualUdpCreateJoin(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNpSessionSignalingManualUdpEstablishConnection(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNpSessionSignalingManualUdpJoin(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNpSessionSignalingRegisterInternalCallback(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }

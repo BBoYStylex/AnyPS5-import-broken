@@ -83,4 +83,14 @@ std::int32_t APS5_VABI scePlayerInvitationDialogGetResult(ScePlayerInvitationDia
     return 0;
 }
 
+int APS5_VABI scePlayerInvitationDialogParamInit(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI scePlayerInvitationDialogParamInitialize(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
 }
