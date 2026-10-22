@@ -3,6 +3,7 @@
 ### Unknown function info
 
 - [Events](../../../core/libs/prx/libSceNpUniversalDataSystem/src/Event.cpp): `sceNpUniversalDataSystemCreateEvent` copies `prop` and returns the event's own property object through `prop_ptr`, as [KytyPS5](https://github.com/KytyPS5/KytyPS5/blob/9e41d8320a2774b303fbad344c2347e8d0292e83/src/libs/libTrophy.cpp) does; `sceNpUniversalDataSystemEventPropertyObjectSetObject`, `SetArray` and the array setters for objects and arrays store a copy of `value` and return the stored copy through `value_ptr`. Destroying a property object or array that its Create function did not return (an event's property object or a stored copy) does nothing, as its owner frees it. These ownership rules are not verified on a console, nor are the output of `sceNpUniversalDataSystemEventToString` (still `{}`) and `sceNpUniversalDataSystemEventEstimateSize` (still 3).
+- [libSceNpUniversalDataSystem pending exports](../../../core/libs/prx/libSceNpUniversalDataSystem/Export.cpp) (libSceNpUniversalDataSystem) - 11 named callable exports are present in the [PS5 3.20 export inventory](https://github.com/DNNDHH/PS5-3.20_Libs/blob/b2a77c09cd71c01f34c790cfbe98c751a13262ad/libSceNpUniversalDataSystem.c), which lists them among the module's 84 exports. Their signatures and behaviour are unverified; each declaration uses the no-parameter unknown-signature convention and throws through `NotImplemented_nid_no_patch`. They add no behaviour to the trophy events the module implements
 
 ### Functional
 
