@@ -41,7 +41,7 @@ struct SdmaSlot {
     bool queueMode = false;
     std::uint32_t ringDwords = 0;
     std::uint32_t writeIndex = 0;
-    std::uint16_t pendingDwords = 0;
+    std::uint32_t pendingDwords = 0;
     std::uint32_t fenceIndex = 0;
     std::uint64_t* writeBack = nullptr;
     std::vector<std::function<void()>> deferred;
@@ -55,7 +55,7 @@ SdmaSlot g_slots[20];
 
 void Emit(SdmaSlot& slot, std::uint32_t dwords, std::function<void()> operation) {
     slot.writeIndex = static_cast<std::uint32_t>((static_cast<std::uint64_t>(slot.writeIndex) + dwords) % slot.ringDwords);
-    slot.pendingDwords = static_cast<std::uint16_t>(slot.pendingDwords + dwords);
+    slot.pendingDwords += dwords;
     slot.deferred.push_back(std::move(operation));
 }
 
@@ -80,8 +80,10 @@ void FlushAll(SdmaSlot& slot) {
     slot.fenceIndex = 0;
 }
 
+std::uint32_t RingPending(const SdmaSlot& slot) { return static_cast<std::uint16_t>(slot.pendingDwords); }
+
 bool Fits(const SdmaSlot& slot, std::uint32_t dwords) {
-    return static_cast<std::uint64_t>(slot.pendingDwords) + dwords + RingMargin <= slot.ringDwords;
+    return static_cast<std::uint64_t>(RingPending(slot)) + dwords + RingMargin <= slot.ringDwords;
 }
 
 int Submit(void* handle, std::uint32_t dwords, bool blocking, const std::function<void(SdmaSlot&)>& emit) {
@@ -186,6 +188,7 @@ int APS5_VABI sceSdmaCancelQueue(void* handle) {
     std::lock_guard lock(g_mutex);
     auto& slot = *static_cast<SdmaSlot*>(handle);
     if (!slot.queueMode) return SdmaErrorNotQueueMode;
+    if (slot.pendingDwords != RingPending(slot)) NotImplemented_nid_no_patch("sceSdmaCancelQueue: a queue of more than 65535 dwords, which the module rewinds only in part");
     slot.writeIndex = static_cast<std::uint32_t>((static_cast<std::uint64_t>(slot.writeIndex) + slot.ringDwords - slot.pendingDwords % slot.ringDwords) % slot.ringDwords);
     slot.pendingDwords = 0;
     slot.deferred.clear();
@@ -274,7 +277,7 @@ int APS5_VABI sceSdmaEndQueueMode(void* handle) {
 int APS5_VABI sceSdmaFenceNonBlocking(void* handle) {
     std::lock_guard lock(g_mutex);
     auto& slot = *static_cast<SdmaSlot*>(handle);
-    if (static_cast<std::uint64_t>(slot.pendingDwords) + FencePacket + 8 > slot.ringDwords) return SdmaErrorRingFull;
+    if (static_cast<std::uint64_t>(RingPending(slot)) + FencePacket + 8 > slot.ringDwords) return SdmaErrorRingFull;
     if (slot.fenceIndex >= FenceSlots - 1) return SdmaErrorRingFull;
     slot.watchedFence = EmitFence(slot);
     ++slot.fenceIndex;

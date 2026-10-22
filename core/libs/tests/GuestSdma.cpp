@@ -196,6 +196,8 @@ void RequireRing() {
     Require(sceSdmaBeginQueueMode(engine.handle) == 0);
     for (int index = 0; index < 582; ++index) Require(sceSdmaCopyLinearNonBlocking(engine.handle, source, destination, 8) == 0);
     Require(sceSdmaCopyLinearNonBlocking(engine.handle, source, destination, 8) == RingFull);
+    Require(sceSdmaCopyLinearNonBlocking(engine.handle, source, destination, 0) == RingFull);
+    Require(sceSdmaConstantFillNonBlocking(engine.handle, 0, destination, 0, 0) == 0);
     Require(sceSdmaCopyWindowL2LNonBlocking(engine.handle, source, destination, 8, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0) == RingFull);
     Require(sceSdmaConstantFillNonBlocking(engine.handle, 0, destination, 8, 0) == 0);
     Require(sceSdmaFenceNonBlocking(engine.handle) == 0);
@@ -215,6 +217,29 @@ void RequireRing() {
     Require(sceSdmaTryFlush(large.handle) == 0);
     Require(sceSdmaFenceNonBlocking(large.handle) == 0);
     Require(sceSdmaFlushAll(large.handle) == 0);
+
+    {
+        Engine exact(19, 0x8000);
+        std::vector<std::uint8_t> big(0x400000, 0x3c), target(0x400000, 0);
+        Require(sceSdmaBeginQueueMode(exact.handle) == 0);
+        for (int index = 0; index < 581; ++index) Require(sceSdmaCopyLinearNonBlocking(exact.handle, source, destination, 1) == 0);
+        Require(sceSdmaCopyLinearNonBlocking(exact.handle, big.data(), target.data(), 0x400000) == RingFull);
+        Require(sceSdmaCopyLinearNonBlocking(exact.handle, big.data(), target.data(), 0x3fffff) == 0);
+        Require(target[0] == 0);
+        Require(sceSdmaEndQueueMode(exact.handle) == 0);
+        Require(target[0x3ffffe] == 0x3c && target[0x3fffff] == 0);
+    }
+
+    {
+        std::uint64_t writeBack = 0;
+        Engine wrapped(19, 0x80000, &writeBack);
+        Require(sceSdmaBeginQueueMode(wrapped.handle) == 0);
+        for (int index = 0; index < 18137; ++index) Require(sceSdmaCopyLinearNonBlocking(wrapped.handle, source, destination, 1) == 0);
+        Require(sceSdmaCopyLinearNonBlocking(wrapped.handle, source, destination, 1) == 0);
+        RequireThrows([&] { sceSdmaCancelQueue(wrapped.handle); });
+        Require(sceSdmaEndQueueMode(wrapped.handle) == 0);
+        Require(writeBack == (18138 * 7 + 4) * 4);
+    }
 }
 
 }
