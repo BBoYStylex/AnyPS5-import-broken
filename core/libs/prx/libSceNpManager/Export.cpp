@@ -14,6 +14,7 @@ static constexpr int SCE_NP_ERROR_SIGNED_OUT = static_cast<int>(0x80550006);
 static constexpr int SCE_NP_ERROR_USER_NOT_FOUND = static_cast<int>(0x80550007);
 static constexpr int SCE_NP_ERROR_CALLBACK_ALREADY_REGISTERED = static_cast<int>(0x80550008);
 static constexpr int SCE_NP_ERROR_CALLBACK_NOT_REGISTERED = static_cast<int>(0x80550009);
+static constexpr int SCE_NP_ERROR_INVALID_SIZE = static_cast<int>(0x80550011);
 static constexpr int SCE_NP_ERROR_REQUEST_NOT_FOUND = static_cast<int>(0x80550014);
 static constexpr int SCE_NP_ERROR_CALLBACK_MAX = static_cast<int>(0x8055001D);
 static constexpr uint32_t NP_STATE_SIGNED_OUT = 1;
@@ -348,8 +349,9 @@ int APS5_VABI sceNpIntRegisterGamePresenceCallback(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
-int APS5_VABI sceNpIsPlusMember(void) {
-    NotImplemented_nid_no_patch(__func__);
+int APS5_VABI sceNpIsPlusMember(int, bool* isMember) {
+    if (!isMember) return SCE_NP_ERROR_INVALID_ARGUMENT;
+    *isMember = false;
     return 0;
 }
 int APS5_VABI sceNpManagerIntAbortRequest(void) {
@@ -871,9 +873,19 @@ int APS5_VABI sceNpRegisterStateCallback(NpStateCallback callback, void* userdat
 }
 
 int APS5_VABI sceNpSetContentRestriction(const NpContentRestriction* restriction) {
- (void)restriction;
- NotImplemented_nid_no_patch(__func__);
- return 0;
+    struct Fields {
+        std::uint64_t size;
+        std::int8_t defaultAgeRestriction;
+        std::uint8_t padding[3];
+        std::int32_t ageRestrictionCount;
+        const void* ageRestrictions;
+    };
+    if (!restriction) return SCE_NP_ERROR_INVALID_ARGUMENT;
+    const auto* fields = reinterpret_cast<const Fields*>(restriction);
+    if (fields->size != sizeof(Fields)) return SCE_NP_ERROR_INVALID_SIZE;
+    if (fields->defaultAgeRestriction < 0 || fields->ageRestrictionCount > 0x100) return SCE_NP_ERROR_INVALID_ARGUMENT;
+    if (fields->ageRestrictionCount > 0 && !fields->ageRestrictions) return SCE_NP_ERROR_INVALID_ARGUMENT;
+    return 0;
 }
 
 int APS5_VABI sceNpSetNpTitleId(const NpTitleId* title_id, const NpTitleSecret* title_secret) {
@@ -976,8 +988,7 @@ int APS5_VABI sceNpUnknown_WxLcN76q19o(void) {
 
 
 int APS5_VABI sceNpCheckCallbackForLib() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return sceNpCheckCallback();
 }
 
 }
