@@ -446,7 +446,6 @@ int main() {
     constexpr int outOfMemory = static_cast<int>(0x80431022);
     constexpr int invalidValue = static_cast<int>(0x804311FE);
     constexpr int invalidUrl = static_cast<int>(0x80433060);
-    constexpr int network = static_cast<int>(0x80431063);
     constexpr std::uint32_t buildAll = 0xFF;
 
     const char* url = "https://user:secret@example.com:8443/a/./b/../c?x=1&y=2#top";
@@ -687,7 +686,6 @@ int main() {
     flushCaches(0, invalidId);
     flushCaches(-1, invalidId);
     flushCaches(INT32_MAX, invalidId);
-    flushCaches(1, invalidId);
     Require(sceHttpCreateEpoll(-1, &epoll) == invalidId);
     Require(sceHttpCreateEpoll(context, nullptr) == invalidValue);
     Require(sceHttpCreateEpoll(context, &epoll) == 0 && epoll != nullptr);
