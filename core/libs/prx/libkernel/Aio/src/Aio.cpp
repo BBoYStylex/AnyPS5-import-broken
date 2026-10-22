@@ -11,6 +11,7 @@
 #include "prx/libc/include/GuestArena.hpp"
 #include "prx/libc/include/PreciseWait.hpp"
 #include "prx/libkernel/File/include/ArchivedFile.hpp"
+#include "prx/libkernel/File/include/DirectoryDescriptor.hpp"
 #include "prx/libkernel/File/include/File.hpp"
 #include "prx/libkernel/File/include/SharedMemory.hpp"
 #include "prx/libkernel/KernelErrors.hpp"
@@ -58,6 +59,7 @@ void SetState(std::int32_t id, std::int32_t state) {
 }
 
 std::int64_t NativePread(std::int32_t fd, void* buf, std::size_t nbyte, std::int64_t offset) {
+    if (File::IsVirtualDirectoryDescriptor(fd)) { errno = EISDIR; return -1; }
     const GuestArena::HostWrite destination(buf, nbyte);
     if (!destination.Open()) {
         errno = EFAULT;
@@ -80,6 +82,7 @@ std::int64_t NativePread(std::int32_t fd, void* buf, std::size_t nbyte, std::int
 }
 
 std::int64_t NativePwrite(std::int32_t fd, const void* buf, std::size_t nbyte, std::int64_t offset) {
+    if (File::IsVirtualDirectoryDescriptor(fd)) { errno = EISDIR; return -1; }
     if (offset < 0) {
         errno = EINVAL;
         return -1;
@@ -103,6 +106,7 @@ bool RunRequest(KernelAioRwRequest& req, bool write) {
         if (error == EBADF) req.result->return_value = static_cast<std::int64_t>(SCE_KERNEL_ERROR_EBADF);
         if (error == EFAULT) req.result->return_value = static_cast<std::int64_t>(SCE_KERNEL_ERROR_EFAULT);
         if (error == EINVAL) req.result->return_value = static_cast<std::int64_t>(SCE_KERNEL_ERROR_EINVAL);
+        if (error == EISDIR) req.result->return_value = static_cast<std::int64_t>(SCE_KERNEL_ERROR_EISDIR);
         req.result->state = AioAborted;
         return false;
     }
