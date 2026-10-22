@@ -11,6 +11,6 @@ int APS5_VABI sceNKWebCdlgInjectedBundleUnknown_001_nid_no_patch() {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
-APS5_EXPORT("WKBundleInitialize", sceNKWebCdlgInjectedBundleUnknown_001_nid_no_patch);
+APS5_EXPORT("es-hzEqlzr0", sceNKWebCdlgInjectedBundleUnknown_001_nid_no_patch);
 
 }
