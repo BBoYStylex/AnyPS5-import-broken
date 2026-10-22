@@ -51,12 +51,12 @@ void Case(const char* name, TCall call) {
     ++failures;
 }
 
-template<typename TException, typename TCall>
-bool Throws(TCall call) {
+template<typename TCall>
+bool Unimplemented(TCall call, std::string_view reason) {
     try {
         static_cast<void>(call());
-    } catch (const TException&) {
-        return true;
+    } catch (const std::runtime_error& error) {
+        return std::string_view(error.what()).find(reason) != std::string_view::npos;
     }
     return false;
 }
@@ -67,11 +67,11 @@ void TestSuspend() {
     });
     Case("sceLncUtilUnblockAppSuspend", [] {
         return sceLncUtilUnblockAppSuspend("saving") == SYSTEM_SERVICE_OK && sceLncUtilUnblockAppSuspend("saving") == SYSTEM_SERVICE_OK &&
-            Throws<std::logic_error>([] { return sceLncUtilUnblockAppSuspend("saving"); });
+            Unimplemented([] { return sceLncUtilUnblockAppSuspend("saving"); }, "no block left");
     });
     Case("sceLncUtilBlockAppSuspend null reason", [] {
-        return Throws<std::invalid_argument>([] { return sceLncUtilBlockAppSuspend(nullptr); }) &&
-            Throws<std::invalid_argument>([] { return sceLncUtilUnblockAppSuspend(nullptr); });
+        return Unimplemented([] { return sceLncUtilBlockAppSuspend(nullptr); }, "null reason") &&
+            Unimplemented([] { return sceLncUtilUnblockAppSuspend(nullptr); }, "null reason");
     });
     Case("sceLncUtilEnableSuspendNotification", [] {
         return sceLncUtilEnableSuspendNotification() == SYSTEM_SERVICE_OK && sceLncUtilEnableSuspendNotification() == SYSTEM_SERVICE_OK;
@@ -95,12 +95,7 @@ bool ReportsInactive(TCall call) {
 
 template<typename TCall>
 bool RefusesNullOutput(TCall call) {
-    try {
-        static_cast<void>(call());
-    } catch (const std::runtime_error& error) {
-        return std::string_view(error.what()).find("null output") != std::string_view::npos;
-    }
-    return false;
+    return Unimplemented(call, "null output");
 }
 
 void TestSessions() {
@@ -132,7 +127,7 @@ bool ReportsNotAdjusted(TCall call) {
     if (call(user, &adjusted) != SYSTEM_SERVICE_OK || adjusted != 0) return false;
     for (const auto other : {0u, user + 1, static_cast<std::uint32_t>(USER_SERVICE_USER_ID_INVALID)}) {
         adjusted = 0xff;
-        if (!Throws<std::invalid_argument>([&] { return call(other, &adjusted); }) || adjusted != 0xff) return false;
+        if (!Unimplemented([&] { return call(other, &adjusted); }, "other than the logged-in user") || adjusted != 0xff) return false;
     }
     return true;
 }

@@ -306,16 +306,16 @@ int APS5_VABI sceSystemServiceGetStatus(SystemServiceStatus* status) {
 }
 
 int APS5_VABI sceLncUtilBlockAppSuspend(const char* reason) {
-    if (reason == nullptr) APS5_INVALID_ARG_EX;
+    if (reason == nullptr) NotImplemented_nid_no_patch("sceLncUtilBlockAppSuspend with a null reason");
     std::lock_guard lock(appSuspendBlockMutex);
     ++appSuspendBlocks;
     return SYSTEM_SERVICE_OK;
 }
 
 int APS5_VABI sceLncUtilUnblockAppSuspend(const char* reason) {
-    if (reason == nullptr) APS5_INVALID_ARG_EX;
+    if (reason == nullptr) NotImplemented_nid_no_patch("sceLncUtilUnblockAppSuspend with a null reason");
     std::lock_guard lock(appSuspendBlockMutex);
-    if (appSuspendBlocks == 0) throw std::logic_error("sceLncUtilUnblockAppSuspend: no block to release");
+    if (appSuspendBlocks == 0) NotImplemented_nid_no_patch("sceLncUtilUnblockAppSuspend with no block left");
     --appSuspendBlocks;
     return SYSTEM_SERVICE_OK;
 }
@@ -392,7 +392,7 @@ int APS5_VABI sceShellCoreUtilGetSocialScreenStatus(bool* active) {
 int APS5_VABI sceShellCoreUtilIsEyeToEyeDistanceAdjusted(std::uint32_t userId, std::uint8_t* adjusted) {
     if (adjusted == nullptr) NotImplemented_nid_no_patch("sceShellCoreUtilIsEyeToEyeDistanceAdjusted with a null output");
     if (userId != static_cast<std::uint32_t>(USER_SERVICE_INITIAL_USER_ID)) {
-        throw std::invalid_argument("sceShellCoreUtilIsEyeToEyeDistanceAdjusted: a user other than the logged-in user");
+        NotImplemented_nid_no_patch("sceShellCoreUtilIsEyeToEyeDistanceAdjusted for a user other than the logged-in user");
     }
     *adjusted = 0;
     return SYSTEM_SERVICE_OK;
