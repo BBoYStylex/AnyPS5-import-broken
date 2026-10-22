@@ -52,6 +52,105 @@ class ExportTests(unittest.TestCase):
         self.assertNotIn("context_nid_postfix", found)
         self.assertNotIn("Helper_nid_no_patch", found)
 
+    def test_explicit_aps5_export_nids_are_exports(self):
+        diff = """diff --git a/core/libs/prx/libSceFreeTypeOt/src/Export.cpp b/core/libs/prx/libSceFreeTypeOt/src/Export.cpp
+@@ -10,0 +11,4 @@
++int APS5_VABI placeholder_nid_no_patch() {
++    NotImplemented_nid_no_patch(__func__);
++}
++APS5_EXPORT("Pz262plj20w", placeholder_nid_no_patch);
++APS5_EXPORT("1m6DD9BBmSE", VrTracker2GetRelativePose);
++"""
+        self.assertEqual(pr_overlap.exports(diff), {"Pz262plj20w", "1m6DD9BBmSE"})
+
+    def test_explicit_alias_overlaps_with_named_export_sharing_nid_in_same_provider(self):
+        diff_named = """diff --git a/core/libs/prx/libSceFreeTypeOt/src/Export.cpp b/core/libs/prx/libSceFreeTypeOt/src/Export.cpp
+@@ -10,0 +11,3 @@
++int APS5_VABI FT_Outline_GetInsideBorder_nid_postfix() {
++    return 0;
++}
++"""
+        diff_alias = """diff --git a/core/libs/prx/libSceFreeTypeOt/src/Export.cpp b/core/libs/prx/libSceFreeTypeOt/src/Export.cpp
+@@ -10,0 +11,4 @@
++int APS5_VABI placeholder_nid_no_patch() {
++    NotImplemented_nid_no_patch(__func__);
++}
++APS5_EXPORT("Pz262plj20w", placeholder_nid_no_patch);
++"""
+        prs = {
+            1: {"author": "alice", "depends": set(), "added": set(), "tree": None,
+                "exports": pr_overlap.exports(diff_named), "export_map": pr_overlap.scan_exports(diff_named)},
+            2: {"author": "bob", "depends": set(), "added": set(), "tree": None,
+                "exports": pr_overlap.exports(diff_alias), "export_map": pr_overlap.scan_exports(diff_alias)},
+        }
+        found = pr_overlap.overlaps(prs, 1, 2)
+        self.assertIsNotNone(found)
+        self.assertEqual(found["exports"], {"FT_Outline_GetInsideBorder"})
+
+    def test_same_nid_in_different_providers_does_not_overlap(self):
+        diff_named = """diff --git a/core/libs/prx/libSceFreeTypeOt/src/Export.cpp b/core/libs/prx/libSceFreeTypeOt/src/Export.cpp
+@@ -10,0 +11,3 @@
++int APS5_VABI FT_Outline_GetInsideBorder_nid_postfix() {
++    return 0;
++}
++"""
+        diff_other = """diff --git a/core/libs/prx/libSceAmpr/src/Export.cpp b/core/libs/prx/libSceAmpr/src/Export.cpp
+@@ -10,0 +11,4 @@
++int APS5_VABI placeholder_nid_no_patch() {
++    NotImplemented_nid_no_patch(__func__);
++}
++APS5_EXPORT("Pz262plj20w", placeholder_nid_no_patch);
++"""
+        prs = {
+            1: {"author": "alice", "depends": set(), "added": set(), "tree": None,
+                "exports": pr_overlap.exports(diff_named), "export_map": pr_overlap.scan_exports(diff_named)},
+            2: {"author": "bob", "depends": set(), "added": set(), "tree": None,
+                "exports": pr_overlap.exports(diff_other), "export_map": pr_overlap.scan_exports(diff_other)},
+        }
+        self.assertIsNone(pr_overlap.overlaps(prs, 1, 2))
+
+    def test_unaliased_helper_functions_do_not_overlap(self):
+        diff_helper1 = """diff --git a/core/libs/prx/libSceFreeTypeOt/src/Export.cpp b/core/libs/prx/libSceFreeTypeOt/src/Export.cpp
+@@ -10,0 +11,3 @@
++int APS5_VABI placeholder_nid_no_patch() {
++    NotImplemented_nid_no_patch(__func__);
++}
++"""
+        diff_helper2 = """diff --git a/core/libs/prx/libSceFreeTypeOt/src/Export.cpp b/core/libs/prx/libSceFreeTypeOt/src/Export.cpp
+@@ -10,0 +11,3 @@
++int APS5_VABI other_helper_nid_no_patch() {
++    NotImplemented_nid_no_patch(__func__);
++}
++"""
+        prs = {
+            1: {"author": "alice", "depends": set(), "added": set(), "tree": None,
+                "exports": pr_overlap.exports(diff_helper1), "export_map": pr_overlap.scan_exports(diff_helper1)},
+            2: {"author": "bob", "depends": set(), "added": set(), "tree": None,
+                "exports": pr_overlap.exports(diff_helper2), "export_map": pr_overlap.scan_exports(diff_helper2)},
+        }
+        self.assertIsNone(pr_overlap.overlaps(prs, 1, 2))
+
+    def test_two_explicit_aliases_without_named_symbol_report_nid(self):
+        diff_alias1 = """diff --git a/core/libs/prx/libSceFreeTypeOt/src/Export.cpp b/core/libs/prx/libSceFreeTypeOt/src/Export.cpp
+@@ -10,0 +11,4 @@
++int APS5_VABI h1_nid_no_patch() { return 0; }
++APS5_EXPORT("Pz262plj20w", h1_nid_no_patch);
++"""
+        diff_alias2 = """diff --git a/core/libs/prx/libSceFreeTypeOt/src/Export.cpp b/core/libs/prx/libSceFreeTypeOt/src/Export.cpp
+@@ -10,0 +11,4 @@
++int APS5_VABI h2_nid_no_patch() { return 0; }
++APS5_EXPORT("Pz262plj20w", h2_nid_no_patch);
++"""
+        prs = {
+            1: {"author": "alice", "depends": set(), "added": set(), "tree": None,
+                "exports": pr_overlap.exports(diff_alias1), "export_map": pr_overlap.scan_exports(diff_alias1)},
+            2: {"author": "bob", "depends": set(), "added": set(), "tree": None,
+                "exports": pr_overlap.exports(diff_alias2), "export_map": pr_overlap.scan_exports(diff_alias2)},
+        }
+        found = pr_overlap.overlaps(prs, 1, 2)
+        self.assertIsNotNone(found)
+        self.assertEqual(found["exports"], {"Pz262plj20w"})
+
 
 if __name__ == "__main__":
     unittest.main()

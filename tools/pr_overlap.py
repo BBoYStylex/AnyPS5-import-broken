@@ -6,11 +6,15 @@ import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from itertools import combinations
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from urllib.parse import quote, urlencode
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import nid_names
 
 PARENT = 'if .parent then "\\(.parent.owner.login)/\\(.parent.name)" else .nameWithOwner end'
 EXPORT = re.compile(r"^\+.*\bAPS5_VABI\s+(\w+)\s*\(")
+APS5_EXPORT = re.compile(r"\bAPS5_EXPORT\s*\(\s*\"([A-Za-z0-9+\-]{11})\"\s*,\s*(\w+)\s*\)")
 NID_DISAMBIG = re.compile(r"_nid_disambig[0-9]+$")
 DEPENDS = re.compile(r'Depends on:[ \t]*((?:#\d+\b(?:(?:[ \t]*,[ \t]*(?:and[ \t]+)?|[ \t]+and[ \t]+)#\d+\b)*|none\b)?(?:\r?\n[ \t]*[-*][ \t]*#\d+\b[^\r\n]*)*)')
 PLAIN_DEPENDS = re.compile(r'Depends on[ \t]+(#\d+\b(?:(?:[ \t]*,[ \t]*(?:and[ \t]+)?|[ \t]+and[ \t]+)#\d+\b)*)')
@@ -103,23 +107,105 @@ def commit(tree):
                "-p", "refs/pr/base", "-m", "pr_overlap").strip()
 
 
+def provider_for_path(path):
+    parts = PurePosixPath(path.replace("\\", "/")).parts
+    return "/".join(parts[:4]) if len(parts) > 3 and parts[:3] == ("core", "libs", "prx") else ""
+
+
 def exports(diff):
     found = set()
     lines = diff.splitlines()
     for i, line in enumerate(lines):
-        m = EXPORT.match(line)
-        if not m or m.group(1).endswith(("_nid_no_patch", "_nid_no_patch_cut")):
+        if not line.startswith("+") or line.startswith("+++"):
             continue
         text = line[1:]
         for nxt in lines[i + 1:]:
             if ";" in text or "{" in text or not nxt.startswith("+") or nxt.startswith("+++"):
                 break
             text += nxt[1:]
+        aliases = list(APS5_EXPORT.finditer(text))
+        if aliases:
+            for m_alias in aliases:
+                found.add(m_alias.group(1))
+            continue
+        m = EXPORT.match(line)
+        if not m or m.group(1).endswith(("_nid_no_patch", "_nid_no_patch_cut")):
+            continue
         semi, brace = text.find(";"), text.find("{")
         if semi < 0 or 0 <= brace < semi:
             name = m.group(1).removesuffix("_nid_postfix")
             found.add(NID_DISAMBIG.sub("", name))
     return found
+
+
+def scan_exports(diff):
+    found = {}
+    current_path = ""
+    current_lines = []
+
+    def flush(path, lines):
+        provider = provider_for_path(path)
+        for i, line in enumerate(lines):
+            if not line.startswith("+") or line.startswith("+++"):
+                continue
+            text = line[1:]
+            for nxt in lines[i + 1:]:
+                if ";" in text or "{" in text or not nxt.startswith("+") or nxt.startswith("+++"):
+                    break
+                text += nxt[1:]
+            aliases = list(APS5_EXPORT.finditer(text))
+            if aliases:
+                for m_alias in aliases:
+                    nid, name = m_alias.group(1), m_alias.group(2)
+                    entry = found.setdefault((provider, nid), {"symbols": set(), "nids": set()})
+                    if name.endswith(("_nid_no_patch", "_nid_no_patch_cut")):
+                        entry["nids"].add(nid)
+                    else:
+                        entry["symbols"].add(name)
+                continue
+            m = EXPORT.match(line)
+            if not m or m.group(1).endswith(("_nid_no_patch", "_nid_no_patch_cut")):
+                continue
+            semi, brace = text.find(";"), text.find("{")
+            if semi < 0 or 0 <= brace < semi:
+                name = m.group(1).removesuffix("_nid_postfix")
+                canonical = NID_DISAMBIG.sub("", name)
+                nid = nid_names.compute_nid(canonical)
+                found.setdefault((provider, nid), {"symbols": set(), "nids": set()})["symbols"].add(canonical)
+
+    for line in diff.splitlines():
+        if line.startswith("diff --git "):
+            if current_lines:
+                flush(current_path, current_lines)
+            current_path = line.split(" b/", 1)[1] if " b/" in line else ""
+            current_lines = []
+        elif line.startswith("+++ b/") and not current_path:
+            current_path = line[6:]
+        else:
+            current_lines.append(line)
+    if current_lines or current_path:
+        flush(current_path, current_lines)
+    return found
+
+
+def export_overlaps(pa, pb, shared=()):
+    if "export_map" in pa and "export_map" in pb:
+        keys = set(pa["export_map"]) & set(pb["export_map"])
+        for pr in shared:
+            if "export_map" in pr:
+                keys -= set(pr["export_map"])
+            elif "exports" in pr:
+                keys = {k for k in keys if not (
+                    (pa["export_map"][k]["symbols"] | pa["export_map"][k]["nids"]) & pr["exports"]
+                )}
+        overlap_names = set()
+        for k in keys:
+            symbols = pa["export_map"][k]["symbols"] | pb["export_map"][k]["symbols"]
+            overlap_names.update(symbols or (pa["export_map"][k]["nids"] | pb["export_map"][k]["nids"]))
+        return overlap_names
+    return (pa.get("exports", set()) & pb.get("exports", set())).difference(
+        *(pr.get("exports", set()) for pr in shared)
+    )
 
 
 def scan(pr):
@@ -134,6 +220,7 @@ def scan(pr):
             pr["added"].add(path)
     diff = git("diff", "-U0", "--no-color", old, new, "--", "core/libs/prx/*.cpp")
     pr["exports"] = exports(diff)
+    pr["export_map"] = scan_exports(diff)
 
 
 def scan_all(prs, jobs):
@@ -188,7 +275,7 @@ def overlaps(prs, a, b):
     found = {"added": (pa["added"] & pb["added"]).difference(*(pr["added"] for pr in shared))}
     if pa["author"] != pb["author"]:
         found["conflicts"] = conflicts(pa, pb)
-        found["exports"] = (pa["exports"] & pb["exports"]).difference(*(pr["exports"] for pr in shared))
+        found["exports"] = export_overlaps(pa, pb, shared)
         if not (pa["tree"] and pb["tree"]):
             uncompared = pa.get("files", set()) & pb.get("files", set())
             if uncompared:
