@@ -159,6 +159,45 @@ public:
         return inst;
     }
 
+    Value* CreateBSwap(Value* val) {
+        auto* inst = new Instruction(val ? val->getType() : getInt64Ty());
+        if (currentBlock) currentBlock->addInstruction(inst);
+        return inst;
+    }
+
+    Value* CreateCTTZ(Value* val) {
+        auto* inst = new Instruction(val ? val->getType() : getInt64Ty());
+        if (currentBlock) currentBlock->addInstruction(inst);
+        return inst;
+    }
+
+    Value* CreateCTLZ(Value* val) {
+        auto* inst = new Instruction(val ? val->getType() : getInt64Ty());
+        if (currentBlock) currentBlock->addInstruction(inst);
+        return inst;
+    }
+
+    Value* CreateMemSet(Value* dest, Value* val, Value* size, unsigned align) {
+        static_cast<void>(dest);
+        static_cast<void>(val);
+        static_cast<void>(size);
+        static_cast<void>(align);
+        auto* inst = new Instruction(getVoidTy());
+        if (currentBlock) currentBlock->addInstruction(inst);
+        return inst;
+    }
+
+    Value* CreateMemCpy(Value* dest, unsigned destAlign, Value* src, unsigned srcAlign, Value* size) {
+        static_cast<void>(dest);
+        static_cast<void>(destAlign);
+        static_cast<void>(src);
+        static_cast<void>(srcAlign);
+        static_cast<void>(size);
+        auto* inst = new Instruction(getVoidTy());
+        if (currentBlock) currentBlock->addInstruction(inst);
+        return inst;
+    }
+
 private:
     Value* makeBinaryOp(Value* lhs, Value* rhs) {
         static_cast<void>(rhs);
