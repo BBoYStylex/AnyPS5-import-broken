@@ -81,6 +81,9 @@ int main() {
     for (auto& reader : readers) reader.join();
     *__error_nid_postfix() = 0;
     Require(setlogin_nid_postfix(nullptr) == -1 && *__error_nid_postfix() == 14);
+    *__error_nid_postfix() = 0;
+    Require(setlogin_nid_postfix(reinterpret_cast<const char*>(0x10)) == -1 && *__error_nid_postfix() == 14);
+    RequireLogin(expected);
     const std::string longest(32, 'n');
     const std::string tooLong(33, 'n');
     *__error_nid_postfix() = 0;

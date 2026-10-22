@@ -278,7 +278,11 @@ int APS5_VABI _fstatfs_nid_postfix(int d, void* buf);
 int SetLogin_nid_no_patch(const char* name);
 
 int APS5_VABI setlogin_nid_postfix(const char* name) {
-    if (const int error = SetLogin_nid_no_patch(name)) return static_cast<int>(Fail(error));
+    std::string copy;
+    const int copied = CopyGuestPath_nid_no_patch(name, copy);
+    if (copied == GuestEnametoolong) return static_cast<int>(Fail(GuestEinval));
+    if (copied != 0) return static_cast<int>(Fail(copied));
+    if (const int error = SetLogin_nid_no_patch(copy.c_str())) return static_cast<int>(Fail(error));
     return 0;
 }
 
