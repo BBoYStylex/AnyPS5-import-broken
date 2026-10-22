@@ -37,6 +37,13 @@ public:
         }
     }
 
+    raw_fd_ostream& write(const char* ptr, size_t size) {
+        if (fileStream.is_open()) {
+            fileStream.write(ptr, size);
+        }
+        return *this;
+    }
+
     raw_fd_ostream& operator<<(const std::string& s) {
         if (fileStream.is_open()) {
             fileStream << s;

@@ -32,10 +32,29 @@ public:
 
     void setDataLayout(const DataLayout& dl) { static_cast<void>(dl); }
 
+    const std::string& getName() const { return moduleName; }
+    const std::vector<Function*>& getFunctions() const { return functionList; }
+
     void print(raw_fd_ostream& os, void* annotator = nullptr) const {
         static_cast<void>(annotator);
         os << "; ModuleID = '" << moduleName << "'\n";
-        os << "target triple = \"" << targetTriple << "\"\n";
+        os << "source_filename = \"" << moduleName << "\"\n";
+        os << "target triple = \"" << targetTriple << "\"\n\n";
+
+        for (const auto* fn : functionList) {
+            if (fn->isDeclaration()) {
+                os << "declare i64 @" << fn->getName() << "(...)\n\n";
+                continue;
+            }
+            os << "define i64 @" << fn->getName() << "() {\n";
+            for (const auto* bb : fn->getBasicBlocks()) {
+                os << bb->getName() << ":\n";
+                for (const auto* inst : bb->getInstructions()) {
+                    os << "  " << inst->getAsString() << "\n";
+                }
+            }
+            os << "}\n\n";
+        }
     }
 
     FunctionCallee getOrInsertFunction(std::string_view name, FunctionType* type) {

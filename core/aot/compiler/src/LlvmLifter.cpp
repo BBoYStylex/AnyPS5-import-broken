@@ -67,6 +67,10 @@ bool LlvmLifter::LiftSection(const ElfSection& section, llvm::Module& module) {
         module
     );
 
+    if (function != nullptr) {
+        function->setMachineCode(section.Data);
+    }
+
     return function != nullptr;
 }
 

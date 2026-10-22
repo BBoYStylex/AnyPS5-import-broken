@@ -26,10 +26,9 @@ public:
         raw_pwrite_stream* dwoOut,
         CodeGenFileType::CodeGenFileTypeEnum fileType
     ) {
-        static_cast<void>(pm);
-        static_cast<void>(out);
         static_cast<void>(dwoOut);
-        static_cast<void>(fileType);
+        pm.setOutputStream(&out);
+        pm.setFileType(fileType);
         return false;
     }
 };

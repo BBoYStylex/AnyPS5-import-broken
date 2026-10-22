@@ -285,5 +285,132 @@ int main() {
     assert(lifted.LiftedFunctionCount == 1);
     assert(lifted.LiftedInstructionCount == codeSection.Data.size());
 
+    {
+        std::filesystem::path testInputElf = "test_driver_input.elf";
+        std::filesystem::path testOutputObj = "test_driver_output.o";
+        std::filesystem::path testOutputIr = "test_driver_output.ll";
+        std::filesystem::path testOutputAsm = "test_driver_output.s";
+
+        struct RawElf64Header {
+            uint8_t Ident[16];
+            uint16_t Type;
+            uint16_t Machine;
+            uint32_t Version;
+            uint64_t EntryPoint;
+            uint64_t ProgramHeaderOffset;
+            uint64_t SectionHeaderOffset;
+            uint32_t Flags;
+            uint16_t HeaderSize;
+            uint16_t ProgramHeaderEntrySize;
+            uint16_t ProgramHeaderCount;
+            uint16_t SectionHeaderEntrySize;
+            uint16_t SectionHeaderCount;
+            uint16_t SectionHeaderStringIndex;
+        };
+
+        struct RawElf64SectionHeader {
+            uint32_t NameOffset;
+            uint32_t Type;
+            uint64_t Flags;
+            uint64_t VirtualAddress;
+            uint64_t Offset;
+            uint64_t Size;
+            uint32_t Link;
+            uint32_t Info;
+            uint64_t AddressAlignment;
+            uint64_t EntrySize;
+        };
+
+        std::vector<uint8_t> testCode = { 0x31, 0xC0, 0xC3 };
+        const char testShstrtab[] = "\0.text\0.shstrtab";
+        size_t shstrtabSize = sizeof(testShstrtab);
+
+        size_t textOffset = sizeof(RawElf64Header);
+        size_t shstrtabOffset = textOffset + testCode.size();
+        size_t shdrOffset = shstrtabOffset + shstrtabSize;
+
+        RawElf64Header inputEhdr{};
+        inputEhdr.Ident[0] = 0x7F;
+        inputEhdr.Ident[1] = 'E';
+        inputEhdr.Ident[2] = 'L';
+        inputEhdr.Ident[3] = 'F';
+        inputEhdr.Ident[4] = 2;
+        inputEhdr.Ident[5] = 1;
+        inputEhdr.Ident[6] = 1;
+        inputEhdr.Type = 2;
+        inputEhdr.Machine = 62;
+        inputEhdr.Version = 1;
+        inputEhdr.EntryPoint = 0x400000;
+        inputEhdr.ProgramHeaderOffset = 0;
+        inputEhdr.SectionHeaderOffset = shdrOffset;
+        inputEhdr.Flags = 0;
+        inputEhdr.HeaderSize = sizeof(RawElf64Header);
+        inputEhdr.SectionHeaderEntrySize = sizeof(RawElf64SectionHeader);
+        inputEhdr.SectionHeaderCount = 3;
+        inputEhdr.SectionHeaderStringIndex = 2;
+
+        RawElf64SectionHeader inputShdrs[3]{};
+        inputShdrs[1].NameOffset = 1;
+        inputShdrs[1].Type = 1;
+        inputShdrs[1].Flags = 6;
+        inputShdrs[1].VirtualAddress = 0x400000;
+        inputShdrs[1].Offset = textOffset;
+        inputShdrs[1].Size = testCode.size();
+
+        inputShdrs[2].NameOffset = 7;
+        inputShdrs[2].Type = 3;
+        inputShdrs[2].Flags = 0;
+        inputShdrs[2].VirtualAddress = 0;
+        inputShdrs[2].Offset = shstrtabOffset;
+        inputShdrs[2].Size = shstrtabSize;
+
+        size_t totalInputSize = shdrOffset + sizeof(inputShdrs);
+        std::vector<uint8_t> inputElfBytes(totalInputSize, 0);
+        std::memcpy(inputElfBytes.data(), &inputEhdr, sizeof(inputEhdr));
+        std::memcpy(inputElfBytes.data() + textOffset, testCode.data(), testCode.size());
+        std::memcpy(inputElfBytes.data() + shstrtabOffset, testShstrtab, shstrtabSize);
+        std::memcpy(inputElfBytes.data() + shdrOffset, inputShdrs, sizeof(inputShdrs));
+
+        {
+            std::ofstream out(testInputElf, std::ios::binary);
+            out.write(reinterpret_cast<const char*>(inputElfBytes.data()), inputElfBytes.size());
+        }
+
+        Aot::Compiler::AotCompilerDriver driver;
+        Aot::Compiler::CompilerOptions options{};
+        options.InputExecutablePath = testInputElf;
+        options.OutputObjectPath = testOutputObj;
+        options.EmitLlvmIr = true;
+        options.OutputLlvmIrPath = testOutputIr;
+        options.EmitAssembly = true;
+        options.OutputAssemblyPath = testOutputAsm;
+
+        auto stats = driver.Compile(options);
+        assert(stats.Success == true);
+        assert(stats.FunctionsLifted == 1);
+        assert(std::filesystem::exists(testOutputObj));
+        assert(std::filesystem::file_size(testOutputObj) > 0);
+
+        assert(std::filesystem::exists(testOutputIr));
+        assert(std::filesystem::file_size(testOutputIr) > 0);
+
+        assert(std::filesystem::exists(testOutputAsm));
+        assert(std::filesystem::file_size(testOutputAsm) > 0);
+
+        Aot::Compiler::ElfBinaryParser objParser;
+        auto objParsed = objParser.ParseFromFile(testOutputObj);
+        assert(objParsed.has_value());
+        const auto* textSec = objParsed->FindSection(".text");
+        assert(textSec != nullptr);
+        assert(textSec->Size > 0);
+        assert(objParsed->FindSection(".symtab") != nullptr);
+        assert(objParsed->FindSection(".strtab") != nullptr);
+
+        std::filesystem::remove(testInputElf);
+        std::filesystem::remove(testOutputObj);
+        std::filesystem::remove(testOutputIr);
+        std::filesystem::remove(testOutputAsm);
+    }
+
     return 0;
 }

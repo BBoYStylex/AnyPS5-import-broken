@@ -30,5 +30,22 @@ inline bool CallInst::isInlineAsm() const {
     return dynamic_cast<const InlineAsm*>(calledOperand) != nullptr;
 }
 
+inline std::string CallInst::getAsString() const {
+    if (isInlineAsm()) {
+        auto* inlineAsm = dynamic_cast<const InlineAsm*>(calledOperand);
+        return "call void asm sideeffect \"" + (inlineAsm ? inlineAsm->getAsmString() : "") + "\"";
+    }
+    auto* fn = dynamic_cast<const Function*>(calledOperand);
+    std::string s = "call i64 @" + (fn ? fn->getName() : "callee") + "(";
+    for (size_t i = 0; i < arguments.size(); ++i) {
+        if (i > 0) {
+            s += ", ";
+        }
+        s += "i64 %arg" + std::to_string(i);
+    }
+    s += ")";
+    return s;
+}
+
 } // namespace llvm
 #endif

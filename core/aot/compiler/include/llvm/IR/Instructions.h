@@ -60,21 +60,33 @@ private:
 
 class Instruction : public Value {
 public:
-    Instruction(Type* t = nullptr, BasicBlock* parent = nullptr)
-        : Value(t), parentBlock(parent) {}
+    Instruction(Type* t = nullptr, BasicBlock* parent = nullptr, std::string_view op = "")
+        : Value(t), parentBlock(parent), opString(op) {}
 
     BasicBlock* getParent() const { return parentBlock; }
     void setParent(BasicBlock* bb) { parentBlock = bb; }
     void eraseFromParent();
 
-private:
+    virtual std::string getAsString() const {
+        if (!opString.empty()) {
+            return opString;
+        }
+        return "nop";
+    }
+
+    void setAsString(std::string_view str) { opString = str; }
+
+protected:
     BasicBlock* parentBlock = nullptr;
+    std::string opString;
 };
 
 class AllocaInst : public Instruction {
 public:
     AllocaInst(Type* allocatedType, std::string_view name = "")
-        : Instruction(allocatedType), varName(name) {}
+        : Instruction(allocatedType, nullptr, name.empty() ? "alloca i64" : "%" + std::string(name) + " = alloca i64"), varName(name) {}
+
+    std::string_view getName() const { return varName; }
 
 private:
     std::string varName;
@@ -92,6 +104,8 @@ public:
     Value* getArgOperand(size_t index) const {
         return (index < arguments.size()) ? arguments[index] : nullptr;
     }
+
+    std::string getAsString() const override;
 
 private:
     Value* calledOperand = nullptr;
@@ -112,6 +126,8 @@ public:
     static BasicBlock* Create(LLVMContext& context, std::string_view name, Function* parent = nullptr);
 
     Function* getParent() const { return parentFunction; }
+    const std::string& getName() const { return blockName; }
+    const std::vector<Instruction*>& getInstructions() const { return instructions; }
 
     void addInstruction(Instruction* inst) {
         inst->setParent(this);
@@ -188,6 +204,10 @@ public:
         return *basicBlocks.front();
     }
 
+    const std::vector<BasicBlock*>& getBasicBlocks() const { return basicBlocks; }
+    const std::vector<uint8_t>& getMachineCode() const { return machineCode; }
+    void setMachineCode(std::vector<uint8_t> code) { machineCode = std::move(code); }
+
     struct BasicBlockIterator {
         std::vector<BasicBlock*>::iterator it;
         BasicBlock& operator*() const { return **it; }
@@ -205,6 +225,7 @@ private:
     std::string funcName;
     Module* parentModule = nullptr;
     std::vector<BasicBlock*> basicBlocks;
+    std::vector<uint8_t> machineCode;
 };
 
 inline BasicBlock* BasicBlock::Create(LLVMContext& context, std::string_view name, Function* parent) {

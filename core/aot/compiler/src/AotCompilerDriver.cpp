@@ -191,7 +191,9 @@ bool AotCompilerDriver::emitObjectFile(
         return false;
     }
 
-    passManager.run(module);
+    if (!passManager.run(module)) {
+        return false;
+    }
     destinationFile.flush();
 
     return true;
@@ -257,7 +259,9 @@ bool AotCompilerDriver::emitAssemblyFile(
         return false;
     }
 
-    passManager.run(module);
+    if (!passManager.run(module)) {
+        return false;
+    }
     destinationFile.flush();
 
     return true;
