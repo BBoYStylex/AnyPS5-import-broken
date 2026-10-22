@@ -127,6 +127,10 @@ int main(int argc, char** argv) {
         if (std::strcmp(argv[1], "free") == 0) TestStrings();
         LibreSslPutError_nid_no_patch(32, 0xfff, 67, nullptr, 0);
         ERR_free_strings_nid_postfix();
+        ExpectString(0x20fff043, "error:20FFF043:lib(32):func(4095):reason(67)");
+        Require(ERR_peek_error_nid_postfix() == 0x20fff043, "free strings preserves queued error");
+        ERR_load_crypto_strings_nid_postfix();
+        ExpectString(0x20fff043, "error:20FFF043:lib(32):func(4095):reason(67)");
         ERR_free_strings_nid_postfix();
         ERR_load_crypto_strings_nid_postfix();
         ExpectString(0x20fff043, "error:20FFF043:lib(32):func(4095):reason(67)");
