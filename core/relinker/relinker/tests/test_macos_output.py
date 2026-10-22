@@ -26,6 +26,9 @@ LC_RPATH = 0x8000001C
 LC_DYLD_INFO_ONLY = 0x80000022
 LC_MAIN = 0x80000028
 PAGE = 0x1000
+# Free bytes the writer leaves between the load commands and the entry stub, for the LC_CODE_SIGNATURE codesign adds.
+LOAD_COMMAND_RESERVE = 0x400
+ENTRY_STUB_BYTES = 32
 IMAGE_BASE = 0x140000000
 META_VERSION = 2
 PROT_EXEC = 4
@@ -108,6 +111,7 @@ def check_structure(name, data):
     linkedit = macho.segment("__LINKEDIT")
     check(linkedit["initprot"] == 1 and linkedit["fileoff"] + linkedit["filesize"] == len(data), f"{name}: __LINKEDIT does not end the file")
     check(macho.entryoff is not None and any(lo <= macho.entryoff < hi for lo, hi in macho.executable_ranges()), f"{name}: entry point is outside the executable segments")
+    check(macho.entryoff - macho.end >= LOAD_COMMAND_RESERVE, f"{name}: only {macho.entryoff - macho.end} bytes between the load commands and the entry stub, so codesign overwrites the stub")
     check("@rpath/libkernel.prx" in macho.dylibs and "/usr/lib/libSystem.B.dylib" in macho.dylibs, f"{name}: dependencies {macho.dylibs}")
     check(macho.rpaths == ["@executable_path/libs"], f"{name}: run paths {macho.rpaths}")
     check(macho.dyld_info is not None, f"{name}: no binding information")
@@ -148,6 +152,19 @@ def check_tls(data):
     code = b"".join(data[lo:hi] for lo, hi in macho.executable_ranges())
     check(FS_LOAD not in code, "tls: an %fs access was left in the code")
     check(GS_LOAD in code, "tls: the thread pointer is not read through a pthread key")
+
+
+def check_signing_keeps_entry_stub(output):
+    if sys.platform != "darwin":
+        return
+    macho = MachO(output.read_bytes())
+    stub = macho.data[macho.entryoff:macho.entryoff + ENTRY_STUB_BYTES]
+    signed = output.with_name(output.name + ".signed")
+    signed.write_bytes(macho.data)
+    result = subprocess.run(["codesign", "-s", "-", "-f", str(signed)], capture_output=True, text=True, timeout=60)
+    check(result.returncode == 0, f"{output.name}: ad-hoc signing failed: {result.stdout}{result.stderr}")
+    after = signed.read_bytes()[macho.entryoff:macho.entryoff + ENTRY_STUB_BYTES]
+    check(after == stub, f"{output.name}: ad-hoc signing changed the entry stub at {macho.entryoff:#x}")
 
 
 def check_options(relinker, directory):
@@ -191,8 +208,10 @@ def main():
     relinker = Path(sys.argv[1]).resolve()
     with tempfile.TemporaryDirectory(prefix="anyps5-macos-output-") as directory:
         check_imports(relink(relinker, directory, "import", import_fixture()))
+        check_signing_keeps_entry_stub(Path(directory) / "import")
         check_runtime_dependencies(relinker, directory)
         check_tls(relink(relinker, directory, "tls", tls_fixture()))
+        check_signing_keeps_entry_stub(Path(directory) / "tls")
         check_options(relinker, directory)
         check_runpath_lists(relinker, directory)
     print("macOS output checks passed")

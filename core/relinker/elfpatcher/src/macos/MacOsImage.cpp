@@ -811,8 +811,8 @@ std::vector<std::uint8_t> WriteMacOsImage(MacOsImageInput& input) {
 
     std::vector<std::uint8_t> file;
     constexpr std::size_t HeaderSize = 32;
-    // Free space after the load commands, like ld's -headerpad: codesign (and install_name_tool) append load
-    // commands there, and an LC_CODE_SIGNATURE written over the entry stub corrupts its first instructions.
+    // Free space after the load commands, like ld's -headerpad: codesign appends LC_CODE_SIGNATURE there, and
+    // written over the entry stub it corrupts the stub's first instructions while codesign -v still passes.
     constexpr std::size_t LoadCommandReserve = 0x400;
     const auto stubOffset = AlignUp(HeaderSize + commands.size() + LoadCommandReserve, 16);
     if (stubOffset + (input.Executable ? sizeof(EntryStub) : 0) > LoadRva)
