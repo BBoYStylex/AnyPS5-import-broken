@@ -1122,6 +1122,21 @@ Samples ReadTarget(const Context& context, VkImageView view, bool color, std::ui
     return ReadValues(values, count);
 }
 
+Samples ReadDepth(const Context& context, const SampleOrderTarget& target) {
+    Image sampled(context, target.format, target.samples, target.extent, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, 0u);
+    const VkImageAspectFlags aspects = VK_IMAGE_ASPECT_DEPTH_BIT | (AgcDriver::Graphics::HasStencil(target.format) ? VK_IMAGE_ASPECT_STENCIL_BIT : 0u);
+    Submit(context, [&](VkCommandBuffer commands) {
+        sampled.ToGeneral(commands, aspects);
+        FullBarrier(context, commands);
+        VkImageCopy region{};
+        region.srcSubresource = {VK_IMAGE_ASPECT_DEPTH_BIT, 0u, 0u, 1u};
+        region.dstSubresource = region.srcSubresource;
+        region.extent = {target.extent.width, target.extent.height, 1u};
+        context.Function<PFN_vkCmdCopyImage>("vkCmdCopyImage")(commands, target.image, VK_IMAGE_LAYOUT_GENERAL, sampled.Handle(), VK_IMAGE_LAYOUT_GENERAL, 1u, &region);
+    });
+    return ReadTarget(context, sampled.View(target.format, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_USAGE_SAMPLED_BIT), false, target.samples);
+}
+
 Rendered RenderCheckerboard(AgcDriver::VulkanDevice& device, const Context& context, std::uint32_t samples, std::size_t run, const std::optional<std::array<std::uint8_t, 32>>& locations) {
     AgcDriver::Graphics::ColorTarget color{};
     color.extent = ReferenceExtent;
@@ -1169,7 +1184,7 @@ Rendered RenderCheckerboard(AgcDriver::VulkanDevice& device, const Context& cont
     Settle(device);
     Rendered rendered;
     rendered.color = ReadTarget(context, AgcDriver::Graphics::MultisampleTargetView(context, color), true, samples);
-    rendered.depth = ReadTarget(context, AgcDriver::Graphics::DepthSurfaceOrderTarget(context, depth).view, false, samples);
+    rendered.depth = ReadDepth(context, AgcDriver::Graphics::DepthSurfaceOrderTarget(context, depth));
     return rendered;
 }
 
@@ -1348,7 +1363,7 @@ void CheckRecipeDepth(AgcDriver::VulkanDevice& device, const Context& context, c
         std::printf("%s: builds no recipe, since a draw that reorders its samples is built in full each time, with its sample swaps\n", what.c_str());
         return;
     }
-    const auto read = [&] { return ReadTarget(context, AgcDriver::Graphics::DepthSurfaceOrderTarget(context, depth).view, false, samples); };
+    const auto read = [&] { return ReadDepth(context, AgcDriver::Graphics::DepthSurfaceOrderTarget(context, depth)); };
     Samples recorded;
     slopes.beforeReplay = [&] {
         Settle(device);
