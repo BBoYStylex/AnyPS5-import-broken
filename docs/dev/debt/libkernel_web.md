@@ -1,6 +1,6 @@
 # libkernel_web technical debt
 
-### Unknown function info
+### Known export names; ABI prototypes unverified
 
 - [sceKernelWebUnknown_*_nid_no_patch](../../../core/libs/prx/libkernel_web/Export.cpp) (libkernel_web), aliases 001–008 - PS5 3.20 imports (`__freeze`, `__sceKernelGetGPI`, `__sys_debug_init`, `__sys_dl_get_info`, `__sys_dl_get_info_2`, `__sys_dl_get_list`, `__sys_dl_get_metadata`, `__sys_dynlib_get_info2`). Prototypes and behavior are unverified; each declaration uses the no-parameter import-resolution convention and throws through `NotImplemented_nid_no_patch`. No ABI or behavior is claimed. Source: [PS5-3.20_Libs](https://github.com/DNNDHH/PS5-3.20_Libs).
 - [sceKernelWebUnknown_*_nid_no_patch](../../../core/libs/prx/libkernel_web/Export.cpp) (libkernel_web), aliases 009–016 - PS5 3.20 imports (`__sys_dynlib_get_info_for_libdbg`, `__sys_dynlib_get_list2`, `__sys_dynlib_get_list_for_libdbg`, `__sys_dynlib_load_prx`, `__sys_get_proc_type_info`, `__sys_is_development_mode`, `__sys_kqueueex`, `__sys_namedobj_create`). Prototypes and behavior are unverified; each declaration uses the no-parameter import-resolution convention and throws through `NotImplemented_nid_no_patch`. No ABI or behavior is claimed. Source: [PS5-3.20_Libs](https://github.com/DNNDHH/PS5-3.20_Libs).
