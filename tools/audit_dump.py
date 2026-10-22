@@ -99,7 +99,17 @@ def main(argv=None):
             if dump_path.is_relative_to(generated_path) or generated_path.is_relative_to(dump_path):
                 parser.error(f"{generated}: work directory overlaps the input dump")
         for generated in (source, output):
-            shutil.rmtree(generated, ignore_errors=True)
+            try:
+                if generated.is_symlink():
+                    generated.unlink()
+                elif generated.exists():
+                    shutil.rmtree(generated)
+            except OSError as error:
+                print(f"FAIL: cannot empty {generated}: {error}", file=sys.stderr)
+                return 2
+            if generated.exists() or generated.is_symlink():
+                print(f"FAIL: cannot empty {generated}: it still exists", file=sys.stderr)
+                return 2
         output.mkdir(parents=True, exist_ok=True)
         try:
             module_directories, extra = prepare(dump, source)

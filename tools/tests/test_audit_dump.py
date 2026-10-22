@@ -120,6 +120,54 @@ class AuditDumpTests(unittest.TestCase):
         self.assertEqual(audit.call_args.args[0][:2], [str(work / "output" / "app.registry.json"), "--libs"])
         self.assertFalse((work / "source" / "sce_module" / "gone.prx").exists())
 
+    def test_an_undeletable_stale_registry_stops_before_conversion(self):
+        work = self.root / "work"
+        stale = work / "output" / "locked" / "stale.registry.json"
+        stale.parent.mkdir(parents=True)
+        stale.write_text("[]")
+        real_rmtree = audit_dump.shutil.rmtree
+
+        def rmtree(path, ignore_errors=False, **kwargs):
+            if Path(path) == work / "output":
+                if ignore_errors:
+                    return None
+                raise PermissionError(13, "Permission denied", str(stale))
+            return real_rmtree(path, ignore_errors=ignore_errors, **kwargs)
+
+        with mock.patch.object(audit_dump.shutil, "rmtree", side_effect=rmtree), mock.patch.object(audit_dump, "convert") as convert, mock.patch.object(audit_dump.import_audit, "main", return_value=0) as audit:
+            code, errors = self.run_main(self.dump, "--relinker", self.relinker, "--libs", "libs", "--work", work)
+        self.assertEqual(code, 2)
+        self.assertIn("cannot empty", errors)
+        self.assertIn(str(work / "output"), errors)
+        convert.assert_not_called()
+        audit.assert_not_called()
+        self.assertTrue(stale.exists())
+
+    @unittest.skipIf(os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0), "needs POSIX permissions and a non-root user")
+    def test_a_non_writable_stale_directory_stops_before_conversion(self):
+        work = self.root / "work"
+        locked = work / "output" / "locked"
+        locked.mkdir(parents=True)
+        (locked / "stale.registry.json").write_text("[]")
+        locked.chmod(0o500)
+        self.addCleanup(locked.chmod, 0o700)
+        with mock.patch.object(audit_dump, "convert") as convert, mock.patch.object(audit_dump.import_audit, "main", return_value=0) as audit:
+            code, errors = self.run_main(self.dump, "--relinker", self.relinker, "--libs", "libs", "--work", work)
+        self.assertEqual(code, 2)
+        self.assertIn("cannot empty", errors)
+        convert.assert_not_called()
+        audit.assert_not_called()
+
+    def test_a_generated_directory_that_survives_removal_stops_before_conversion(self):
+        work = self.root / "work"
+        (work / "source").mkdir(parents=True)
+        with mock.patch.object(audit_dump.shutil, "rmtree"), mock.patch.object(audit_dump, "convert") as convert, mock.patch.object(audit_dump.import_audit, "main", return_value=0) as audit:
+            code, errors = self.run_main(self.dump, "--relinker", self.relinker, "--libs", "libs", "--work", work)
+        self.assertEqual(code, 2)
+        self.assertIn("still exists", errors)
+        convert.assert_not_called()
+        audit.assert_not_called()
+
     def assert_overlap_rejected(self, dump, work):
         marker = dump / "original-marker"
         marker.write_bytes(b"preserve original")
