@@ -529,6 +529,11 @@ int APS5_VABI kill_nid_postfix(int pid, int guest) {
     if (pid != self && pid != 0 && pid != -self) { *__error_nid_postfix() = 3; return -1; }
     return guest == 0 ? 0 : raise_nid_postfix(guest);
 }
+int APS5_VABI sigqueue_nid_disambig1_nid_postfix(int pid, int guest, void*) {
+    if (static_cast<unsigned>(guest) > MaxSignal || pid <= 0) { *__error_nid_postfix() = 22; return -1; }
+    if (pid != getpid_nid_postfix()) { *__error_nid_postfix() = 3; return -1; }
+    return guest == 0 ? 0 : raise_nid_postfix(guest);
+}
 int APS5_VABI killpg_nid_postfix(int pgrp, int guest) {
     if (pgrp < 0) { *__error_nid_postfix() = 22; return -1; }
     return kill_nid_postfix(-pgrp, guest);
