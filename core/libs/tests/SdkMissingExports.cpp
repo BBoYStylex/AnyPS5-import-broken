@@ -791,7 +791,11 @@ int main(int argc, char** argv) {
         const auto refuse = []() { std::_Exit(3); };
         if (guestSetTerminate != nullptr) guestSetTerminate(refuse);
         std::set_terminate(refuse);
-        { std::ofstream file(std::filesystem::temp_directory_path() / "sdk-export-reached.txt"); file << "reached"; }
+        {
+            std::ofstream file(std::filesystem::temp_directory_path() / "sdk-export-reached.txt");
+            file << "reached";
+            file.flush();
+        }
         exportFunction();
         return 0;
     }
