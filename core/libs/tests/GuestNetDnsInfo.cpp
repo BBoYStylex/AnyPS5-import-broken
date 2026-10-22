@@ -2,6 +2,11 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <sys/mman.h>
+#endif
 
 struct NetDnsInfo {
     std::uint32_t primaryAddress;
@@ -26,6 +31,7 @@ namespace {
 void Require(bool value) { if (!value) std::abort(); }
 
 constexpr int kErrorBase = static_cast<int>(0x80410100);
+constexpr int kEfault = 14;
 constexpr int kEinval = 22;
 
 bool Failed(int result, int error) { return result == (kErrorBase | error) && *sceNetErrnoLoc() == error; }
@@ -69,7 +75,36 @@ void CheckDns() {
 
 }
 
+void* UnreadablePage() {
+#ifdef _WIN32
+    return VirtualAlloc(nullptr, 4096, MEM_RESERVE | MEM_COMMIT, PAGE_NOACCESS);
+#else
+    void* page = mmap(nullptr, 4096, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    return page == MAP_FAILED ? nullptr : page;
+#endif
+}
+
+void CheckUnreadableInfo() {
+    void* page = UnreadablePage();
+    Require(page != nullptr);
+    NetDnsInfo info{0x08080808u, 0};
+    Require(sceNetSetDnsInfo(&info, 0) == 0);
+    Require(Failed(sceNetSetDnsInfo(static_cast<const NetDnsInfo*>(page), 0), kEfault));
+    NetDnsInfo read{};
+    Require(sceNetGetDnsInfo(&read, 0) == 1 && read.primaryAddress == 0x08080808u);
+    Require(sceNetSetDnsInfo(nullptr, 0) == 0);
+
+    NetDns6Info info6{};
+    info6.primaryAddress[0] = 0x20;
+    Require(sceNetSetDns6Info(&info6, 0) == 0);
+    Require(Failed(sceNetSetDns6Info(static_cast<const NetDns6Info*>(page), 0), kEfault));
+    NetDns6Info read6{};
+    Require(sceNetGetDns6Info(&read6, 0) == 1 && std::memcmp(&read6, &info6, sizeof(info6)) == 0);
+    Require(sceNetSetDns6Info(nullptr, 0) == 0);
+}
+
 int main() {
     CheckDns();
+    CheckUnreadableInfo();
     return 0;
 }
