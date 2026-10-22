@@ -108,11 +108,15 @@ void RequireRequests(const Api& api) {
     Require(api.ctl(unknown.data(), OPUS_GET_GAIN_REQUEST, &value) == api.error(1));
     for (int request : {0, 4011, 4027, 4030, 4032, 4048, 4052, 4100, -2})
         Require(api.ctl(state.data(), request, &value) == api.error(14));
+    for (int request : {0, 4100, -2}) Require(api.ctl(state.data(), request) == api.error(14));
     if (api.celt)
         for (int request : {OPUS_SET_INBAND_FEC_REQUEST, OPUS_GET_INBAND_FEC_REQUEST, 4050, 4051})
             Require(api.ctl(state.data(), request, &value) == api.error(14));
     for (int request : {OPUS_GET_SAMPLE_RATE_REQUEST, OPUS_GET_FINAL_RANGE_REQUEST, OPUS_GET_GAIN_REQUEST, OPUS_GET_PHASE_INVERSION_DISABLED_REQUEST})
         Require(api.ctl(state.data(), request, static_cast<std::int32_t*>(nullptr)) == api.error(13));
+    if (!api.celt)
+        for (int request : {OPUS_GET_INBAND_FEC_REQUEST, 4051})
+            Require(api.ctl(state.data(), request, static_cast<std::int32_t*>(nullptr)) == api.error(13));
     std::int32_t first = 0, second = 0;
     Require(api.ctl(state.data(), -1, &first, static_cast<std::int32_t*>(nullptr)) == api.error(13));
     Require(api.ctl(state.data(), -1, static_cast<std::int32_t*>(nullptr), &second) == api.error(13));

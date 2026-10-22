@@ -34,17 +34,15 @@ int APS5_VABI sceOpusCeltDecCreate() {
 }
 
 int APS5_VABI sceOpusCeltDecCtl(void* state, int request, ...) {
-    std::uint64_t arguments[2]{};
-    const int count = OpusDecoderLibrary::CtlArgumentCount(request);
 #ifdef _WIN32
     __builtin_sysv_va_list list;
     __builtin_sysv_va_start(list, request);
-    for (int index = 0; index < count; ++index) arguments[index] = __builtin_va_arg(list, std::uint64_t);
+    const auto arguments = OpusDecoderLibrary::ReadCtlArguments(request, [&] { return __builtin_va_arg(list, int); }, [&] { return __builtin_va_arg(list, std::int32_t*); });
     __builtin_sysv_va_end(list);
 #else
     std::va_list list;
     va_start(list, request);
-    for (int index = 0; index < count; ++index) arguments[index] = va_arg(list, std::uint64_t);
+    const auto arguments = OpusDecoderLibrary::ReadCtlArguments(request, [&] { return va_arg(list, int); }, [&] { return va_arg(list, std::int32_t*); });
     va_end(list);
 #endif
     return library.Ctl(state, request, arguments);

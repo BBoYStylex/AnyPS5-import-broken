@@ -94,16 +94,42 @@ public:
         return outputBytes;
     }
 
-    static int CtlArgumentCount(int request) { return request == -1 ? 2 : request == OPUS_RESET_STATE ? 0 : 1; }
+    struct CtlArguments {
+        std::int32_t value = 0;
+        std::int32_t* output = nullptr;
+        const std::int32_t* second = nullptr;
+    };
 
-    int Ctl(void* state, int request, const std::uint64_t* arguments) {
+    template <typename TReadValue, typename TReadPointer>
+    static CtlArguments ReadCtlArguments(int request, TReadValue readValue, TReadPointer readPointer) {
+        CtlArguments arguments;
+        switch (request) {
+        case OPUS_SET_GAIN_REQUEST:
+        case OPUS_SET_PHASE_INVERSION_DISABLED_REQUEST:
+        case OPUS_SET_INBAND_FEC_REQUEST:
+        case unknownFlagSet: arguments.value = readValue(); break;
+        case OPUS_GET_SAMPLE_RATE_REQUEST:
+        case OPUS_GET_FINAL_RANGE_REQUEST:
+        case OPUS_GET_GAIN_REQUEST:
+        case OPUS_GET_PHASE_INVERSION_DISABLED_REQUEST:
+        case OPUS_GET_INBAND_FEC_REQUEST:
+        case unknownFlagGet: arguments.output = readPointer(); break;
+        case -1:
+            arguments.output = readPointer();
+            arguments.second = readPointer();
+            break;
+        }
+        return arguments;
+    }
+
+    int Ctl(void* state, int request, const CtlArguments& arguments) {
         if (!state) return error(0);
         std::lock_guard lock(mutex);
         const auto found = decoders.find(state);
         if (found == decoders.end()) return error(1);
         auto& decoder = *found->second;
-        const auto value = static_cast<std::int32_t>(arguments[0]);
-        auto* output = reinterpret_cast<std::int32_t*>(arguments[0]);
+        const auto value = arguments.value;
+        auto* output = arguments.output;
         const auto get = [&](std::int32_t current) {
             if (!output) return error(13);
             *output = current;
@@ -133,7 +159,7 @@ public:
             return 0;
         case OPUS_GET_PHASE_INVERSION_DISABLED_REQUEST: return get(decoder.phaseInversionDisabled);
         case -1: {
-            const auto* second = reinterpret_cast<const std::int32_t*>(arguments[1]);
+            const auto* second = arguments.second;
             if (!output || !second) return error(13);
             fail("the AJM result words of the last batch are not modelled");
         }
