@@ -152,6 +152,34 @@ llvm::Value* X86LifterContext::ReadOverflowFlag(llvm::IRBuilder<>& builder) cons
     return builder.CreateLoad(builder.getInt1Ty(), flagOverflowAlloca);
 }
 
+void X86LifterContext::WriteZeroFlag(llvm::Value* value, llvm::IRBuilder<>& builder) {
+    if (value->getType() != builder.getInt1Ty()) {
+        value = builder.CreateTrunc(value, builder.getInt1Ty());
+    }
+    builder.CreateStore(value, flagZeroAlloca);
+}
+
+void X86LifterContext::WriteSignFlag(llvm::Value* value, llvm::IRBuilder<>& builder) {
+    if (value->getType() != builder.getInt1Ty()) {
+        value = builder.CreateTrunc(value, builder.getInt1Ty());
+    }
+    builder.CreateStore(value, flagSignAlloca);
+}
+
+void X86LifterContext::WriteCarryFlag(llvm::Value* value, llvm::IRBuilder<>& builder) {
+    if (value->getType() != builder.getInt1Ty()) {
+        value = builder.CreateTrunc(value, builder.getInt1Ty());
+    }
+    builder.CreateStore(value, flagCarryAlloca);
+}
+
+void X86LifterContext::WriteOverflowFlag(llvm::Value* value, llvm::IRBuilder<>& builder) {
+    if (value->getType() != builder.getInt1Ty()) {
+        value = builder.CreateTrunc(value, builder.getInt1Ty());
+    }
+    builder.CreateStore(value, flagOverflowAlloca);
+}
+
 llvm::Value* X86LifterContext::ReadXmmRegister(uint8_t index, llvm::IRBuilder<>& builder) const {
     if (index >= xmmAllocas.size()) {
         index = 0;

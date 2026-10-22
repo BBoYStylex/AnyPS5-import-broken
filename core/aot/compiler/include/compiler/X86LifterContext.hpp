@@ -63,6 +63,11 @@ public:
     [[nodiscard]] llvm::Value* ReadCarryFlag(llvm::IRBuilder<>& builder) const;
     [[nodiscard]] llvm::Value* ReadOverflowFlag(llvm::IRBuilder<>& builder) const;
 
+    void WriteZeroFlag(llvm::Value* value, llvm::IRBuilder<>& builder);
+    void WriteSignFlag(llvm::Value* value, llvm::IRBuilder<>& builder);
+    void WriteCarryFlag(llvm::Value* value, llvm::IRBuilder<>& builder);
+    void WriteOverflowFlag(llvm::Value* value, llvm::IRBuilder<>& builder);
+
     [[nodiscard]] llvm::Value* ReadXmmRegister(uint8_t index, llvm::IRBuilder<>& builder) const;
     void WriteXmmRegister(uint8_t index, llvm::Value* value, llvm::IRBuilder<>& builder);
 

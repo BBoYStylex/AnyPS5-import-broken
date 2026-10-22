@@ -156,6 +156,53 @@ static DecodedEffectiveAddress decodeAddress(
     return {baseVal, 0};
 }
 
+static llvm::Value* evaluateConditionCode(
+    uint8_t condCode,
+    llvm::IRBuilder<>& builder,
+    X86LifterContext& lifterContext) {
+    switch (condCode & 0x0F) {
+        case 0x0:
+            return lifterContext.ReadOverflowFlag(builder);
+        case 0x1:
+            return builder.CreateICmpEQ(lifterContext.ReadOverflowFlag(builder), builder.getInt1(false));
+        case 0x2:
+            return lifterContext.ReadCarryFlag(builder);
+        case 0x3:
+            return builder.CreateICmpEQ(lifterContext.ReadCarryFlag(builder), builder.getInt1(false));
+        case 0x4:
+            return lifterContext.ReadZeroFlag(builder);
+        case 0x5:
+            return builder.CreateICmpEQ(lifterContext.ReadZeroFlag(builder), builder.getInt1(false));
+        case 0x6:
+            return builder.CreateOr(lifterContext.ReadCarryFlag(builder), lifterContext.ReadZeroFlag(builder));
+        case 0x7: {
+            llvm::Value* notCf = builder.CreateICmpEQ(lifterContext.ReadCarryFlag(builder), builder.getInt1(false));
+            llvm::Value* notZf = builder.CreateICmpEQ(lifterContext.ReadZeroFlag(builder), builder.getInt1(false));
+            return builder.CreateAnd(notCf, notZf);
+        }
+        case 0x8:
+            return lifterContext.ReadSignFlag(builder);
+        case 0x9:
+            return builder.CreateICmpEQ(lifterContext.ReadSignFlag(builder), builder.getInt1(false));
+        case 0xC:
+            return builder.CreateICmpNE(lifterContext.ReadSignFlag(builder), lifterContext.ReadOverflowFlag(builder));
+        case 0xD:
+            return builder.CreateICmpEQ(lifterContext.ReadSignFlag(builder), lifterContext.ReadOverflowFlag(builder));
+        case 0xE:
+            return builder.CreateOr(
+                lifterContext.ReadZeroFlag(builder),
+                builder.CreateICmpNE(lifterContext.ReadSignFlag(builder), lifterContext.ReadOverflowFlag(builder))
+            );
+        case 0xF: {
+            llvm::Value* notZf = builder.CreateICmpEQ(lifterContext.ReadZeroFlag(builder), builder.getInt1(false));
+            llvm::Value* sOfSame = builder.CreateICmpEQ(lifterContext.ReadSignFlag(builder), lifterContext.ReadOverflowFlag(builder));
+            return builder.CreateAnd(notZf, sOfSame);
+        }
+        default:
+            return builder.getInt1(true);
+    }
+}
+
 llvm::Function* LlvmLifter::liftFunctionAtAddress(
     const uint8_t* codeBytes,
     size_t byteCount,
@@ -270,59 +317,13 @@ llvm::Function* LlvmLifter::liftFunctionAtAddress(
             if ((op2 >= 0x80 && op2 <= 0x8F) && currentOffset + 5 < byteCount) {
                 int32_t rel32 = 0;
                 std::memcpy(&rel32, &codeBytes[currentOffset + 2], sizeof(int32_t));
-                llvm::Value* cond = nullptr;
-
-                if (op2 == 0x84) {
-                    cond = lifterContext.ReadZeroFlag(builder);
-                } else if (op2 == 0x85) {
-                    llvm::Value* zf = lifterContext.ReadZeroFlag(builder);
-                    cond = builder.CreateICmpEQ(zf, builder.getInt1(false));
-                } else if (op2 == 0x82) {
-                    cond = lifterContext.ReadCarryFlag(builder);
-                } else if (op2 == 0x83) {
-                    llvm::Value* cf = lifterContext.ReadCarryFlag(builder);
-                    cond = builder.CreateICmpEQ(cf, builder.getInt1(false));
-                } else if (op2 == 0x86) {
-                    llvm::Value* cf = lifterContext.ReadCarryFlag(builder);
-                    llvm::Value* zf = lifterContext.ReadZeroFlag(builder);
-                    cond = builder.CreateOr(cf, zf);
-                } else if (op2 == 0x87) {
-                    llvm::Value* cf = lifterContext.ReadCarryFlag(builder);
-                    llvm::Value* zf = lifterContext.ReadZeroFlag(builder);
-                    llvm::Value* notCf = builder.CreateICmpEQ(cf, builder.getInt1(false));
-                    llvm::Value* notZf = builder.CreateICmpEQ(zf, builder.getInt1(false));
-                    cond = builder.CreateAnd(notCf, notZf);
-                } else if (op2 == 0x8C) {
-                    llvm::Value* sf = lifterContext.ReadSignFlag(builder);
-                    llvm::Value* of = lifterContext.ReadOverflowFlag(builder);
-                    cond = builder.CreateICmpNE(sf, of);
-                } else if (op2 == 0x8D) {
-                    llvm::Value* sf = lifterContext.ReadSignFlag(builder);
-                    llvm::Value* of = lifterContext.ReadOverflowFlag(builder);
-                    cond = builder.CreateICmpEQ(sf, of);
-                } else if (op2 == 0x8E) {
-                    llvm::Value* zf = lifterContext.ReadZeroFlag(builder);
-                    llvm::Value* sf = lifterContext.ReadSignFlag(builder);
-                    llvm::Value* of = lifterContext.ReadOverflowFlag(builder);
-                    llvm::Value* sOfDiff = builder.CreateICmpNE(sf, of);
-                    cond = builder.CreateOr(zf, sOfDiff);
-                } else if (op2 == 0x8F) {
-                    llvm::Value* zf = lifterContext.ReadZeroFlag(builder);
-                    llvm::Value* sf = lifterContext.ReadSignFlag(builder);
-                    llvm::Value* of = lifterContext.ReadOverflowFlag(builder);
-                    llvm::Value* notZf = builder.CreateICmpEQ(zf, builder.getInt1(false));
-                    llvm::Value* sOfSame = builder.CreateICmpEQ(sf, of);
-                    cond = builder.CreateAnd(notZf, sOfSame);
-                }
-
-                if (cond != nullptr) {
-                    llvm::BasicBlock* trueBB = llvm::BasicBlock::Create(context, "jcc_taken", function);
-                    llvm::BasicBlock* contBB = llvm::BasicBlock::Create(context, "jcc_fallthrough", function);
-                    builder.CreateCondBr(cond, trueBB, contBB);
-                    builder.SetInsertPoint(contBB);
-                    offset = currentOffset + 6;
-                    continue;
-                }
+                llvm::Value* cond = evaluateConditionCode(op2 & 0x0F, builder, lifterContext);
+                llvm::BasicBlock* trueBB = llvm::BasicBlock::Create(context, "jcc_taken", function);
+                llvm::BasicBlock* contBB = llvm::BasicBlock::Create(context, "jcc_fallthrough", function);
+                builder.CreateCondBr(cond, trueBB, contBB);
+                builder.SetInsertPoint(contBB);
+                offset = currentOffset + 6;
+                continue;
             }
 
             if (currentOffset + 2 < byteCount) {
@@ -330,6 +331,98 @@ llvm::Function* LlvmLifter::liftFunctionAtAddress(
                 uint8_t mod = (modrm >> 6) & 0x03;
                 uint8_t regField = ((modrm >> 3) & 0x07) + (rexR ? 8 : 0);
                 uint8_t rmField = (modrm & 0x07) + (rexB ? 8 : 0);
+
+                if (op2 >= 0x40 && op2 <= 0x4F) {
+                    auto regDst = static_cast<X86Register>(regField);
+                    llvm::Value* cond = evaluateConditionCode(op2 & 0x0F, builder, lifterContext);
+                    llvm::Value* curVal = lifterContext.ReadRegister(regDst, builder);
+                    if (mod == 3) {
+                        auto regSrc = static_cast<X86Register>(rmField);
+                        llvm::Value* srcVal = lifterContext.ReadRegister(regSrc, builder);
+                        llvm::Value* selected = builder.CreateSelect(cond, srcVal, curVal);
+                        lifterContext.WriteRegister(regDst, selected, builder);
+                        offset = currentOffset + 3;
+                        continue;
+                    } else {
+                        auto decoded = decodeAddress(codeBytes, currentOffset + 3, byteCount, mod, rmField, rexX, rexB, virtualAddress, builder, lifterContext);
+                        llvm::Type* opTy = rexW ? builder.getInt64Ty() : builder.getInt32Ty();
+                        llvm::Value* loaded = builder.CreateLoad(opTy, decoded.Address);
+                        if (!rexW) {
+                            loaded = builder.CreateZExt(loaded, builder.getInt64Ty());
+                        }
+                        llvm::Value* selected = builder.CreateSelect(cond, loaded, curVal);
+                        lifterContext.WriteRegister(regDst, selected, builder);
+                        offset = currentOffset + 3 + decoded.ConsumedBytes;
+                        continue;
+                    }
+                }
+
+                if (op2 >= 0x90 && op2 <= 0x9F) {
+                    llvm::Value* cond = evaluateConditionCode(op2 & 0x0F, builder, lifterContext);
+                    if (mod == 3) {
+                        auto regDst = static_cast<X86Register>(rmField);
+                        llvm::Value* curVal = lifterContext.ReadRegister(regDst, builder);
+                        llvm::Value* clearLow8 = builder.CreateAnd(curVal, builder.getInt64(~0xFFULL));
+                        llvm::Value* condExt = builder.CreateZExt(cond, builder.getInt64Ty());
+                        llvm::Value* finalVal = builder.CreateOr(clearLow8, condExt);
+                        lifterContext.WriteRegister(regDst, finalVal, builder);
+                        offset = currentOffset + 3;
+                        continue;
+                    } else {
+                        auto decoded = decodeAddress(codeBytes, currentOffset + 3, byteCount, mod, rmField, rexX, rexB, virtualAddress, builder, lifterContext);
+                        llvm::Value* condByte = builder.CreateZExt(cond, builder.getInt8Ty());
+                        builder.CreateStore(condByte, decoded.Address);
+                        offset = currentOffset + 3 + decoded.ConsumedBytes;
+                        continue;
+                    }
+                }
+
+                if (op2 == 0xA3) {
+                    llvm::Value* bitIdx = lifterContext.ReadRegister(static_cast<X86Register>(regField), builder);
+                    llvm::Value* mask = builder.getInt64(rexW ? 0x3F : 0x1F);
+                    llvm::Value* maskedIdx = builder.CreateAnd(bitIdx, mask);
+                    llvm::Value* baseVal = nullptr;
+                    size_t nextOffset = 0;
+                    if (mod == 3) {
+                        baseVal = lifterContext.ReadRegister(static_cast<X86Register>(rmField), builder);
+                        nextOffset = currentOffset + 3;
+                    } else {
+                        auto decoded = decodeAddress(codeBytes, currentOffset + 3, byteCount, mod, rmField, rexX, rexB, virtualAddress, builder, lifterContext);
+                        baseVal = builder.CreateLoad(builder.getInt64Ty(), decoded.Address);
+                        nextOffset = currentOffset + 3 + decoded.ConsumedBytes;
+                    }
+                    llvm::Value* shifted = builder.CreateLShr(baseVal, maskedIdx);
+                    llvm::Value* bit = builder.CreateTrunc(shifted, builder.getInt1Ty());
+                    lifterContext.WriteCarryFlag(bit, builder);
+                    offset = nextOffset;
+                    continue;
+                }
+
+                if (op2 == 0xBA) {
+                    uint8_t regOp = (modrm >> 3) & 0x07;
+                    if (regOp == 4) {
+                        llvm::Value* baseVal = nullptr;
+                        size_t immOffset = 0;
+                        if (mod == 3) {
+                            baseVal = lifterContext.ReadRegister(static_cast<X86Register>(rmField), builder);
+                            immOffset = currentOffset + 3;
+                        } else {
+                            auto decoded = decodeAddress(codeBytes, currentOffset + 3, byteCount, mod, rmField, rexX, rexB, virtualAddress, builder, lifterContext);
+                            baseVal = builder.CreateLoad(builder.getInt64Ty(), decoded.Address);
+                            immOffset = currentOffset + 3 + decoded.ConsumedBytes;
+                        }
+                        if (immOffset < byteCount) {
+                            uint8_t bitIdxImm = codeBytes[immOffset];
+                            uint8_t mask = rexW ? 0x3F : 0x1F;
+                            llvm::Value* shiftVal = builder.getInt64(bitIdxImm & mask);
+                            llvm::Value* shifted = builder.CreateLShr(baseVal, shiftVal);
+                            llvm::Value* bit = builder.CreateTrunc(shifted, builder.getInt1Ty());
+                            lifterContext.WriteCarryFlag(bit, builder);
+                            offset = immOffset + 1;
+                            continue;
+                        }
+                    }
+                }
 
                 if (op2 == 0x28 || op2 == 0x10) {
                     if (mod == 3) {
@@ -498,121 +591,10 @@ llvm::Function* LlvmLifter::liftFunctionAtAddress(
             continue;
         }
 
-        if (byte == 0x74 && currentOffset + 1 < byteCount) {
-            llvm::Value* cond = lifterContext.ReadZeroFlag(builder);
-            llvm::BasicBlock* trueBB = llvm::BasicBlock::Create(context, "jz_taken", function);
-            llvm::BasicBlock* contBB = llvm::BasicBlock::Create(context, "jz_fallthrough", function);
-            builder.CreateCondBr(cond, trueBB, contBB);
-            builder.SetInsertPoint(contBB);
-            offset = currentOffset + 2;
-            continue;
-        }
-
-        if (byte == 0x75 && currentOffset + 1 < byteCount) {
-            llvm::Value* zf = lifterContext.ReadZeroFlag(builder);
-            llvm::Value* cond = builder.CreateICmpEQ(zf, builder.getInt1(false));
-            llvm::BasicBlock* trueBB = llvm::BasicBlock::Create(context, "jnz_taken", function);
-            llvm::BasicBlock* contBB = llvm::BasicBlock::Create(context, "jnz_fallthrough", function);
-            builder.CreateCondBr(cond, trueBB, contBB);
-            builder.SetInsertPoint(contBB);
-            offset = currentOffset + 2;
-            continue;
-        }
-
-        if (byte == 0x72 && currentOffset + 1 < byteCount) {
-            llvm::Value* cond = lifterContext.ReadCarryFlag(builder);
-            llvm::BasicBlock* trueBB = llvm::BasicBlock::Create(context, "jc_taken", function);
-            llvm::BasicBlock* contBB = llvm::BasicBlock::Create(context, "jc_fallthrough", function);
-            builder.CreateCondBr(cond, trueBB, contBB);
-            builder.SetInsertPoint(contBB);
-            offset = currentOffset + 2;
-            continue;
-        }
-
-        if (byte == 0x73 && currentOffset + 1 < byteCount) {
-            llvm::Value* cf = lifterContext.ReadCarryFlag(builder);
-            llvm::Value* cond = builder.CreateICmpEQ(cf, builder.getInt1(false));
-            llvm::BasicBlock* trueBB = llvm::BasicBlock::Create(context, "jnc_taken", function);
-            llvm::BasicBlock* contBB = llvm::BasicBlock::Create(context, "jnc_fallthrough", function);
-            builder.CreateCondBr(cond, trueBB, contBB);
-            builder.SetInsertPoint(contBB);
-            offset = currentOffset + 2;
-            continue;
-        }
-
-        if (byte == 0x76 && currentOffset + 1 < byteCount) {
-            llvm::Value* cf = lifterContext.ReadCarryFlag(builder);
-            llvm::Value* zf = lifterContext.ReadZeroFlag(builder);
-            llvm::Value* cond = builder.CreateOr(cf, zf);
-            llvm::BasicBlock* trueBB = llvm::BasicBlock::Create(context, "jbe_taken", function);
-            llvm::BasicBlock* contBB = llvm::BasicBlock::Create(context, "jbe_fallthrough", function);
-            builder.CreateCondBr(cond, trueBB, contBB);
-            builder.SetInsertPoint(contBB);
-            offset = currentOffset + 2;
-            continue;
-        }
-
-        if (byte == 0x77 && currentOffset + 1 < byteCount) {
-            llvm::Value* cf = lifterContext.ReadCarryFlag(builder);
-            llvm::Value* zf = lifterContext.ReadZeroFlag(builder);
-            llvm::Value* notCf = builder.CreateICmpEQ(cf, builder.getInt1(false));
-            llvm::Value* notZf = builder.CreateICmpEQ(zf, builder.getInt1(false));
-            llvm::Value* cond = builder.CreateAnd(notCf, notZf);
-            llvm::BasicBlock* trueBB = llvm::BasicBlock::Create(context, "ja_taken", function);
-            llvm::BasicBlock* contBB = llvm::BasicBlock::Create(context, "ja_fallthrough", function);
-            builder.CreateCondBr(cond, trueBB, contBB);
-            builder.SetInsertPoint(contBB);
-            offset = currentOffset + 2;
-            continue;
-        }
-
-        if (byte == 0x7C && currentOffset + 1 < byteCount) {
-            llvm::Value* sf = lifterContext.ReadSignFlag(builder);
-            llvm::Value* of = lifterContext.ReadOverflowFlag(builder);
-            llvm::Value* cond = builder.CreateICmpNE(sf, of);
-            llvm::BasicBlock* trueBB = llvm::BasicBlock::Create(context, "jl_taken", function);
-            llvm::BasicBlock* contBB = llvm::BasicBlock::Create(context, "jl_fallthrough", function);
-            builder.CreateCondBr(cond, trueBB, contBB);
-            builder.SetInsertPoint(contBB);
-            offset = currentOffset + 2;
-            continue;
-        }
-
-        if (byte == 0x7D && currentOffset + 1 < byteCount) {
-            llvm::Value* sf = lifterContext.ReadSignFlag(builder);
-            llvm::Value* of = lifterContext.ReadOverflowFlag(builder);
-            llvm::Value* cond = builder.CreateICmpEQ(sf, of);
-            llvm::BasicBlock* trueBB = llvm::BasicBlock::Create(context, "jge_taken", function);
-            llvm::BasicBlock* contBB = llvm::BasicBlock::Create(context, "jge_fallthrough", function);
-            builder.CreateCondBr(cond, trueBB, contBB);
-            builder.SetInsertPoint(contBB);
-            offset = currentOffset + 2;
-            continue;
-        }
-
-        if (byte == 0x7E && currentOffset + 1 < byteCount) {
-            llvm::Value* zf = lifterContext.ReadZeroFlag(builder);
-            llvm::Value* sf = lifterContext.ReadSignFlag(builder);
-            llvm::Value* of = lifterContext.ReadOverflowFlag(builder);
-            llvm::Value* diff = builder.CreateICmpNE(sf, of);
-            llvm::Value* cond = builder.CreateOr(zf, diff);
-            llvm::BasicBlock* trueBB = llvm::BasicBlock::Create(context, "jle_taken", function);
-            llvm::BasicBlock* contBB = llvm::BasicBlock::Create(context, "jle_fallthrough", function);
-            builder.CreateCondBr(cond, trueBB, contBB);
-            builder.SetInsertPoint(contBB);
-            offset = currentOffset + 2;
-            continue;
-        }
-
-        if (byte == 0x7F && currentOffset + 1 < byteCount) {
-            llvm::Value* zf = lifterContext.ReadZeroFlag(builder);
-            llvm::Value* sf = lifterContext.ReadSignFlag(builder);
-            llvm::Value* of = lifterContext.ReadOverflowFlag(builder);
-            llvm::Value* notZf = builder.CreateICmpEQ(zf, builder.getInt1(false));
-            llvm::Value* same = builder.CreateICmpEQ(sf, of);
-            llvm::Value* cond = builder.CreateAnd(notZf, same);
-            llvm::BasicBlock* trueBB = llvm::BasicBlock::Create(context, "jg_taken", function);
-            llvm::BasicBlock* contBB = llvm::BasicBlock::Create(context, "jg_fallthrough", function);
+        if ((byte >= 0x70 && byte <= 0x7F) && currentOffset + 1 < byteCount) {
+            llvm::Value* cond = evaluateConditionCode(byte & 0x0F, builder, lifterContext);
+            llvm::BasicBlock* trueBB = llvm::BasicBlock::Create(context, "jcc_taken", function);
+            llvm::BasicBlock* contBB = llvm::BasicBlock::Create(context, "jcc_fallthrough", function);
             builder.CreateCondBr(cond, trueBB, contBB);
             builder.SetInsertPoint(contBB);
             offset = currentOffset + 2;

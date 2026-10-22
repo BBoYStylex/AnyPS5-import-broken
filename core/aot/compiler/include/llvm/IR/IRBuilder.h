@@ -139,6 +139,14 @@ public:
     Value* CreateICmpULT(Value* lhs, Value* rhs) { return makeCmpOp(lhs, rhs); }
     Value* CreateICmpSLT(Value* lhs, Value* rhs) { return makeCmpOp(lhs, rhs); }
 
+    Value* CreateSelect(Value* cond, Value* trueVal, Value* falseVal) {
+        static_cast<void>(cond);
+        static_cast<void>(falseVal);
+        auto* inst = new Instruction(trueVal ? trueVal->getType() : getInt64Ty());
+        if (currentBlock) currentBlock->addInstruction(inst);
+        return inst;
+    }
+
     Value* CreateNot(Value* val) {
         auto* inst = new Instruction(val ? val->getType() : getInt64Ty());
         if (currentBlock) currentBlock->addInstruction(inst);
