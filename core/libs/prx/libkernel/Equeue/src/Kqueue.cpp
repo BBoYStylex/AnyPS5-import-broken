@@ -196,6 +196,32 @@ bool PollKqueue(KernelEqueueEvent* e) {
     return pending != 0;
 }
 
+struct ClearedKqueueNote {
+    std::uint64_t seen = 0;
+    bool active = false;
+};
+
+bool PollClearedKqueue(KernelEqueueEvent* e) {
+    auto& note = *static_cast<ClearedKqueueNote*>(e->filter.data);
+    const auto pending = e->filter.watched->CountTriggeredEvents();
+    const auto activations = e->filter.watched->Activations();
+    if (activations != note.seen) {
+        note.seen = activations;
+        if (pending != 0) {
+            note.active = true;
+            e->event.data = static_cast<std::intptr_t>(pending);
+        }
+    }
+    return note.active;
+}
+
+void ResetClearedKqueue(KernelEqueueEvent* e) {
+    static_cast<ClearedKqueueNote*>(e->filter.data)->active = false;
+    e->triggered = false;
+    e->event.fflags = 0;
+    e->event.data = 0;
+}
+
 bool KqueueReaches(const KernelEqueueRef& from, const KernelEqueuePrivate* target, std::vector<const KernelEqueuePrivate*>& visited) {
     if (from.get() == target) {
         return true;
@@ -213,9 +239,6 @@ bool KqueueReaches(const KernelEqueueRef& from, const KernelEqueuePrivate* targe
 }
 
 int AddKqueueKnote(const KernelEqueueRef& queue, const KernelEqueueRef& watched, KernelEvent& change, std::uint16_t flags) {
-    if ((flags & EV_CLEAR) != 0) {
-        NotImplemented_nid_no_patch("kevent: EV_CLEAR on a kqueue descriptor");
-    }
     std::lock_guard lock(g_kqueueWatchMutex);
     std::vector<const KernelEqueuePrivate*> visited;
     if (KqueueReaches(watched, queue.get(), visited)) {
@@ -228,6 +251,17 @@ int AddKqueueKnote(const KernelEqueueRef& queue, const KernelEqueueRef& watched,
     event.event.data = 0;
     event.filter.pollFunc = PollKqueue;
     event.filter.watched = watched;
+    if ((flags & EV_CLEAR) != 0) {
+        auto note = std::make_shared<ClearedKqueueNote>();
+        const auto pending = watched->CountTriggeredEvents();
+        note->seen = watched->Activations();
+        note->active = pending != 0;
+        event.event.data = static_cast<std::intptr_t>(pending);
+        event.filter.data = note.get();
+        event.filter.owner = std::move(note);
+        event.filter.pollFunc = PollClearedKqueue;
+        event.filter.resetFunc = ResetClearedKqueue;
+    }
     change.fflags = 0;
     change.data = 0;
     return GuestErrno(queue->AddEvent(event));

@@ -484,8 +484,8 @@ static void WatchKqueue() {
 
     RequireFailure(Apply(outer, Change(watched, EvfiltWrite, EvAdd)), GuestEinval);
     RequireFailure(Apply(outer, Change(watched, EvfiltVnode, EvAdd, NoteWrite)), GuestEinval);
-    Require(ThrownMessage([outer, watched] { Apply(outer, Change(watched, EvfiltRead, EvAdd | EvClear)); }).find("EV_CLEAR on a kqueue descriptor") != std::string::npos);
-    RequireFailure(Apply(outer, Change(watched, EvfiltRead, EvDelete)), GuestEnoent);
+    Require(Apply(outer, Change(watched, EvfiltRead, EvAdd | EvClear)) == 0);
+    Require(Apply(outer, Change(watched, EvfiltRead, EvDelete)) == 0);
     Require(Apply(outer, Change(watched, EvfiltRead, EvAdd)) == 0);
     Require(ThrownMessage([inner, outer] { Apply(inner, Change(static_cast<std::uintptr_t>(outer), EvfiltRead, EvAdd)); }).find("watches the kqueue") != std::string::npos);
     Require(Apply(inner, Change(5, EvfiltUser, 0, NoteTrigger)) == 0);
@@ -495,6 +495,34 @@ static void WatchKqueue() {
     Require(Poll(outer, events, 4) == 0);
     RequireFailure(Apply(outer, Change(watched, EvfiltRead, EvDelete)), GuestEbadf);
     Require(close_nid_postfix(outer) == 0);
+}
+
+static void ClearedKqueue() {
+    const int inner = kqueue_nid_postfix();
+    const int outer = kqueue_nid_postfix();
+    Require(inner >= 0 && outer >= 0);
+    const auto watched = static_cast<std::uintptr_t>(inner);
+    KernelEvent events[4]{};
+    Require(Apply(inner, Change(7, EvfiltUser, EvAdd)) == 0);
+    Require(Apply(inner, Change(8, EvfiltUser, EvAdd)) == 0);
+    Require(Apply(outer, Change(watched, EvfiltRead, EvAdd | EvClear)) == 0);
+    Require(Poll(outer, events, 4) == 0);
+
+    Require(Apply(inner, Change(7, EvfiltUser, 0, NoteTrigger)) == 0);
+    Require(Poll(outer, events, 4) == 1 && events[0].ident == watched && events[0].data == 1 && (events[0].flags & EvClear) != 0);
+    Require(Poll(outer, events, 4) == 0);
+    Require(Poll(inner, events, 4) == 1);
+    Require(Poll(outer, events, 4) == 0);
+
+    Require(Apply(inner, Change(8, EvfiltUser, 0, NoteTrigger)) == 0);
+    Require(Poll(outer, events, 4) == 1 && events[0].data == 2);
+    Require(Poll(outer, events, 4) == 0);
+
+    Require(Apply(outer, Change(watched, EvfiltRead, EvDelete)) == 0);
+    Require(Apply(outer, Change(watched, EvfiltRead, EvAdd | EvClear)) == 0);
+    Require(Poll(outer, events, 4) == 1 && events[0].data == 2);
+    Require(Poll(outer, events, 4) == 0);
+    Require(close_nid_postfix(outer) == 0 && close_nid_postfix(inner) == 0);
 }
 
 static void LowWaterMarks() {
@@ -1154,6 +1182,7 @@ int main() {
     DisableAndDispatch();
     Errors();
     LowWaterMarks();
+    ClearedKqueue();
     FileWatch();
 #ifndef _WIN32
     RenameAndDeleteWatchedFile();
