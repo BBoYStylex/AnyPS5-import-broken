@@ -9,6 +9,10 @@ int main() {
     auto& registry = Aot::Compiler::SyscallRegistry::Instance();
     assert(registry.Has(1));
     assert(registry.Has(3));
+    assert(registry.Has(20));
+    assert(registry.Has(232));
+    assert(registry.Has(240));
+    assert(registry.Has(327));
     assert(registry.Has(477));
 
     auto exitSig = registry.Find(1);

@@ -26,6 +26,10 @@ SyscallRegistry::SyscallRegistry() {
     Register(533, "aps5_sys_jit_allocate", 3, false);
     Register(534, "aps5_sys_dmem_allocate", 4, false);
     Register(535, "aps5_sys_dmem_release", 2, false);
+    Register(20, "aps5_sys_getpid", 0, false);
+    Register(232, "aps5_sys_clock_gettime", 2, false);
+    Register(240, "aps5_sys_nanosleep", 2, false);
+    Register(327, "aps5_sys_sched_yield", 0, false);
     Register(585, "aps5_sys_named_event_create", 3, false);
 }
 

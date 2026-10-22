@@ -2,6 +2,8 @@
 #include <runtime/MemoryBridge.hpp>
 #include <runtime/OsSubsystemStubs.hpp>
 #include <cstdlib>
+#include <chrono>
+#include <thread>
 
 #if defined(_WIN32)
 #ifndef NOMINMAX
@@ -10,6 +12,7 @@
 #include <windows.h>
 #else
 #include <pthread.h>
+#include <unistd.h>
 #endif
 
 namespace Aot::Runtime {
@@ -174,6 +177,46 @@ int32_t aps5_sys_named_event_create(const char* name, uint32_t attributes, uint6
     if (outEventHandle != nullptr) {
         *outEventHandle = ++nextEventId;
     }
+    return 0;
+}
+
+int32_t aps5_sys_sched_yield() {
+    std::this_thread::yield();
+    return 0;
+}
+
+int32_t aps5_sys_nanosleep(const void* rqtp, void* rmtp) {
+    static_cast<void>(rmtp);
+    if (rqtp == nullptr) {
+        return -1;
+    }
+    const auto* ts = static_cast<const uint64_t*>(rqtp);
+    uint64_t sec = ts[0];
+    uint64_t nsec = ts[1];
+    std::this_thread::sleep_for(std::chrono::seconds(sec) + std::chrono::nanoseconds(nsec));
+    return 0;
+}
+
+int32_t aps5_sys_getpid() {
+#if defined(_WIN32)
+    return static_cast<int32_t>(GetCurrentProcessId());
+#else
+    return static_cast<int32_t>(getpid());
+#endif
+}
+
+int32_t aps5_sys_clock_gettime(int32_t clockId, void* timeSpec) {
+    static_cast<void>(clockId);
+    if (timeSpec == nullptr) {
+        return -1;
+    }
+    auto now = std::chrono::system_clock::now();
+    auto duration = now.time_since_epoch();
+    auto sec = std::chrono::duration_cast<std::chrono::seconds>(duration);
+    auto nsec = std::chrono::duration_cast<std::chrono::nanoseconds>(duration - sec);
+    auto* ts = static_cast<uint64_t*>(timeSpec);
+    ts[0] = static_cast<uint64_t>(sec.count());
+    ts[1] = static_cast<uint64_t>(nsec.count());
     return 0;
 }
 

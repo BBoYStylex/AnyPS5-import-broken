@@ -77,5 +77,20 @@ int main() {
     int32_t regRes = aps5_sys_regmgr_call(1, 1, &regVal, sizeof(regVal), 0);
     assert(regRes == 0);
 
+    int32_t pid = aps5_sys_getpid();
+    assert(pid > 0);
+
+    int32_t yieldRes = aps5_sys_sched_yield();
+    assert(yieldRes == 0);
+
+    uint64_t ts[2] = {0, 1000};
+    int32_t sleepRes = aps5_sys_nanosleep(ts, nullptr);
+    assert(sleepRes == 0);
+
+    uint64_t clockTs[2] = {0, 0};
+    int32_t clockRes = aps5_sys_clock_gettime(0, clockTs);
+    assert(clockRes == 0);
+    assert(clockTs[0] > 0);
+
     return 0;
 }

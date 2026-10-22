@@ -35,6 +35,10 @@ int32_t aps5_sys_jit_allocate(size_t size, int32_t flags, uint64_t* outAddress);
 uint64_t aps5_sys_dmem_allocate(size_t size, uint64_t alignment, uint32_t memoryType, uint64_t* outAddress);
 int32_t aps5_sys_dmem_release(uint64_t address, size_t size);
 int32_t aps5_sys_named_event_create(const char* name, uint32_t attributes, uint64_t* outEventHandle);
+int32_t aps5_sys_sched_yield();
+int32_t aps5_sys_nanosleep(const void* rqtp, void* rmtp);
+int32_t aps5_sys_getpid();
+int32_t aps5_sys_clock_gettime(int32_t clockId, void* timeSpec);
 }
 
 #endif
