@@ -93,14 +93,26 @@ inline RelinkerRun RunRelinker(const std::filesystem::path& relinker, const std:
     SECURITY_ATTRIBUTES inheritable{sizeof(inheritable), nullptr, TRUE};
     const HANDLE logFile = CreateFileW(logPath.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, &inheritable, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (logFile == INVALID_HANDLE_VALUE) throw std::runtime_error("Cannot create the relinker log");
-    STARTUPINFOW startup{};
-    startup.cb = sizeof(startup);
-    startup.dwFlags = STARTF_USESTDHANDLES;
-    startup.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
-    startup.hStdOutput = logFile;
-    startup.hStdError = logFile;
+    SIZE_T attributeBytes = 0;
+    InitializeProcThreadAttributeList(nullptr, 1, 0, &attributeBytes);
+    std::vector<unsigned char> attributeStorage(attributeBytes);
+    const auto attributes = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(attributeStorage.data());
+    HANDLE inherited[] = {logFile};
+    if (!InitializeProcThreadAttributeList(attributes, 1, 0, &attributeBytes)) {
+        CloseHandle(logFile);
+        throw std::runtime_error("Cannot prepare the relinker's inherited handles");
+    }
+    const bool listed = UpdateProcThreadAttribute(attributes, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, inherited, sizeof(inherited), nullptr, nullptr) != 0;
+    STARTUPINFOEXW startup{};
+    startup.StartupInfo.cb = sizeof(startup);
+    startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+    startup.StartupInfo.hStdOutput = logFile;
+    startup.StartupInfo.hStdError = logFile;
+    startup.lpAttributeList = attributes;
     PROCESS_INFORMATION process{};
-    const bool spawned = CreateProcessW(relinker.c_str(), commandLine.data(), nullptr, nullptr, TRUE, 0, nullptr, nullptr, &startup, &process) != 0;
+    const bool spawned = listed && CreateProcessW(relinker.c_str(), commandLine.data(), nullptr, nullptr, TRUE, EXTENDED_STARTUPINFO_PRESENT,
+                                                  nullptr, nullptr, &startup.StartupInfo, &process) != 0;
+    DeleteProcThreadAttributeList(attributes);
     CloseHandle(logFile);
     if (!spawned) throw std::runtime_error("Cannot start the relinker");
     DWORD exitCode = 0;
