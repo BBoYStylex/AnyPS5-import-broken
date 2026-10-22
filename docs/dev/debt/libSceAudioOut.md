@@ -107,6 +107,7 @@
 - [sceAudioOut2PortUnregister](../../../core/libs/prx/libSceAudioOut/src/Unimplemented.cpp) (libSceAudioOut) - unknown signature
 - [sceAudioOut2GetAmbisonicsEncodeCoefficients](../../../core/libs/prx/libSceAudioOut/src/Unimplemented.cpp) (libSceAudioOut) - unknown signature
 - [sceAudioOut2GetHrtfIdForCronos](../../../core/libs/prx/libSceAudioOut/src/Unimplemented.cpp) (libSceAudioOut) - unknown signature
+- [sceAudioDeviceControlGet, sceAudioDeviceControlSet](../../../core/libs/prx/libSceAudioOut/src/Unimplemented.cpp) (libSceAudioOut) - these 2 named callable exports are listed in the public PS5 payload SDK's [stub table](https://github.com/ps5-payload-dev/sdk/blob/a7685ce8e97ce1f8a4f38253a41d54241c9124f1/sce_stubs/libSceAudioOut.c) and in the [PS5 3.20 export table](https://github.com/DNNDHH/PS5-3.20_Libs/blob/b2a77c09cd71c01f34c790cfbe98c751a13262ad/libSceAudioOut.c). Their signatures and behaviour are unverified; each declaration uses the no-parameter unknown-signature convention and throws through `NotImplemented_nid_no_patch`
 
 ### Functional
 

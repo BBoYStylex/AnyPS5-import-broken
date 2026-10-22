@@ -41,3 +41,4 @@
 - [sceRemoteplaySetProhibition](../../../core/libs/prx/libSceRemoteplay/Export.cpp) (libSceRemoteplay) - declared without parameters, signature unknown; name from the PS5 3.20 export inventory (DNNDHH/PS5-3.20_Libs)
 - [sceRemoteplaySetProhibitionForVsh](../../../core/libs/prx/libSceRemoteplay/Export.cpp) (libSceRemoteplay) - declared without parameters, signature unknown; name from the PS5 3.20 export inventory (DNNDHH/PS5-3.20_Libs)
 - [sceRemoteplaySetRpMode](../../../core/libs/prx/libSceRemoteplay/Export.cpp) (libSceRemoteplay) - declared without parameters, signature unknown; name from the PS5 3.20 export inventory (DNNDHH/PS5-3.20_Libs)
+- [sceRemoteplayNotifyCanWakeup](../../../core/libs/prx/libSceRemoteplay/Export.cpp) (libSceRemoteplay) - declared without parameters, signature unknown; listed in the public PS5 payload SDK's [stub table](https://github.com/ps5-payload-dev/sdk/blob/a7685ce8e97ce1f8a4f38253a41d54241c9124f1/sce_stubs/libSceRemoteplay.c)

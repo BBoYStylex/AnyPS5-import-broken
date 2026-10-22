@@ -511,4 +511,9 @@ int APS5_VABI sceHttp2SetPreSendCallback(void) {
     return 0;
 }
 
+int APS5_VABI _Z5dummyv(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
 }
