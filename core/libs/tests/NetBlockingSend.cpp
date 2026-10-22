@@ -107,6 +107,9 @@ int main(int argc, char** argv) {
     }
     {
         Connection connection;
+#ifndef _WIN32
+        SetOption(connection.receiver, NET_SO_RCVBUF, 4096);
+#endif
         SetOption(connection.sender, 0x1105, 100000);
         auto started = std::chrono::steady_clock::now();
         const auto partial = Send(api, connection.sender, bytes);
