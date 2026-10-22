@@ -486,6 +486,7 @@ struct DescriptorBinding {
     std::vector<bool> imageUnnormalizedBaseLevel;
     std::vector<std::uint32_t> imageSamplers;
     std::vector<bool> bufferRead;
+    std::vector<bool> bufferAtomicOnly;
     std::vector<std::uint32_t> bufferExtent;
 };
 
