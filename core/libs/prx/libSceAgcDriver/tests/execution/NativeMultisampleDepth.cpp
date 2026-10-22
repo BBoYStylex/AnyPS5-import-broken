@@ -2140,7 +2140,12 @@ int CheckDriverPath(bool queued) {
     const auto context = AgcDriver::VulkanDeviceTestAccess::ContextOf(*device);
     auto* recorder = Recorder::Active();
     Require(recorder != nullptr && recorder->Device() == context.device, "the driver's device did not activate its recorder");
-#ifndef _WIN32
+#ifdef _WIN32
+    if (queued && PrepareImportWatch(context) == ImportWatch::Unwatch) {
+        std::printf("skipped, host imports are compared here, not write-watched, and a queued fill's HTILE proof needs a write-watched import\n");
+        return VulkanTestSkipped;
+    }
+#else
     SetImportWatch(context, ImportWatch::Watch);
 #endif
     const auto supported = [&](std::uint32_t samples) { return DepthSupported(context, VK_FORMAT_D32_SFLOAT_S8_UINT, samples) && (context.limits.framebufferStencilSampleCounts & samples) != 0u; };
