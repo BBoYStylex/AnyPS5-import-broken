@@ -39,9 +39,16 @@ if(MINGW)
     check_cxx_source_compiles("#ifdef __USING_SJLJ_EXCEPTIONS__\n#error\n#endif\nint main() { return 0; }" ANYPS5_MINGW_DWARF_EXCEPTIONS)
     unset(CMAKE_REQUIRED_FLAGS)
     if(NOT ANYPS5_MINGW_DWARF_EXCEPTIONS)
-        message(FATAL_ERROR "${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION} selects SjLj exceptions with -fno-asynchronous-unwind-tables; the libraries need DWARF unwinding. Use the MinGW-w64 toolchain listed in docs/dev/BUILD.md.")
+        check_cxx_source_compiles("#if !defined(__SEH__) || defined(__USING_SJLJ_EXCEPTIONS__)\n#error\n#endif\n[[gnu::sysv_abi, gnu::noinline]] void Throw() { throw 1; }\n[[gnu::sysv_abi, gnu::noinline]] int Catch() { try { Throw(); } catch (int value) { return value; } return 0; }\nint main() { return Catch() != 1; }" ANYPS5_MINGW_SYSV_SEH_EXCEPTIONS)
+        if(NOT ANYPS5_MINGW_SYSV_SEH_EXCEPTIONS)
+            message(FATAL_ERROR "The Windows libraries require DWARF exceptions or GCC with System V ABI SEH support. Use the toolchains listed in docs/dev/BUILD.md.")
+        endif()
+        add_library(windows_seh_personalities OBJECT ${CMAKE_CURRENT_SOURCE_DIR}/prx/libc/src/specifics/windows/SehPersonalities.cpp)
+        target_link_options(windows_seh_personalities INTERFACE LINKER:--undefined=LibcSehPersonalities_nid_no_patch)
+        link_libraries(windows_seh_personalities)
+    else()
+        add_compile_options(-fno-asynchronous-unwind-tables)
     endif()
-    add_compile_options(-fno-asynchronous-unwind-tables)
 endif()
 
 function(configure_windows_unwind target)
@@ -50,7 +57,7 @@ function(configure_windows_unwind target)
             message(FATAL_ERROR "Windows DWARF unwinding requires objcopy")
         endif()
         add_custom_command(TARGET ${target} POST_BUILD
-                COMMAND "${CMAKE_OBJCOPY}" --rename-section .eh_frame=.ehfram "$<TARGET_FILE:${target}>"
+                COMMAND "${CMAKE_OBJCOPY}" --rename-section .eh_frame=.ehfram --rename-section .eh_fram=.ehfram "$<TARGET_FILE:${target}>"
                 VERBATIM
         )
     elseif(APPLE)
@@ -336,6 +343,9 @@ if(BUILD_TESTING)
 
     if(WIN32)
         add_test_executable(undeliverable_host_exception_tests tests/UndeliverableHostException.cpp)
+        if(MINGW)
+            target_compile_options(undeliverable_host_exception_tests PRIVATE -fno-asynchronous-unwind-tables -fno-exceptions)
+        endif()
         add_dependencies(undeliverable_host_exception_tests libc)
         add_test(NAME undeliverable_host_exception COMMAND undeliverable_host_exception_tests $<TARGET_FILE:libc>)
         set_tests_properties(undeliverable_host_exception PROPERTIES

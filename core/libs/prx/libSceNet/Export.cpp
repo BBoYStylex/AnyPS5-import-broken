@@ -2089,6 +2089,28 @@ int APS5_VABI sceNetEtherNtostr(const NetEtherAddr* n, char* str, size_t len) {
     return 0;
 }
 
+int APS5_VABI sceNetEtherStrton(const char* text, NetEtherAddr* address) {
+    if (text == nullptr || address == nullptr) return fail(NET_EINVAL);
+    for (std::size_t index = 0; index < 17; ++index) {
+        if (text[index] == '\0') return fail(NET_EINVAL);
+    }
+    const auto hexDigit = [](char character) {
+        if (character >= '0' && character <= '9') return character - '0';
+        if (character >= 'a' && character <= 'z') return character - 'a' + 10;
+        if (character >= 'A' && character <= 'Z') return character - 'A' + 10;
+        return 0x7f;
+    };
+    NetEtherAddr parsed{};
+    for (std::size_t index = 0; index < sizeof(parsed.data); ++index) {
+        if (static_cast<unsigned char>(text[index * 3]) >= 128 || static_cast<unsigned char>(text[index * 3 + 1]) >= 128) {
+            NotImplemented_nid_no_patch(__func__);
+        }
+        parsed.data[index] = static_cast<std::uint8_t>(hexDigit(text[index * 3]) * 16 + hexDigit(text[index * 3 + 1]));
+    }
+    *address = parsed;
+    return 0;
+}
+
 int APS5_VABI sceNetGetMacAddress(NetEtherAddr* addr, int flags) {
     (void)flags;
     if (addr == nullptr) {
@@ -3179,11 +3201,6 @@ int APS5_VABI sceNetEmulationSet(const NetEmulationParameter* parameter, std::ui
 }
 
 int APS5_VABI sceNetEmulationGet(NetEmulationParameter* parameter, std::uint32_t flags) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceNetEtherStrton(const char* str, void* address) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
