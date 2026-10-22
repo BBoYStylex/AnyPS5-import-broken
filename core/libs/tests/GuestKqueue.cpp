@@ -14,6 +14,8 @@
 #ifdef _WIN32
 #include <aclapi.h>
 #include <windows.h>
+#elif defined(__linux__)
+#include <sched.h>
 #endif
 
 extern "C" {
@@ -562,7 +564,23 @@ static void ClearedKqueueRechecksTheWatchedCount() {
     Require(close_nid_postfix(outer) == 0 && close_nid_postfix(inner) == 0);
 }
 
+static void RunOnOneCpuOnLinux() {
+#ifdef __linux__
+    cpu_set_t allowed;
+    CPU_ZERO(&allowed);
+    Require(sched_getaffinity(0, sizeof(allowed), &allowed) == 0);
+    int first = 0;
+    while (first < CPU_SETSIZE && !CPU_ISSET(first, &allowed)) ++first;
+    Require(first < CPU_SETSIZE);
+    cpu_set_t one;
+    CPU_ZERO(&one);
+    CPU_SET(first, &one);
+    Require(sched_setaffinity(0, sizeof(one), &one) == 0);
+#endif
+}
+
 static void ClearedKqueueKeepsConcurrentActivations() {
+    RunOnOneCpuOnLinux();
     const int inner = kqueue_nid_postfix();
     const int outer = kqueue_nid_postfix();
     Require(inner >= 0 && outer >= 0);
