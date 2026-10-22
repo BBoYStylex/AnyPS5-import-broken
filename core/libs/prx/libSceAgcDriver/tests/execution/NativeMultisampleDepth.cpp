@@ -6,7 +6,12 @@
 #include "prx/libSceAgcDriver/Graphics/include/ShaderResources.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Recorder.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Draw.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/GuestBufferMemory.hpp"
+#include "prx/libSceAgcDriver/Execution/include/Driver/Driver.hpp"
+#include "prx/libSceAgcDriver/Execution/include/Driver/Draw/DrawPipeline.hpp"
+#include "prx/libSceAgcDriver/Execution/include/Driver/Synchronization/SynchronizationStatistics.hpp"
 #include "prx/libSceAgcDriver/Execution/include/GuestMemory.hpp"
+#include "prx/libSceAgcDriver/Submit/include/Dcb.hpp"
 #include "prx/libc/include/GuestArena.hpp"
 #include "prx/libc/include/GuestAllocations.hpp"
 #include "prx/libc/include/GuestWriteWatch.hpp"
@@ -16,16 +21,20 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <tuple>
+#include <utility>
 #include <vector>
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -35,6 +44,22 @@
 #else
 #include <sys/mman.h>
 #endif
+
+namespace AgcDriver {
+
+struct VulkanDeviceTestAccess {
+    static Graphics::Context ContextOf(const VulkanDevice& device) { return device.graphicsContext(); }
+};
+
+}
+
+namespace AgcDriver::DriverDetail {
+
+struct DriverTestAccess {
+    static void UseDevice(std::shared_ptr<VulkanDevice> device) { Driver::Get().device = std::move(device); }
+};
+
+}
 
 namespace {
 
@@ -1677,10 +1702,171 @@ void CheckRetirement(Context context, VkFormat format, std::uint32_t samples, st
     }
 }
 
+constexpr std::size_t DriverMetadataSpan = 131072u;
+
+void SubmitDriverDmaFill(std::uint64_t address, std::uint32_t bytes, std::uint32_t pattern) {
+    std::array<std::uint32_t, 7> words{0xc0055000u, 0x40000000u, pattern, 0u, static_cast<std::uint32_t>(address), static_cast<std::uint32_t>(address >> 32u), bytes};
+    Packet dcb{words.data(), static_cast<std::uint32_t>(words.size()), 0, {}};
+    Require(sceAgcDriverSubmitDcb(&dcb) == 0, "the driver refused a DMA_DATA fill over a native depth target's HTILE");
+    AgcDriverWaitIdle_nid_postfix();
+    const auto start = std::chrono::steady_clock::now();
+    while (AgcDriver::DriverDetail::DrawPipeline::Queue0().Outstanding() != 0u) {
+        Require(std::chrono::steady_clock::now() - start < std::chrono::seconds(20), "the draw pipeline kept an item after a DMA_DATA fill over a native depth target's HTILE");
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+}
+
+enum class DriverFill { Whole, Partial };
+
+class DriverDepthTarget {
+public:
+    DriverDepthTarget(const Context& context, Recorder& recorder, std::uint32_t fragments, bool one)
+        : context(context), recorder(recorder), extent{5u, 3u}, fragments(fragments),
+          memory(static_cast<std::size_t>(MultisampledDepthBytes_nid_no_patch(extent, 4u, fragments))),
+          stencil(static_cast<std::size_t>(MultisampledDepthBytes_nid_no_patch(extent, 1u, fragments))),
+          metadata(DriverMetadataSpan),
+          htileBytes(static_cast<std::size_t>(HtileMetadataBytes(extent))),
+          clearWord(one ? 0xfffffff0u : 0u),
+          clearStencil(one ? 0x5au : 0u),
+          target{memory.Address(), stencil.Address(), extent, VK_FORMAT_D32_SFLOAT_S8_UINT, one ? 1.0f : 0.0f, clearStencil, metadata.Address(), false, fragments} {
+        for (std::size_t offset = 0u; offset < htileBytes; offset += 4u) std::memcpy(metadata.Data() + offset, &clearWord, 4u);
+        std::memset(stencil.Data(), clearStencil, MultisampledDepthBytes_nid_no_patch(extent, 1u, fragments));
+        target.depthSwizzle = 24u;
+        target.pipeBankXor = one ? 0x8c00u : 0u;
+        target.iterate256 = target.htilePipeAligned = true;
+        target.htileDepthOnly = true;
+        words = DepthSampleWords(target);
+        {
+            GuestAllocations::Mutation mutation;
+            mutation.Add(metadata.Data(), DriverMetadataSpan, true, true, true);
+        }
+        const std::lock_guard gpu(AgcDriver::GuestMemory::GpuMutex());
+        view = DepthSurfaceView(context, target);
+        texture = CachedSampledTexture(context, words);
+        Require(texture != nullptr, "the native depth target on the driver's device was not imported for sampling");
+        recorder.Sync();
+        output = std::make_unique<Buffer>(context, (Count() + 2u) * 16u, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+        fetch = std::make_unique<Fetch>(context, *texture, *output, FetchShader(extent.width, extent.height, fragments, false, true));
+    }
+    ~DriverDepthTarget() {
+        {
+            const std::lock_guard gpu(AgcDriver::GuestMemory::GpuMutex());
+            fetch.reset();
+            texture.reset();
+            recorder.Sync();
+            ClearCachedTextures(context.device);
+            ClearDepthSurfaces(context.device);
+        }
+        GuestAllocations::Mutation mutation;
+        mutation.Remove(metadata.Data());
+    }
+    DriverDepthTarget(const DriverDepthTarget&) = delete;
+    DriverDepthTarget& operator=(const DriverDepthTarget&) = delete;
+
+    void Fill(std::size_t bytes) const { SubmitDriverDmaFill(target.htileAddress, static_cast<std::uint32_t>(bytes), clearWord); }
+    std::shared_ptr<Texture> Sampled() const {
+        const std::lock_guard gpu(AgcDriver::GuestMemory::GpuMutex());
+        return CachedSampledTexture(context, words);
+    }
+    void Sample(std::optional<float> drawn, std::optional<float> offset, std::string_view what) const {
+        const std::lock_guard gpu(AgcDriver::GuestMemory::GpuMutex());
+        std::memset(output->Bytes().data(), 0xa5, output->Bytes().size());
+        if (offset) {
+            const DepthRaster raster(context, target, view, StencilUse{VK_COMPARE_OP_EQUAL, VK_STENCIL_OP_KEEP, clearStencil});
+            CommandBatch batch(context);
+            raster.Run(batch.Handle(), *offset);
+            batch.SubmitAndWait();
+        }
+        Require(CachedSampledTexture(context, words) == texture, std::string(what) + ": the sampled view of the native depth target on the driver's device changed");
+        recorder.Sync();
+        CommandBatch batch(context);
+        fetch->Run(batch.Handle(), Count());
+        RecordMemoryBarrier(context, batch.Handle(), VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_HOST_BIT, VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_HOST_READ_BIT);
+        batch.SubmitAndWait();
+        output->Invalidate();
+        for (std::uint32_t index = 0u; index < Count(); ++index) {
+            std::array<float, 4> result{};
+            std::memcpy(result.data(), output->Bytes().data() + (index + 1u) * 16u, 16u);
+            const auto expected = drawn ? *drawn + static_cast<float>(index % fragments + 1u) / 16.0f : target.clearDepth;
+            Require(result == std::array<float, 4>{expected, 0.0f, 0.0f, 1.0f}, std::string(what) + ": a sampled depth on the driver's device is not " + std::to_string(expected));
+        }
+    }
+    std::size_t HtileBytes() const { return htileBytes; }
+
+private:
+    std::uint32_t Count() const { return extent.width * extent.height * fragments; }
+
+    Context context;
+    Recorder& recorder;
+    VkExtent2D extent;
+    std::uint32_t fragments;
+    TargetMemory memory;
+    TargetMemory stencil;
+    TargetMemory metadata;
+    std::size_t htileBytes;
+    std::uint32_t clearWord;
+    std::uint8_t clearStencil;
+    DepthTarget target;
+    std::array<std::uint32_t, 8> words{};
+    VkImageView view = VK_NULL_HANDLE;
+    std::shared_ptr<Texture> texture;
+    std::unique_ptr<Buffer> output;
+    std::unique_ptr<Fetch> fetch;
+};
+
+void CheckDriverPathTarget(const Context& context, Recorder& recorder, std::uint32_t fragments, bool one, DriverFill fill) {
+    const DriverDepthTarget target(context, recorder, fragments, one);
+    target.Sample(std::nullopt, std::nullopt, "native depth imported on the driver's device");
+    target.Sample(0.25f, 0.25f, "native depth drawn on the driver's device");
+    const auto fillsBefore = AgcDriver::DriverDetail::dmaFills.load();
+    if (fill == DriverFill::Partial) {
+        target.Fill(target.HtileBytes() / 2u);
+        TargetRefuses([&] { target.Sampled(); }, "native multisample depth metadata fill transition is not implemented");
+        std::printf("Native depth on the driver's device samples=%u clear=%u: a DMA_DATA fill over half its HTILE refused\n", fragments, one);
+        return;
+    }
+    target.Fill(target.HtileBytes());
+    Require(AgcDriver::DriverDetail::dmaFills.load() == fillsBefore, "a whole-HTILE DMA_DATA fill of 64 KiB or less was stored as a queued buffer fill");
+    target.Sample(std::nullopt, std::nullopt, "a whole-HTILE DMA_DATA fill through the driver");
+    target.Sample(0.125f, 0.125f, "native depth drawn after a DMA_DATA clear through the driver");
+    std::printf("Native depth on the driver's device samples=%u clear=%u: drawn, cleared by a DMA_DATA fill of its HTILE through the driver and sampled\n", fragments, one);
+}
+
+int CheckDriverPath() {
+#ifdef _WIN32
+    _putenv_s("APS5_PIPELINED_DRAWS", "1");
+    _putenv_s("APS5_PIPELINE_DMA", "1");
+#else
+    setenv("APS5_PIPELINED_DRAWS", "1", 1);
+    setenv("APS5_PIPELINE_DMA", "1", 1);
+#endif
+    std::shared_ptr<AgcDriver::VulkanDevice> device = OpenVulkanTestDevice();
+    if (device == nullptr) return VulkanTestSkipped;
+    AgcDriver::DriverDetail::DriverTestAccess::UseDevice(device);
+    const auto context = AgcDriver::VulkanDeviceTestAccess::ContextOf(*device);
+    auto* recorder = Recorder::Active();
+    Require(recorder != nullptr && recorder->Device() == context.device, "the driver's device did not activate its recorder");
+#ifndef _WIN32
+    SetImportWatch(context, ImportWatch::Watch);
+#endif
+    const auto supported = [&](std::uint32_t samples) { return DepthSupported(context, VK_FORMAT_D32_SFLOAT_S8_UINT, samples) && (context.limits.framebufferStencilSampleCounts & samples) != 0u; };
+    Require(supported(4u), "the native depth driver-path regression requires sampled D32S8 with four samples");
+    std::uint32_t checked = 0u, unavailable = 0u;
+    for (const auto samples : {2u, 4u, 8u}) {
+        if (!supported(samples)) { unavailable += 2u; continue; }
+        for (const bool one : {false, true}) { CheckDriverPathTarget(context, *recorder, samples, one, DriverFill::Whole); ++checked; }
+    }
+    CheckDriverPathTarget(context, *recorder, 4u, false, DriverFill::Partial);
+    AgcDriverWaitIdle_nid_postfix();
+    std::printf("Native depth on the driver's device cases checked=%u unavailable=%u\n", checked, unavailable);
+    return 0;
+}
+
 }
 
 int main(int argc, char** argv) {
     try {
+        if (argc == 2 && std::string_view(argv[1]) == "--driver-path") return CheckDriverPath();
         std::unique_ptr<Device> device;
         try { device = std::make_unique<Device>(); }
         catch (const std::exception& error) {
