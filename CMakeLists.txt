@@ -161,6 +161,10 @@ if(BUILD_TESTING)
         add_test(NAME export_prototypes COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_export_prototypes.py)
         set_tests_properties(export_prototypes PROPERTIES TIMEOUT 20)
+        add_test(NAME pending_export_nids COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_pending_export_nids.py)
+        set_tests_properties(pending_export_nids PROPERTIES TIMEOUT 20
+            ENVIRONMENT_MODIFICATION "ANYPS5_SOURCE_ROOT=string_append:${CMAKE_CURRENT_SOURCE_DIR}")
         add_test(NAME unwrap_self COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_unwrap_self.py)
         foreach(shard RANGE 0 11)
