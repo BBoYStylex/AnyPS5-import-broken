@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <initializer_list>
@@ -133,7 +134,12 @@ bool IsFiller(std::uint32_t header) {
 std::span<const std::uint32_t> PacketAt(std::span<const std::uint32_t> words, std::size_t at, const char* stream) {
     const auto header = words[at];
     if (IsFiller(header)) return words.subspan(at, 1);
-    if ((header >> 30) != 3) throw std::runtime_error(std::string("GnmDriver: unsupported PM4 packet type in the ") + stream);
+    if (const auto type = header >> 30; type != 3) {
+        char what[256];
+        std::snprintf(what, sizeof(what), "GnmDriver: unsupported PM4 packet type %u in the %s: header 0x%08x at dword %zu of %zu%s", type, stream, header, at, words.size(),
+            header == 1u ? " (a dword of 1 where a packet header was expected: a title store that landed on a rebuilt buffer; APS5_GNM_SUBMIT_WAIT_IDLE=1 keeps the queue ahead of it)" : "");
+        throw std::runtime_error(what);
+    }
     const std::size_t total = ((header >> 16) & 0x3fffu) + 2;
     if (total > words.size() - at) throw std::runtime_error(std::string("GnmDriver: truncated packet in the ") + stream);
     return words.subspan(at, total);
