@@ -118,8 +118,8 @@ DescriptorImageShape ImageShapeForResource(const ImageResource& image) {
     fail("DescriptorBindingBuilder::Populate image resource dimension has no descriptor image shape");
 }
 
-std::vector<std::uint32_t> GuestBuffersDescriptor(const std::vector<std::uint32_t>& resources, const ResourceSnapshot& snapshot) {
-    std::vector<std::uint32_t> result;
+void GuestBuffersDescriptor(std::vector<std::uint32_t>& result, const std::vector<std::uint32_t>& resources, const ResourceSnapshot& snapshot) {
+    result.clear();
     result.reserve(resources.size() * 4u);
     for (const std::uint32_t r : resources) {
         if (r >= snapshot.buffers.size()) {
@@ -133,11 +133,10 @@ std::vector<std::uint32_t> GuestBuffersDescriptor(const std::vector<std::uint32_
             result.push_back(value.dwords[dword]);
         }
     }
-    return result;
 }
 
-std::vector<std::uint32_t> GuestSamplersDescriptor(const std::vector<std::uint32_t>& resources, const ResourceSnapshot& snapshot) {
-    std::vector<std::uint32_t> result;
+void GuestSamplersDescriptor(std::vector<std::uint32_t>& result, const std::vector<std::uint32_t>& resources, const ResourceSnapshot& snapshot) {
+    result.clear();
     std::uint32_t dwordCount = 0;
     for (std::size_t i = 0; i < resources.size(); i++) {
         const std::uint32_t r = resources[i];
@@ -157,7 +156,6 @@ std::vector<std::uint32_t> GuestSamplersDescriptor(const std::vector<std::uint32
             result.push_back(value.dwords[dword]);
         }
     }
-    return result;
 }
 
 constexpr std::uint32_t ForceUnnormalizedBit = 1u << 15u;
@@ -576,7 +574,7 @@ void DescriptorBindingBuilder::Populate(BindingAllocationResult& allocation, con
         physical = entry.descriptor;
         switch (physical.role) {
         case DescriptorRole::GuestBuffers:
-            physical.guestDescriptor = GuestBuffersDescriptor(entry.resources, snapshot);
+            GuestBuffersDescriptor(physical.guestDescriptor, entry.resources, snapshot);
             writtenHere += entry.writtenBuffers;
             readOnlyHere += entry.readOnlyBuffers;
             break;
@@ -595,7 +593,7 @@ void DescriptorBindingBuilder::Populate(BindingAllocationResult& allocation, con
             }
             break;
         case DescriptorRole::GuestSamplers:
-            physical.guestDescriptor = GuestSamplersDescriptor(entry.resources, snapshot);
+            GuestSamplersDescriptor(physical.guestDescriptor, entry.resources, snapshot);
             for (const auto element : entry.samplerFilterElements) {
                 auto& filter = physical.guestDescriptor.at(element * 4u + 2u);
                 filter = PointFilteredSamplerWord(physical.guestDescriptor.at(element * 4u), filter);
