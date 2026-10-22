@@ -117,15 +117,22 @@ std::mutex g_submitMutex;
 bool g_frameStarted = false;
 
 int CheckSubmission(std::uint32_t count, std::uint32_t* const* dcbs, const std::uint32_t* dcbBytes, std::uint32_t* const* ccbs, const std::uint32_t* ccbBytes) {
-    if (count != 0 && (!dcbs || !dcbBytes || (ccbBytes && !ccbs))) return GNM_ERROR_SUBMISSION_FAILED_INVALID_ARGUMENT;
+    if (count != 0 && (!dcbs || !dcbBytes)) return GNM_ERROR_SUBMISSION_FAILED_INVALID_ARGUMENT;
     for (std::uint32_t i = 0; i < count; ++i) {
-        if (dcbBytes[i] == 0 || dcbBytes[i] > MaxCommandBufferBytes || (ccbBytes && ccbBytes[i] > MaxCommandBufferBytes)) return GNM_ERROR_SUBMISSION_FAILED_INVALID_ARGUMENT;
+        if (!dcbs[i] || dcbBytes[i] == 0 || dcbBytes[i] % 4 != 0 || dcbBytes[i] > MaxCommandBufferBytes) return GNM_ERROR_SUBMISSION_FAILED_INVALID_ARGUMENT;
+        const auto constantBytes = ccbBytes ? ccbBytes[i] : 0;
+        if (constantBytes % 4 != 0 || constantBytes > MaxCommandBufferBytes || (constantBytes != 0 && (!ccbs || !ccbs[i]))) return GNM_ERROR_SUBMISSION_FAILED_INVALID_ARGUMENT;
     }
     return 0;
 }
 
+bool IsFiller(std::uint32_t header) {
+    return (header >> 30) == 2;
+}
+
 std::span<const std::uint32_t> PacketAt(std::span<const std::uint32_t> words, std::size_t at, const char* stream) {
     const auto header = words[at];
+    if (IsFiller(header)) return words.subspan(at, 1);
     if ((header >> 30) != 3) throw std::runtime_error(std::string("GnmDriver: unsupported PM4 packet type in the ") + stream);
     const std::size_t total = ((header >> 16) & 0x3fffu) + 2;
     if (total > words.size() - at) throw std::runtime_error(std::string("GnmDriver: truncated packet in the ") + stream);
@@ -184,6 +191,7 @@ std::vector<std::uint32_t> MergeEngines(std::span<const std::uint32_t> dcb, std:
         while (constant < ccb.size() && !(untilAhead && g_constantCounter > g_drawCounter)) {
             const auto packet = PacketAt(ccb, constant, "constant command buffer");
             constant += packet.size();
+            if (IsFiller(packet[0])) continue;
             switch (Opcode(packet[0])) {
                 case OpIncrementCeCounter:
                     ++g_constantCounter;
@@ -203,6 +211,7 @@ std::vector<std::uint32_t> MergeEngines(std::span<const std::uint32_t> dcb, std:
     for (std::size_t draw = 0; draw < dcb.size();) {
         const auto packet = PacketAt(dcb, draw, "draw command buffer");
         draw += packet.size();
+        if (IsFiller(packet[0])) continue;
         switch (Opcode(packet[0])) {
             case OpWaitOnCeCounter:
                 runConstant(true);
@@ -223,8 +232,8 @@ void SubmitLocked(std::uint32_t count, std::uint32_t* const* dcbs, const std::ui
     static FrameStart frameStart;
     std::vector<std::vector<std::uint32_t>> merged;
     for (std::uint32_t i = 0; i < count; ++i) {
-        const auto constantWords = ccbBytes && ccbs[i] ? ccbBytes[i] / 4 : 0;
-        merged.push_back(MergeEngines({dcbs[i], dcbBytes[i] / 4}, {ccbs ? ccbs[i] : nullptr, constantWords}));
+        const auto constantWords = ccbBytes ? ccbBytes[i] / 4 : 0;
+        merged.push_back(MergeEngines({dcbs[i], dcbBytes[i] / 4}, {constantWords != 0 ? ccbs[i] : nullptr, constantWords}));
     }
     if (!g_frameStarted) {
         static const bool gcn = (AgcDriverUseGcnShaders_nid_postfix(), true);
@@ -468,10 +477,6 @@ bool APS5_VABI sceGnmIsUserPaEnabled() {
     return false;
 }
 
-std::uint32_t APS5_VABI sceGnmLogicalCuMaskToPhysicalCuMask(std::int64_t, std::uint32_t logicalMask) {
-    return logicalMask;
-}
-
 bool APS5_VABI sceGnmDriverCaptureInProgress() {
     return false;
 }
@@ -530,6 +535,11 @@ int APS5_VABI sceGnmGetTheTessellationFactorRingBufferBaseAddress() {
 }
 
 int APS5_VABI sceGnmLogicalCuIndexToPhysicalCuIndex() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceGnmLogicalCuMaskToPhysicalCuMask() {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }

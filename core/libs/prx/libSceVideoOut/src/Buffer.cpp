@@ -83,6 +83,11 @@ uint64_t Ps5PixelFormat(uint32_t pixelFormat) {
     throw std::runtime_error(text);
 }
 
+uint32_t Ps4TiledPitch(uint32_t tilingMode, uint32_t width, uint32_t pitchInPixel) {
+    if (tilingMode != 0) return 0;
+    return pitchInPixel != 0 ? pitchInPixel : (width + 127u) / 128u * 128u;
+}
+
 }
 
 extern "C" {
@@ -209,7 +214,7 @@ int APS5_VABI sceVideoOutRegisterBuffers(int handle, int bufferIndexStart, void*
     group.attribute.width = attribute->width;
     group.attribute.height = attribute->height;
     group.attribute.pitch_in_pixel = attribute->tiling_mode == 0 ? 0 : attribute->pitch_in_pixel;
-    group.ps4Pitch = attribute->tiling_mode == 0 ? (attribute->pitch_in_pixel != 0 ? attribute->pitch_in_pixel : (attribute->width + 127u) / 128u * 128u) : 0;
+    group.ps4Pitch = Ps4TiledPitch(attribute->tiling_mode, attribute->width, attribute->pitch_in_pixel);
     group.category = VIDEO_OUT_BUFFER_ATTRIBUTE_CATEGORY_UNCOMPRESSED;
     group.occupied = true;
     group.ps4 = true;
@@ -242,6 +247,7 @@ int APS5_VABI sceVideoOutSubmitChangeBufferAttribute2(int handle, int setIndex, 
     AgcDriverCheckGuestMemory_nid_postfix(attribute, sizeof(*attribute), alignof(VideoOutBufferAttribute2));
     auto group = cfg->groups[setIndex];
     group.attribute = *attribute;
+    if (group.ps4) group.ps4Pitch = Ps4TiledPitch(attribute->tiling_mode, attribute->width, attribute->pitch_in_pixel);
     for (int i = 0; i < VIDEO_OUT_BUFFER_NUM_MAX; ++i) {
         if (cfg->buffers[i].groupIndex != setIndex) continue;
         const auto display = DescribeVideoOutBuffer(cfg->buffers[i], group);

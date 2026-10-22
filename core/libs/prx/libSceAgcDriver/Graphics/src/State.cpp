@@ -282,7 +282,9 @@ VkStencilOpState stencilFace(std::uint32_t compare, std::uint32_t ops, std::uint
     const auto opValue = refMask >> 24u;
     auto reference = test;
     auto fixed = compare == 0 || compare == 7 ? 0u : face.compareMask;
-    const auto convert = [&](std::uint32_t op) {
+    std::uint32_t invertMask = 0;
+    std::uint32_t inverted = 0;
+    const auto convert = [&](std::uint32_t op, bool testFailed) {
         if (face.writeMask == 0) return VK_STENCIL_OP_KEEP;
         char detail[112];
         if (opValExport && ((op == 4 && !opValReference) || op == 5 || op == 6 || op == 8 || op == 9)) {
@@ -305,6 +307,16 @@ VkStencilOpState stencilFace(std::uint32_t compare, std::uint32_t ops, std::uint
                 }
                 const auto value = op == 2 ? 0xffu : op == 3 ? test : opValue;
                 if (((reference ^ value) & fixed & face.writeMask) != 0) {
+                    const auto compared = test & face.compareMask;
+                    const bool passKnown = compare == 2 || (compare == 3 && compared == face.compareMask) || (compare == 6 && compared == 0u);
+                    const bool failKnown = compare == 5 || (compare == 1 && compared == 0u) || (compare == 4 && compared == face.compareMask);
+                    const bool testValueKnown = testFailed ? failKnown : passKnown;
+                    const auto flipped = (test ^ value) & face.writeMask;
+                    if (testValueKnown && (face.writeMask & ~face.compareMask) == 0 && (invertMask == 0 || invertMask == flipped)) {
+                        invertMask = flipped;
+                        ++inverted;
+                        return VK_STENCIL_OP_INVERT;
+                    }
                     std::snprintf(detail, sizeof(detail), "AGC graphics: stencil replacement 0x%02x against test value 0x%02x (masks 0x%02x/0x%02x) is unsupported", value, test, face.compareMask, face.writeMask);
                     throw std::runtime_error(detail);
                 }
@@ -327,9 +339,14 @@ VkStencilOpState stencilFace(std::uint32_t compare, std::uint32_t ops, std::uint
                 throw std::runtime_error(detail);
         }
     };
-    face.failOp = convert(ops & 0xfu);
-    face.passOp = convert((ops >> 4u) & 0xfu);
-    face.depthFailOp = convert((ops >> 8u) & 0xfu);
+    face.failOp = convert(ops & 0xfu, true);
+    face.passOp = convert((ops >> 4u) & 0xfu, false);
+    face.depthFailOp = convert((ops >> 8u) & 0xfu, false);
+    if (invertMask != 0) {
+        const auto active = ((ops & 0xfu) != 0u) + (((ops >> 4u) & 0xfu) != 0u) + (((ops >> 8u) & 0xfu) != 0u);
+        if (inverted != active) throw std::runtime_error("AGC graphics: a stencil replacement drawn as an inversion beside another stencil operation is unsupported");
+        face.writeMask = invertMask;
+    }
     face.reference = reference;
     Require(!opValReference || compare == 0 || compare == 7 || face.compareMask == 0, "a stencil compare against the test value is unsupported with a pixel shader that exports the stencil operation value");
     return face;
@@ -341,8 +358,9 @@ void decodeDepth(const Registers& cx, std::uint32_t depthControl, bool testValEx
     const bool depthClear = (read(cx, 0x000) & 1u) != 0;
     const bool stencilClear = (read(cx, 0x000) & 2u) != 0;
     const auto view = read(cx, 0x002);
-    zero(cx, 0x002, 0x3c000000u, "depth mips (DB_DEPTH_VIEW MIP_LEVEL)");
-    zero(cx, 0x010, 0x000f1000u, "partially resident or mipmapped depth (DB_Z_INFO)");
+    zero(cx, 0x010, 0x00001000u, "partially resident depth (DB_Z_INFO)");
+    const auto viewMip = (view >> 26u) & 0xfu;
+    const auto maxMip = (read(cx, 0x010) >> 16u) & 0xfu;
     zero(cx, 0x011, 0x00001000u, "partially resident stencil (DB_STENCIL_INFO)");
     const auto zFormat = read(cx, 0x010) & 3u;
     const bool stencil = (read(cx, 0x011) & 1u) != 0;
@@ -386,7 +404,28 @@ void decodeDepth(const Registers& cx, std::uint32_t depthControl, bool testValEx
         const auto size = read(cx, 0x007);
         depth.extent = {(size & 0x3fffu) + 1u, ((size >> 16u) & 0x3fffu) + 1u};
     }
-    if (const auto slice = view & 0x1fffu; slice != 0) {
+    Require(!gcn || (maxMip == 0 && viewMip == 0), "PS4 depth targets with mip levels are not implemented");
+    if (maxMip == 0 && viewMip != 0) Require(false, "depth view mip " + std::to_string(viewMip) + " on a surface without mips");
+    if (maxMip != 0) {
+        char message[320];
+        std::snprintf(message, sizeof(message), "depth view mip %u of %u at %ux%u (DB_Z_INFO 0x%08x, DB_DEPTH_VIEW 0x%08x)", viewMip, maxMip + 1u, depth.extent.width, depth.extent.height, read(cx, 0x010), view);
+        const std::string where(message);
+        Require(viewMip <= maxMip, "the " + where + " is beyond the surface's mips");
+        Require(depth.samples == 1u, "multisampled " + where + " is unsupported");
+        Require(depth.depthSwizzle == XorSwizzleMode(TextureTileMode::kZ64KBX), "the " + where + " uses a swizzle other than 64 KiB Z_X");
+        const auto depthMips = ComputeElementMipLayout(TextureTileMode::kZ64KBX, zFormat == 1 ? 2u : 4u, depth.extent.width, depth.extent.height, maxMip + 1u);
+        const auto stencilMips = ComputeElementMipLayout(TextureTileMode::kZ64KBX, 1u, depth.extent.width, depth.extent.height, maxMip + 1u);
+        Require(zFormat == 0 || !depthMips.at(viewMip).tail, "rendering the " + where + " into the packed mip tail is unsupported");
+        Require(!stencil || !stencilMips.at(viewMip).tail, "rendering the stencil of the " + where + " into the packed mip tail is unsupported");
+        Require((read(cx, 0x010) & (1u << 29u)) == 0, "HTILE for the " + where + " is unsupported");
+        if (const auto slice = view & 0x1fffu; slice != 0) {
+            if (depth.address != 0) depth.address += static_cast<std::uint64_t>(slice) * ComputeSurfaceSize(depthMips, 1u);
+            if (depth.stencilAddress != 0) depth.stencilAddress += static_cast<std::uint64_t>(slice) * ComputeSurfaceSize(stencilMips, 1u);
+        }
+        if (depth.address != 0) depth.address += depthMips.at(viewMip).tiledOffset;
+        if (depth.stencilAddress != 0) depth.stencilAddress += stencilMips.at(viewMip).tiledOffset;
+        depth.extent = {depthMips.at(viewMip).width, depthMips.at(viewMip).height};
+    } else if (const auto slice = view & 0x1fffu; slice != 0) {
         if (depth.address != 0) depth.address += static_cast<std::uint64_t>(slice) * DepthSliceBytes(depth.extent, zFormat == 1 ? 2u : 4u);
         if (depth.stencilAddress != 0) depth.stencilAddress += static_cast<std::uint64_t>(slice) * DepthSliceBytes(depth.extent, 1u);
     }

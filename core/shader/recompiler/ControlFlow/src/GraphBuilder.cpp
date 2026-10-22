@@ -1293,8 +1293,9 @@ std::set<std::uint32_t> branchLabels(const RdnaProgram& program) {
 
 bool unchangedUntil(const RdnaProgram& program, std::uint32_t reg, std::uint32_t reader, std::uint32_t waveSize) {
     for (std::uint32_t index = 0; index < program.instructions.size(); ++index) {
-        if (index == reader || !writesScalar(program.instructions[index], reg, waveSize)) continue;
-        if (index < reader) return false;
+        const bool readerWritesAfterReading = index == reader && GcnGuestShaders();
+        if (readerWritesAfterReading || !writesScalar(program.instructions[index], reg, waveSize)) continue;
+        if (index <= reader) return false;
         for (std::uint32_t later = index; later < program.instructions.size(); ++later) {
             const auto& instruction = program.instructions[later];
             if ((IsDirectBranchOpcode(instruction.op) || instruction.op == RdnaOpcode::SCallB64) && instruction.branchTarget <= program.instructions[reader].programCounter) return false;

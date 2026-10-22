@@ -153,20 +153,39 @@ void testPs4Buffers() {
     tiledChange.width = 64;
     tiledChange.height = 64;
     tiledChange.pixel_format = 0x8000000000000000ull;
-    check(expectFailure([&] { sceVideoOutSubmitChangeBufferAttribute2(handle, 0, &tiledChange, nullptr); }).find("only supported for linear buffers") != std::string::npos, "a PS4 buffer set was changed to tiled");
+    check(sceVideoOutSubmitChangeBufferAttribute2(handle, 0, &tiledChange, nullptr) == 0, "a PS4 buffer set was not changed to tiled");
+    {
+        const auto cfg = VideoOutDriver::Get().GetConfig(handle);
+        std::lock_guard lock(cfg->mutex);
+        const auto display = DescribeVideoOutBuffer(cfg->buffers[1], cfg->groups[0]);
+        check(display.tilingMode == AgcDriver::DisplayTilingGcn && display.pitchInPixel == 128 && display.alignment == 4096, "the PS4 buffer set changed to tiled is not a GCN display buffer padded to 128 pixels");
+    }
+    auto linearChange = tiledChange;
+    linearChange.tiling_mode = 1;
+    linearChange.pitch_in_pixel = 64;
+    check(sceVideoOutSubmitChangeBufferAttribute2(handle, 0, &linearChange, nullptr) == 0, "a PS4 buffer set was not changed back to linear");
     void* const odd[1] = {storage.data() + 65536 + 256};
     check(expectFailure([&] { sceVideoOutRegisterBuffers(handle, 3, odd, 1, &attribute); }).find("4 KiB alignment") != std::string::npos, "a PS4 buffer was accepted below 4 KiB alignment");
     void* const fourth[1] = {storage.data() + 65536};
-    auto tiled = attribute;
-    tiled.tiling_mode = 0;
-    tiled.pitch_in_pixel = 0;
-    check(expectFailure([&] { sceVideoOutRegisterBuffers(handle, 3, fourth, 1, &tiled); }).find("tiled display buffers are not implemented") != std::string::npos, "a PS4 tiled buffer was accepted");
     auto tenBit = attribute;
     tenBit.pixel_format = 0x88060000u;
     check(expectFailure([&] { sceVideoOutRegisterBuffers(handle, 3, fourth, 1, &tenBit); }).find("unsupported PS4 pixel format 0x88060000") != std::string::npos, "an unknown PS4 pixel format was accepted");
     auto withOption = attribute;
     withOption.option = 1;
     check(expectFailure([&] { sceVideoOutRegisterBuffers(handle, 3, fourth, 1, &withOption); }).find("VIDEO_OUT_ERROR_INVALID_OPTION") != std::string::npos, "a PS4 buffer option was accepted");
+    auto unknownTiling = attribute;
+    unknownTiling.tiling_mode = 2;
+    check(expectFailure([&] { sceVideoOutRegisterBuffers(handle, 3, fourth, 1, &unknownTiling); }).find("VIDEO_OUT_ERROR_INVALID_TILING_MODE") != std::string::npos, "a PS4 buffer with tiling mode 2 was accepted");
+    auto tiled = attribute;
+    tiled.tiling_mode = 0;
+    tiled.pitch_in_pixel = 0;
+    check(sceVideoOutRegisterBuffers(handle, 3, fourth, 1, &tiled) == 2, "the PS4 tiled buffer set index is not 2");
+    {
+        const auto cfg = VideoOutDriver::Get().GetConfig(handle);
+        std::lock_guard lock(cfg->mutex);
+        const auto display = DescribeVideoOutBuffer(cfg->buffers[3], cfg->groups[2]);
+        check(cfg->groups[2].attribute.tiling_mode == 0 && display.tilingMode == AgcDriver::DisplayTilingGcn && display.pitchInPixel == 128, "the PS4 tiled buffer is not a GCN display buffer padded to 128 pixels");
+    }
     std::array<std::uint8_t, sizeof(VideoOutFlipStatus)> raw{};
     raw.fill(0xaa);
     check(sceVideoOutGetFlipStatus(handle, reinterpret_cast<VideoOutFlipStatus*>(raw.data())) == 0, "the PS4 flip status failed");
@@ -479,10 +498,12 @@ void testControls() {
     check(owner->GetTriggeredEvents(&event, 1) == 1 && event.udata == &settings && sceVideoOutGetEventId(&event) == VIDEO_OUT_EVENT_VBLANK, "vblank event or updated user data missing");
     check(sceVideoOutAddPreVblankStartEvent(queue, handle, &mode) == 0, "pre-vblank subscription failed");
     check(sceVideoOutWaitVblank(handle) == 0, "vblank wait failed");
-    KernelEvent events[2]{};
-    check(owner->GetTriggeredEvents(events, 2) == 2, "pre-vblank or vblank event missing");
-    const auto& preVblank = sceVideoOutGetEventId(&events[0]) == VIDEO_OUT_EVENT_PRE_VBLANK_START ? events[0] : events[1];
-    check(sceVideoOutGetEventId(&preVblank) == VIDEO_OUT_EVENT_PRE_VBLANK_START && preVblank.udata == &mode, "pre-vblank event missing");
+    std::array<KernelEvent, 8> events{};
+    const int collected = owner->GetTriggeredEvents(events.data(), static_cast<int>(events.size()));
+    check(collected >= 2, "pre-vblank or vblank event missing");
+    const auto end = events.begin() + collected;
+    check(std::any_of(events.begin(), end, [&](KernelEvent& item) { return sceVideoOutGetEventId(&item) == VIDEO_OUT_EVENT_VBLANK && item.udata == &settings; }), "vblank event missing");
+    check(std::any_of(events.begin(), end, [&](KernelEvent& item) { return sceVideoOutGetEventId(&item) == VIDEO_OUT_EVENT_PRE_VBLANK_START && item.udata == &mode; }), "pre-vblank event missing");
     check(sceVideoOutDeletePreVblankStartEvent(queue, handle) == 0, "pre-vblank unsubscription failed");
     std::vector<std::byte> allocation(65536 + 65535);
     const auto storage = alignedBuffer(allocation);
@@ -1052,7 +1073,9 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "%s\n", error.what());
         try { LibcRunShutdown_nid_postfix(); }
         catch (const std::exception& shutdown) { std::fprintf(stderr, "shutdown: %s\n", shutdown.what()); }
-        if (std::string(error.what()).find("Vulkan support") != std::string::npos && !std::getenv("ANYPS5_REQUIRE_DISPLAY")) {
+        const std::string what = error.what();
+        const bool noVulkanWindow = what.find("Vulkan support") != std::string::npos || (what.starts_with("DisplayWindow: ") && what.find("Vulkan") != std::string::npos);
+        if (noVulkanWindow && !std::getenv("ANYPS5_REQUIRE_DISPLAY")) {
             std::printf("skipped, no display or Vulkan device: %s\n", error.what());
             return 77;
         }

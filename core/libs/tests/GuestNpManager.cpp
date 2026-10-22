@@ -12,7 +12,7 @@ int APS5_VABI sceNpGetAccountCountryA(int user_id, void* country_code);
 int APS5_VABI sceNpGetNpId(int user_id, NpId* np_id);
 int APS5_VABI sceNpGetOnlineId(int user_id, NpOnlineId* online_id);
 int APS5_VABI sceNpGetUserIdByAccountId(std::uint64_t account_id, int* user_id);
-int APS5_VABI sceNpUnknown_8weiQyIdI3A(int userId, void* buffer);
+int APS5_VABI sceNpUnknown_8weiQyIdI3A(int userId, const NpOnlineId* buffer);
 int APS5_VABI sceNpUnknown_WxLcN76q19o(void);
 int APS5_VABI sceNpGetAccountCountry(const NpOnlineId* online_id, void* country_code);
 int APS5_VABI sceNpGetAccountDateOfBirth(const NpOnlineId* online_id, void* date_of_birth);
@@ -39,6 +39,7 @@ int APS5_VABI sceNpSetTimeout(int reqId, std::int32_t resolveRetry, std::uint32_
 
 extern "C" {
 int APS5_VABI sceNpCheckCallback(void);
+int APS5_VABI sceNpCheckCallbackForLib(void);
 int APS5_VABI sceNpRegisterStateCallback(void* callback, void* userdata);
 int APS5_VABI sceNpUnregisterStateCallback(void);
 int APS5_VABI sceNpRegisterStateCallbackA(void* callback, void* userdata);
@@ -160,9 +161,13 @@ void CheckStateCallbacksA() {
             "unregistering one id removed another callback");
     }
     Require(sceNpRegisterStateCallbackA(callbacks[3], &userdata[3]) == ids[3], "registering again takes the freed slot");
-    Require(sceNpCheckCallback() == 0, "sceNpCheckCallback failed after registering again");
+    Require(sceNpCheckCallbackForLib() == 0, "sceNpCheckCallbackForLib failed after registering again");
     for (int index = 0; index < 8; ++index) {
         Require(stateCallsA[index].calls == (index == 3 ? 2 : 1), "only the registration made again gets SIGNED_OUT");
+    }
+    Require(sceNpCheckCallbackForLib() == 0 && sceNpCheckCallback() == 0, "checking again failed");
+    for (int index = 0; index < 8; ++index) {
+        Require(stateCallsA[index].calls == (index == 3 ? 2 : 1), "sceNpCheckCallbackForLib left the state pending");
     }
     for (int index = 0; index < 8; ++index) {
         Require(sceNpUnregisterStateCallbackA(ids[index]) == 0, "unregistering a state callback");
@@ -350,9 +355,9 @@ int main() {
     Require(sceNpGetUserIdByAccountId(0x1234, nullptr) == InvalidArgument, "sceNpGetUserIdByAccountId must reject a null output");
     Require(sceNpGetUserIdByAccountId(0x1234, &userId) == SignedOut, "sceNpGetUserIdByAccountId must report NP as signed out");
     Require(userId == 0x5a5a, "sceNpGetUserIdByAccountId must leave the user id untouched");
-    unsigned char buffer[0x11]{};
+    NpOnlineId buffer{};
     try {
-        sceNpUnknown_8weiQyIdI3A(0x10000, buffer);
+        sceNpUnknown_8weiQyIdI3A(0x10000, &buffer);
         Require(false, "sceNpUnknown_8weiQyIdI3A must report that it is not implemented");
     } catch (const std::runtime_error& error) {
         Require(std::string(error.what()) == "sceNpUnknown_8weiQyIdI3A not implemented",
