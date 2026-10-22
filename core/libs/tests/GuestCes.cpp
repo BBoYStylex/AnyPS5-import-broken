@@ -36,6 +36,9 @@ const std::uint8_t* APS5_VABI sceCesRefersUcsProfileKoi8U(void);
 const std::uint8_t* APS5_VABI sceCesRefersUcsProfileCp1254(void);
 const std::uint8_t* APS5_VABI sceCesRefersUcsProfileCp1256(void);
 const std::uint8_t* APS5_VABI sceCesRefersUcsProfileCp1258(void);
+const std::uint8_t* APS5_VABI sceCesRefersUcsProfileCp1253(void);
+const std::uint8_t* APS5_VABI sceCesRefersUcsProfileCp1255(void);
+const std::uint8_t* APS5_VABI sceCesRefersUcsProfileCp1257(void);
 int APS5_VABI sceCesMbcsUcsContextInit(void*, const void*);
 void* APS5_VABI sceCesUcsProfileInitEucJpCp51932(void*);
 int APS5_VABI sceCesUtf8StrToMbcsStr(void*, const std::uint8_t*, std::uint32_t, std::uint32_t*, std::uint8_t*, std::uint32_t, std::uint32_t*);
@@ -92,7 +95,7 @@ static void RequireSbcCode(const std::uint8_t* profile, std::uint8_t sbc, std::u
 
 static void CheckSingleByteProfiles() {
     constexpr int unassignedCode = static_cast<int>(0x805C0020);
-    const auto getters = {sceCesRefersUcsProfileIso8859_1, sceCesRefersUcsProfileIso8859_2, sceCesRefersUcsProfileIso8859_4, sceCesRefersUcsProfileIso8859_5, sceCesRefersUcsProfileIso8859_9, sceCesRefersUcsProfileIso8859_10, sceCesRefersUcsProfileIso8859_13, sceCesRefersUcsProfileIso8859_14, sceCesRefersUcsProfileIso8859_15, sceCesRefersUcsProfileIso8859_16, sceCesRefersUcsProfileCp437, sceCesRefersUcsProfileCp737, sceCesRefersUcsProfileCp775, sceCesRefersUcsProfileCp850, sceCesRefersUcsProfileCp852, sceCesRefersUcsProfileCp855, sceCesRefersUcsProfileCp860, sceCesRefersUcsProfileCp861, sceCesRefersUcsProfileCp862, sceCesRefersUcsProfileCp863, sceCesRefersUcsProfileCp865, sceCesRefersUcsProfileCp866, sceCesRefersUcsProfileKoi8R, sceCesRefersUcsProfileKoi8U, sceCesRefersUcsProfileCp1254, sceCesRefersUcsProfileCp1256, sceCesRefersUcsProfileCp1258};
+    const auto getters = {sceCesRefersUcsProfileIso8859_1, sceCesRefersUcsProfileIso8859_2, sceCesRefersUcsProfileIso8859_4, sceCesRefersUcsProfileIso8859_5, sceCesRefersUcsProfileIso8859_9, sceCesRefersUcsProfileIso8859_10, sceCesRefersUcsProfileIso8859_13, sceCesRefersUcsProfileIso8859_14, sceCesRefersUcsProfileIso8859_15, sceCesRefersUcsProfileIso8859_16, sceCesRefersUcsProfileCp437, sceCesRefersUcsProfileCp737, sceCesRefersUcsProfileCp775, sceCesRefersUcsProfileCp850, sceCesRefersUcsProfileCp852, sceCesRefersUcsProfileCp855, sceCesRefersUcsProfileCp860, sceCesRefersUcsProfileCp861, sceCesRefersUcsProfileCp862, sceCesRefersUcsProfileCp863, sceCesRefersUcsProfileCp865, sceCesRefersUcsProfileCp866, sceCesRefersUcsProfileKoi8R, sceCesRefersUcsProfileKoi8U, sceCesRefersUcsProfileCp1254, sceCesRefersUcsProfileCp1256, sceCesRefersUcsProfileCp1258, sceCesRefersUcsProfileCp1253, sceCesRefersUcsProfileCp1255, sceCesRefersUcsProfileCp1257};
     const std::uint8_t* existing[] = {sceCesRefersUcsProfileCp1252(), sceCesRefersUcsProfileCp1251(), sceCesRefersUcsProfileCp1250()};
     std::size_t index = 0;
     for (const auto getter : getters) {
@@ -229,6 +232,24 @@ static void CheckSingleByteProfiles() {
         {sceCesRefersUcsProfileCp1258, 0xA4, 0x00A4},
         {sceCesRefersUcsProfileCp1258, 0xC1, 0x00C1},
         {sceCesRefersUcsProfileCp1258, 0xFF, 0x00FF},
+        {sceCesRefersUcsProfileCp1253, 0x80, 0x20AC},
+        {sceCesRefersUcsProfileCp1253, 0xA4, 0x00A4},
+        {sceCesRefersUcsProfileCp1253, 0xC1, 0x0391},
+        {sceCesRefersUcsProfileCp1253, 0xFF, 0xF8FB},
+        {sceCesRefersUcsProfileCp1253, 0xAA, 0xF8F9},
+        {sceCesRefersUcsProfileCp1253, 0xD2, 0xF8FA},
+        {sceCesRefersUcsProfileCp1255, 0x80, 0x20AC},
+        {sceCesRefersUcsProfileCp1255, 0xA4, 0x20AA},
+        {sceCesRefersUcsProfileCp1255, 0xC1, 0x05B1},
+        {sceCesRefersUcsProfileCp1255, 0xFF, 0xF896},
+        {sceCesRefersUcsProfileCp1255, 0xCA, 0x05BA},
+        {sceCesRefersUcsProfileCp1255, 0xD9, 0xF88D},
+        {sceCesRefersUcsProfileCp1257, 0x80, 0x20AC},
+        {sceCesRefersUcsProfileCp1257, 0xA4, 0x00A4},
+        {sceCesRefersUcsProfileCp1257, 0xC1, 0x012E},
+        {sceCesRefersUcsProfileCp1257, 0xFF, 0x02D9},
+        {sceCesRefersUcsProfileCp1257, 0xA1, 0xF8FC},
+        {sceCesRefersUcsProfileCp1257, 0xA5, 0xF8FD},
     };
     for (const Check& check : checks) RequireSbcCode(check.profile(), check.sbc, check.code);
 

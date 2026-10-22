@@ -652,6 +652,18 @@ const uint8_t* APS5_VABI sceCesRefersUcsProfileCp1258(void) {
     return singleByteProfile(SingleByte::Cp1258);
 }
 
+const uint8_t* APS5_VABI sceCesRefersUcsProfileCp1253(void) {
+    return singleByteProfile(SingleByte::Cp1253);
+}
+
+const uint8_t* APS5_VABI sceCesRefersUcsProfileCp1255(void) {
+    return singleByteProfile(SingleByte::Cp1255);
+}
+
+const uint8_t* APS5_VABI sceCesRefersUcsProfileCp1257(void) {
+    return singleByteProfile(SingleByte::Cp1257);
+}
+
 void* APS5_VABI sceCesUcsProfileInitSJis1997Cp932(void* sheet) {
     if (!sheet) return nullptr;
     std::memcpy(sheet, SJIS_TAG, sizeof(SJIS_TAG));
