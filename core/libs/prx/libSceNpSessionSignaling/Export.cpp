@@ -292,37 +292,67 @@ int APS5_VABI sceNpSessionSignalingGetConnectionFromNetAddress2(std::uint32_t co
     return 0;
 }
 
-int APS5_VABI sceNpSessionSignalingCreateJoinActivate() {
+int APS5_VABI sceNpSessionSignalingActivate(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceNpSessionSignalingGetConnectionFromNetAddress() {
+int APS5_VABI sceNpSessionSignalingCreateJoinActivate(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceNpSessionSignalingGetCustomProperty() {
+int APS5_VABI sceNpSessionSignalingGetConnectionFromNetAddress(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceNpSessionSignalingGetGroupFromPeerAddress() {
+int APS5_VABI sceNpSessionSignalingGetCustomProperty(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceNpSessionSignalingInitializeWithPort() {
+int APS5_VABI sceNpSessionSignalingGetGroupFromPeerAddress(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceNpSessionSignalingJoinActivate() {
+int APS5_VABI sceNpSessionSignalingInitializeWithPort(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceNpSessionSignalingSetCustomProperty() {
+int APS5_VABI sceNpSessionSignalingJoinActivate(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNpSessionSignalingManualUdpAbortConnection(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNpSessionSignalingManualUdpCreateJoin(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNpSessionSignalingManualUdpEstablishConnection(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNpSessionSignalingManualUdpJoin(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNpSessionSignalingRegisterInternalCallback(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNpSessionSignalingSetCustomProperty(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }

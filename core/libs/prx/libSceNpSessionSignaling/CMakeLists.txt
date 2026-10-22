@@ -11,4 +11,12 @@ if(BUILD_TESTING)
         set_tests_properties(guest_np_session_signaling PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceNpSessionSignaling>")
     endif()
+    find_package(Python3 QUIET COMPONENTS Interpreter)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME np_session_signaling_export_nids COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_export_nids.py
+            ${CMAKE_CURRENT_SOURCE_DIR}
+            ${PATCHED_DIR}/libSceNpSessionSignaling.prx)
+        set_tests_properties(np_session_signaling_export_nids PROPERTIES TIMEOUT 20)
+    endif()
 endif()
