@@ -125,7 +125,7 @@ int RunChild(const std::filesystem::path& self, const std::filesystem::path& dir
     return static_cast<int>(status);
 }
 #else
-Module Load(const std::filesystem::path& path) { return dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL); }
+Module Load(const std::filesystem::path& path) { return dlopen(path.c_str(), RTLD_LAZY | RTLD_LOCAL); }
 Export Resolve(Module module, const std::string& name) { return reinterpret_cast<Export>(dlsym(module, name.c_str())); }
 int RunChild(const std::filesystem::path& self, const std::filesystem::path& directory, const std::string& library, std::size_t index) {
     const auto child = fork();
