@@ -6,16 +6,23 @@
 struct DiscId;
 struct DiscId2;
 
+namespace {
+
+constexpr std::int32_t SCE_DISC_ID_ERROR_INVALID_ARGUMENT = static_cast<std::int32_t>(0x80D50001);
+constexpr std::int32_t SCE_DISC_ID_ERROR_NO_DISC = static_cast<std::int32_t>(0x80D50002);
+
+}
+
 extern "C" {
 
 int APS5_VABI sceDiscIdGet(DiscId* discId) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    if (discId == nullptr) return SCE_DISC_ID_ERROR_INVALID_ARGUMENT;
+    return SCE_DISC_ID_ERROR_NO_DISC;
 }
 
 int APS5_VABI sceDiscIdGet2(DiscId2* discId, std::uint32_t flags) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    if (discId == nullptr || flags != 0) return SCE_DISC_ID_ERROR_INVALID_ARGUMENT;
+    return SCE_DISC_ID_ERROR_NO_DISC;
 }
 
 }
