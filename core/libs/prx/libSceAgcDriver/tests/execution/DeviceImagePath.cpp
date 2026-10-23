@@ -70,6 +70,11 @@ alignas(256) constexpr std::array<std::uint32_t, 20> PointerCode{
     0xf40c0504u, 0x20000000u, 0xbf8cc07fu, 0xf09c0f08u, 0x00650000u, 0xbf8c0000u, 0xe0780000u, 0x80010000u, 0xbf810000u, 0xbf810000u,
 };
 
+alignas(256) constexpr std::array<std::uint32_t, 22> RuntimeAddressCode{
+    0x7e200500u, 0x80100210u, 0x7e0002f0u, 0x7e0202f0u, 0xf4040200u, 0xfa000000u, 0xf4080300u, 0xfa000010u, 0xbf8cc07fu, 0x8f108510u, 0xf4080504u,
+    0x20000000u, 0xf4080604u, 0xfa000010u, 0xbf8cc07fu, 0xf09c0f08u, 0x00650000u, 0xbf8c0000u, 0xe0780000u, 0x80010000u, 0xbf810000u, 0xbf810000u,
+};
+
 alignas(4096) std::array<std::array<float, 4>, 64> Outputs{};
 
 class GuestBlock {
@@ -222,6 +227,7 @@ struct Header {
 alignas(8) Header ComputeHeader{};
 alignas(8) Header LaneHeader{};
 alignas(8) Header PointerHeader{};
+alignas(8) Header RuntimeAddressHeader{};
 
 void Registered(Header& header, const std::uint32_t* code, std::size_t bytes) {
     header.shader.file_header = 0x34333231u;
@@ -241,7 +247,7 @@ void Append(std::vector<std::uint32_t>& commands, std::uint32_t opcode, std::ini
 
 void Dispatch(std::vector<std::uint32_t>& words, const GuestBlock& block, std::uint32_t key, std::array<float, 4>& output, const std::uint32_t* code = ComputeCode.data(), std::uint32_t threads = 1u) {
     const auto address = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(code));
-    const auto srt = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(code == PointerCode.data() ? block.PointerSrt() : block.Srt()));
+    const auto srt = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(code == PointerCode.data() || code == RuntimeAddressCode.data() ? block.PointerSrt() : block.Srt()));
     const auto set = [&](std::uint32_t offset, std::uint32_t value) { Append(words, 0x76, {offset, value}); };
     set(0x20c, static_cast<std::uint32_t>(address >> 8u));
     set(0x20d, static_cast<std::uint32_t>(address >> 40u) & 0xffu);
@@ -369,6 +375,7 @@ void UnexpectedKeys(const GuestBlock& block, const std::uint32_t* code, const st
 int main(int argc, char** argv) {
     const bool unexpected = argc > 1 && std::string(argv[1]) == "--unexpected";
     const bool pointer = argc > 1 && std::string(argv[1]) == "--pointer";
+    const bool runtimeAddress = argc > 1 && std::string(argv[1]) == "--runtime-address";
     const bool requested = AgcDriver::Graphics::GpuPathEnabled();
 #ifdef _WIN32
     _putenv_s("APS5_EAGER_WRITEBACK", "1");
@@ -398,7 +405,11 @@ int main(int argc, char** argv) {
         std::printf("device image path %s\n", served ? "on" : "off");
         Registered(LaneHeader, LaneCode.data(), sizeof(LaneCode));
         Registered(PointerHeader, PointerCode.data(), sizeof(PointerCode));
-        if (pointer) {
+        Registered(RuntimeAddressHeader, RuntimeAddressCode.data(), sizeof(RuntimeAddressCode));
+        if (runtimeAddress) {
+            Require(served, "the runtime-address run needs the device image path");
+            UnexpectedKeys(block, RuntimeAddressCode.data(), "runtime-address");
+        } else if (pointer) {
             Require(served, "the pointer-column run needs the device image path");
             UnexpectedKeys(block, PointerCode.data(), "lane-keyed pointer-column");
         } else if (unexpected) {
