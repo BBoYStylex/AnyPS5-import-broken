@@ -15,6 +15,8 @@ int DuplicateFrom(int fd, int start);
 void RememberDescriptor(int fd, int openFlags);
 void ShareDescriptor(int from, int to);
 void ForgetDescriptor(int fd);
+int PipeProcessGroup(int fd);
+int SetPipeProcessGroup(int fd, int group);
 bool Appends(int fd);
 bool IsVnode(int fd);
 bool IsCharacterDevice(int fd);
