@@ -246,6 +246,7 @@ constexpr int guestRlimitCount = 15;
 constexpr std::int64_t guestRlimitInfinity = std::numeric_limits<std::int64_t>::max();
 constexpr std::int64_t guestStackLimit = 0x200000;
 constexpr std::int64_t guestProcessLimit = 1604;
+constexpr std::int64_t guestProcessLimitPerUser = 1443;
 
 #ifdef _WIN32
 std::int64_t hostMemoryLimit() {
@@ -281,6 +282,8 @@ struct GuestResourceLimit {
 namespace {
 std::mutex openFileLimitMutex;
 std::optional<GuestResourceLimit> guestOpenFileLimit;
+std::mutex processLimitMutex;
+GuestResourceLimit guestProcessResourceLimit{guestProcessLimit, guestProcessLimit};
 }
 
 struct GuestResourceUsage {
@@ -467,8 +470,13 @@ int APS5_VABI setrlimit_nid_postfix(int resource, const GuestResourceLimit* limi
             return 0;
         }
     }
-    if (resource == guestRlimitNproc)
-        throw std::runtime_error("setrlimit: RLIMIT_NPROC is not stored");
+    if (resource == guestRlimitNproc) {
+        requested.rlim_cur = std::clamp(requested.rlim_cur, std::int64_t{1}, guestProcessLimitPerUser);
+        requested.rlim_max = std::clamp(requested.rlim_max, std::int64_t{1}, guestProcessLimitPerUser);
+        std::lock_guard lock(processLimitMutex);
+        guestProcessResourceLimit = requested;
+        return 0;
+    }
     if (requested.rlim_cur != current.rlim_cur || requested.rlim_max != current.rlim_max)
         throw std::runtime_error("setrlimit: changing the limit of resource " + std::to_string(resource) + " is not supported");
     return 0;
@@ -757,10 +765,11 @@ int APS5_VABI getrlimit_nid_postfix(int resource, GuestResourceLimit* limit) {
         result.rlim_cur = guestStackLimit;
         result.rlim_max = guestStackLimit;
         break;
-    case guestRlimitNproc:
-        result.rlim_cur = guestProcessLimit;
-        result.rlim_max = guestProcessLimit;
+    case guestRlimitNproc: {
+        std::lock_guard lock(processLimitMutex);
+        result = guestProcessResourceLimit;
         break;
+    }
     case guestRlimitCpu:
     case guestRlimitFsize:
     case guestRlimitCore:

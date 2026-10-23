@@ -82,36 +82,6 @@ int APS5_VABI sceCesEucCnUcsProfileSetSbcs(void) {
     return 0;
 }
 
-int APS5_VABI sceCesEucJpToUtf16(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceCesEucJpToUtf16be(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceCesEucJpToUtf16le(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceCesEucJpToUtf32(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceCesEucJpToUtf32be(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceCesEucJpToUtf32le(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
 int APS5_VABI sceCesEucJpUcsProfileSetSbcs(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
@@ -272,11 +242,6 @@ int APS5_VABI sceCesJisGetLevel(void) {
     return 0;
 }
 
-int APS5_VABI sceCesJisX0208ToSJisCode(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
 int APS5_VABI sceCesJisX0213ToSJisCode(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
@@ -323,26 +288,6 @@ int APS5_VABI sceCesMbcToUtf32le(void) {
 }
 
 int APS5_VABI sceCesMbcToUtf8(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceCesMbcsStrGetUtf16Len(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceCesMbcsStrGetUtf32Len(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceCesMbcsStrToUtf16Str(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceCesMbcsStrToUtf32Str(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -487,11 +432,6 @@ int APS5_VABI sceCesRefersUcsProfileKsX1003Tilde0x7e(void) {
     return 0;
 }
 
-int APS5_VABI sceCesSJisCodeToJisX0208(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
 int APS5_VABI sceCesSJisCodeToJisX0213(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
@@ -507,82 +447,7 @@ int APS5_VABI sceCesSJisPutCode(void) {
     return 0;
 }
 
-int APS5_VABI sceCesSJisToUcs2(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceCesSJisToUtf16(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceCesSJisToUtf16be(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceCesSJisToUtf16le(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceCesSJisToUtf32(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceCesSJisToUtf32be(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceCesSJisToUtf32le(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceCesSJisToUtf8(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
 int APS5_VABI sceCesSJisUcsProfileSetSbcs(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceCesSbcToUcs2(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceCesSbcToUtf16(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceCesSbcToUtf16be(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceCesSbcToUtf16le(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceCesSbcToUtf32(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceCesSbcToUtf32be(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceCesSbcToUtf32le(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -607,11 +472,6 @@ int APS5_VABI sceCesUcs2ToEucCn(void) {
     return 0;
 }
 
-int APS5_VABI sceCesUcs2ToEucJp(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
 int APS5_VABI sceCesUcs2ToEucKr(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
@@ -623,16 +483,6 @@ int APS5_VABI sceCesUcs2ToGb(void) {
 }
 
 int APS5_VABI sceCesUcs2ToMbc(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceCesUcs2ToSJis(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceCesUcs2ToSbc(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -757,17 +607,7 @@ int APS5_VABI sceCesUtf16StrGetIso2022Len(void) {
     return 0;
 }
 
-int APS5_VABI sceCesUtf16StrGetMbcsLen(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
 int APS5_VABI sceCesUtf16StrToIso2022Str(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceCesUtf16StrToMbcsStr(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -778,11 +618,6 @@ int APS5_VABI sceCesUtf16ToBig5(void) {
 }
 
 int APS5_VABI sceCesUtf16ToEucCn(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceCesUtf16ToEucJp(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -802,16 +637,6 @@ int APS5_VABI sceCesUtf16ToMbc(void) {
     return 0;
 }
 
-int APS5_VABI sceCesUtf16ToSJis(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceCesUtf16ToSbc(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
 int APS5_VABI sceCesUtf16ToUhc(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
@@ -823,11 +648,6 @@ int APS5_VABI sceCesUtf16beToBig5(void) {
 }
 
 int APS5_VABI sceCesUtf16beToEucCn(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceCesUtf16beToEucJp(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -847,16 +667,6 @@ int APS5_VABI sceCesUtf16beToMbc(void) {
     return 0;
 }
 
-int APS5_VABI sceCesUtf16beToSJis(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceCesUtf16beToSbc(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
 int APS5_VABI sceCesUtf16beToUhc(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
@@ -868,11 +678,6 @@ int APS5_VABI sceCesUtf16leToBig5(void) {
 }
 
 int APS5_VABI sceCesUtf16leToEucCn(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceCesUtf16leToEucJp(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -892,16 +697,6 @@ int APS5_VABI sceCesUtf16leToMbc(void) {
     return 0;
 }
 
-int APS5_VABI sceCesUtf16leToSJis(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceCesUtf16leToSbc(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
 int APS5_VABI sceCesUtf16leToUhc(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
@@ -912,17 +707,7 @@ int APS5_VABI sceCesUtf32StrGetIso2022Len(void) {
     return 0;
 }
 
-int APS5_VABI sceCesUtf32StrGetMbcsLen(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
 int APS5_VABI sceCesUtf32StrToIso2022Str(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceCesUtf32StrToMbcsStr(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -933,11 +718,6 @@ int APS5_VABI sceCesUtf32ToBig5(void) {
 }
 
 int APS5_VABI sceCesUtf32ToEucCn(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceCesUtf32ToEucJp(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -957,16 +737,6 @@ int APS5_VABI sceCesUtf32ToMbc(void) {
     return 0;
 }
 
-int APS5_VABI sceCesUtf32ToSJis(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceCesUtf32ToSbc(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
 int APS5_VABI sceCesUtf32ToUhc(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
@@ -978,11 +748,6 @@ int APS5_VABI sceCesUtf32beToBig5(void) {
 }
 
 int APS5_VABI sceCesUtf32beToEucCn(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceCesUtf32beToEucJp(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -1002,16 +767,6 @@ int APS5_VABI sceCesUtf32beToMbc(void) {
     return 0;
 }
 
-int APS5_VABI sceCesUtf32beToSJis(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceCesUtf32beToSbc(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
 int APS5_VABI sceCesUtf32beToUhc(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
@@ -1027,11 +782,6 @@ int APS5_VABI sceCesUtf32leToEucCn(void) {
     return 0;
 }
 
-int APS5_VABI sceCesUtf32leToEucJp(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
 int APS5_VABI sceCesUtf32leToEucKr(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
@@ -1043,16 +793,6 @@ int APS5_VABI sceCesUtf32leToGb(void) {
 }
 
 int APS5_VABI sceCesUtf32leToMbc(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceCesUtf32leToSJis(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceCesUtf32leToSbc(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -1082,11 +822,6 @@ int APS5_VABI sceCesUtf8ToEucCn(void) {
     return 0;
 }
 
-int APS5_VABI sceCesUtf8ToEucJp(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
 int APS5_VABI sceCesUtf8ToEucKr(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
@@ -1098,11 +833,6 @@ int APS5_VABI sceCesUtf8ToGb(void) {
 }
 
 int APS5_VABI sceCesUtf8ToMbc(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceCesUtf8ToSJis(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
