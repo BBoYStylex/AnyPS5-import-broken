@@ -24,6 +24,9 @@ int APS5_VABI sysctl_nid_postfix(const int*, std::uint32_t, void*, std::size_t*,
 int APS5_VABI sysctlbyname_nid_postfix(const char*, void*, std::size_t*, const void*, std::size_t);
 int APS5_VABI sysctlnametomib_nid_postfix(const char*, int*, std::size_t*);
 int APS5_VABI sceKernelGetSystemSwVersion_nid_postfix(SceKernelSystemSwVersion*);
+int APS5_VABI sceKernelGetSystemExVersion(char*, char*);
+int APS5_VABI sysKernelGetLowerLimitSysexVersion_nid_postfix(char*);
+int APS5_VABI sysKernelGetLowerLimitUpdVersion_nid_postfix(std::uint32_t*);
 int APS5_VABI getpid_nid_postfix();
 void* APS5_VABI mmap_nid_postfix(void*, std::size_t, int, int, int, std::int64_t);
 int APS5_VABI munmap_nid_postfix(void*, std::size_t);
@@ -438,6 +441,31 @@ static void CheckMeasuredAbsentSysctlMibs() {
         Require(threw);
     }
 }
+static void CheckVersionLimits() {
+    unsigned char first[4];
+    unsigned char second[4];
+    std::memset(first, 0xaa, sizeof(first));
+    std::memset(second, 0xaa, sizeof(second));
+    *__error_nid_postfix() = 13;
+    Require(sceKernelGetSystemExVersion(reinterpret_cast<char*>(first + 1), reinterpret_cast<char*>(second + 1)) == 0 && *__error_nid_postfix() == 13);
+    Require(first[0] == 0xaa && first[1] == 0 && first[2] == 0xaa && second[0] == 0xaa && second[1] == 0 && second[2] == 0xaa);
+    std::memset(first, 0xaa, sizeof(first));
+    Require(sceKernelGetSystemExVersion(reinterpret_cast<char*>(first), nullptr) == 22 && first[0] == 0xaa);
+    Require(sceKernelGetSystemExVersion(nullptr, reinterpret_cast<char*>(first)) == 22 && first[0] == 0xaa);
+    Require(sceKernelGetSystemExVersion(nullptr, nullptr) == 22 && *__error_nid_postfix() == 13);
+
+    std::memset(first, 0xaa, sizeof(first));
+    Require(sysKernelGetLowerLimitSysexVersion_nid_postfix(reinterpret_cast<char*>(first + 1)) == 0);
+    Require(first[0] == 0xaa && first[1] == 0 && first[2] == 0xaa);
+    Require(sysKernelGetLowerLimitSysexVersion_nid_postfix(nullptr) == SCE_KERNEL_ERROR_EINVAL);
+
+    struct {
+        std::uint32_t version;
+        std::uint32_t after;
+    } update{0xaaaaaaaau, 0xaaaaaaaau};
+    Require(sysKernelGetLowerLimitUpdVersion_nid_postfix(&update.version) == 0 && update.version == 0 && update.after == 0xaaaaaaaau);
+    Require(sysKernelGetLowerLimitUpdVersion_nid_postfix(nullptr) == SCE_KERNEL_ERROR_EINVAL && *__error_nid_postfix() == 13);
+}
 static void CheckSystemSwVersion() {
     *__error_nid_postfix() = 13;
     Require(sceKernelGetSystemSwVersion_nid_postfix(nullptr) == SCE_KERNEL_ERROR_EFAULT && *__error_nid_postfix() == 13);
@@ -818,6 +846,7 @@ int main() {
     CheckLeafWithTrailingComponent();
     CheckMeasuredAbsentSysctlMibs();
     CheckSystemSwVersion();
+    CheckVersionLimits();
     CheckPseudoRandomSysctl();
     CheckSdkVersionSysctl();
     CheckOvercommitSysctl();

@@ -480,6 +480,31 @@ int APS5_VABI sceKernelGetSystemSwVersion_nid_postfix(SceKernelSystemSwVersion* 
     return 0;
 }
 
+int APS5_VABI sceKernelGetSystemExVersion(char* first, char* second) {
+    if (first == nullptr || second == nullptr) {
+        return 22;
+    }
+    *first = '\0';
+    *second = '\0';
+    return 0;
+}
+
+int APS5_VABI sysKernelGetLowerLimitSysexVersion_nid_postfix(char* version) {
+    if (version == nullptr) {
+        return SCE_KERNEL_ERROR_EINVAL;
+    }
+    *version = '\0';
+    return 0;
+}
+
+int APS5_VABI sysKernelGetLowerLimitUpdVersion_nid_postfix(std::uint32_t* version) {
+    if (version == nullptr) {
+        return SCE_KERNEL_ERROR_EINVAL;
+    }
+    *version = 0;
+    return 0;
+}
+
 int APS5_VABI sysctlnametomib_nid_postfix(const char* name, int* mib, std::size_t* size) {
     struct KnownName {
         const char* name;
