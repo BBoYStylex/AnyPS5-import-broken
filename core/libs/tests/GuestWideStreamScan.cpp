@@ -7,6 +7,7 @@
 #include <string>
 
 extern "C" {
+int* APS5_VABI __error_nid_postfix();
 extern FileStream* __stdinp_nid_postfix;
 int APS5_VABI vfwscanf_nid_postfix(FileStream*, const char16_t*, void*);
 int APS5_VABI vfwscanf_s_nid_postfix(FileStream*, const char16_t*, void*);
@@ -201,7 +202,49 @@ static void CheckShortCharacterFields() {
     }
 }
 
+static void CheckSecureCharacterCapacities() {
+    const char* inputs[]{"", "a", "ab", "abc", "abcd"};
+    for (const char* input : inputs) {
+        const std::size_t length = std::string(input).size();
+        for (unsigned int capacity : {1u, 2u, 3u, 4u}) {
+            const std::size_t limit = capacity < 3 ? capacity : 3;
+            const std::size_t consumed = length < limit ? length : limit;
+            for (bool indirect : {false, true}) {
+                FileStream* stream = Open(input);
+                char16_t output[]{0xa55a, 0xa55a, 0xa55a, 0xa55a, 0xa55a, 0xa55a};
+                int count = -1;
+                *__error_nid_postfix() = 0;
+                const int result = indirect ? ScanStreamSized(stream, u"%3lc%n", output + 1, capacity, &count)
+                                            : fwscanf_s_nid_postfix(stream, u"%3lc%n", output + 1, capacity, &count);
+                Require(result == (length == 0 ? EOF : 1), "positive secure stream character capacity assignment count");
+                Require(count == (length == 0 ? -1 : static_cast<int>(consumed)), "positive secure stream character capacity consumed count");
+                Require(*__error_nid_postfix() == 0, "positive secure stream character capacity preserves errno");
+                for (std::size_t index = 0; index < 6; ++index) {
+                    const char16_t expectedUnit = index > 0 && index <= consumed ? static_cast<char16_t>(input[index - 1]) : 0xa55a;
+                    Require(output[index] == expectedUnit, "positive secure stream character capacity exact writes without terminator");
+                }
+                Require(fgetwc_nid_postfix(stream) == (length > consumed ? input[consumed] : -1),
+                        "positive secure stream character capacity leaves lookahead");
+                Close(stream);
+            }
+        }
+    }
+    for (bool indirect : {false, true}) {
+        FileStream* stream = Open("7 abcZ");
+        char16_t output[]{0xa55a, 0xa55a, 0xa55a, 0xa55a};
+        int value = -1, count = -1;
+        const int result = indirect ? ScanStreamSized(stream, u"%d %3lc%n", &value, output + 1, 2u, &count)
+                                    : fwscanf_s_nid_postfix(stream, u"%d %3lc%n", &value, output + 1, 2u, &count);
+        Require(result == 2 && value == 7 && count == 4, "positive secure stream capacity after another assignment");
+        Require(output[0] == 0xa55a && output[1] == u'a' && output[2] == u'b' && output[3] == 0xa55a,
+                "positive secure stream capacity after another assignment preserves bounds");
+        Require(fgetwc_nid_postfix(stream) == u'c', "positive secure stream capacity after another assignment leaves lookahead");
+        Close(stream);
+    }
+}
+
 int main() {
+    CheckSecureCharacterCapacities();
     CheckShortCharacterFields();
     CheckConsumption();
     CheckWideText();

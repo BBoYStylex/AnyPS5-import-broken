@@ -11,6 +11,7 @@
 extern "C" {
 std::uint64_t APS5_VABI _WStoul_nid_postfix(const char16_t*, char16_t**, int);
 int APS5_VABI _Iswctype_nid_postfix(std::uint32_t, std::uint64_t);
+int* APS5_VABI __error_nid_postfix();
 int APS5_VABI swscanf_nid_postfix(const char16_t*, const char16_t*, ...);
 int APS5_VABI swscanf_s_nid_postfix(const char16_t*, const char16_t*, ...);
 int APS5_VABI iswalnum_nid_postfix(std::uint32_t);
@@ -130,7 +131,7 @@ static void CheckScan() {
     Require(swscanf_s_nid_postfix(u"abc def", u"%s", narrow, std::size_t{4}) == 1 && std::strcmp(narrow, "abc") == 0, "%s");
     char16_t pair[3] = {u'?', u'?', u'?'};
     Require(swscanf_s_nid_postfix(u"xyz", u"%2lc", pair, std::size_t{2}) == 1 && pair[0] == u'x' && pair[1] == u'y' && pair[2] == u'?', "%2lc");
-    Require(swscanf_s_nid_postfix(u"xyz", u"%2lc", pair, std::size_t{1}) == 0, "%2lc too small");
+    Require(swscanf_s_nid_postfix(u"xyz", u"%2lc", pair, std::size_t{1}) == 1 && pair[0] == u'x', "%2lc limited by capacity");
     Require(swscanf_s_nid_postfix(u"x", u"%2lc", pair, std::size_t{2}) == 1 && pair[0] == u'x', "%2lc short input");
     Require(swscanf_s_nid_postfix(u"cab12", u"%l[abc]%d", text, std::size_t{6}, &first) == 2 && std::u16string(text) == u"cab" && first == 12, "%l[");
     Require(swscanf_s_nid_postfix(u"été!", u"%l[^!]", text, std::size_t{6}) == 1 && std::u16string(text) == u"été", "%l[^");
@@ -255,7 +256,7 @@ static void CheckShortCharacterFields() {
     Require(swscanf_nid_postfix(u"5 a", u"%d %3lc%n", &value, output, &count) == 2 && value == 5 && count == 3,
             "short character field after another assignment");
     Require(output[0] == u'a' && output[1] == 0xa55a && output[2] == 0xa55a, "short field after assignment does not terminate");
-    for (unsigned int capacity : {0u, 1u, 2u}) {
+    for (unsigned int capacity : {0u}) {
         char16_t guarded[]{0xa55a, 0xa55a, 0xa55a};
         Require(Throws([&] { swscanf_s_nid_postfix(u"a", u"%3lc", guarded + 1, capacity); }),
                 "short secure field with capacity below width is explicitly unsupported");
@@ -269,7 +270,53 @@ static void CheckShortCharacterFields() {
     Require(bytes[0] == '?' && bytes[1] == 'a' && bytes[2] == 'b' && bytes[3] == '?', "short narrow destination bounds");
 }
 
+static void CheckSecureCharacterCapacities() {
+    const char16_t* inputs[]{u"", u"a", u"ab", u"abc", u"abcd"};
+    for (const char16_t* input : inputs) {
+        const std::size_t length = std::u16string(input).size();
+        for (unsigned int capacity : {1u, 2u, 3u, 4u}) {
+            const std::size_t limit = capacity < 3 ? capacity : 3;
+            const std::size_t consumed = length < limit ? length : limit;
+            char16_t output[]{0xa55a, 0xa55a, 0xa55a, 0xa55a, 0xa55a, 0xa55a};
+            char16_t next = 0xa55a;
+            int count = -1;
+            int result = 0;
+            *__error_nid_postfix() = 0;
+            if (Throws([&] { result = swscanf_s_nid_postfix(input, u"%3lc%n%lc", output + 1, capacity, &count, &next, 1u); })) {
+                Require(false, "positive secure character capacity does not throw");
+                continue;
+            }
+            const int expected = length == 0 ? EOF : length > consumed ? 2 : 1;
+            Require(result == expected, "positive secure character capacity assignment count");
+            Require(count == (length == 0 ? -1 : static_cast<int>(consumed)), "positive secure character capacity consumed count");
+            Require(next == (length > consumed ? input[consumed] : 0xa55a), "the next conversion sees the capacity-limited remainder");
+            Require(*__error_nid_postfix() == 0, "positive secure character capacity preserves errno");
+            for (std::size_t index = 0; index < 6; ++index) {
+                const char16_t expectedUnit = index > 0 && index <= consumed ? input[index - 1] : 0xa55a;
+                Require(output[index] == expectedUnit, "positive secure character capacity exact writes without terminator");
+            }
+        }
+    }
+    char16_t output[]{0xa55a, 0xa55a, 0xa55a, 0xa55a};
+    char16_t next = 0xa55a;
+    int value = -1, count = -1;
+    Require(swscanf_s_nid_postfix(u"7 abcZ", u"%d %3lc%n%lc", &value, output + 1, 2u, &count, &next, 1u) == 3
+            && value == 7 && count == 4 && next == u'c', "positive secure character capacity after another assignment");
+    Require(output[0] == 0xa55a && output[1] == u'a' && output[2] == u'b' && output[3] == 0xa55a,
+            "positive secure character capacity after another assignment preserves bounds");
+    count = -1;
+    next = 0xa55a;
+    Require(swscanf_s_nid_postfix(u"abcd", u"%*3lc%n%lc", &count, &next, 1u) == 1 && count == 3 && next == u'd',
+            "suppressed character fields keep width and consume no capacity argument");
+    char bytes[]{'?', '?', '?', '?', '?'};
+    Require(Throws([&] { swscanf_s_nid_postfix(u"a", u"%3c", bytes + 1, 2u); }),
+            "undersized narrow character capacity remains explicitly unsupported");
+    Require(bytes[0] == '?' && bytes[1] == '?' && bytes[2] == '?' && bytes[3] == '?' && bytes[4] == '?',
+            "unsupported narrow character capacity leaves the destination unchanged");
+}
+
 int main() {
+    CheckSecureCharacterCapacities();
     CheckShortCharacterFields();
     CheckStoul();
     CheckClassification();
