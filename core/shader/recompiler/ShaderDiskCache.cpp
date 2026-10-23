@@ -470,6 +470,7 @@ void encodeArtifact(Writer& writer, const CompiledShaderArtifact& result) {
     writer.Value(result.runtimeAbiVersion);
     writer.Values(std::span<const std::uint32_t>(result.spirv.Words()));
     writer.Value(result.bdaAbiVersion);
+    writer.Value(result.windowLaneGuards);
     writer.Value(result.memoryOffsetDword);
     writer.Value(result.shaderDataDwords);
     writer.Value(result.imageMetadataDword);
@@ -530,6 +531,7 @@ void decodeArtifact(Reader& reader, CompiledShaderArtifact& result) {
     reader.Value(result.runtimeAbiVersion);
     result.spirv = reader.Spirv();
     reader.Value(result.bdaAbiVersion);
+    reader.Value(result.windowLaneGuards);
     reader.Value(result.memoryOffsetDword);
     reader.Value(result.shaderDataDwords);
     reader.Value(result.imageMetadataDword);
