@@ -141,6 +141,10 @@ bool faultReportOnlyCached(const ShaderRecompiler::SharedSpirv& spirv, std::uint
 
 }
 
+bool ShaderStoresThroughAddresses(const ShaderRecompiler::SharedSpirv& spirv) {
+    return storesThroughAddressesCached(spirv);
+}
+
 bool SpirvStoresThroughAddresses(std::span<const std::uint32_t> words) {
     if (words.size() < 5 || words[0] != spv::MagicNumber) return true;
     std::unordered_set<std::uint32_t> pointerTypes;
