@@ -1,0 +1,35 @@
+// SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
+// SPDX-License-Identifier: GPL-2.0-or-later
+
+#ifndef CORE_LIBS_PRX_LIBSCEGNMDRIVERFORNEOMODE_INCLUDE_EMBEDDEDSHADERS_HPP
+#define CORE_LIBS_PRX_LIBSCEGNMDRIVERFORNEOMODE_INCLUDE_EMBEDDEDSHADERS_HPP
+
+#include <array>
+#include <cstdint>
+
+namespace GnmNeo {
+
+alignas(256) constexpr std::array<std::uint32_t, 32> FullscreenVs{
+    0xbeeb03ffu, 0x00000007u, 0x36020081u, 0x34020281u, 0x360000c2u, 0x4a0202c1u, 0x4a0000c1u, 0x7e020b01u,
+    0x7e000b00u, 0x7e040280u, 0x7e0602f2u, 0xf80008cfu, 0x03020001u, 0xf800020fu, 0x03030303u, 0xbf810000u,
+    0x5362724fu, 0x07726468u, 0x00004047u, 0x00000000u, 0x47f8c29fu, 0x9b2da5cfu, 0xff7c5b7du, 0x00000017u,
+    0x0fe000f1u, 0x00000000u, 0x000c0000u, 0x00000004u, 0x00000000u, 0x00000004u, 0x00000000u, 0x00000007u,
+};
+
+alignas(256) constexpr std::array<std::uint32_t, 32> BlackPs{
+    0xbeeb03ffu, 0x00000003u, 0x7e000280u, 0x5e000100u, 0xbf800000u, 0xf8001c0fu, 0x00000000u, 0xbf810000u,
+    0x5362724fu, 0x07726468u, 0x00002043u, 0x00000000u, 0xb0a45b2bu, 0x1d39766du, 0x72044b7bu, 0x0000000fu,
+    0x0fe000f0u, 0x00000000u, 0x000c0000u, 0x00000004u, 0x00000000u, 0x00000004u, 0x00000002u, 0x00000002u,
+    0x00000000u, 0x00000000u, 0x00000010u, 0x0000000fu, 0x0000000cu, 0x00000000u, 0x00000000u, 0x00000000u,
+};
+
+alignas(256) constexpr std::array<std::uint32_t, 27> DepthOnlyPs{
+    0xbeeb03ffu, 0x00000003u, 0x7e040280u, 0xf8001803u, 0x02020202u, 0xbf810000u,
+    0x5362724fu, 0x07726468u, 0x00001841u, 0x04080002u, 0x98b9cb94u, 0x00000000u, 0x6f130734u, 0x0000000fu,
+    0x0fe000f2u, 0x00000000u, 0x00002000u, 0x00000000u, 0x00000000u, 0x00000002u, 0x00000002u, 0x00000002u,
+    0x00000000u, 0x00000000u, 0x00000010u, 0x00000003u, 0x0000000cu,
+};
+
+} // namespace GnmNeo
+
+#endif
