@@ -309,7 +309,6 @@ float APS5_VABI acosf_nid_postfix(float x) {
     errno = saved_errno;
     return result;
 }
-float APS5_VABI atan2f_nid_postfix(float y, float x) { return std::atan2(y, x); }
 float APS5_VABI hypotf_nid_postfix(float x, float y) { return static_cast<float>(std::hypot(static_cast<double>(x), static_cast<double>(y))); }
 double APS5_VABI hypot_nid_postfix(double x, double y) {
     const std::uint64_t hx = std::bit_cast<std::uint64_t>(x);
@@ -539,7 +538,116 @@ void APS5_VABI sincos_nid_postfix(double x, double* sinp, double* cosp) {
     *cosp = std::cos(x);
 }
 
-float APS5_VABI atanf_nid_postfix(float x) { return std::atan(x); }
+float APS5_VABI atanf_nid_postfix(float x) {
+    static constexpr float atanhi[] = {static_cast<float>(4.6364760399e-01), static_cast<float>(7.8539812565e-01), static_cast<float>(9.8279368877e-01), static_cast<float>(1.5707962513e+00)};
+    static constexpr float atanlo[] = {static_cast<float>(5.0121582440e-09), static_cast<float>(3.7748947079e-08), static_cast<float>(3.4473217170e-08), static_cast<float>(7.5497894159e-08)};
+    static constexpr float aT[] = {static_cast<float>(3.3333328366e-01), static_cast<float>(-1.9999158382e-01), static_cast<float>(1.4253635705e-01), static_cast<float>(-1.0648017377e-01), static_cast<float>(6.1687607318e-02)};
+    const std::int32_t hx = std::bit_cast<std::int32_t>(x);
+    const std::int32_t ix = hx & 0x7fffffff;
+    if (ix >= 0x4c800000) {
+        if (ix > 0x7f800000) {
+            return x + x;
+        }
+        const volatile float lo = atanlo[3];
+        return hx > 0 ? atanhi[3] + lo : -atanhi[3] - lo;
+    }
+    int id = -1;
+    if (ix < 0x3ee00000) {
+        if (ix < 0x39800000) {
+            return x;
+        }
+    } else {
+        x = std::fabs(x);
+        if (ix < 0x3f300000) {
+            id = 0;
+            x = (2.0f * x - 1.0f) / (2.0f + x);
+        } else if (ix < 0x3f980000) {
+            id = 1;
+            x = (x - 1.0f) / (x + 1.0f);
+        } else if (ix < 0x401c0000) {
+            id = 2;
+            x = (x - 1.5f) / (1.0f + 1.5f * x);
+        } else {
+            id = 3;
+            x = -1.0f / x;
+        }
+    }
+    const float z = x * x;
+    const float w = z * z;
+    const float s1 = z * (aT[0] + w * (aT[2] + w * aT[4]));
+    const float s2 = w * (aT[1] + w * aT[3]);
+    if (id < 0) {
+        return x - x * (s1 + s2);
+    }
+    const float result = atanhi[id] - ((x * (s1 + s2) - atanlo[id]) - x);
+    return hx < 0 ? -result : result;
+}
+
+float APS5_VABI atan2f_nid_postfix(float y, float x) {
+    static volatile float tiny = 1.0e-30f;
+    static volatile float pi_lo = static_cast<float>(-8.7422776573e-08);
+    const float pi_o_4 = static_cast<float>(7.8539818525e-01);
+    const float pi_o_2 = static_cast<float>(1.5707963705e+00);
+    const float pi = static_cast<float>(3.1415927410e+00);
+    const std::int32_t hx = std::bit_cast<std::int32_t>(x);
+    const std::int32_t ix = hx & 0x7fffffff;
+    const std::int32_t hy = std::bit_cast<std::int32_t>(y);
+    const std::int32_t iy = hy & 0x7fffffff;
+    if (iy > 0x7f800000) {
+        return y + y;
+    }
+    if (ix > 0x7f800000) {
+        return x + x;
+    }
+    if (hx == 0x3f800000) {
+        return atanf_nid_postfix(y);
+    }
+    int m = ((hy >> 31) & 1) | ((hx >> 30) & 2);
+    if (iy == 0) {
+        if (m < 2) {
+            return y;
+        }
+        return m == 2 ? pi + tiny : -pi - tiny;
+    }
+    if (ix == 0) {
+        return hy < 0 ? -pi_o_2 - tiny : pi_o_2 + tiny;
+    }
+    if (ix == 0x7f800000) {
+        if (iy == 0x7f800000) {
+            switch (m) {
+                case 0: return pi_o_4 + tiny;
+                case 1: return -pi_o_4 - tiny;
+                case 2: return 3.0f * pi_o_4 + tiny;
+                default: return -3.0f * pi_o_4 - tiny;
+            }
+        }
+        switch (m) {
+            case 0: return 0.0f;
+            case 1: return -0.0f;
+            case 2: return pi + tiny;
+            default: return -pi - tiny;
+        }
+    }
+    if (iy == 0x7f800000) {
+        return hy < 0 ? -pi_o_2 - tiny : pi_o_2 + tiny;
+    }
+    const std::int32_t k = (iy - ix) >> 23;
+    float z;
+    if (k > 26) {
+        z = pi_o_2 + 0.5f * pi_lo;
+        m &= 1;
+    } else if (k < -26 && hx < 0) {
+        z = 0.0f;
+    } else {
+        z = atanf_nid_postfix(std::fabs(y / x));
+    }
+    switch (m) {
+        case 0: return z;
+        case 1: return -z;
+        case 2: return pi - (z - pi_lo);
+        default: return (z - pi_lo) - pi;
+    }
+}
 double APS5_VABI atan2_nid_postfix(double y, double x) { return std::atan2(y, x); }
 float APS5_VABI powf_nid_postfix(float base, float exp) {
     if (base == 1.0f) return 1.0f;
