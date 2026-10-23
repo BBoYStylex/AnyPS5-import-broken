@@ -114,7 +114,8 @@ enum class ConservativeZExport : std::uint8_t {
 enum class ColorExportPacking : std::uint8_t {
     None,
     Unorm10_11_11,
-    Float11_11_10
+    Float11_11_10,
+    Unorm4_4_4_4
 };
 
 enum class RasterPrimitive : std::uint8_t {
@@ -150,6 +151,17 @@ inline constexpr std::uint32_t Zero = 2u;
 inline constexpr std::uint32_t One = 3u;
 
 }
+
+struct TargetMerge {
+    std::uint8_t target = 0;
+    std::uint16_t mask = 0;
+    std::uint8_t samples = 1;
+    std::array<std::uint32_t, 8> descriptor{};
+    bool depthStencilWrites = false;
+    bool depthStencilTests = false;
+
+    bool operator==(const TargetMerge&) const = default;
+};
 
 struct ShaderPixelStageInfo {
     std::uint32_t interpolatorCount;
@@ -191,6 +203,7 @@ struct ShaderPixelStageInfo {
     bool iteratesSamples = false;
     PixelPositionLocation positionLocation = PixelPositionLocation::Center;
     std::array<std::uint8_t, 32> sampleLocations{};
+    TargetMerge targetMerge{};
     std::array<std::uint32_t, 4> sampleOrder{};
 };
 
