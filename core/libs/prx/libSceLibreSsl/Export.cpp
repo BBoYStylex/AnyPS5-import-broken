@@ -1,3 +1,4 @@
+#include <atomic>
 #include <cinttypes>
 #include <cstdio>
 #include <cstddef>
@@ -12,6 +13,18 @@
 namespace {
 
 constexpr std::size_t DesScheduleBytes = 128;
+constexpr int CryptoNumLocks = 41;
+
+struct CryptoThreadId {
+    void* ptr;
+    std::uint64_t val;
+};
+
+static_assert(sizeof(CryptoThreadId) == 16);
+
+std::atomic<void*> lockingCallback{nullptr};
+std::atomic<void*> addLockCallback{nullptr};
+std::atomic<void*> threadIdCallback{nullptr};
 
 }
 
@@ -268,14 +281,15 @@ int APS5_VABI CONF_modules_load_file_nid_postfix(void) {
     return 0;
 }
 
-int APS5_VABI CRYPTO_THREADID_set_callback_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+int APS5_VABI CRYPTO_THREADID_set_callback_nid_postfix(void* callback) {
+    void* expected = nullptr;
+    return threadIdCallback.compare_exchange_strong(expected, callback) ? 1 : 0;
 }
 
-int APS5_VABI CRYPTO_THREADID_set_numeric_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+void APS5_VABI CRYPTO_THREADID_set_numeric_nid_postfix(CryptoThreadId* id, std::uint64_t value) {
+    if (id == nullptr) APS5_INVALID_ARG_EX;
+    *id = {};
+    id->val = value;
 }
 
 int APS5_VABI CRYPTO_cleanup_all_ex_data_nid_postfix(void) {
@@ -294,18 +308,15 @@ int APS5_VABI CRYPTO_malloc_nid_postfix(void) {
 }
 
 int APS5_VABI CRYPTO_num_locks_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return CryptoNumLocks;
 }
 
-int APS5_VABI CRYPTO_set_add_lock_callback_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+void APS5_VABI CRYPTO_set_add_lock_callback_nid_postfix(void* callback) {
+    addLockCallback.store(callback);
 }
 
-int APS5_VABI CRYPTO_set_locking_callback_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+void APS5_VABI CRYPTO_set_locking_callback_nid_postfix(void* callback) {
+    lockingCallback.store(callback);
 }
 
 int APS5_VABI CRYPTO_set_mem_functions_nid_postfix(void) {
