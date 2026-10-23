@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstring>
 #include <deque>
+#include <immintrin.h>
 #include <mutex>
 #include <stdexcept>
 #include <string>
@@ -23,6 +24,7 @@ int APS5_VABI scePthreadAttrSetstacksize(PthreadAttr* attr, std::size_t stackSiz
 int APS5_VABI scePthreadAttrSetaffinity(PthreadAttr* attr, KernelCpumask mask);
 int APS5_VABI scePthreadCreate(Pthread* thread, const PthreadAttr* attr, PthreadEntry entry, void* arg, const char* name);
 int APS5_VABI scePthreadJoin(Pthread thread, void** result);
+std::uint64_t APS5_VABI sceKernelGetTscFrequency();
 int APS5_VABI sceKernelCreateEqueue(KernelEqueue* eq, const char* name);
 int APS5_VABI sceKernelDeleteEqueue(KernelEqueue eq);
 int APS5_VABI sceKernelWaitEqueue(KernelEqueue eq, KernelEvent* ev, int num, int* out, const KernelUseconds* timo);
@@ -226,6 +228,11 @@ struct Manager {
     std::uint32_t freeNodes = 0;
     std::uint32_t freeSequences = 0;
     std::uint32_t persistentThreads = 0;
+    std::uint32_t workerCount = 0;
+    std::uint32_t sleepingWorkers = 0;
+    std::uint32_t wakeTokens = 0;
+    std::uint64_t pendingInvocations = 0;
+    std::uint64_t spinTicks = 0;
     std::array<std::deque<Item*>, 2> runQueues;
     std::vector<Sequence> sequences;
     std::deque<Sequence> computeSequences;
@@ -237,6 +244,14 @@ struct Manager {
     std::array<Factory, 2> unifiedFactories;
     std::vector<Pthread> workers;
 };
+
+thread_local Manager* currentWorker = nullptr;
+
+void WakeWorkers(Manager& manager, std::uint32_t invocations) {
+    const std::uint32_t available = invocations - (currentWorker == &manager ? 1u : 0u);
+    manager.wakeTokens += std::min(available, manager.sleepingWorkers - manager.wakeTokens);
+    if (manager.wakeTokens != 0) manager.work.notify_all();
+}
 
 Manager*& Implementation(void* self) {
     return *static_cast<Manager**>(self);
@@ -285,7 +300,8 @@ void Sequence::Advance() {
             ++outstanding;
             ++cursor;
             manager->runQueues[priority].push_back(&item);
-            manager->work.notify_all();
+            manager->pendingInvocations -= item.count;
+            WakeWorkers(*manager, item.count);
             continue;
         }
         if (item.type == ItemType::Compute || item.type == ItemType::ComputeIndirect) {
@@ -338,6 +354,7 @@ int Sequence::Dispatch(JobEntry entry, void* argument, std::uint32_t count, cons
     if (before.invocations + count > limits.invocations || before.dispatches >= limits.dispatches) return Latch(SequenceLimitExceeded);
     if (!TakeNode(*manager)) return Latch(SequenceNoNodes);
     items.push_back({ItemType::Dispatch, this, entry, argument, count, 0, 0, nullptr});
+    manager->pendingInvocations += count;
     Advance();
     return 0;
 }
@@ -551,11 +568,27 @@ bool RunOne(Manager& manager, std::unique_lock<std::mutex>& guard) {
 
 void* APS5_VABI WorkerEntry(void* argument) {
     Manager& manager = *static_cast<Manager*>(argument);
+    currentWorker = &manager;
+    std::uint64_t lastWork = __rdtsc();
     std::unique_lock guard(manager.lock);
     while (manager.running) {
-        if (RunOne(manager, guard)) continue;
-        manager.work.wait(guard, [&manager] { return !manager.running || !manager.runQueues[0].empty() || !manager.runQueues[1].empty(); });
+        if (RunOne(manager, guard)) {
+            lastWork = __rdtsc();
+            continue;
+        }
+        const bool spinning = manager.pendingInvocations != 0 && __rdtsc() - lastWork < manager.spinTicks;
+        if (spinning || manager.sleepingWorkers >= manager.workerCount - manager.persistentThreads) {
+            guard.unlock();
+            _mm_pause();
+            guard.lock();
+            continue;
+        }
+        ++manager.sleepingWorkers;
+        manager.work.wait(guard, [&manager] { return !manager.running || manager.wakeTokens != 0; });
+        if (manager.wakeTokens != 0) --manager.wakeTokens;
+        --manager.sleepingWorkers;
     }
+    currentWorker = nullptr;
     return nullptr;
 }
 
@@ -658,6 +691,8 @@ int Initialize(void* self, void* memory, std::uint64_t size, std::uint32_t worke
     if (computeSequences != 0 && (handlerPriority < 0x100 || handlerPriority > 0x2ff || handlerAffinity == 0 || handlerAffinity > 0x1fff)) return ManagerInvalidArgument;
     auto* manager = new Manager;
     manager->running = true;
+    manager->workerCount = workers;
+    manager->spinTicks = sceKernelGetTscFrequency() / 1000000 * settings.spinMicroseconds;
     manager->freeNodes = nodes - 1;
     manager->freeSequences = sequences == MaxSequences ? ~std::uint32_t{0} : (std::uint32_t{1} << sequences) - 1;
     manager->sequences = std::vector<Sequence>(sequences);
@@ -781,7 +816,7 @@ ISequenceFactory* APS5_VABI _ZN3sce3Job10JobManager34getUnifiedSequenceFactoryIn
 int APS5_VABI _ZN3sce3Job10JobManager24setPersistentThreadCountEj(void* self, std::uint32_t count) {
     Manager* manager = Implementation(self);
     if (manager == nullptr) return ManagerNotInitialized;
-    if (count > manager->workers.size()) return ManagerInvalidArgument;
+    if (count > manager->workerCount) return ManagerInvalidArgument;
     const std::lock_guard guard(manager->lock);
     manager->persistentThreads = count;
     return 0;
