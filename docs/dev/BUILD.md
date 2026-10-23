@@ -18,10 +18,6 @@ The output is x86-64: Linux ELF by default, Windows PE with `--windows` or Mach-
 
 Use a separate build directory for the full build.
 
-## Full build
-
-The experimental integer leaf compiler is included in full builds. It builds LLVM 20.1.5 from the pinned `3rdparty/llvm-project` submodule. Set `ANYPS5_BUILD_AOT=OFF` to omit it. Relinker-only builds omit it unless `ANYPS5_BUILD_AOT=ON` is passed explicitly.
-
 ## Integer leaf compiler
 
 This compiler translates one named x86-64 ELF function to a native x86-64 object. It does not convert a console executable or provide a guest runtime. The caller must declare the input function's System V ABI: zero to six `uint64_t` arguments and a `uint64_t` result. Argument registers are RDI, RSI, RDX, RCX, R8 and R9; LLVM lowers them to the output target's C calling convention.
@@ -42,7 +38,9 @@ Input must contain a defined `STT_FUNC` symbol with a nonzero extent entirely in
 
 The tests link and execute emitted objects and emitted assembly, compare both against the original x86-64 function and independent integer results, and parse emitted IR using LLVM. They require an x86-64 host and a GCC-compatible C++ compiler. Unsupported input and malformed CLI requests must fail without replacing existing output. Limits are tracked in [AOT debt](debt/aot.md).
 
-## Runtime dependencies
+## Full build
+
+The experimental integer leaf compiler is included in full builds. It builds LLVM 20.1.5 from the pinned `3rdparty/llvm-project` submodule. Set `ANYPS5_BUILD_AOT=OFF` to omit it. Relinker-only builds omit it unless `ANYPS5_BUILD_AOT=ON` is passed explicitly.
 
 ```sh
 git submodule update --init --recursive
