@@ -936,7 +936,10 @@ DeserializedRequest RequestSerializer::Deserialize(std::string_view text) const 
         result.vertex = vertex;
     }
     if (version >= 44u) result.request.target.fusedExactArithmetic = reader.ReadBool();
-    if (version >= 45u) result.request.target.largePixelFunctionLdsBuffer = reader.ReadBool();
+    if (version >= 45u) {
+        result.request.target.largePixelFunctionLdsBuffer = reader.ReadBool();
+        result.request.target.pixelFunctionStorageDwords = reader.ReadU32();
+    }
     if (version >= 21u && reader.Remaining() != 0u) throw std::runtime_error("RequestSerializer: unexpected trailing data");
     return result;
 }
