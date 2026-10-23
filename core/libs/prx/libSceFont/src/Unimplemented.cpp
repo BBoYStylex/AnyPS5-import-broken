@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <cstring>
 #include "prx/libc/include/General.hpp"
 #include "prx/libSceFont/include/FontTypes.hpp"
 
@@ -240,13 +241,25 @@ int APS5_VABI sceFontGraphicsExchangeResource(FontGraphicsResource* resource, Fo
 }
 
 int APS5_VABI sceFontGraphicsFillMethodInit(FontGraphicsFillMethod* method, std::int32_t mode, std::int32_t type) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    if (!method) return SCE_FONT_ERROR_INVALID_PARAMETER;
+    method->mode = mode;
+    method->type = type;
+    method->flags = 0;
+    method->tag = 0;
+    std::memset(method->reserved, 0, sizeof(method->reserved));
+    return SCE_FONT_OK;
 }
 
 int APS5_VABI sceFontGraphicsFillPlotInit(FontGraphicsFillPlot* plot, const FontGraphicsRegion* region) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    if (!plot || !region) return SCE_FONT_ERROR_INVALID_PARAMETER;
+    for (float& val : plot->mapping) val = 0.0f;
+    plot->region = region;
+    plot->tag = 0;
+    plot->reserved26 = 0;
+    plot->layout = 0;
+    plot->flags = 0;
+    std::memset(plot->reserved, 0, sizeof(plot->reserved));
+    return SCE_FONT_OK;
 }
 
 int APS5_VABI sceFontGraphicsFillPlotSetLayout(FontGraphicsFillPlot* plot, std::int32_t first, std::int32_t second) {
@@ -285,18 +298,42 @@ int APS5_VABI sceFontGraphicsGetDeviceUsage(FontGraphicsDevice* device, FontGrap
 }
 
 int APS5_VABI sceFontGraphicsRegionInit(FontGraphicsRegion* region, float x, float y, float width, float height) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    if (!region) return SCE_FONT_ERROR_INVALID_PARAMETER;
+    region->x = x;
+    region->y = y;
+    region->width = width;
+    region->height = height;
+    region->flags = 0;
+    region->tag = 0;
+    region->outerRadius = 0.0f;
+    region->innerRadius = 0.0f;
+    return SCE_FONT_OK;
 }
 
 int APS5_VABI sceFontGraphicsRegionInitCircular(FontGraphicsRegion* region, float centerX, float centerY, float outerRadius, float innerRadius) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    if (!region) return SCE_FONT_ERROR_INVALID_PARAMETER;
+    region->x = centerX;
+    region->y = centerY;
+    region->width = 0.0f;
+    region->height = 0.0f;
+    region->flags = 1;
+    region->tag = 0;
+    region->outerRadius = outerRadius;
+    region->innerRadius = innerRadius;
+    return SCE_FONT_OK;
 }
 
 int APS5_VABI sceFontGraphicsRegionInitRoundish(FontGraphicsRegion* region, float x, float y, float width, float height, float outerRadius, float innerRadius, std::uint32_t flags) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    if (!region) return SCE_FONT_ERROR_INVALID_PARAMETER;
+    region->x = x;
+    region->y = y;
+    region->width = width;
+    region->height = height;
+    region->flags = flags;
+    region->tag = 0;
+    region->outerRadius = outerRadius;
+    region->innerRadius = innerRadius;
+    return SCE_FONT_OK;
 }
 
 int APS5_VABI sceFontGraphicsRelease(void** object) {

@@ -80,6 +80,37 @@ int APS5_VABI sceFontCharacterGetSyllableStringState(const FontTextCharacter*, i
 FontTextCodes* APS5_VABI sceFontCharactersRefersTextCodes(const FontTextCharacter*, const FontTextCharacter*, FontTextCodes*);
 FontTextCodes* APS5_VABI sceFontTextCodesStepNext(FontTextCodes*);
 FontTextCodes* APS5_VABI sceFontTextCodesStepBack(FontTextCodes*);
+struct FontGraphicsRegion {
+    float x;
+    float y;
+    float width;
+    float height;
+    std::uint32_t flags;
+    std::uint32_t tag;
+    float outerRadius;
+    float innerRadius;
+};
+struct FontGraphicsFillMethod {
+    std::int32_t mode;
+    std::int32_t type;
+    std::uint32_t flags;
+    std::uint32_t tag;
+    std::byte reserved[16];
+};
+struct FontGraphicsFillPlot {
+    float mapping[4];
+    const FontGraphicsRegion* region;
+    std::uint16_t tag;
+    std::uint16_t reserved26;
+    std::uint16_t layout;
+    std::uint8_t flags;
+    std::byte reserved[33];
+};
+int APS5_VABI sceFontGraphicsRegionInit(FontGraphicsRegion*, float, float, float, float);
+int APS5_VABI sceFontGraphicsRegionInitCircular(FontGraphicsRegion*, float, float, float, float);
+int APS5_VABI sceFontGraphicsRegionInitRoundish(FontGraphicsRegion*, float, float, float, float, float, float, std::uint32_t);
+int APS5_VABI sceFontGraphicsFillMethodInit(FontGraphicsFillMethod*, std::int32_t, std::int32_t);
+int APS5_VABI sceFontGraphicsFillPlotInit(FontGraphicsFillPlot*, const FontGraphicsRegion*);
 }
 
 static void Check(bool value, int line) {
@@ -602,5 +633,28 @@ int main() {
     syllableState = -1;
     Require(sceFontCharacterGetSyllableStringState(nullptr, &syllableState) == SCE_FONT_ERROR_INVALID_PARAMETER && syllableState == 0);
     Require(sceFontCharacterGetSyllableStringState(&character, nullptr) == SCE_FONT_ERROR_INVALID_PARAMETER);
+    FontGraphicsRegion region{};
+    Require(sceFontGraphicsRegionInit(&region, 10.0f, 20.0f, 100.0f, 200.0f) == SCE_FONT_OK);
+    Require(region.x == 10.0f && region.y == 20.0f && region.width == 100.0f && region.height == 200.0f);
+    Require(region.flags == 0 && region.tag == 0 && region.outerRadius == 0.0f && region.innerRadius == 0.0f);
+    Require(sceFontGraphicsRegionInit(nullptr, 0.0f, 0.0f, 0.0f, 0.0f) == SCE_FONT_ERROR_INVALID_PARAMETER);
+
+    Require(sceFontGraphicsRegionInitCircular(&region, 50.0f, 60.0f, 30.0f, 10.0f) == SCE_FONT_OK);
+    Require(region.x == 50.0f && region.y == 60.0f && region.flags == 1 && region.outerRadius == 30.0f && region.innerRadius == 10.0f);
+    Require(sceFontGraphicsRegionInitCircular(nullptr, 0.0f, 0.0f, 0.0f, 0.0f) == SCE_FONT_ERROR_INVALID_PARAMETER);
+
+    Require(sceFontGraphicsRegionInitRoundish(&region, 5.0f, 6.0f, 70.0f, 80.0f, 15.0f, 5.0f, 0x42) == SCE_FONT_OK);
+    Require(region.x == 5.0f && region.y == 6.0f && region.flags == 0x42 && region.outerRadius == 15.0f && region.innerRadius == 5.0f);
+    Require(sceFontGraphicsRegionInitRoundish(nullptr, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0) == SCE_FONT_ERROR_INVALID_PARAMETER);
+
+    FontGraphicsFillMethod method{};
+    Require(sceFontGraphicsFillMethodInit(&method, 1, 2) == SCE_FONT_OK);
+    Require(method.mode == 1 && method.type == 2 && method.flags == 0 && method.tag == 0);
+    Require(sceFontGraphicsFillMethodInit(nullptr, 1, 2) == SCE_FONT_ERROR_INVALID_PARAMETER);
+
+    FontGraphicsFillPlot plot{};
+    Require(sceFontGraphicsFillPlotInit(&plot, &region) == SCE_FONT_OK && plot.region == &region);
+    Require(sceFontGraphicsFillPlotInit(nullptr, &region) == SCE_FONT_ERROR_INVALID_PARAMETER);
+    Require(sceFontGraphicsFillPlotInit(&plot, nullptr) == SCE_FONT_ERROR_INVALID_PARAMETER);
     std::filesystem::remove_all(fontRoot);
 }
