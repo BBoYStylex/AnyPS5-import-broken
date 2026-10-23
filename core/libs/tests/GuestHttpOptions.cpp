@@ -32,6 +32,9 @@ int APS5_VABI sceHttpCacheRedirectedConnectionEnabled(int, int);
 int APS5_VABI sceHttpsEnableOptionPrivate(int, std::uint32_t);
 int APS5_VABI sceHttpsDisableOptionPrivate(int, std::uint32_t);
 int APS5_VABI sceHttpAbortRequestForce(int);
+int APS5_VABI sceHttpSetProxy(int, int, int, const char*, std::uint16_t);
+int APS5_VABI sceHttpAddRequestHeader(int, const char*, const char*, std::uint32_t);
+int APS5_VABI sceHttpRemoveRequestHeader(int, const char*);
 }
 
 namespace {
@@ -149,6 +152,7 @@ void CheckTermEndsOptions() {
     Require(sceHttpGetAcceptEncodingGZIPEnabled(pattern, &value) == BeforeInit && sceHttpSetAcceptEncodingGZIPEnabled(pattern, 1) == BeforeInit, "the gzip option outlived the last sceHttpTerm");
     Require(sceHttpGetEpoll(connection, &bound, nullptr) == BeforeInit && sceHttpUnsetEpoll(connection) == BeforeInit, "the epoll binding outlived the last sceHttpTerm");
     Require(sceHttpCacheRedirectedConnectionEnabled(connection, 1) == BeforeInit, "sceHttpCacheRedirectedConnectionEnabled works after the last sceHttpTerm");
+    Require(sceHttpSetProxy(connection, 1, 0, "proxy.example", 3128) == BeforeInit, "sceHttpSetProxy works after the last sceHttpTerm");
     Require(sceHttpsEnableOptionPrivate(connection, 0x4000u) == BeforeInit && sceHttpsDisableOptionPrivate(connection, 0x4000u) == BeforeInit, "the private SSL options work after the last sceHttpTerm");
     Require(sceHttpGetNonblock(connection, nullptr) == BeforeInit, "a null output is checked before initialisation");
     Require(value == -1 && bound == nullptr, "a refused getter wrote its output");
@@ -161,6 +165,8 @@ void CheckUnobservedOptions(int context) {
     const int pattern = sceHttpCreateTemplate(context, "anyps5-test", 2, 0);
     const int connection = sceHttpCreateConnectionWithURL(pattern, "http://example.com/", 1);
     const int request = sceHttpCreateRequestWithURL(connection, 0, "http://example.com/a", 0);
+    Require(sceHttpAddRequestHeader(request, "X-Test", "value", 0) == 0 && sceHttpRemoveRequestHeader(request, "X-Test") == 0, "offline request header calls failed");
+    Require(sceHttpRemoveRequestHeader(UnknownId, nullptr) == 0, "offline header removal started validating arguments");
     Require(sceHttpCacheRedirectedConnectionEnabled(pattern, 0) == 0 && sceHttpCacheRedirectedConnectionEnabled(request, 1) == 0, "sceHttpCacheRedirectedConnectionEnabled refused a live object");
     Require(sceHttpCacheRedirectedConnectionEnabled(UnknownId, 1) == InvalidId, "sceHttpCacheRedirectedConnectionEnabled took an unknown id");
     for (const auto option : {sceHttpsEnableOptionPrivate, sceHttpsDisableOptionPrivate}) {
@@ -170,6 +176,12 @@ void CheckUnobservedOptions(int context) {
         Require(option(UnknownId, 0x0200u) == InvalidValue, "the SSL flags are not checked before the id");
         Require(option(UnknownId, 0x01u) == InvalidId, "a private SSL option took an unknown id");
     }
+    for (const int id : {pattern, connection, request}) {
+        Require(sceHttpSetProxy(id, 1, 0, "proxy.example", 3128) == 0, "sceHttpSetProxy refused a live object");
+    }
+    Require(sceHttpSetProxy(connection, 0, 0, nullptr, 0) == InvalidValue, "sceHttpSetProxy took a null host");
+    Require(sceHttpSetProxy(UnknownId, 0, 0, nullptr, 0) == InvalidValue, "the proxy host is not checked before the id");
+    Require(sceHttpSetProxy(UnknownId, 1, 1, "proxy.example", 8080) == InvalidId, "sceHttpSetProxy took an unknown id");
     Require(sceHttpAbortRequestForce(request) == 0, "sceHttpAbortRequestForce failed on a live request");
     Require(sceHttpDeleteRequest(request) == 0 && sceHttpDeleteConnection(connection) == 0 && sceHttpDeleteTemplate(pattern) == 0, "delete failed");
 }

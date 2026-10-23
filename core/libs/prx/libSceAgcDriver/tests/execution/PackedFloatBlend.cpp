@@ -3,6 +3,7 @@
 #include "prx/libSceAgcDriver/Execution/include/Driver/Shaders/ShaderRegistry.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/ColorTargetLayout.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Draw.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/Recorder.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/ShaderInputState.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/State.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Texture.hpp"
@@ -22,7 +23,9 @@
 #include <sys/mman.h>
 #endif
 #include <array>
+#include <algorithm>
 #include <bit>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -32,7 +35,9 @@
 #include <limits>
 #include <map>
 #include <span>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -269,6 +274,7 @@ struct DrawSetup {
     std::span<const LayeredVertex> layered{};
     VkExtent2D extent{Width, Height};
     std::uint32_t scissorWidth = ScissorWidth;
+    std::optional<VkPipelineColorBlendAttachmentState> hostBlend{};
 };
 
 std::uint32_t Draw(AgcDriver::VulkanDevice& device, AgcDriver::Graphics::ColorTarget color, std::uint32_t blendControl, std::uint32_t exportedMask, std::span<const std::uint32_t> pixelCode, const DrawSetup& setup = {}) {
@@ -295,8 +301,8 @@ std::uint32_t Draw(AgcDriver::VulkanDevice& device, AgcDriver::Graphics::ColorTa
     const auto vertexResult = ShaderRecompiler::Recompile(vertex);
     const auto vertexPush = static_cast<std::uint32_t>(vertexResult.pushConstants.size());
 
-    const bool merged = blendControl != 0u || (exportedMask & 7u) != 7u;
-    color.mergeBlend = blendControl == 0u ? 0u : AgcDriver::Graphics::PackedBlendControl(blendControl);
+    const bool merged = !setup.hostBlend && (blendControl != 0u || (exportedMask & 7u) != 7u);
+    color.mergeBlend = blendControl == 0u || !merged ? 0u : AgcDriver::Graphics::PackedBlendControl(blendControl);
     color.partialWriteMask = merged ? AgcDriver::Graphics::PackedWriteMask(color.packing, color.componentMapping, exportedMask & 7u) : 0u;
     AgcDriver::Graphics::State state{};
     state.stages = {AgcDriver::Graphics::ShaderPath::Vertex, 0u, waveSize, waveSize, std::nullopt, std::nullopt};
@@ -312,7 +318,7 @@ std::uint32_t Draw(AgcDriver::VulkanDevice& device, AgcDriver::Graphics::ColorTa
     state.scissor = {{0, 0}, {setup.scissorWidth, setup.extent.height}};
     state.cullMode = VK_CULL_MODE_NONE;
     state.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-    VkPipelineColorBlendAttachmentState blend{};
+    VkPipelineColorBlendAttachmentState blend = setup.hostBlend.value_or(VkPipelineColorBlendAttachmentState{});
     blend.colorWriteMask = merged ? 0u : VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT;
     state.blends = {blend};
     state.blend = blend;
@@ -438,6 +444,120 @@ void SameDrawOverdraw(AgcDriver::VulkanDevice& device, Block& block, const Color
     ExpectWords(device, block, layout, expected, before, what);
 }
 
+constexpr std::uint32_t Float10_11_11Info = 0x40718u;
+
+AgcDriver::Graphics::ColorTarget DecodeBenchTarget(const Block& block, std::uint32_t info, std::uint32_t side) {
+    AgcDriver::Registers cx;
+    cx[0x318] = static_cast<std::uint32_t>(block.Address() >> 8u);
+    cx[0x31b] = 0;
+    cx[0x31c] = info;
+    cx[0x31d] = 0;
+    cx[0x3b0] = ((side - 1u) << 14u) | (side - 1u);
+    cx[0x3b8] = TiledAttrib3;
+    cx[0x390] = static_cast<std::uint32_t>(block.Address() >> 40u);
+    return AgcDriver::Graphics::DecodeColorBuffer(cx, 0);
+}
+
+struct Timed {
+    double gpuMs;
+    double wallMs;
+};
+
+template <typename Work> Timed TimeOnGpu(AgcDriver::VulkanDevice& device, Work&& work) {
+    auto* recorder = AgcDriver::Graphics::Recorder::Active();
+    Require(recorder != nullptr && AgcDriver::Graphics::Recorder::BatchStampsEnabled(), "the overdraw benchmark needs the device's recorder with batch timestamps (APS5_PROFILE_GPU)");
+    device.WaitIdle();
+    const auto before = recorder->NewestSubmitted();
+    const auto start = std::chrono::steady_clock::now();
+    work();
+    device.WaitIdle();
+    const auto wall = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+    std::size_t missing = 0;
+    const auto batches = recorder->CompletedBatches(before, recorder->NewestSubmitted(), missing);
+    Require(missing == 0 && !batches.empty(), "the overdraw benchmark lost a batch's timestamps");
+    double gpu = 0;
+    for (const auto& batch : batches) {
+        Require(batch.gpuEndNs >= batch.gpuStartNs && batch.gpuEndNs > 0, "a benchmark batch has no GPU timestamps");
+        gpu += (batch.gpuEndNs - batch.gpuStartNs) / 1.0e6;
+    }
+    return {gpu, wall};
+}
+
+double Median(std::vector<double> values) {
+    std::sort(values.begin(), values.end());
+    return values[values.size() / 2u];
+}
+
+int OverdrawBenchmark() {
+#ifdef _WIN32
+    _putenv("APS5_PROFILE_GPU=1");
+#else
+    setenv("APS5_PROFILE_GPU", "1", 1);
+#endif
+    const auto device = OpenVulkanTestDevice();
+    if (!device) return VulkanTestSkipped;
+    if (!TargetHasCapability(device->Target(), spv::CapabilityFragmentShaderPixelInterlockEXT)) {
+        std::puts("skipped, the device lacks fragmentShaderPixelInterlock");
+        return VulkanTestSkipped;
+    }
+    constexpr std::uint32_t Side = 2048;
+    constexpr std::uint32_t Layers = 64;
+    constexpr std::uint32_t Rounds = 9;
+    constexpr std::uint32_t PremultipliedOver = 0x40000501u;
+    const ColorTargetLayout layout(Side, Side, ColorTileMode::RenderTarget, 4);
+    Block mergedBlock(layout.Bytes());
+    Block hostBlock(layout.Bytes());
+    const auto merged = DecodeBenchTarget(mergedBlock, Float11_11_10Info, Side);
+    const auto host = DecodeBenchTarget(hostBlock, Float10_11_11Info, Side);
+    Require(merged.packing == ShaderRecompiler::ColorExportPacking::Float11_11_10 && merged.format == VK_FORMAT_R32_UINT, "the 11_11_10 float benchmark target did not decode as a packed R32_UINT target");
+    Require(host.packing == ShaderRecompiler::ColorExportPacking::None && host.format == VK_FORMAT_B10G11R11_UFLOAT_PACK32, "the 10_11_11 float benchmark target did not decode as a B10G11R11 target");
+    VkPipelineColorBlendAttachmentState over{};
+    over.blendEnable = VK_TRUE;
+    over.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+    over.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    over.colorBlendOp = VK_BLEND_OP_ADD;
+    over.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+    over.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    over.alphaBlendOp = VK_BLEND_OP_ADD;
+    const auto program = Float32Program({0.25f, 0.5f, 0.125f, 0.5f});
+    std::vector<std::array<float, 4>> one(Triangle.begin(), Triangle.end());
+    std::vector<std::array<float, 4>> stack;
+    for (std::uint32_t layer = 0; layer < Layers; ++layer) stack.insert(stack.end(), Triangle.begin(), Triangle.end());
+    struct Path {
+        const char* name;
+        AgcDriver::Graphics::ColorTarget color;
+        std::optional<VkPipelineColorBlendAttachmentState> hostBlend;
+        std::vector<double> oneGpu, stackGpu, stackWall;
+    };
+    std::array<Path, 2> paths{{
+        {"11_11_10 float through the interlocked merge", merged, std::nullopt, {}, {}, {}},
+        {"10_11_11 float blended by the host", host, over, {}, {}, {}},
+    }};
+    for (std::uint32_t round = 0; round <= Rounds; ++round) {
+        for (auto& path : paths) {
+            const DrawSetup single{0, one, {}, {Side, Side}, Side, path.hostBlend};
+            const DrawSetup layered{0, stack, {}, {Side, Side}, Side, path.hostBlend};
+            const auto first = TimeOnGpu(*device, [&] { Draw(*device, path.color, PremultipliedOver, 0xfu, program, single); });
+            const auto all = TimeOnGpu(*device, [&] { Draw(*device, path.color, PremultipliedOver, 0xfu, program, layered); });
+            if (round == 0) continue;
+            path.oneGpu.push_back(first.gpuMs);
+            path.stackGpu.push_back(all.gpuMs);
+            path.stackWall.push_back(all.wallMs);
+        }
+    }
+    std::printf("overdraw benchmark: one draw of N full-target triangles, premultiplied source-over (CB_BLEND_CONTROL 0x%08x), %ux%u tiled target, median GPU time of %u rounds from the recorder's batch timestamps\n", PremultipliedOver, Side, Side, Rounds);
+    double perLayer[2]{};
+    for (std::size_t index = 0; index < paths.size(); ++index) {
+        const auto& path = paths[index];
+        const auto oneMs = Median(path.oneGpu);
+        const auto stackMs = Median(path.stackGpu);
+        perLayer[index] = (stackMs - oneMs) / (Layers - 1u);
+        std::printf("  %s: N=1 %.3f ms, N=%u %.3f ms (wall %.3f ms), %.4f ms per full-target layer (%.2f Gpixel/s)\n", path.name, oneMs, Layers, stackMs, Median(path.stackWall), perLayer[index], static_cast<double>(Side) * Side / (perLayer[index] * 1.0e6));
+    }
+    std::printf("  the merge takes %.2fx the host blend's time per layer\n", perLayer[0] / perLayer[1]);
+    return 0;
+}
+
 // A 2D array of 11_11_10 float slices of side x side texels with a chain of mips levels.
 struct ArrayShape {
     std::uint32_t side;
@@ -506,8 +626,9 @@ void ArrayBlend(AgcDriver::VulkanDevice& device, Block& block, const ArrayShape&
 
 }
 
-int main() {
+int main(int argc, char** argv) {
     try {
+        if (argc == 2 && std::string_view(argv[1]) == "--benchmark-overdraw") return OverdrawBenchmark();
         const auto device = OpenVulkanTestDevice();
         if (!device) return VulkanTestSkipped;
         if (!TargetHasCapability(device->Target(), spv::CapabilityFragmentShaderPixelInterlockEXT)) {
