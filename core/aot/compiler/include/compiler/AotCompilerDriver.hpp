@@ -1,70 +1,30 @@
-#ifndef CORE_AOT_COMPILER_AOTCOMPILERDRIVER_HPP
-#define CORE_AOT_COMPILER_AOTCOMPILERDRIVER_HPP
+#pragma once
 
-#include <compiler/ElfBinaryParser.hpp>
-#include <compiler/LlvmLifter.hpp>
-#include <compiler/SyscallReplacementPass.hpp>
 #include <filesystem>
 #include <string>
-#include <string_view>
-#include <optional>
 
 namespace Aot::Compiler {
 
 struct CompilerOptions {
     std::filesystem::path InputExecutablePath;
     std::filesystem::path OutputObjectPath;
-    std::string TargetTriple;
-    uint32_t OptimizationLevel = 2;
-    bool EnableSyscallReplacement = true;
-    std::filesystem::path OutputExecutablePath;
-    bool EmitExecutable = false;
-    std::vector<std::filesystem::path> AdditionalLibraries;
-    bool VerboseLogging = false;
-    bool EmitLlvmIr = false;
     std::filesystem::path OutputLlvmIrPath;
-    bool EmitAssembly = false;
     std::filesystem::path OutputAssemblyPath;
+    std::string FunctionName;
+    std::string TargetTriple;
+    unsigned ArgumentCount = 0;
+    unsigned OptimizationLevel = 2;
 };
 
 struct CompilationStatistics {
-    size_t TotalSectionsParsed = 0;
-    size_t CodeSectionsLifted = 0;
-    size_t FunctionsLifted = 0;
     size_t InstructionsLifted = 0;
-    size_t RelocationsApplied = 0;
-    bool SyscallPassModified = false;
     bool Success = false;
+    std::string Error;
 };
 
 class AotCompilerDriver {
 public:
-    AotCompilerDriver();
-    ~AotCompilerDriver();
-
-    CompilationStatistics Compile(const CompilerOptions& options);
-
-    bool LinkExecutable(
-        const std::filesystem::path& objectPath,
-        const std::filesystem::path& executablePath,
-        const std::vector<std::filesystem::path>& additionalLibraries = {}
-    );
-
-private:
-    bool emitObjectFile(
-        llvm::Module& module,
-        const std::filesystem::path& outputPath,
-        const std::string& targetTriple,
-        uint32_t optLevel
-    );
-
-    bool emitAssemblyFile(
-        llvm::Module& module,
-        const std::filesystem::path& outputPath,
-        const std::string& targetTriple,
-        uint32_t optLevel
-    );
+    static CompilationStatistics Compile(const CompilerOptions& options);
 };
 
 } // namespace Aot::Compiler
-#endif

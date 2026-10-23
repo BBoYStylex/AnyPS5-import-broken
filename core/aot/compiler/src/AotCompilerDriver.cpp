@@ -1,270 +1,163 @@
 #include <compiler/AotCompilerDriver.hpp>
-#include <compiler/ElfRelocationResolver.hpp>
-#include <llvm/MC/TargetRegistry.h>
-#include <llvm/Target/TargetMachine.h>
-#include <llvm/Target/TargetOptions.h>
+#include <compiler/ElfBinaryParser.hpp>
+#include <compiler/LlvmLifter.hpp>
+#include <llvm/ADT/SmallString.h>
 #include <llvm/IR/LegacyPassManager.h>
+#include <llvm/IR/Verifier.h>
+#include <llvm/MC/TargetRegistry.h>
 #include <llvm/Support/FileSystem.h>
+#include <llvm/Support/TargetSelect.h>
 #include <llvm/Support/raw_ostream.h>
-#include <llvm/Passes/PassBuilder.h>
-#include <iostream>
+#include <llvm/Target/TargetMachine.h>
+#include <llvm/Transforms/Utils/Cloning.h>
+#include <mutex>
+#include <stdexcept>
+#include <vector>
 
 namespace Aot::Compiler {
 
-AotCompilerDriver::AotCompilerDriver() = default;
-AotCompilerDriver::~AotCompilerDriver() = default;
+namespace {
+
+struct Output {
+    std::filesystem::path Path;
+    llvm::SmallVector<char, 0> Bytes;
+};
+
+std::string DefaultTriple() {
+#if defined(_WIN32)
+    return "x86_64-w64-windows-gnu";
+#elif defined(__APPLE__)
+    return "x86_64-apple-darwin";
+#else
+    return "x86_64-unknown-linux-gnu";
+#endif
+}
+
+void ValidatePaths(const CompilerOptions& options) {
+    if (options.InputExecutablePath.empty() || options.OutputObjectPath.empty()) {
+        throw std::runtime_error("Input and output paths are required");
+    }
+    std::vector<std::filesystem::path> paths{options.InputExecutablePath};
+    for (const auto& path : {options.OutputObjectPath, options.OutputLlvmIrPath, options.OutputAssemblyPath}) {
+        if (path.empty()) {
+            continue;
+        }
+        for (const auto& other : paths) {
+            if (std::filesystem::weakly_canonical(path) == std::filesystem::weakly_canonical(other) ||
+                (std::filesystem::exists(path) && std::filesystem::exists(other) &&
+                    std::filesystem::equivalent(path, other))) {
+                throw std::runtime_error("Input and output paths must be distinct");
+            }
+        }
+        if (std::filesystem::exists(path) && !std::filesystem::is_regular_file(path)) {
+            throw std::runtime_error("Output must be a regular file: " + path.string());
+        }
+        paths.push_back(path);
+    }
+}
+
+Output Emit(llvm::Module& module, llvm::TargetMachine& machine,
+    const std::filesystem::path& path, llvm::CodeGenFileType type) {
+    Output output{path, {}};
+    llvm::raw_svector_ostream stream(output.Bytes);
+    auto copy = llvm::CloneModule(module);
+    llvm::legacy::PassManager passes;
+    if (machine.addPassesToEmitFile(passes, stream, nullptr, type)) {
+        throw std::runtime_error("Target cannot emit the requested output");
+    }
+    passes.run(*copy);
+    if (output.Bytes.empty()) {
+        throw std::runtime_error("Target produced empty output");
+    }
+    return output;
+}
+
+void Write(const Output& output) {
+    int descriptor = -1;
+    llvm::SmallString<256> temporary;
+    auto error = llvm::sys::fs::createUniqueFile(output.Path.string() + ".%%%%%%.tmp", descriptor, temporary);
+    if (error) {
+        throw std::runtime_error("Cannot create output " + output.Path.string() + ": " + error.message());
+    }
+    struct Cleanup {
+        llvm::SmallString<256>& Path;
+        ~Cleanup() { llvm::sys::fs::remove(Path); }
+    } cleanup{temporary};
+    llvm::raw_fd_ostream stream(descriptor, true);
+    stream.write(output.Bytes.data(), output.Bytes.size());
+    stream.close();
+    if (stream.has_error()) {
+        error = stream.error();
+        stream.clear_error();
+        throw std::runtime_error("Cannot write output: " + error.message());
+    }
+    error = llvm::sys::fs::rename(temporary, output.Path.string());
+    if (error) {
+        throw std::runtime_error("Cannot replace output: " + error.message());
+    }
+}
+
+} // namespace
 
 CompilationStatistics AotCompilerDriver::Compile(const CompilerOptions& options) {
-    CompilationStatistics stats{};
-
-    ElfBinaryParser parser;
-    auto binaryOpt = parser.ParseFromFile(options.InputExecutablePath);
-    if (!binaryOpt.has_value()) {
-        return stats;
-    }
-
-    ParsedElfBinary binary = *binaryOpt;
-    stats.TotalSectionsParsed = binary.Sections.size();
-
-    ElfRelocationResolver relocationResolver;
-    relocationResolver.LoadSymbolsAndRelocations(binary, {});
-    stats.RelocationsApplied = relocationResolver.ApplyRelocations(binary, binary.BaseVirtualAddress);
-
-    LlvmLifter lifter;
-    std::string moduleName = options.InputExecutablePath.stem().string();
-    LiftedModuleResult lifted = lifter.LiftBinary(binary, moduleName);
-
-    stats.FunctionsLifted = lifted.LiftedFunctionCount;
-    stats.InstructionsLifted = lifted.LiftedInstructionCount;
-
-    if (lifted.Module == nullptr) {
-        return stats;
-    }
-
-    if (options.EnableSyscallReplacement) {
-        llvm::LoopAnalysisManager lam;
-        llvm::FunctionAnalysisManager fam;
-        llvm::CGSCCAnalysisManager cgam;
-        llvm::ModuleAnalysisManager mam;
-
-        llvm::PassBuilder passBuilder;
-        passBuilder.registerModuleAnalyses(mam);
-        passBuilder.registerCGSCCAnalyses(cgam);
-        passBuilder.registerFunctionAnalyses(fam);
-        passBuilder.registerLoopAnalyses(lam);
-        passBuilder.crossRegisterProxies(lam, fam, cgam, mam);
-
-        SyscallReplacementPass syscallPass;
-        llvm::PreservedAnalyses pa = syscallPass.run(*lifted.Module, mam);
-        stats.SyscallPassModified = !pa.areAllPreserved();
-    }
-
-    std::string targetTriple = options.TargetTriple;
-    if (targetTriple.empty()) {
-#if defined(_WIN32)
-        targetTriple = "x86_64-pc-windows-msvc";
-#else
-        targetTriple = "x86_64-unknown-linux-gnu";
-#endif
-    }
-
-    if (options.EmitLlvmIr && !options.OutputLlvmIrPath.empty()) {
-        if (options.OutputLlvmIrPath.has_parent_path()) {
-            std::filesystem::create_directories(options.OutputLlvmIrPath.parent_path());
+    CompilationStatistics statistics;
+    try {
+        ValidatePaths(options);
+        if (options.OptimizationLevel > 3) {
+            throw std::runtime_error("Optimization level must be between 0 and 3");
         }
-        std::error_code errorCode;
-        llvm::raw_fd_ostream irStream(options.OutputLlvmIrPath.string(), errorCode, llvm::sys::fs::OF_None);
-        if (!errorCode) {
-            lifted.Module->print(irStream, nullptr);
-            irStream.flush();
+        const std::string triple = options.TargetTriple.empty() ? DefaultTriple() : options.TargetTriple;
+        if (triple != "x86_64-unknown-linux-gnu" && triple != "x86_64-w64-windows-gnu" &&
+            triple != "x86_64-pc-windows-msvc" && triple != "x86_64-apple-darwin") {
+            throw std::runtime_error("Unsupported target triple: " + triple);
         }
+        static std::once_flag targets;
+        std::call_once(targets, [] {
+            LLVMInitializeX86TargetInfo();
+            LLVMInitializeX86Target();
+            LLVMInitializeX86TargetMC();
+            LLVMInitializeX86AsmPrinter();
+        });
+        std::string error;
+        auto* target = llvm::TargetRegistry::lookupTarget(triple, error);
+        if (!target) {
+            throw std::runtime_error(error);
+        }
+        llvm::TargetOptions targetOptions;
+        std::unique_ptr<llvm::TargetMachine> machine(target->createTargetMachine(
+            triple, "generic", "", targetOptions, llvm::Reloc::PIC_, std::nullopt,
+            static_cast<llvm::CodeGenOptLevel>(options.OptimizationLevel)));
+        if (!machine) {
+            throw std::runtime_error("Cannot create the target machine");
+        }
+        auto function = ElfBinaryParser::ReadFunction(options.InputExecutablePath, options.FunctionName);
+        auto lifted = LlvmLifter::LiftFunction(function, options.ArgumentCount);
+        lifted.Module->setTargetTriple(triple);
+        lifted.Module->setDataLayout(machine->createDataLayout());
+        statistics.InstructionsLifted = lifted.InstructionCount;
+        llvm::raw_string_ostream diagnostics(error);
+        if (llvm::verifyModule(*lifted.Module, &diagnostics)) {
+            throw std::runtime_error("Invalid target IR: " + error);
+        }
+        std::vector<Output> outputs;
+        outputs.push_back(Emit(*lifted.Module, *machine, options.OutputObjectPath, llvm::CodeGenFileType::ObjectFile));
+        if (!options.OutputAssemblyPath.empty()) {
+            outputs.push_back(Emit(*lifted.Module, *machine, options.OutputAssemblyPath, llvm::CodeGenFileType::AssemblyFile));
+        }
+        if (!options.OutputLlvmIrPath.empty()) {
+            Output output{options.OutputLlvmIrPath, {}};
+            llvm::raw_svector_ostream stream(output.Bytes);
+            lifted.Module->print(stream, nullptr);
+            outputs.push_back(std::move(output));
+        }
+        for (const auto& output : outputs) {
+            Write(output);
+        }
+        statistics.Success = true;
+    } catch (const std::exception& exception) {
+        statistics.Error = exception.what();
     }
-
-    if (options.EmitAssembly && !options.OutputAssemblyPath.empty()) {
-        emitAssemblyFile(*lifted.Module, options.OutputAssemblyPath, targetTriple, options.OptimizationLevel);
-    }
-
-    stats.Success = emitObjectFile(
-        *lifted.Module,
-        options.OutputObjectPath,
-        targetTriple,
-        options.OptimizationLevel
-    );
-
-    if (stats.Success && options.EmitExecutable && !options.OutputExecutablePath.empty()) {
-        stats.Success = LinkExecutable(
-            options.OutputObjectPath,
-            options.OutputExecutablePath,
-            options.AdditionalLibraries
-        );
-    }
-
-    return stats;
-}
-
-bool AotCompilerDriver::LinkExecutable(
-    const std::filesystem::path& objectPath,
-    const std::filesystem::path& executablePath,
-    const std::vector<std::filesystem::path>& additionalLibraries) {
-    if (!std::filesystem::exists(objectPath)) {
-        return false;
-    }
-
-    if (executablePath.has_parent_path()) {
-        std::filesystem::create_directories(executablePath.parent_path());
-    }
-
-    std::string command;
-#if defined(_WIN32)
-    command = "lld-link /NOLOGO /SUBSYSTEM:CONSOLE /OUT:\"" + executablePath.string() + "\" \"" + objectPath.string() + "\"";
-    for (const auto& lib : additionalLibraries) {
-        command += " \"" + lib.string() + "\"";
-    }
-#else
-    command = "clang++ -o \"" + executablePath.string() + "\" \"" + objectPath.string() + "\"";
-    for (const auto& lib : additionalLibraries) {
-        command += " \"" + lib.string() + "\"";
-    }
-#endif
-
-    int result = std::system(command.c_str());
-    return result == 0;
-}
-
-bool AotCompilerDriver::emitObjectFile(
-    llvm::Module& module,
-    const std::filesystem::path& outputPath,
-    const std::string& targetTriple,
-    uint32_t optLevel) {
-    std::string error;
-    const llvm::Target* target = llvm::TargetRegistry::lookupTarget(targetTriple, error);
-    if (target == nullptr) {
-        return false;
-    }
-
-    llvm::CodeGenOptLevel codegenOpt = llvm::CodeGenOptLevel::Default;
-    if (optLevel == 0) {
-        codegenOpt = llvm::CodeGenOptLevel::None;
-    } else if (optLevel == 1) {
-        codegenOpt = llvm::CodeGenOptLevel::Less;
-    } else if (optLevel >= 3) {
-        codegenOpt = llvm::CodeGenOptLevel::Aggressive;
-    }
-
-    llvm::TargetOptions targetOptions;
-    std::unique_ptr<llvm::TargetMachine> targetMachine(
-        target->createTargetMachine(
-            targetTriple,
-            "generic",
-            "",
-            targetOptions,
-            std::optional<llvm::Reloc::Model>(llvm::Reloc::PIC_),
-            std::nullopt,
-            codegenOpt
-        )
-    );
-
-    if (!targetMachine) {
-        return false;
-    }
-
-    module.setDataLayout(targetMachine->createDataLayout());
-    module.setTargetTriple(targetTriple);
-
-    if (outputPath.has_parent_path()) {
-        std::filesystem::create_directories(outputPath.parent_path());
-    }
-
-    std::error_code errorCode;
-    llvm::raw_fd_ostream destinationFile(
-        outputPath.string(),
-        errorCode,
-        llvm::sys::fs::OF_None
-    );
-
-    if (errorCode) {
-        return false;
-    }
-
-    llvm::legacy::PassManager passManager;
-    if (targetMachine->addPassesToEmitFile(passManager, destinationFile, nullptr, llvm::CodeGenFileType::ObjectFile)) {
-        return false;
-    }
-
-    if (!passManager.run(module)) {
-        return false;
-    }
-    destinationFile.flush();
-
-    return true;
-}
-
-bool AotCompilerDriver::emitAssemblyFile(
-    llvm::Module& module,
-    const std::filesystem::path& outputPath,
-    const std::string& targetTriple,
-    uint32_t optLevel) {
-    std::string error;
-    const llvm::Target* target = llvm::TargetRegistry::lookupTarget(targetTriple, error);
-    if (target == nullptr) {
-        return false;
-    }
-
-    llvm::CodeGenOptLevel codegenOpt = llvm::CodeGenOptLevel::Default;
-    if (optLevel == 0) {
-        codegenOpt = llvm::CodeGenOptLevel::None;
-    } else if (optLevel == 1) {
-        codegenOpt = llvm::CodeGenOptLevel::Less;
-    } else if (optLevel >= 3) {
-        codegenOpt = llvm::CodeGenOptLevel::Aggressive;
-    }
-
-    llvm::TargetOptions targetOptions;
-    std::unique_ptr<llvm::TargetMachine> targetMachine(
-        target->createTargetMachine(
-            targetTriple,
-            "generic",
-            "",
-            targetOptions,
-            std::optional<llvm::Reloc::Model>(llvm::Reloc::PIC_),
-            std::nullopt,
-            codegenOpt
-        )
-    );
-
-    if (!targetMachine) {
-        return false;
-    }
-
-    module.setDataLayout(targetMachine->createDataLayout());
-    module.setTargetTriple(targetTriple);
-
-    if (outputPath.has_parent_path()) {
-        std::filesystem::create_directories(outputPath.parent_path());
-    }
-
-    std::error_code errorCode;
-    llvm::raw_fd_ostream destinationFile(
-        outputPath.string(),
-        errorCode,
-        llvm::sys::fs::OF_None
-    );
-
-    if (errorCode) {
-        return false;
-    }
-
-    llvm::legacy::PassManager passManager;
-    if (targetMachine->addPassesToEmitFile(passManager, destinationFile, nullptr, llvm::CodeGenFileType::AssemblyFile)) {
-        return false;
-    }
-
-    if (!passManager.run(module)) {
-        return false;
-    }
-    destinationFile.flush();
-
-    return true;
+    return statistics;
 }
 
 } // namespace Aot::Compiler

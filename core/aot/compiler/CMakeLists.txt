@@ -1,25 +1,14 @@
 add_library(aot_compiler STATIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/ElfBinaryParser.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/ElfRelocationResolver.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/LlvmLifter.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/X86LifterContext.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/SyscallRegistry.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/SyscallReplacementPass.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/AotCompilerDriver.cpp
+    src/ElfBinaryParser.cpp
+    src/LlvmLifter.cpp
+    src/AotCompilerDriver.cpp
 )
-
-target_include_directories(aot_compiler PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
+target_include_directories(aot_compiler PUBLIC include)
+target_include_directories(aot_compiler SYSTEM PUBLIC
+    "${llvmSource}/include"
+    "${CMAKE_CURRENT_BINARY_DIR}/../llvm/include"
 )
-
 target_compile_features(aot_compiler PUBLIC cxx_std_20)
-
-add_executable(aot_compiler_cli
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/Main.cpp
-)
-
-target_link_libraries(aot_compiler_cli PRIVATE
-    aot_compiler
-)
-
-target_compile_features(aot_compiler_cli PUBLIC cxx_std_20)
+target_link_libraries(aot_compiler PUBLIC LLVMCore LLVMObject LLVMX86CodeGen LLVMX86Desc LLVMX86Info)
+add_executable(aot_compiler_cli src/Main.cpp)
+target_link_libraries(aot_compiler_cli PRIVATE aot_compiler)

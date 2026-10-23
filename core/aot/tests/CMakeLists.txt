@@ -1,29 +1,18 @@
-enable_testing()
-
-add_executable(test_aot_compiler
-    TestAotCompiler.cpp
-)
-target_link_libraries(test_aot_compiler PRIVATE aot_compiler)
-target_compile_features(test_aot_compiler PUBLIC cxx_std_20)
-add_test(NAME test_aot_compiler COMMAND test_aot_compiler)
-
-add_executable(test_aot_runtime
-    TestAotRuntime.cpp
-)
-target_link_libraries(test_aot_runtime PRIVATE aot_runtime)
-target_compile_features(test_aot_runtime PUBLIC cxx_std_20)
-add_test(NAME test_aot_runtime COMMAND test_aot_runtime)
-
-add_executable(test_aot_graphics
-    TestAotGraphics.cpp
-)
-target_link_libraries(test_aot_graphics PRIVATE aot_graphics)
-target_compile_features(test_aot_graphics PUBLIC cxx_std_20)
-add_test(NAME test_aot_graphics COMMAND test_aot_graphics)
-
-add_executable(test_aot_io
-    TestAotIo.cpp
-)
-target_link_libraries(test_aot_io PRIVATE aot_io)
-target_compile_features(test_aot_io PUBLIC cxx_std_20)
-add_test(NAME test_aot_io COMMAND test_aot_io)
+if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(AMD64|amd64|x86_64)$")
+    message(FATAL_ERROR "Leaf compiler execution tests require a native x86-64 host")
+endif()
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+if(COMMAND add_test_executable)
+    add_test_executable(aot_ir_check TestAotCompiler.cpp)
+else()
+    add_executable(aot_ir_check TestAotCompiler.cpp)
+endif()
+target_link_libraries(aot_ir_check PRIVATE aot_compiler LLVMIRReader)
+foreach(group IN ITEMS arithmetic moves shifts reject formats)
+    add_test(NAME aot_leaf_${group}
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_aot_compiler.py
+        --compiler $<TARGET_FILE:aot_compiler_cli> --host-compiler ${CMAKE_CXX_COMPILER}
+        --ir-checker $<TARGET_FILE:aot_ir_check>
+        --group ${group})
+    set_tests_properties(aot_leaf_${group} PROPERTIES TIMEOUT 30)
+endforeach()

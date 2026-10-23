@@ -1,1369 +1,234 @@
 #include <compiler/LlvmLifter.hpp>
-#include <compiler/X86LifterContext.hpp>
-#include <llvm/IR/InlineAsm.h>
+#include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Verifier.h>
-#include <llvm/Support/TargetSelect.h>
-#include <cstring>
+#include <array>
+#include <span>
+#include <stdexcept>
 
 namespace Aot::Compiler {
 
-LlvmLifter::LlvmLifter() {
-    llvm::InitializeAllTargetInfos();
-    llvm::InitializeAllTargets();
-    llvm::InitializeAllTargetMCs();
-    llvm::InitializeAllAsmParsers();
-    llvm::InitializeAllAsmPrinters();
-}
+namespace {
 
-LlvmLifter::~LlvmLifter() = default;
+class LeafLifter {
+public:
+    LeafLifter(const ElfFunction& input, unsigned argumentCount, llvm::Module& module)
+        : code(input.Code), builder(module.getContext()) {
+        if (argumentCount > 6 || code.empty()) {
+            throw std::runtime_error("A leaf function requires code and at most six integer arguments");
+        }
+        auto* type = llvm::FunctionType::get(builder.getInt64Ty(),
+            std::vector<llvm::Type*>(argumentCount, builder.getInt64Ty()), false);
+        auto* function = llvm::Function::Create(type, llvm::Function::ExternalLinkage, input.Name, module);
+        builder.SetInsertPoint(llvm::BasicBlock::Create(module.getContext(), "entry", function));
+        constexpr std::array<unsigned, 6> argumentRegisters{7, 6, 2, 1, 8, 9};
+        for (unsigned index = 0; index < argumentCount; ++index) {
+            registers[argumentRegisters[index]] = function->getArg(index);
+        }
+    }
 
-LiftedModuleResult LlvmLifter::LiftBinary(const ParsedElfBinary& binary, std::string_view moduleName) {
-    auto context = std::make_unique<llvm::LLVMContext>();
-    auto module = std::make_unique<llvm::Module>(moduleName, *context);
-
-#if defined(_WIN32)
-    module->setTargetTriple("x86_64-pc-windows-msvc");
-#else
-    module->setTargetTriple("x86_64-unknown-linux-gnu");
-#endif
-
-    size_t functionCount = 0;
-    size_t instructionCount = 0;
-
-    for (const auto& section : binary.Sections) {
-        if ((section.Flags & 0x4) != 0 && !section.Data.empty()) {
-            if (LiftSection(section, *module)) {
-                ++functionCount;
-                instructionCount += section.Data.size();
+    size_t Lift() {
+        size_t count = 0;
+        while (offset < code.size()) {
+            instructionOffset = offset;
+            uint8_t opcode = byte();
+            uint8_t rex = 0;
+            if (opcode >= 0x40 && opcode <= 0x4f) {
+                rex = opcode;
+                opcode = byte();
             }
+            unsigned width = rex & 8 ? 64 : 32;
+            ++count;
+            if (opcode == 0xc3 && !rex) {
+                if (offset != code.size()) {
+                    fail("bytes after RET are outside the supported straight-line function contract");
+                }
+                builder.CreateRet(read(0, 64));
+                return count;
+            }
+            if (opcode == 0x90 && !rex) {
+                continue;
+            }
+            if (opcode >= 0xb8 && opcode <= 0xbf) {
+                write((opcode - 0xb8) + ((rex & 1) ? 8 : 0),
+                    builder.getIntN(width, immediate(width / 8)));
+                continue;
+            }
+            if (opcode == 0x05 || opcode == 0x0d || opcode == 0x25 ||
+                opcode == 0x2d || opcode == 0x35) {
+                auto* rhs = constant(immediate(4), 32, width);
+                write(0, binary((opcode >> 3) & 7, read(0, width), rhs));
+                continue;
+            }
+            if (opcode == 0x0f) {
+                if (byte() != 0xaf) {
+                    fail("unsupported two-byte opcode");
+                }
+                auto [rm, reg, extension] = operands(rex);
+                write(reg, builder.CreateMul(read(reg, width), read(rm, width)));
+                continue;
+            }
+            if (opcode == 0x89 || opcode == 0x8b) {
+                auto [rm, reg, extension] = operands(rex);
+                write(opcode == 0x89 ? rm : reg, read(opcode == 0x89 ? reg : rm, width));
+                continue;
+            }
+            if (opcode == 0x63 && width == 64) {
+                auto [rm, reg, extension] = operands(rex);
+                write(reg, builder.CreateSExt(read(rm, 32), builder.getInt64Ty()));
+                continue;
+            }
+            if (opcode == 0xc7) {
+                auto [rm, reg, extension] = operands(rex);
+                if (extension != 0) {
+                    fail("unsupported MOV extension");
+                }
+                write(rm, constant(immediate(4), 32, width));
+                continue;
+            }
+            if (opcode == 0x81 || opcode == 0x83) {
+                auto [rm, reg, extension] = operands(rex);
+                const unsigned bits = opcode == 0x83 ? 8 : 32;
+                auto* rhs = constant(immediate(bits / 8), bits, width);
+                write(rm, binary(extension, read(rm, width), rhs));
+                continue;
+            }
+            if ((opcode & 0xc4) == 0 && (opcode & 1) &&
+                (opcode <= 0x33) && ((opcode & 7) == 1 || (opcode & 7) == 3)) {
+                auto [rm, reg, extension] = operands(rex);
+                unsigned destination = (opcode & 2) ? reg : rm;
+                unsigned source = (opcode & 2) ? rm : reg;
+                const unsigned operation = (opcode >> 3) & 7;
+                if (destination == source && (operation == 5 || operation == 6)) {
+                    write(destination, builder.getIntN(width, 0));
+                } else {
+                    write(destination, binary(operation, read(destination, width), read(source, width)));
+                }
+                continue;
+            }
+            if (opcode == 0xf7) {
+                auto [rm, reg, extension] = operands(rex);
+                auto* value = read(rm, width);
+                if (extension == 2) {
+                    write(rm, builder.CreateNot(value));
+                } else if (extension == 3) {
+                    write(rm, builder.CreateNeg(value));
+                } else {
+                    fail("unsupported unary opcode");
+                }
+                continue;
+            }
+            if (opcode == 0xd1 || opcode == 0xd3 || opcode == 0xc1) {
+                auto [rm, reg, extension] = operands(rex);
+                llvm::Value* shift = opcode == 0xd3 ? read(1, width) :
+                    builder.getIntN(width, opcode == 0xd1 ? 1 : byte());
+                shift = builder.CreateAnd(shift, builder.getIntN(width, width - 1));
+                auto* value = read(rm, width);
+                if (extension == 4) {
+                    write(rm, builder.CreateShl(value, shift));
+                } else if (extension == 5) {
+                    write(rm, builder.CreateLShr(value, shift));
+                } else if (extension == 7) {
+                    write(rm, builder.CreateAShr(value, shift));
+                } else {
+                    fail("unsupported shift opcode");
+                }
+                continue;
+            }
+            fail("unsupported opcode or prefix");
         }
+        fail("function has no terminating RET");
     }
 
-    return LiftedModuleResult{
-        .Context = std::move(context),
-        .Module = std::move(module),
-        .LiftedFunctionCount = functionCount,
-        .LiftedInstructionCount = instructionCount
+private:
+    struct Operands {
+        unsigned Rm;
+        unsigned Reg;
+        unsigned Extension;
     };
-}
 
-bool LlvmLifter::LiftSection(const ElfSection& section, llvm::Module& module) {
-    if (section.Data.empty()) {
-        return false;
+    std::span<const uint8_t> code;
+    llvm::IRBuilder<> builder;
+    std::array<llvm::Value*, 16> registers{};
+    size_t offset = 0;
+    size_t instructionOffset = 0;
+
+    [[noreturn]] void fail(const char* message) const {
+        throw std::runtime_error("At function byte " + std::to_string(instructionOffset) + ": " + message);
     }
 
-    std::string funcName = "sub_" + section.Name;
-    for (char& c : funcName) {
-        if (c == '.' || c == '-') {
-            c = '_';
+    uint8_t byte() {
+        if (offset == code.size()) {
+            fail("truncated instruction");
+        }
+        return code[offset++];
+    }
+
+    uint64_t immediate(unsigned size) {
+        uint64_t value = 0;
+        for (unsigned index = 0; index < size; ++index) {
+            value |= uint64_t(byte()) << (index * 8);
+        }
+        return value;
+    }
+
+    Operands operands(uint8_t rex) {
+        const uint8_t modrm = byte();
+        if ((modrm >> 6) != 3) {
+            fail("memory operands are not supported");
+        }
+        return {(modrm & 7u) + ((rex & 1) ? 8u : 0u),
+            ((modrm >> 3) & 7u) + ((rex & 4) ? 8u : 0u), (modrm >> 3) & 7u};
+    }
+
+    llvm::Value* constant(uint64_t value, unsigned bits, unsigned width) {
+        return builder.CreateSExtOrTrunc(builder.getIntN(bits, value), builder.getIntNTy(width));
+    }
+
+    bool volatileRegister(unsigned reg) const {
+        return reg == 0 || reg == 1 || reg == 2 || reg == 6 || reg == 7 ||
+            (reg >= 8 && reg <= 11);
+    }
+
+    llvm::Value* read(unsigned reg, unsigned width) {
+        if (!volatileRegister(reg) || !registers[reg]) {
+            fail("register read depends on undeclared input or callee-saved state");
+        }
+        return builder.CreateTruncOrBitCast(registers[reg], builder.getIntNTy(width));
+    }
+
+    void write(unsigned reg, llvm::Value* value) {
+        if (!volatileRegister(reg)) {
+            fail("writes to the stack pointer or callee-saved registers are not supported");
+        }
+        registers[reg] = builder.CreateZExtOrBitCast(value, builder.getInt64Ty());
+    }
+
+    llvm::Value* binary(unsigned operation, llvm::Value* lhs, llvm::Value* rhs) {
+        switch (operation) {
+            case 0: return builder.CreateAdd(lhs, rhs);
+            case 1: return builder.CreateOr(lhs, rhs);
+            case 4: return builder.CreateAnd(lhs, rhs);
+            case 5: return builder.CreateSub(lhs, rhs);
+            case 6: return builder.CreateXor(lhs, rhs);
+            default: fail("unsupported arithmetic operation");
         }
     }
-
-    llvm::Function* function = liftFunctionAtAddress(
-        section.Data.data(),
-        section.Data.size(),
-        section.VirtualAddress,
-        funcName,
-        module
-    );
-
-    if (function != nullptr) {
-        function->setMachineCode(section.Data);
-    }
-
-    return function != nullptr;
-}
-
-struct DecodedEffectiveAddress {
-    llvm::Value* Address;
-    size_t ConsumedBytes;
 };
 
-static DecodedEffectiveAddress decodeAddress(
-    const uint8_t* codeBytes,
-    size_t currentOffset,
-    size_t byteCount,
-    uint8_t mod,
-    uint8_t rm,
-    bool rexX,
-    bool rexB,
-    uint64_t virtualAddress,
-    llvm::IRBuilder<>& builder,
-    X86LifterContext& lifterContext) {
-    if (mod == 3) {
-        return {nullptr, 0};
+} // namespace
+
+LiftedModuleResult LlvmLifter::LiftFunction(const ElfFunction& function, unsigned argumentCount) {
+    LiftedModuleResult result;
+    result.Context = std::make_unique<llvm::LLVMContext>();
+    result.Module = std::make_unique<llvm::Module>("anyps5_leaf", *result.Context);
+    LeafLifter lifter(function, argumentCount, *result.Module);
+    result.InstructionCount = lifter.Lift();
+    std::string error;
+    llvm::raw_string_ostream diagnostics(error);
+    if (llvm::verifyModule(*result.Module, &diagnostics)) {
+        throw std::runtime_error("Invalid lifted IR: " + error);
     }
-
-    if (mod == 0 && (rm & 0x07) == 5) {
-        if (currentOffset + 4 <= byteCount) {
-            int32_t disp = 0;
-            std::memcpy(&disp, &codeBytes[currentOffset], sizeof(int32_t));
-            uint64_t ripTarget = virtualAddress + currentOffset + 4 + disp;
-            return {builder.getInt64(ripTarget), 4};
-        }
-        return {builder.getInt64(0), 4};
-    }
-
-    if ((rm & 0x07) == 4 && currentOffset < byteCount) {
-        uint8_t sib = codeBytes[currentOffset];
-        uint8_t scale = (sib >> 6) & 0x03;
-        uint8_t indexReg = ((sib >> 3) & 0x07) + (rexX ? 8 : 0);
-        uint8_t baseReg = (sib & 0x07) + (rexB ? 8 : 0);
-
-        llvm::Value* baseVal = nullptr;
-        size_t dispOffset = currentOffset + 1;
-        int32_t disp = 0;
-
-        if (mod == 0 && (sib & 0x07) == 5) {
-            if (dispOffset + 4 <= byteCount) {
-                std::memcpy(&disp, &codeBytes[dispOffset], sizeof(int32_t));
-                dispOffset += 4;
-            }
-            baseVal = builder.getInt64(disp);
-        } else {
-            baseVal = lifterContext.ReadRegister(static_cast<X86Register>(baseReg), builder);
-            if (mod == 1 && dispOffset < byteCount) {
-                disp = static_cast<int8_t>(codeBytes[dispOffset]);
-                dispOffset += 1;
-                baseVal = builder.CreateAdd(baseVal, builder.getInt64(disp));
-            } else if (mod == 2 && dispOffset + 4 <= byteCount) {
-                std::memcpy(&disp, &codeBytes[dispOffset], sizeof(int32_t));
-                dispOffset += 4;
-                baseVal = builder.CreateAdd(baseVal, builder.getInt64(disp));
-            }
-        }
-
-        if (indexReg != 4 || rexX) {
-            llvm::Value* indexVal = lifterContext.ReadRegister(static_cast<X86Register>(indexReg), builder);
-            if (scale > 0) {
-                indexVal = builder.CreateShl(indexVal, builder.getInt64(scale));
-            }
-            baseVal = builder.CreateAdd(baseVal, indexVal);
-        }
-
-        return {baseVal, dispOffset - currentOffset};
-    }
-
-    auto regBase = static_cast<X86Register>(rm);
-    llvm::Value* baseVal = lifterContext.ReadRegister(regBase, builder);
-    if (mod == 0) {
-        return {baseVal, 0};
-    } else if (mod == 1 && currentOffset < byteCount) {
-        int8_t disp = static_cast<int8_t>(codeBytes[currentOffset]);
-        return {builder.CreateAdd(baseVal, builder.getInt64(disp)), 1};
-    } else if (mod == 2 && currentOffset + 4 <= byteCount) {
-        int32_t disp = 0;
-        std::memcpy(&disp, &codeBytes[currentOffset], sizeof(int32_t));
-        return {builder.CreateAdd(baseVal, builder.getInt64(disp)), 4};
-    }
-
-    return {baseVal, 0};
-}
-
-static llvm::Value* evaluateConditionCode(
-    uint8_t condCode,
-    llvm::IRBuilder<>& builder,
-    X86LifterContext& lifterContext) {
-    switch (condCode & 0x0F) {
-        case 0x0:
-            return lifterContext.ReadOverflowFlag(builder);
-        case 0x1:
-            return builder.CreateICmpEQ(lifterContext.ReadOverflowFlag(builder), builder.getInt1(false));
-        case 0x2:
-            return lifterContext.ReadCarryFlag(builder);
-        case 0x3:
-            return builder.CreateICmpEQ(lifterContext.ReadCarryFlag(builder), builder.getInt1(false));
-        case 0x4:
-            return lifterContext.ReadZeroFlag(builder);
-        case 0x5:
-            return builder.CreateICmpEQ(lifterContext.ReadZeroFlag(builder), builder.getInt1(false));
-        case 0x6:
-            return builder.CreateOr(lifterContext.ReadCarryFlag(builder), lifterContext.ReadZeroFlag(builder));
-        case 0x7: {
-            llvm::Value* notCf = builder.CreateICmpEQ(lifterContext.ReadCarryFlag(builder), builder.getInt1(false));
-            llvm::Value* notZf = builder.CreateICmpEQ(lifterContext.ReadZeroFlag(builder), builder.getInt1(false));
-            return builder.CreateAnd(notCf, notZf);
-        }
-        case 0x8:
-            return lifterContext.ReadSignFlag(builder);
-        case 0x9:
-            return builder.CreateICmpEQ(lifterContext.ReadSignFlag(builder), builder.getInt1(false));
-        case 0xC:
-            return builder.CreateICmpNE(lifterContext.ReadSignFlag(builder), lifterContext.ReadOverflowFlag(builder));
-        case 0xD:
-            return builder.CreateICmpEQ(lifterContext.ReadSignFlag(builder), lifterContext.ReadOverflowFlag(builder));
-        case 0xE:
-            return builder.CreateOr(
-                lifterContext.ReadZeroFlag(builder),
-                builder.CreateICmpNE(lifterContext.ReadSignFlag(builder), lifterContext.ReadOverflowFlag(builder))
-            );
-        case 0xF: {
-            llvm::Value* notZf = builder.CreateICmpEQ(lifterContext.ReadZeroFlag(builder), builder.getInt1(false));
-            llvm::Value* sOfSame = builder.CreateICmpEQ(lifterContext.ReadSignFlag(builder), lifterContext.ReadOverflowFlag(builder));
-            return builder.CreateAnd(notZf, sOfSame);
-        }
-        default:
-            return builder.getInt1(true);
-    }
-}
-
-llvm::Function* LlvmLifter::liftFunctionAtAddress(
-    const uint8_t* codeBytes,
-    size_t byteCount,
-    uint64_t virtualAddress,
-    std::string_view name,
-    llvm::Module& module) {
-    llvm::LLVMContext& context = module.getContext();
-
-    llvm::FunctionType* funcType = llvm::FunctionType::get(
-        llvm::Type::getInt64Ty(context),
-        {llvm::Type::getInt64Ty(context)},
-        false
-    );
-
-    llvm::Function* function = llvm::Function::Create(
-        funcType,
-        llvm::Function::ExternalLinkage,
-        name,
-        module
-    );
-
-    llvm::BasicBlock* entryBlock = llvm::BasicBlock::Create(context, "entry", function);
-    llvm::IRBuilder<> builder(entryBlock);
-    X86LifterContext lifterContext(function, builder);
-
-    size_t offset = 0;
-    while (offset < byteCount) {
-        uint8_t byte = codeBytes[offset];
-
-        if (byte == 0x90) {
-            offset += 1;
-            continue;
-        }
-
-        if (byte == 0xC3) {
-            llvm::Value* retVal = lifterContext.ReadRegister(X86Register::Rax, builder);
-            builder.CreateRet(retVal);
-            offset += 1;
-            break;
-        }
-
-        bool hasPrefix66 = false;
-        bool hasPrefixF2 = false;
-        bool hasPrefixF3 = false;
-        size_t currentOffset = offset;
-
-        while (currentOffset < byteCount) {
-            uint8_t p = codeBytes[currentOffset];
-            if (p == 0x66) {
-                hasPrefix66 = true;
-                currentOffset++;
-            } else if (p == 0xF2) {
-                hasPrefixF2 = true;
-                currentOffset++;
-            } else if (p == 0xF3) {
-                hasPrefixF3 = true;
-                currentOffset++;
-            } else {
-                break;
-            }
-        }
-
-        if (currentOffset >= byteCount) {
-            offset++;
-            continue;
-        }
-
-        bool rexW = false;
-        bool rexR = false;
-        bool rexX = false;
-        bool rexB = false;
-
-        if ((codeBytes[currentOffset] & 0xF0) == 0x40) {
-            uint8_t rex = codeBytes[currentOffset];
-            rexW = (rex & 0x08) != 0;
-            rexR = (rex & 0x04) != 0;
-            rexX = (rex & 0x02) != 0;
-            rexB = (rex & 0x01) != 0;
-            currentOffset++;
-        }
-
-        if (currentOffset >= byteCount) {
-            offset++;
-            continue;
-        }
-
-        byte = codeBytes[currentOffset];
-
-        if (byte == 0x0F && currentOffset + 1 < byteCount) {
-            uint8_t op2 = codeBytes[currentOffset + 1];
-
-            if (op2 == 0x05) {
-                llvm::FunctionType* asmType = llvm::FunctionType::get(
-                    llvm::Type::getInt64Ty(context),
-                    {llvm::Type::getInt32Ty(context)},
-                    false
-                );
-                llvm::InlineAsm* inlineAsm = llvm::InlineAsm::get(
-                    asmType,
-                    "syscall",
-                    "={rax},{rax},~{rcx},~{r11},~{memory}",
-                    true
-                );
-                llvm::Value* raxVal = lifterContext.ReadRegister(X86Register::Rax, builder);
-                llvm::Value* sysId = builder.CreateTrunc(raxVal, builder.getInt32Ty());
-                llvm::Value* result = builder.CreateCall(inlineAsm, {sysId});
-                lifterContext.WriteRegister(X86Register::Rax, result, builder);
-                offset = currentOffset + 2;
-                continue;
-            }
-
-            if ((op2 >= 0x80 && op2 <= 0x8F) && currentOffset + 5 < byteCount) {
-                int32_t rel32 = 0;
-                std::memcpy(&rel32, &codeBytes[currentOffset + 2], sizeof(int32_t));
-                llvm::Value* cond = evaluateConditionCode(op2 & 0x0F, builder, lifterContext);
-                llvm::BasicBlock* trueBB = llvm::BasicBlock::Create(context, "jcc_taken", function);
-                llvm::BasicBlock* contBB = llvm::BasicBlock::Create(context, "jcc_fallthrough", function);
-                builder.CreateCondBr(cond, trueBB, contBB);
-                builder.SetInsertPoint(contBB);
-                offset = currentOffset + 6;
-                continue;
-            }
-
-            if (op2 >= 0xC8 && op2 <= 0xCF) {
-                uint8_t regIndex = (op2 & 0x07) + (rexB ? 8 : 0);
-                auto reg = static_cast<X86Register>(regIndex);
-                llvm::Value* val = lifterContext.ReadRegister(reg, builder);
-                llvm::Value* swapped = nullptr;
-                if (rexW) {
-                    swapped = builder.CreateBSwap(val);
-                } else {
-                    llvm::Value* trunc32 = builder.CreateTrunc(val, builder.getInt32Ty());
-                    llvm::Value* swap32 = builder.CreateBSwap(trunc32);
-                    swapped = builder.CreateZExt(swap32, builder.getInt64Ty());
-                }
-                lifterContext.WriteRegister(reg, swapped, builder);
-                offset = currentOffset + 2;
-                continue;
-            }
-
-            if (currentOffset + 2 < byteCount) {
-                uint8_t modrm = codeBytes[currentOffset + 2];
-                uint8_t mod = (modrm >> 6) & 0x03;
-                uint8_t regField = ((modrm >> 3) & 0x07) + (rexR ? 8 : 0);
-                uint8_t rmField = (modrm & 0x07) + (rexB ? 8 : 0);
-
-                if (op2 >= 0x40 && op2 <= 0x4F) {
-                    auto regDst = static_cast<X86Register>(regField);
-                    llvm::Value* cond = evaluateConditionCode(op2 & 0x0F, builder, lifterContext);
-                    llvm::Value* curVal = lifterContext.ReadRegister(regDst, builder);
-                    if (mod == 3) {
-                        auto regSrc = static_cast<X86Register>(rmField);
-                        llvm::Value* srcVal = lifterContext.ReadRegister(regSrc, builder);
-                        llvm::Value* selected = builder.CreateSelect(cond, srcVal, curVal);
-                        lifterContext.WriteRegister(regDst, selected, builder);
-                        offset = currentOffset + 3;
-                        continue;
-                    } else {
-                        auto decoded = decodeAddress(codeBytes, currentOffset + 3, byteCount, mod, rmField, rexX, rexB, virtualAddress, builder, lifterContext);
-                        llvm::Type* opTy = rexW ? builder.getInt64Ty() : builder.getInt32Ty();
-                        llvm::Value* loaded = builder.CreateLoad(opTy, decoded.Address);
-                        if (!rexW) {
-                            loaded = builder.CreateZExt(loaded, builder.getInt64Ty());
-                        }
-                        llvm::Value* selected = builder.CreateSelect(cond, loaded, curVal);
-                        lifterContext.WriteRegister(regDst, selected, builder);
-                        offset = currentOffset + 3 + decoded.ConsumedBytes;
-                        continue;
-                    }
-                }
-
-                if (op2 >= 0x90 && op2 <= 0x9F) {
-                    llvm::Value* cond = evaluateConditionCode(op2 & 0x0F, builder, lifterContext);
-                    if (mod == 3) {
-                        auto regDst = static_cast<X86Register>(rmField);
-                        llvm::Value* curVal = lifterContext.ReadRegister(regDst, builder);
-                        llvm::Value* clearLow8 = builder.CreateAnd(curVal, builder.getInt64(~0xFFULL));
-                        llvm::Value* condExt = builder.CreateZExt(cond, builder.getInt64Ty());
-                        llvm::Value* finalVal = builder.CreateOr(clearLow8, condExt);
-                        lifterContext.WriteRegister(regDst, finalVal, builder);
-                        offset = currentOffset + 3;
-                        continue;
-                    } else {
-                        auto decoded = decodeAddress(codeBytes, currentOffset + 3, byteCount, mod, rmField, rexX, rexB, virtualAddress, builder, lifterContext);
-                        llvm::Value* condByte = builder.CreateZExt(cond, builder.getInt8Ty());
-                        builder.CreateStore(condByte, decoded.Address);
-                        offset = currentOffset + 3 + decoded.ConsumedBytes;
-                        continue;
-                    }
-                }
-
-                if (op2 == 0xA3) {
-                    llvm::Value* bitIdx = lifterContext.ReadRegister(static_cast<X86Register>(regField), builder);
-                    llvm::Value* mask = builder.getInt64(rexW ? 0x3F : 0x1F);
-                    llvm::Value* maskedIdx = builder.CreateAnd(bitIdx, mask);
-                    llvm::Value* baseVal = nullptr;
-                    size_t nextOffset = 0;
-                    if (mod == 3) {
-                        baseVal = lifterContext.ReadRegister(static_cast<X86Register>(rmField), builder);
-                        nextOffset = currentOffset + 3;
-                    } else {
-                        auto decoded = decodeAddress(codeBytes, currentOffset + 3, byteCount, mod, rmField, rexX, rexB, virtualAddress, builder, lifterContext);
-                        baseVal = builder.CreateLoad(builder.getInt64Ty(), decoded.Address);
-                        nextOffset = currentOffset + 3 + decoded.ConsumedBytes;
-                    }
-                    llvm::Value* shifted = builder.CreateLShr(baseVal, maskedIdx);
-                    llvm::Value* bit = builder.CreateTrunc(shifted, builder.getInt1Ty());
-                    lifterContext.WriteCarryFlag(bit, builder);
-                    offset = nextOffset;
-                    continue;
-                }
-
-                if (op2 == 0xBA) {
-                    uint8_t regOp = (modrm >> 3) & 0x07;
-                    if (regOp == 4) {
-                        llvm::Value* baseVal = nullptr;
-                        size_t immOffset = 0;
-                        if (mod == 3) {
-                            baseVal = lifterContext.ReadRegister(static_cast<X86Register>(rmField), builder);
-                            immOffset = currentOffset + 3;
-                        } else {
-                            auto decoded = decodeAddress(codeBytes, currentOffset + 3, byteCount, mod, rmField, rexX, rexB, virtualAddress, builder, lifterContext);
-                            baseVal = builder.CreateLoad(builder.getInt64Ty(), decoded.Address);
-                            immOffset = currentOffset + 3 + decoded.ConsumedBytes;
-                        }
-                        if (immOffset < byteCount) {
-                            uint8_t bitIdxImm = codeBytes[immOffset];
-                            uint8_t mask = rexW ? 0x3F : 0x1F;
-                            llvm::Value* shiftVal = builder.getInt64(bitIdxImm & mask);
-                            llvm::Value* shifted = builder.CreateLShr(baseVal, shiftVal);
-                            llvm::Value* bit = builder.CreateTrunc(shifted, builder.getInt1Ty());
-                            lifterContext.WriteCarryFlag(bit, builder);
-                            offset = immOffset + 1;
-                            continue;
-                        }
-                    }
-                }
-
-                if (op2 == 0xBC || op2 == 0xBD) {
-                    llvm::Value* srcVal = nullptr;
-                    size_t nextOffset = currentOffset + 3;
-                    if (mod == 3) {
-                        srcVal = lifterContext.ReadRegister(static_cast<X86Register>(rmField), builder);
-                    } else {
-                        auto decoded = decodeAddress(codeBytes, currentOffset + 3, byteCount, mod, rmField, rexX, rexB, virtualAddress, builder, lifterContext);
-                        srcVal = builder.CreateLoad(rexW ? builder.getInt64Ty() : builder.getInt32Ty(), decoded.Address);
-                        if (!rexW) {
-                            srcVal = builder.CreateZExt(srcVal, builder.getInt64Ty());
-                        }
-                        nextOffset = currentOffset + 3 + decoded.ConsumedBytes;
-                    }
-                    llvm::Value* isZero = builder.CreateICmpEQ(srcVal, builder.getInt64(0));
-                    lifterContext.WriteZeroFlag(isZero, builder);
-                    llvm::Value* scanRes = nullptr;
-                    if (op2 == 0xBC) {
-                        scanRes = builder.CreateCTTZ(srcVal);
-                    } else {
-                        llvm::Value* lz = builder.CreateCTLZ(srcVal);
-                        uint64_t maxBit = rexW ? 63 : 31;
-                        scanRes = builder.CreateSub(builder.getInt64(maxBit), lz);
-                    }
-                    lifterContext.WriteRegister(static_cast<X86Register>(regField), scanRes, builder);
-                    offset = nextOffset;
-                    continue;
-                }
-
-                if (op2 == 0x1F) {
-                    if (mod == 3) {
-                        offset = currentOffset + 3;
-                    } else {
-                        auto decoded = decodeAddress(codeBytes, currentOffset + 3, byteCount, mod, rmField, rexX, rexB, virtualAddress, builder, lifterContext);
-                        offset = currentOffset + 3 + decoded.ConsumedBytes;
-                    }
-                    continue;
-                }
-
-                if (op2 == 0xB8) {
-                    llvm::Value* srcVal = nullptr;
-                    size_t nextOffset = currentOffset + 3;
-                    if (mod == 3) {
-                        srcVal = lifterContext.ReadRegister(static_cast<X86Register>(rmField), builder);
-                    } else {
-                        auto decoded = decodeAddress(codeBytes, currentOffset + 3, byteCount, mod, rmField, rexX, rexB, virtualAddress, builder, lifterContext);
-                        srcVal = builder.CreateLoad(rexW ? builder.getInt64Ty() : builder.getInt32Ty(), decoded.Address);
-                        if (!rexW) {
-                            srcVal = builder.CreateZExt(srcVal, builder.getInt64Ty());
-                        }
-                        nextOffset = currentOffset + 3 + decoded.ConsumedBytes;
-                    }
-                    llvm::Value* isZero = builder.CreateICmpEQ(srcVal, builder.getInt64(0));
-                    lifterContext.WriteZeroFlag(isZero, builder);
-                    llvm::Value* popCnt = builder.CreateCtPop(srcVal);
-                    lifterContext.WriteRegister(static_cast<X86Register>(regField), popCnt, builder);
-                    offset = nextOffset;
-                    continue;
-                }
-
-                if (op2 == 0xB0 || op2 == 0xB1) {
-                    bool is8Bit = (op2 == 0xB0);
-                    llvm::Type* opTy = is8Bit ? builder.getInt8Ty() : (rexW ? builder.getInt64Ty() : builder.getInt32Ty());
-                    llvm::Value* raxVal = lifterContext.ReadRegister(X86Register::Rax, builder);
-                    llvm::Value* cmpVal = is8Bit ? builder.CreateTrunc(raxVal, opTy) : (rexW ? raxVal : builder.CreateTrunc(raxVal, opTy));
-                    llvm::Value* regVal = lifterContext.ReadRegister(static_cast<X86Register>(regField), builder);
-                    llvm::Value* srcVal = is8Bit ? builder.CreateTrunc(regVal, opTy) : (rexW ? regVal : builder.CreateTrunc(regVal, opTy));
-
-                    if (mod == 3) {
-                        auto rmReg = static_cast<X86Register>(rmField);
-                        llvm::Value* curDest = lifterContext.ReadRegister(rmReg, builder);
-                        llvm::Value* destVal = is8Bit ? builder.CreateTrunc(curDest, opTy) : (rexW ? curDest : builder.CreateTrunc(curDest, opTy));
-                        llvm::Value* eq = builder.CreateICmpEQ(destVal, cmpVal);
-                        lifterContext.WriteZeroFlag(eq, builder);
-
-                        llvm::Value* newDest = builder.CreateSelect(eq, srcVal, destVal);
-                        llvm::Value* newRax = builder.CreateSelect(eq, cmpVal, destVal);
-
-                        if (is8Bit) {
-                            llvm::Value* clearedDest = builder.CreateAnd(curDest, builder.getInt64(~0xFFULL));
-                            lifterContext.WriteRegister(rmReg, builder.CreateOr(clearedDest, builder.CreateZExt(newDest, builder.getInt64Ty())), builder);
-                            llvm::Value* clearedRax = builder.CreateAnd(raxVal, builder.getInt64(~0xFFULL));
-                            lifterContext.WriteRegister(X86Register::Rax, builder.CreateOr(clearedRax, builder.CreateZExt(newRax, builder.getInt64Ty())), builder);
-                        } else if (rexW) {
-                            lifterContext.WriteRegister(rmReg, newDest, builder);
-                            lifterContext.WriteRegister(X86Register::Rax, newRax, builder);
-                        } else {
-                            lifterContext.WriteRegister(rmReg, builder.CreateZExt(newDest, builder.getInt64Ty()), builder);
-                            lifterContext.WriteRegister(X86Register::Rax, builder.CreateZExt(newRax, builder.getInt64Ty()), builder);
-                        }
-                        offset = currentOffset + 3;
-                        continue;
-                    } else {
-                        auto decoded = decodeAddress(codeBytes, currentOffset + 3, byteCount, mod, rmField, rexX, rexB, virtualAddress, builder, lifterContext);
-                        llvm::Value* destVal = builder.CreateLoad(opTy, decoded.Address);
-                        llvm::Value* eq = builder.CreateICmpEQ(destVal, cmpVal);
-                        lifterContext.WriteZeroFlag(eq, builder);
-
-                        llvm::Value* newDest = builder.CreateSelect(eq, srcVal, destVal);
-                        llvm::Value* newRax = builder.CreateSelect(eq, cmpVal, destVal);
-                        builder.CreateStore(newDest, decoded.Address);
-
-                        if (is8Bit) {
-                            llvm::Value* clearedRax = builder.CreateAnd(raxVal, builder.getInt64(~0xFFULL));
-                            lifterContext.WriteRegister(X86Register::Rax, builder.CreateOr(clearedRax, builder.CreateZExt(newRax, builder.getInt64Ty())), builder);
-                        } else if (rexW) {
-                            lifterContext.WriteRegister(X86Register::Rax, newRax, builder);
-                        } else {
-                            lifterContext.WriteRegister(X86Register::Rax, builder.CreateZExt(newRax, builder.getInt64Ty()), builder);
-                        }
-                        offset = currentOffset + 3 + decoded.ConsumedBytes;
-                        continue;
-                    }
-                }
-
-                if (op2 == 0xC0 || op2 == 0xC1) {
-                    bool is8Bit = (op2 == 0xC0);
-                    llvm::Type* opTy = is8Bit ? builder.getInt8Ty() : (rexW ? builder.getInt64Ty() : builder.getInt32Ty());
-                    llvm::Value* regVal = lifterContext.ReadRegister(static_cast<X86Register>(regField), builder);
-                    llvm::Value* srcVal = is8Bit ? builder.CreateTrunc(regVal, opTy) : (rexW ? regVal : builder.CreateTrunc(regVal, opTy));
-
-                    if (mod == 3) {
-                        auto rmReg = static_cast<X86Register>(rmField);
-                        llvm::Value* curDest = lifterContext.ReadRegister(rmReg, builder);
-                        llvm::Value* destVal = is8Bit ? builder.CreateTrunc(curDest, opTy) : (rexW ? curDest : builder.CreateTrunc(curDest, opTy));
-                        llvm::Value* sum = builder.CreateAdd(destVal, srcVal);
-
-                        if (is8Bit) {
-                            llvm::Value* clearedDest = builder.CreateAnd(curDest, builder.getInt64(~0xFFULL));
-                            lifterContext.WriteRegister(rmReg, builder.CreateOr(clearedDest, builder.CreateZExt(sum, builder.getInt64Ty())), builder);
-                            llvm::Value* clearedReg = builder.CreateAnd(regVal, builder.getInt64(~0xFFULL));
-                            lifterContext.WriteRegister(static_cast<X86Register>(regField), builder.CreateOr(clearedReg, builder.CreateZExt(destVal, builder.getInt64Ty())), builder);
-                        } else if (rexW) {
-                            lifterContext.WriteRegister(rmReg, sum, builder);
-                            lifterContext.WriteRegister(static_cast<X86Register>(regField), destVal, builder);
-                        } else {
-                            lifterContext.WriteRegister(rmReg, builder.CreateZExt(sum, builder.getInt64Ty()), builder);
-                            lifterContext.WriteRegister(static_cast<X86Register>(regField), builder.CreateZExt(destVal, builder.getInt64Ty()), builder);
-                        }
-                        lifterContext.UpdateFlags(sum, builder);
-                        offset = currentOffset + 3;
-                        continue;
-                    } else {
-                        auto decoded = decodeAddress(codeBytes, currentOffset + 3, byteCount, mod, rmField, rexX, rexB, virtualAddress, builder, lifterContext);
-                        llvm::Value* destVal = builder.CreateLoad(opTy, decoded.Address);
-                        llvm::Value* sum = builder.CreateAdd(destVal, srcVal);
-                        builder.CreateStore(sum, decoded.Address);
-
-                        if (is8Bit) {
-                            llvm::Value* clearedReg = builder.CreateAnd(regVal, builder.getInt64(~0xFFULL));
-                            lifterContext.WriteRegister(static_cast<X86Register>(regField), builder.CreateOr(clearedReg, builder.CreateZExt(destVal, builder.getInt64Ty())), builder);
-                        } else if (rexW) {
-                            lifterContext.WriteRegister(static_cast<X86Register>(regField), destVal, builder);
-                        } else {
-                            lifterContext.WriteRegister(static_cast<X86Register>(regField), builder.CreateZExt(destVal, builder.getInt64Ty()), builder);
-                        }
-                        lifterContext.UpdateFlags(sum, builder);
-                        offset = currentOffset + 3 + decoded.ConsumedBytes;
-                        continue;
-                    }
-                }
-
-                if (op2 == 0x28 || op2 == 0x10) {
-                    if (mod == 3) {
-                        llvm::Value* srcVal = lifterContext.ReadXmmRegister(rmField, builder);
-                        lifterContext.WriteXmmRegister(regField, srcVal, builder);
-                        offset = currentOffset + 3;
-                        continue;
-                    } else {
-                        auto decoded = decodeAddress(codeBytes, currentOffset + 3, byteCount, mod, rmField, rexX, rexB, virtualAddress, builder, lifterContext);
-                        llvm::Value* loaded = builder.CreateLoad(builder.getVectorTy(), decoded.Address);
-                        lifterContext.WriteXmmRegister(regField, loaded, builder);
-                        offset = currentOffset + 3 + decoded.ConsumedBytes;
-                        continue;
-                    }
-                } else if (op2 == 0x29 || op2 == 0x11) {
-                    if (mod == 3) {
-                        llvm::Value* srcVal = lifterContext.ReadXmmRegister(regField, builder);
-                        lifterContext.WriteXmmRegister(rmField, srcVal, builder);
-                        offset = currentOffset + 3;
-                        continue;
-                    } else {
-                        auto decoded = decodeAddress(codeBytes, currentOffset + 3, byteCount, mod, rmField, rexX, rexB, virtualAddress, builder, lifterContext);
-                        llvm::Value* srcVal = lifterContext.ReadXmmRegister(regField, builder);
-                        builder.CreateStore(srcVal, decoded.Address);
-                        offset = currentOffset + 3 + decoded.ConsumedBytes;
-                        continue;
-                    }
-                } else if (op2 == 0x2A) {
-                    llvm::Value* intVal = nullptr;
-                    size_t nextOffset = currentOffset + 3;
-                    if (mod == 3) {
-                        intVal = lifterContext.ReadRegister(static_cast<X86Register>(rmField), builder);
-                    } else {
-                        auto decoded = decodeAddress(codeBytes, currentOffset + 3, byteCount, mod, rmField, rexX, rexB, virtualAddress, builder, lifterContext);
-                        intVal = builder.CreateLoad(rexW ? builder.getInt64Ty() : builder.getInt32Ty(), decoded.Address);
-                        nextOffset = currentOffset + 3 + decoded.ConsumedBytes;
-                    }
-                    lifterContext.WriteXmmRegister(regField, intVal, builder);
-                    offset = nextOffset;
-                    continue;
-                } else if (op2 == 0x2C || op2 == 0x2D) {
-                    llvm::Value* floatVal = nullptr;
-                    size_t nextOffset = currentOffset + 3;
-                    if (mod == 3) {
-                        floatVal = lifterContext.ReadXmmRegister(rmField, builder);
-                    } else {
-                        auto decoded = decodeAddress(codeBytes, currentOffset + 3, byteCount, mod, rmField, rexX, rexB, virtualAddress, builder, lifterContext);
-                        floatVal = builder.CreateLoad(builder.getVectorTy(), decoded.Address);
-                        nextOffset = currentOffset + 3 + decoded.ConsumedBytes;
-                    }
-                    lifterContext.WriteRegister(static_cast<X86Register>(regField), floatVal, builder);
-                    offset = nextOffset;
-                    continue;
-                } else if (op2 == 0x2E || op2 == 0x2F) {
-                    llvm::Value* v1 = lifterContext.ReadXmmRegister(regField, builder);
-                    llvm::Value* v2 = nullptr;
-                    size_t nextOffset = currentOffset + 3;
-                    if (mod == 3) {
-                        v2 = lifterContext.ReadXmmRegister(rmField, builder);
-                    } else {
-                        auto decoded = decodeAddress(codeBytes, currentOffset + 3, byteCount, mod, rmField, rexX, rexB, virtualAddress, builder, lifterContext);
-                        v2 = builder.CreateLoad(builder.getVectorTy(), decoded.Address);
-                        nextOffset = currentOffset + 3 + decoded.ConsumedBytes;
-                    }
-                    llvm::Value* eq = builder.CreateICmpEQ(v1, v2);
-                    llvm::Value* lt = builder.CreateICmpSLT(v1, v2);
-                    lifterContext.WriteZeroFlag(eq, builder);
-                    lifterContext.WriteCarryFlag(lt, builder);
-                    offset = nextOffset;
-                    continue;
-                } else if (op2 == 0x58 || op2 == 0x5C || op2 == 0x59 || op2 == 0x5E ||
-                           op2 == 0x54 || op2 == 0x56 || op2 == 0x57 || op2 == 0xEF ||
-                           op2 == 0x51 || op2 == 0x52 || op2 == 0x53 || op2 == 0x5D || op2 == 0x5F) {
-                    llvm::Value* v1 = lifterContext.ReadXmmRegister(regField, builder);
-                    llvm::Value* v2 = nullptr;
-                    size_t nextOffset = currentOffset + 3;
-
-                    if (mod == 3) {
-                        v2 = lifterContext.ReadXmmRegister(rmField, builder);
-                    } else {
-                        auto decoded = decodeAddress(codeBytes, currentOffset + 3, byteCount, mod, rmField, rexX, rexB, virtualAddress, builder, lifterContext);
-                        v2 = builder.CreateLoad(builder.getVectorTy(), decoded.Address);
-                        nextOffset = currentOffset + 3 + decoded.ConsumedBytes;
-                    }
-
-                    llvm::Value* res = nullptr;
-                    if (op2 == 0x58) {
-                        res = builder.CreateFAdd(v1, v2);
-                    } else if (op2 == 0x5C) {
-                        res = builder.CreateFSub(v1, v2);
-                    } else if (op2 == 0x59) {
-                        res = builder.CreateFMul(v1, v2);
-                    } else if (op2 == 0x5E) {
-                        res = builder.CreateFDiv(v1, v2);
-                    } else if (op2 == 0x54) {
-                        res = builder.CreateAnd(v1, v2);
-                    } else if (op2 == 0x56) {
-                        res = builder.CreateOr(v1, v2);
-                    } else if (op2 == 0x57 || op2 == 0xEF) {
-                        res = builder.CreateXor(v1, v2);
-                    } else if (op2 == 0x51) {
-                        res = builder.CreateFSqrt(v2);
-                    } else if (op2 == 0x52) {
-                        llvm::Value* sqrtVal = builder.CreateFSqrt(v2);
-                        res = builder.CreateFDiv(builder.getInt64(1), sqrtVal);
-                    } else if (op2 == 0x53) {
-                        res = builder.CreateFDiv(builder.getInt64(1), v2);
-                    } else if (op2 == 0x5D) {
-                        res = builder.CreateFMin(v1, v2);
-                    } else if (op2 == 0x5F) {
-                        res = builder.CreateFMax(v1, v2);
-                    }
-
-                    lifterContext.WriteXmmRegister(regField, res, builder);
-                    offset = nextOffset;
-                    continue;
-                } else if (op2 == 0xAF) {
-                    llvm::Value* v1 = lifterContext.ReadRegister(static_cast<X86Register>(regField), builder);
-                    llvm::Value* v2 = nullptr;
-                    size_t nextOffset = currentOffset + 3;
-                    if (mod == 3) {
-                        v2 = lifterContext.ReadRegister(static_cast<X86Register>(rmField), builder);
-                    } else {
-                        auto decoded = decodeAddress(codeBytes, currentOffset + 3, byteCount, mod, rmField, rexX, rexB, virtualAddress, builder, lifterContext);
-                        v2 = builder.CreateLoad(builder.getInt64Ty(), decoded.Address);
-                        nextOffset = currentOffset + 3 + decoded.ConsumedBytes;
-                    }
-                    llvm::Value* res = builder.CreateMul(v1, v2);
-                    lifterContext.WriteRegister(static_cast<X86Register>(regField), res, builder);
-                    lifterContext.UpdateFlags(res, builder);
-                    offset = nextOffset;
-                    continue;
-                } else if (op2 == 0xB6 || op2 == 0xB7) {
-                    llvm::Value* val = nullptr;
-                    size_t nextOffset = currentOffset + 3;
-                    llvm::Type* srcTy = (op2 == 0xB6) ? builder.getInt8Ty() : builder.getInt16Ty();
-                    if (mod == 3) {
-                        llvm::Value* raw = lifterContext.ReadRegister(static_cast<X86Register>(rmField), builder);
-                        val = builder.CreateTrunc(raw, srcTy);
-                    } else {
-                        auto decoded = decodeAddress(codeBytes, currentOffset + 3, byteCount, mod, rmField, rexX, rexB, virtualAddress, builder, lifterContext);
-                        val = builder.CreateLoad(srcTy, decoded.Address);
-                        nextOffset = currentOffset + 3 + decoded.ConsumedBytes;
-                    }
-                    llvm::Value* extended = builder.CreateZExt(val, builder.getInt64Ty());
-                    lifterContext.WriteRegister(static_cast<X86Register>(regField), extended, builder);
-                    offset = nextOffset;
-                    continue;
-                } else if (op2 == 0xBE || op2 == 0xBF) {
-                    llvm::Value* val = nullptr;
-                    size_t nextOffset = currentOffset + 3;
-                    llvm::Type* srcTy = (op2 == 0xBE) ? builder.getInt8Ty() : builder.getInt16Ty();
-                    if (mod == 3) {
-                        llvm::Value* raw = lifterContext.ReadRegister(static_cast<X86Register>(rmField), builder);
-                        val = builder.CreateTrunc(raw, srcTy);
-                    } else {
-                        auto decoded = decodeAddress(codeBytes, currentOffset + 3, byteCount, mod, rmField, rexX, rexB, virtualAddress, builder, lifterContext);
-                        val = builder.CreateLoad(srcTy, decoded.Address);
-                        nextOffset = currentOffset + 3 + decoded.ConsumedBytes;
-                    }
-                    llvm::Value* extended = builder.CreateSExt(val, builder.getInt64Ty());
-                    lifterContext.WriteRegister(static_cast<X86Register>(regField), extended, builder);
-                    offset = nextOffset;
-                    continue;
-                }
-            }
-        }
-
-        if ((byte & 0xF8) == 0xB8) {
-            uint8_t regIndex = (byte & 0x07) + (rexB ? 8 : 0);
-            if (rexW && currentOffset + 8 < byteCount) {
-                uint64_t imm = 0;
-                std::memcpy(&imm, &codeBytes[currentOffset + 1], sizeof(uint64_t));
-                lifterContext.WriteRegister(static_cast<X86Register>(regIndex), builder.getInt64(imm), builder);
-                offset = currentOffset + 9;
-                continue;
-            } else if (!rexW && currentOffset + 4 < byteCount) {
-                uint32_t imm = 0;
-                std::memcpy(&imm, &codeBytes[currentOffset + 1], sizeof(uint32_t));
-                lifterContext.WriteRegister(static_cast<X86Register>(regIndex), builder.getInt64(imm), builder);
-                offset = currentOffset + 5;
-                continue;
-            }
-        }
-
-        if ((byte & 0xF8) == 0x50) {
-            uint8_t regIndex = (byte & 0x07) + (rexB ? 8 : 0);
-            llvm::Value* rspVal = lifterContext.ReadRegister(X86Register::Rsp, builder);
-            llvm::Value* newRsp = builder.CreateSub(rspVal, builder.getInt64(8));
-            lifterContext.WriteRegister(X86Register::Rsp, newRsp, builder);
-            llvm::Value* regVal = lifterContext.ReadRegister(static_cast<X86Register>(regIndex), builder);
-            builder.CreateStore(regVal, newRsp);
-            offset = currentOffset + 1;
-            continue;
-        }
-
-        if ((byte & 0xF8) == 0x58) {
-            uint8_t regIndex = (byte & 0x07) + (rexB ? 8 : 0);
-            llvm::Value* rspVal = lifterContext.ReadRegister(X86Register::Rsp, builder);
-            llvm::Value* loadedVal = builder.CreateLoad(builder.getInt64Ty(), rspVal);
-            lifterContext.WriteRegister(static_cast<X86Register>(regIndex), loadedVal, builder);
-            llvm::Value* newRsp = builder.CreateAdd(rspVal, builder.getInt64(8));
-            lifterContext.WriteRegister(X86Register::Rsp, newRsp, builder);
-            offset = currentOffset + 1;
-            continue;
-        }
-
-        if (byte == 0x6A && currentOffset + 1 < byteCount) {
-            int8_t imm8 = static_cast<int8_t>(codeBytes[currentOffset + 1]);
-            int64_t imm = static_cast<int64_t>(imm8);
-            llvm::Value* rspVal = lifterContext.ReadRegister(X86Register::Rsp, builder);
-            llvm::Value* newRsp = builder.CreateSub(rspVal, builder.getInt64(8));
-            lifterContext.WriteRegister(X86Register::Rsp, newRsp, builder);
-            builder.CreateStore(builder.getInt64(static_cast<uint64_t>(imm)), newRsp);
-            offset = currentOffset + 2;
-            continue;
-        }
-
-        if (byte == 0x68 && currentOffset + 4 < byteCount) {
-            int32_t imm32 = 0;
-            std::memcpy(&imm32, &codeBytes[currentOffset + 1], sizeof(int32_t));
-            int64_t imm = static_cast<int64_t>(imm32);
-            llvm::Value* rspVal = lifterContext.ReadRegister(X86Register::Rsp, builder);
-            llvm::Value* newRsp = builder.CreateSub(rspVal, builder.getInt64(8));
-            lifterContext.WriteRegister(X86Register::Rsp, newRsp, builder);
-            builder.CreateStore(builder.getInt64(static_cast<uint64_t>(imm)), newRsp);
-            offset = currentOffset + 5;
-            continue;
-        }
-
-        if (byte == 0xEB && currentOffset + 1 < byteCount) {
-            llvm::BasicBlock* targetBB = llvm::BasicBlock::Create(context, "jmp_target", function);
-            builder.CreateBr(targetBB);
-            builder.SetInsertPoint(targetBB);
-            offset = currentOffset + 2;
-            continue;
-        }
-
-        if (byte == 0xE9 && currentOffset + 4 < byteCount) {
-            llvm::BasicBlock* targetBB = llvm::BasicBlock::Create(context, "jmp_target", function);
-            builder.CreateBr(targetBB);
-            builder.SetInsertPoint(targetBB);
-            offset = currentOffset + 5;
-            continue;
-        }
-
-        if ((byte >= 0x70 && byte <= 0x7F) && currentOffset + 1 < byteCount) {
-            llvm::Value* cond = evaluateConditionCode(byte & 0x0F, builder, lifterContext);
-            llvm::BasicBlock* trueBB = llvm::BasicBlock::Create(context, "jcc_taken", function);
-            llvm::BasicBlock* contBB = llvm::BasicBlock::Create(context, "jcc_fallthrough", function);
-            builder.CreateCondBr(cond, trueBB, contBB);
-            builder.SetInsertPoint(contBB);
-            offset = currentOffset + 2;
-            continue;
-        }
-
-        if (byte == 0xE8 && currentOffset + 4 < byteCount) {
-            llvm::Value* rspVal = lifterContext.ReadRegister(X86Register::Rsp, builder);
-            llvm::Value* newRsp = builder.CreateSub(rspVal, builder.getInt64(8));
-            lifterContext.WriteRegister(X86Register::Rsp, newRsp, builder);
-            offset = currentOffset + 5;
-            continue;
-        }
-
-        if (byte == 0x8D && currentOffset + 1 < byteCount) {
-            uint8_t modrm = codeBytes[currentOffset + 1];
-            uint8_t mod = (modrm >> 6) & 0x03;
-            uint8_t regField = ((modrm >> 3) & 0x07) + (rexR ? 8 : 0);
-            uint8_t rmField = (modrm & 0x07) + (rexB ? 8 : 0);
-            auto regDst = static_cast<X86Register>(regField);
-
-            if (mod != 3) {
-                auto decoded = decodeAddress(codeBytes, currentOffset + 2, byteCount, mod, rmField, rexX, rexB, virtualAddress, builder, lifterContext);
-                lifterContext.WriteRegister(regDst, decoded.Address, builder);
-                offset = currentOffset + 2 + decoded.ConsumedBytes;
-                continue;
-            }
-        }
-
-        if ((byte == 0x80 || byte == 0x81 || byte == 0x83) && currentOffset + 1 < byteCount) {
-            uint8_t modrm = codeBytes[currentOffset + 1];
-            uint8_t mod = (modrm >> 6) & 0x03;
-            uint8_t regOp = (modrm >> 3) & 0x07;
-            uint8_t rmField = (modrm & 0x07) + (rexB ? 8 : 0);
-
-            if (mod == 3) {
-                auto regDst = static_cast<X86Register>(rmField);
-                int64_t imm = 0;
-                size_t nextOffset = 0;
-
-                if (byte == 0x81 && currentOffset + 5 < byteCount) {
-                    int32_t imm32 = 0;
-                    std::memcpy(&imm32, &codeBytes[currentOffset + 2], sizeof(int32_t));
-                    imm = static_cast<int64_t>(imm32);
-                    nextOffset = currentOffset + 6;
-                } else if ((byte == 0x83 || byte == 0x80) && currentOffset + 2 < byteCount) {
-                    int8_t imm8 = static_cast<int8_t>(codeBytes[currentOffset + 2]);
-                    imm = static_cast<int64_t>(imm8);
-                    nextOffset = currentOffset + 3;
-                }
-
-                if (nextOffset != 0) {
-                    llvm::Value* v1 = lifterContext.ReadRegister(regDst, builder);
-                    llvm::Value* v2 = builder.getInt64(static_cast<uint64_t>(imm));
-                    X86AluOp aluOp = X86AluOp::Add;
-                    if (regOp == 0) aluOp = X86AluOp::Add;
-                    else if (regOp == 1) aluOp = X86AluOp::Or;
-                    else if (regOp == 4) aluOp = X86AluOp::And;
-                    else if (regOp == 5) aluOp = X86AluOp::Sub;
-                    else if (regOp == 6) aluOp = X86AluOp::Xor;
-                    else if (regOp == 7) aluOp = X86AluOp::Cmp;
-
-                    llvm::Value* res = lifterContext.EvaluateAlu(aluOp, v1, v2, builder);
-                    if (regOp != 7) {
-                        lifterContext.WriteRegister(regDst, res, builder);
-                    }
-                    offset = nextOffset;
-                    continue;
-                }
-            }
-        }
-
-        if (byte == 0x63 && currentOffset + 1 < byteCount) {
-            uint8_t modrm = codeBytes[currentOffset + 1];
-            uint8_t mod = (modrm >> 6) & 0x03;
-            uint8_t regField = ((modrm >> 3) & 0x07) + (rexR ? 8 : 0);
-            uint8_t rmField = (modrm & 0x07) + (rexB ? 8 : 0);
-            llvm::Value* val = nullptr;
-            size_t nextOffset = currentOffset + 2;
-            if (mod == 3) {
-                llvm::Value* raw = lifterContext.ReadRegister(static_cast<X86Register>(rmField), builder);
-                val = builder.CreateTrunc(raw, builder.getInt32Ty());
-            } else {
-                auto decoded = decodeAddress(codeBytes, currentOffset + 2, byteCount, mod, rmField, rexX, rexB, virtualAddress, builder, lifterContext);
-                val = builder.CreateLoad(builder.getInt32Ty(), decoded.Address);
-                nextOffset = currentOffset + 2 + decoded.ConsumedBytes;
-            }
-            llvm::Value* extended = builder.CreateSExt(val, builder.getInt64Ty());
-            lifterContext.WriteRegister(static_cast<X86Register>(regField), extended, builder);
-            offset = nextOffset;
-            continue;
-        }
-
-        if ((byte == 0x86 || byte == 0x87) && currentOffset + 1 < byteCount) {
-            uint8_t modrm = codeBytes[currentOffset + 1];
-            uint8_t mod = (modrm >> 6) & 0x03;
-            uint8_t regField = ((modrm >> 3) & 0x07) + (rexR ? 8 : 0);
-            uint8_t rmField = (modrm & 0x07) + (rexB ? 8 : 0);
-            bool is8Bit = (byte == 0x86);
-            llvm::Type* opTy = is8Bit ? builder.getInt8Ty() : (rexW ? builder.getInt64Ty() : builder.getInt32Ty());
-
-            if (mod == 3) {
-                auto regDst = static_cast<X86Register>(rmField);
-                auto regSrc = static_cast<X86Register>(regField);
-                llvm::Value* v1 = lifterContext.ReadRegister(regDst, builder);
-                llvm::Value* v2 = lifterContext.ReadRegister(regSrc, builder);
-                if (is8Bit) {
-                    llvm::Value* t1 = builder.CreateTrunc(v1, opTy);
-                    llvm::Value* t2 = builder.CreateTrunc(v2, opTy);
-                    llvm::Value* c1 = builder.CreateAnd(v1, builder.getInt64(~0xFFULL));
-                    llvm::Value* c2 = builder.CreateAnd(v2, builder.getInt64(~0xFFULL));
-                    lifterContext.WriteRegister(regDst, builder.CreateOr(c1, builder.CreateZExt(t2, builder.getInt64Ty())), builder);
-                    lifterContext.WriteRegister(regSrc, builder.CreateOr(c2, builder.CreateZExt(t1, builder.getInt64Ty())), builder);
-                } else if (rexW) {
-                    lifterContext.WriteRegister(regDst, v2, builder);
-                    lifterContext.WriteRegister(regSrc, v1, builder);
-                } else {
-                    lifterContext.WriteRegister(regDst, builder.CreateZExt(builder.CreateTrunc(v2, opTy), builder.getInt64Ty()), builder);
-                    lifterContext.WriteRegister(regSrc, builder.CreateZExt(builder.CreateTrunc(v1, opTy), builder.getInt64Ty()), builder);
-                }
-                offset = currentOffset + 2;
-                continue;
-            } else {
-                auto decoded = decodeAddress(codeBytes, currentOffset + 2, byteCount, mod, rmField, rexX, rexB, virtualAddress, builder, lifterContext);
-                auto regSrc = static_cast<X86Register>(regField);
-                llvm::Value* vReg = lifterContext.ReadRegister(regSrc, builder);
-                llvm::Value* vMem = builder.CreateLoad(opTy, decoded.Address);
-                llvm::Value* storeVal = is8Bit ? builder.CreateTrunc(vReg, opTy) : (rexW ? vReg : builder.CreateTrunc(vReg, opTy));
-                builder.CreateStore(storeVal, decoded.Address);
-                if (is8Bit) {
-                    llvm::Value* cReg = builder.CreateAnd(vReg, builder.getInt64(~0xFFULL));
-                    lifterContext.WriteRegister(regSrc, builder.CreateOr(cReg, builder.CreateZExt(vMem, builder.getInt64Ty())), builder);
-                } else if (rexW) {
-                    lifterContext.WriteRegister(regSrc, vMem, builder);
-                } else {
-                    lifterContext.WriteRegister(regSrc, builder.CreateZExt(vMem, builder.getInt64Ty()), builder);
-                }
-                offset = currentOffset + 2 + decoded.ConsumedBytes;
-                continue;
-            }
-        }
-
-        if ((byte == 0xC1 || byte == 0xD1 || byte == 0xD3) && currentOffset + 1 < byteCount) {
-            uint8_t modrm = codeBytes[currentOffset + 1];
-            uint8_t mod = (modrm >> 6) & 0x03;
-            uint8_t regOp = (modrm >> 3) & 0x07;
-            uint8_t rmField = (modrm & 0x07) + (rexB ? 8 : 0);
-
-            if (regOp == 4 || regOp == 5 || regOp == 7) {
-                X86AluOp aluOp = (regOp == 4) ? X86AluOp::Shl : ((regOp == 5) ? X86AluOp::Shr : X86AluOp::Sar);
-                llvm::Value* shiftAmount = nullptr;
-                size_t nextOffset = 0;
-
-                if (mod == 3) {
-                    if (byte == 0xD1) {
-                        shiftAmount = builder.getInt64(1);
-                        nextOffset = currentOffset + 2;
-                    } else if (byte == 0xC1 && currentOffset + 2 < byteCount) {
-                        uint8_t imm8 = codeBytes[currentOffset + 2];
-                        uint8_t mask = rexW ? 0x3F : 0x1F;
-                        shiftAmount = builder.getInt64(imm8 & mask);
-                        nextOffset = currentOffset + 3;
-                    } else if (byte == 0xD3) {
-                        llvm::Value* rcxVal = lifterContext.ReadRegister(X86Register::Rcx, builder);
-                        uint64_t mask = rexW ? 0x3F : 0x1F;
-                        shiftAmount = builder.CreateAnd(rcxVal, builder.getInt64(mask));
-                        nextOffset = currentOffset + 2;
-                    }
-
-                    if (shiftAmount != nullptr) {
-                        auto regDst = static_cast<X86Register>(rmField);
-                        llvm::Value* v1 = lifterContext.ReadRegister(regDst, builder);
-                        llvm::Value* res = lifterContext.EvaluateAlu(aluOp, v1, shiftAmount, builder);
-                        lifterContext.WriteRegister(regDst, res, builder);
-                        offset = nextOffset;
-                        continue;
-                    }
-                } else {
-                    auto decoded = decodeAddress(codeBytes, currentOffset + 2, byteCount, mod, rmField, rexX, rexB, virtualAddress, builder, lifterContext);
-                    size_t immOffset = currentOffset + 2 + decoded.ConsumedBytes;
-
-                    if (byte == 0xD1) {
-                        shiftAmount = builder.getInt64(1);
-                        nextOffset = immOffset;
-                    } else if (byte == 0xC1 && immOffset < byteCount) {
-                        uint8_t imm8 = codeBytes[immOffset];
-                        uint8_t mask = rexW ? 0x3F : 0x1F;
-                        shiftAmount = builder.getInt64(imm8 & mask);
-                        nextOffset = immOffset + 1;
-                    } else if (byte == 0xD3) {
-                        llvm::Value* rcxVal = lifterContext.ReadRegister(X86Register::Rcx, builder);
-                        uint64_t mask = rexW ? 0x3F : 0x1F;
-                        shiftAmount = builder.CreateAnd(rcxVal, builder.getInt64(mask));
-                        nextOffset = immOffset;
-                    }
-
-                    if (shiftAmount != nullptr) {
-                        llvm::Value* v1 = builder.CreateLoad(builder.getInt64Ty(), decoded.Address);
-                        llvm::Value* res = lifterContext.EvaluateAlu(aluOp, v1, shiftAmount, builder);
-                        builder.CreateStore(res, decoded.Address);
-                        offset = nextOffset;
-                        continue;
-                    }
-                }
-            }
-        }
-
-        if ((byte == 0xF6 || byte == 0xF7) && currentOffset + 1 < byteCount) {
-            uint8_t modrm = codeBytes[currentOffset + 1];
-            uint8_t mod = (modrm >> 6) & 0x03;
-            uint8_t regOp = (modrm >> 3) & 0x07;
-            uint8_t rmField = (modrm & 0x07) + (rexB ? 8 : 0);
-
-            if (regOp == 0 || regOp == 1) {
-                bool is8Bit = (byte == 0xF6);
-                llvm::Value* val = nullptr;
-                size_t immOffset = 0;
-                if (mod == 3) {
-                    val = lifterContext.ReadRegister(static_cast<X86Register>(rmField), builder);
-                    immOffset = currentOffset + 2;
-                } else {
-                    auto decoded = decodeAddress(codeBytes, currentOffset + 2, byteCount, mod, rmField, rexX, rexB, virtualAddress, builder, lifterContext);
-                    val = builder.CreateLoad(is8Bit ? builder.getInt8Ty() : (rexW ? builder.getInt64Ty() : builder.getInt32Ty()), decoded.Address);
-                    immOffset = currentOffset + 2 + decoded.ConsumedBytes;
-                }
-                int64_t imm = 0;
-                size_t nextOffset = 0;
-                if (is8Bit && immOffset < byteCount) {
-                    int8_t imm8 = static_cast<int8_t>(codeBytes[immOffset]);
-                    imm = static_cast<int64_t>(imm8);
-                    nextOffset = immOffset + 1;
-                } else if (!is8Bit && immOffset + 3 < byteCount) {
-                    int32_t imm32 = 0;
-                    std::memcpy(&imm32, &codeBytes[immOffset], sizeof(int32_t));
-                    imm = static_cast<int64_t>(imm32);
-                    nextOffset = immOffset + 4;
-                }
-                if (nextOffset != 0) {
-                    llvm::Value* immVal = builder.getInt64(static_cast<uint64_t>(imm));
-                    static_cast<void>(lifterContext.EvaluateAlu(X86AluOp::Test, val, immVal, builder));
-                    offset = nextOffset;
-                    continue;
-                }
-            }
-
-            if (regOp == 2 || regOp == 3) {
-                X86AluOp aluOp = (regOp == 2) ? X86AluOp::Not : X86AluOp::Neg;
-                if (mod == 3) {
-                    auto regDst = static_cast<X86Register>(rmField);
-                    llvm::Value* v1 = lifterContext.ReadRegister(regDst, builder);
-                    llvm::Value* res = lifterContext.EvaluateAlu(aluOp, v1, builder.getInt64(0), builder);
-                    lifterContext.WriteRegister(regDst, res, builder);
-                    offset = currentOffset + 2;
-                    continue;
-                } else {
-                    auto decoded = decodeAddress(codeBytes, currentOffset + 2, byteCount, mod, rmField, rexX, rexB, virtualAddress, builder, lifterContext);
-                    llvm::Value* v1 = builder.CreateLoad(builder.getInt64Ty(), decoded.Address);
-                    llvm::Value* res = lifterContext.EvaluateAlu(aluOp, v1, builder.getInt64(0), builder);
-                    builder.CreateStore(res, decoded.Address);
-                    offset = currentOffset + 2 + decoded.ConsumedBytes;
-                    continue;
-                }
-            }
-
-            if (regOp == 6 || regOp == 7) {
-                bool isSigned = (regOp == 7);
-                llvm::Value* divisor = nullptr;
-                size_t nextOffset = currentOffset + 2;
-                if (mod == 3) {
-                    divisor = lifterContext.ReadRegister(static_cast<X86Register>(rmField), builder);
-                } else {
-                    auto decoded = decodeAddress(codeBytes, currentOffset + 2, byteCount, mod, rmField, rexX, rexB, virtualAddress, builder, lifterContext);
-                    divisor = builder.CreateLoad(rexW ? builder.getInt64Ty() : builder.getInt32Ty(), decoded.Address);
-                    if (!rexW) {
-                        divisor = isSigned ? builder.CreateSExt(divisor, builder.getInt64Ty()) : builder.CreateZExt(divisor, builder.getInt64Ty());
-                    }
-                    nextOffset = currentOffset + 2 + decoded.ConsumedBytes;
-                }
-
-                llvm::Value* raxVal = lifterContext.ReadRegister(X86Register::Rax, builder);
-                llvm::Value* quot = nullptr;
-                llvm::Value* rem = nullptr;
-                if (rexW) {
-                    quot = isSigned ? builder.CreateSDiv(raxVal, divisor) : builder.CreateUDiv(raxVal, divisor);
-                    rem = isSigned ? builder.CreateSRem(raxVal, divisor) : builder.CreateURem(raxVal, divisor);
-                    lifterContext.WriteRegister(X86Register::Rax, quot, builder);
-                    lifterContext.WriteRegister(X86Register::Rdx, rem, builder);
-                } else {
-                    llvm::Value* eax = builder.CreateTrunc(raxVal, builder.getInt32Ty());
-                    llvm::Value* div32 = builder.CreateTrunc(divisor, builder.getInt32Ty());
-                    quot = isSigned ? builder.CreateSDiv(eax, div32) : builder.CreateUDiv(eax, div32);
-                    rem = isSigned ? builder.CreateSRem(eax, div32) : builder.CreateURem(eax, div32);
-                    lifterContext.WriteRegister(X86Register::Rax, builder.CreateZExt(quot, builder.getInt64Ty()), builder);
-                    lifterContext.WriteRegister(X86Register::Rdx, builder.CreateZExt(rem, builder.getInt64Ty()), builder);
-                }
-                offset = nextOffset;
-                continue;
-            }
-        }
-
-        if (currentOffset + 1 < byteCount) {
-            uint8_t modrm = codeBytes[currentOffset + 1];
-            uint8_t mod = (modrm >> 6) & 0x03;
-            uint8_t regField = ((modrm >> 3) & 0x07) + (rexR ? 8 : 0);
-            uint8_t rmField = (modrm & 0x07) + (rexB ? 8 : 0);
-
-            if (mod != 3 && (byte == 0x89 || byte == 0x8B)) {
-                auto regDst = static_cast<X86Register>(rmField);
-                auto regSrc = static_cast<X86Register>(regField);
-                auto decoded = decodeAddress(codeBytes, currentOffset + 2, byteCount, mod, rmField, rexX, rexB, virtualAddress, builder, lifterContext);
-
-                if (byte == 0x89) {
-                    llvm::Value* srcVal = lifterContext.ReadRegister(regSrc, builder);
-                    builder.CreateStore(srcVal, decoded.Address);
-                } else {
-                    llvm::Value* loaded = builder.CreateLoad(builder.getInt64Ty(), decoded.Address);
-                    lifterContext.WriteRegister(regSrc, loaded, builder);
-                }
-                offset = currentOffset + 2 + decoded.ConsumedBytes;
-                continue;
-            }
-
-            if (mod == 3) {
-                auto regDst = static_cast<X86Register>(rmField);
-                auto regSrc = static_cast<X86Register>(regField);
-
-                if (byte == 0x89) {
-                    llvm::Value* srcVal = lifterContext.ReadRegister(regSrc, builder);
-                    lifterContext.WriteRegister(regDst, srcVal, builder);
-                    offset = currentOffset + 2;
-                    continue;
-                } else if (byte == 0x8B) {
-                    llvm::Value* srcVal = lifterContext.ReadRegister(regDst, builder);
-                    lifterContext.WriteRegister(regSrc, srcVal, builder);
-                    offset = currentOffset + 2;
-                    continue;
-                } else if (byte == 0x01 || byte == 0x03) {
-                    auto dst = (byte == 0x01) ? regDst : regSrc;
-                    auto src = (byte == 0x01) ? regSrc : regDst;
-                    llvm::Value* v1 = lifterContext.ReadRegister(dst, builder);
-                    llvm::Value* v2 = lifterContext.ReadRegister(src, builder);
-                    llvm::Value* res = lifterContext.EvaluateAlu(X86AluOp::Add, v1, v2, builder);
-                    lifterContext.WriteRegister(dst, res, builder);
-                    offset = currentOffset + 2;
-                    continue;
-                } else if (byte == 0x29 || byte == 0x2B) {
-                    auto dst = (byte == 0x29) ? regDst : regSrc;
-                    auto src = (byte == 0x29) ? regSrc : regDst;
-                    llvm::Value* v1 = lifterContext.ReadRegister(dst, builder);
-                    llvm::Value* v2 = lifterContext.ReadRegister(src, builder);
-                    llvm::Value* res = lifterContext.EvaluateAlu(X86AluOp::Sub, v1, v2, builder);
-                    lifterContext.WriteRegister(dst, res, builder);
-                    offset = currentOffset + 2;
-                    continue;
-                } else if (byte == 0x31 || byte == 0x33) {
-                    auto dst = (byte == 0x31) ? regDst : regSrc;
-                    auto src = (byte == 0x31) ? regSrc : regDst;
-                    llvm::Value* v1 = lifterContext.ReadRegister(dst, builder);
-                    llvm::Value* v2 = lifterContext.ReadRegister(src, builder);
-                    llvm::Value* res = lifterContext.EvaluateAlu(X86AluOp::Xor, v1, v2, builder);
-                    lifterContext.WriteRegister(dst, res, builder);
-                    offset = currentOffset + 2;
-                    continue;
-                } else if (byte == 0x21 || byte == 0x23) {
-                    auto dst = (byte == 0x21) ? regDst : regSrc;
-                    auto src = (byte == 0x21) ? regSrc : regDst;
-                    llvm::Value* v1 = lifterContext.ReadRegister(dst, builder);
-                    llvm::Value* v2 = lifterContext.ReadRegister(src, builder);
-                    llvm::Value* res = lifterContext.EvaluateAlu(X86AluOp::And, v1, v2, builder);
-                    lifterContext.WriteRegister(dst, res, builder);
-                    offset = currentOffset + 2;
-                    continue;
-                } else if (byte == 0x09 || byte == 0x0B) {
-                    auto dst = (byte == 0x09) ? regDst : regSrc;
-                    auto src = (byte == 0x09) ? regSrc : regDst;
-                    llvm::Value* v1 = lifterContext.ReadRegister(dst, builder);
-                    llvm::Value* v2 = lifterContext.ReadRegister(src, builder);
-                    llvm::Value* res = lifterContext.EvaluateAlu(X86AluOp::Or, v1, v2, builder);
-                    lifterContext.WriteRegister(dst, res, builder);
-                    offset = currentOffset + 2;
-                    continue;
-                } else if (byte == 0x39 || byte == 0x3B) {
-                    auto dst = (byte == 0x39) ? regDst : regSrc;
-                    auto src = (byte == 0x39) ? regSrc : regDst;
-                    llvm::Value* v1 = lifterContext.ReadRegister(dst, builder);
-                    llvm::Value* v2 = lifterContext.ReadRegister(src, builder);
-                    static_cast<void>(lifterContext.EvaluateAlu(X86AluOp::Cmp, v1, v2, builder));
-                    offset = currentOffset + 2;
-                    continue;
-                } else if (byte == 0x85) {
-                    llvm::Value* v1 = lifterContext.ReadRegister(regDst, builder);
-                    llvm::Value* v2 = lifterContext.ReadRegister(regSrc, builder);
-                    static_cast<void>(lifterContext.EvaluateAlu(X86AluOp::Test, v1, v2, builder));
-                    offset = currentOffset + 2;
-                    continue;
-                }
-            }
-        }
-
-        if (byte == 0x90) {
-            offset = currentOffset + 1;
-            continue;
-        }
-
-        if (byte == 0x99) {
-            llvm::Value* raxVal = lifterContext.ReadRegister(X86Register::Rax, builder);
-            if (rexW) {
-                llvm::Value* sign = builder.CreateAShr(raxVal, builder.getInt64(63));
-                lifterContext.WriteRegister(X86Register::Rdx, sign, builder);
-            } else {
-                llvm::Value* eax = builder.CreateTrunc(raxVal, builder.getInt32Ty());
-                llvm::Value* sign32 = builder.CreateAShr(eax, builder.getInt32(31));
-                llvm::Value* edx = builder.CreateSExt(sign32, builder.getInt64Ty());
-                lifterContext.WriteRegister(X86Register::Rdx, edx, builder);
-            }
-            offset = currentOffset + 1;
-            continue;
-        }
-
-        if (byte == 0xAA) {
-            llvm::Value* rdiVal = lifterContext.ReadRegister(X86Register::Rdi, builder);
-            llvm::Value* raxVal = lifterContext.ReadRegister(X86Register::Rax, builder);
-            llvm::Value* alVal = builder.CreateTrunc(raxVal, builder.getInt8Ty());
-            if (hasPrefixF3) {
-                llvm::Value* rcxVal = lifterContext.ReadRegister(X86Register::Rcx, builder);
-                builder.CreateMemSet(rdiVal, alVal, rcxVal, 1);
-                lifterContext.WriteRegister(X86Register::Rdi, builder.CreateAdd(rdiVal, rcxVal), builder);
-                lifterContext.WriteRegister(X86Register::Rcx, builder.getInt64(0), builder);
-            } else {
-                builder.CreateStore(alVal, rdiVal);
-                lifterContext.WriteRegister(X86Register::Rdi, builder.CreateAdd(rdiVal, builder.getInt64(1)), builder);
-            }
-            offset = currentOffset + 1;
-            continue;
-        }
-
-        if (byte == 0xAB) {
-            llvm::Value* rdiVal = lifterContext.ReadRegister(X86Register::Rdi, builder);
-            llvm::Value* raxVal = lifterContext.ReadRegister(X86Register::Rax, builder);
-            uint64_t step = rexW ? 8 : 4;
-            llvm::Type* opTy = rexW ? builder.getInt64Ty() : builder.getInt32Ty();
-            llvm::Value* storeVal = rexW ? raxVal : builder.CreateTrunc(raxVal, opTy);
-            if (hasPrefixF3) {
-                llvm::Value* rcxVal = lifterContext.ReadRegister(X86Register::Rcx, builder);
-                llvm::Value* totalBytes = builder.CreateMul(rcxVal, builder.getInt64(step));
-                builder.CreateMemSet(rdiVal, storeVal, totalBytes, static_cast<unsigned>(step));
-                lifterContext.WriteRegister(X86Register::Rdi, builder.CreateAdd(rdiVal, totalBytes), builder);
-                lifterContext.WriteRegister(X86Register::Rcx, builder.getInt64(0), builder);
-            } else {
-                builder.CreateStore(storeVal, rdiVal);
-                lifterContext.WriteRegister(X86Register::Rdi, builder.CreateAdd(rdiVal, builder.getInt64(step)), builder);
-            }
-            offset = currentOffset + 1;
-            continue;
-        }
-
-        if (byte == 0xA4) {
-            llvm::Value* rsiVal = lifterContext.ReadRegister(X86Register::Rsi, builder);
-            llvm::Value* rdiVal = lifterContext.ReadRegister(X86Register::Rdi, builder);
-            if (hasPrefixF3) {
-                llvm::Value* rcxVal = lifterContext.ReadRegister(X86Register::Rcx, builder);
-                builder.CreateMemCpy(rdiVal, 1, rsiVal, 1, rcxVal);
-                lifterContext.WriteRegister(X86Register::Rdi, builder.CreateAdd(rdiVal, rcxVal), builder);
-                lifterContext.WriteRegister(X86Register::Rsi, builder.CreateAdd(rsiVal, rcxVal), builder);
-                lifterContext.WriteRegister(X86Register::Rcx, builder.getInt64(0), builder);
-            } else {
-                llvm::Value* loaded = builder.CreateLoad(builder.getInt8Ty(), rsiVal);
-                builder.CreateStore(loaded, rdiVal);
-                lifterContext.WriteRegister(X86Register::Rdi, builder.CreateAdd(rdiVal, builder.getInt64(1)), builder);
-                lifterContext.WriteRegister(X86Register::Rsi, builder.CreateAdd(rsiVal, builder.getInt64(1)), builder);
-            }
-            offset = currentOffset + 1;
-            continue;
-        }
-
-        if (byte == 0xA5) {
-            llvm::Value* rsiVal = lifterContext.ReadRegister(X86Register::Rsi, builder);
-            llvm::Value* rdiVal = lifterContext.ReadRegister(X86Register::Rdi, builder);
-            uint64_t step = rexW ? 8 : 4;
-            llvm::Type* opTy = rexW ? builder.getInt64Ty() : builder.getInt32Ty();
-            if (hasPrefixF3) {
-                llvm::Value* rcxVal = lifterContext.ReadRegister(X86Register::Rcx, builder);
-                llvm::Value* totalBytes = builder.CreateMul(rcxVal, builder.getInt64(step));
-                builder.CreateMemCpy(rdiVal, static_cast<unsigned>(step), rsiVal, static_cast<unsigned>(step), totalBytes);
-                lifterContext.WriteRegister(X86Register::Rdi, builder.CreateAdd(rdiVal, totalBytes), builder);
-                lifterContext.WriteRegister(X86Register::Rsi, builder.CreateAdd(rsiVal, totalBytes), builder);
-                lifterContext.WriteRegister(X86Register::Rcx, builder.getInt64(0), builder);
-            } else {
-                llvm::Value* loaded = builder.CreateLoad(opTy, rsiVal);
-                builder.CreateStore(loaded, rdiVal);
-                lifterContext.WriteRegister(X86Register::Rdi, builder.CreateAdd(rdiVal, builder.getInt64(step)), builder);
-                lifterContext.WriteRegister(X86Register::Rsi, builder.CreateAdd(rsiVal, builder.getInt64(step)), builder);
-            }
-            offset = currentOffset + 1;
-            continue;
-        }
-
-        offset += 1;
-    }
-
-    for (auto& bb : *function) {
-        if (bb.getTerminator() == nullptr) {
-            llvm::IRBuilder<> termBuilder(&bb);
-            llvm::Value* retVal = lifterContext.ReadRegister(X86Register::Rax, termBuilder);
-            termBuilder.CreateRet(retVal);
-        }
-    }
-
-    return function;
+    return result;
 }
 
 } // namespace Aot::Compiler
