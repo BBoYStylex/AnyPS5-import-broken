@@ -147,7 +147,7 @@ std::vector<std::uint8_t> GuestModuleWriter::WriteLinux(const Relinker::GuestIma
         return start;
     };
     const auto finalizer = [&](std::uint64_t target) {
-        if (target == 0) return std::uint64_t{};
+        if (!image.HasFini) return std::uint64_t{};
         const auto start = address();
         const auto distance = static_cast<std::int64_t>(target) - static_cast<std::int64_t>(start + 11);
         if (distance < std::numeric_limits<std::int32_t>::min() || distance > std::numeric_limits<std::int32_t>::max())
