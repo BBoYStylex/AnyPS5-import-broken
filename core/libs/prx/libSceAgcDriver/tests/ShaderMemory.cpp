@@ -7613,6 +7613,37 @@ void verifyVolumeArrayLoadMode() {
     expectFailure([&] { static_cast<void>(ResourceMaterializer::RuntimeImageMode(store, descriptor, ResourceMaterializer::RuntimeImageModes(store))); }, "incompatible with the static runtime image interface", "2D-array image atomic on a 3D T# was accepted");
 }
 
+void verifyMultisamplePlaneReadMode() {
+    using namespace ShaderRecompiler;
+    const DescriptorValue descriptor{{0x02754d00u, 0xc3800000u, 0x00cbc167u, 0xe1b20facu, 0u, 0x00700020u, 0u, 0u}, 8u};
+    ImageResource image{};
+    image.resourceClass = ImageResourceClass::Sampled;
+    image.dimension = RdnaImageDimension::Dim2D;
+    const auto modes = ResourceMaterializer::RuntimeImageModes(image);
+    const auto selected = ResourceMaterializer::RuntimeImageMode(image, descriptor, modes);
+    require(modes[selected].dimension == RdnaImageDimension::Dim2D && !modes[selected].cube && modes[selected].numericClass == IrTextureNumericClass::Float, "a 2D read of a 2D MSAA T# (PPSA18216's) did not select a 2D runtime mode");
+    for (const auto& [word1, word3, word5, numericClass] : std::array<std::tuple<std::uint32_t, std::uint32_t, std::uint32_t, IrTextureNumericClass>, 4>{{{0xc0100000u, 0xe1b20facu, 0x00700020u, IrTextureNumericClass::Float}, {0xc0500000u, 0xe1810facu, 0x00700010u, IrTextureNumericClass::Uint}, {0xc0c00000u, 0xe1b20facu, 0x00700020u, IrTextureNumericClass::Sint}, {0xc0d00000u, 0xe1830facu, 0x00700030u, IrTextureNumericClass::Float}}}) {
+        const DescriptorValue narrow{{0x02754d00u, word1, 0x00cbc167u, word3, 0u, word5, 0u, 0u}, 8u};
+        const auto mode = ResourceMaterializer::RuntimeImageMode(image, narrow, modes);
+        require(modes[mode].dimension == RdnaImageDimension::Dim2D && !modes[mode].cube && modes[mode].numericClass == numericClass, "a 2D read of a 2D MSAA T# with 8-bit or 16-bit texels did not select a 2D runtime mode");
+    }
+    const DescriptorValue depthBits{{0x02754d00u, 0xc0b00000u, 0x00cbc167u, 0xe1820facu, 0u, 0x00700020u, 0u, 0u}, 8u};
+    expectFailure([&] { static_cast<void>(ResourceMaterializer::RuntimeImageMode(image, depthBits, modes)); }, "incompatible with the static runtime image interface", "a 2D read of a 16_UINT SW_64KB_Z_X 2D MSAA T#, read as depth bits, was accepted");
+    const auto refused = [&](const ImageResource& access, const char* what) {
+        expectFailure([&] { static_cast<void>(ResourceMaterializer::RuntimeImageMode(access, descriptor, ResourceMaterializer::RuntimeImageModes(access))); }, "incompatible with the static runtime image interface", what);
+    };
+    auto other = image;
+    other.cubeFaceCompatible = false;
+    refused(other, "a 2D read of a 2D MSAA T# through a mip, gather, bias, gradient or offset access was accepted");
+    other = image;
+    other.depthCompare = true;
+    refused(other, "a 2D depth comparison of a 2D MSAA T# was accepted");
+    other = image;
+    other.resourceClass = ImageResourceClass::Storage;
+    other.written = true;
+    refused(other, "a 2D storage access to a 2D MSAA T# was accepted");
+}
+
 void verifyVolumeBiasTableRejection() {
     using namespace ShaderRecompiler;
     namespace Abi = ImageTableAbi;
@@ -7874,6 +7905,7 @@ int main(int argc, char** argv) {
         verifyCubeDepthCompareMode();
         verifyVolumeArrayLoadMode();
         verifyArrayVolumeStoreMode();
+        verifyMultisamplePlaneReadMode();
         verifyVolumeBiasTableRejection();
         verifyDynamicStorageMipChain();
         verifySrgbDepthCompareModes();
