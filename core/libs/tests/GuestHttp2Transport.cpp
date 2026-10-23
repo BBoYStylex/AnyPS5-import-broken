@@ -380,11 +380,18 @@ void Cancellation(int ssl, Mode mode, int teardown) {
     SceSsl::MemoryPoolStats before{};
     Require(sceSslGetMemoryPoolStats(ssl, &before) == 0, "TLS pool baseline");
     auto pending = std::async(std::launch::async, [&] {
-        return Throws([&] {
-            sceHttp2SendRequest(client.request, upload.data(), upload.size());
-            char byte;
-            sceHttp2ReadData(client.request, &byte, 1);
-        });
+        try {
+            const int sent = sceHttp2SendRequest(client.request, upload.data(), upload.size());
+            if (sent == static_cast<int>(0x817b1100)) return teardown != 0;
+            Require(sent == 0, "pending send result");
+            char byte = 'z';
+            const int read = sceHttp2ReadData(client.request, &byte, 1);
+            if (read == static_cast<int>(0x817b1100)) {
+                Require(byte == 'z', "deleted-handle read leaves buffer untouched");
+                return teardown != 0;
+            }
+            return false;
+        } catch (const std::exception&) { return true; }
     });
     server.WaitStage(mode == Mode::StallHandshake ? 1 : 2);
     Require(pending.wait_for(std::chrono::milliseconds(0)) == std::future_status::timeout, "operation is pending");
@@ -429,6 +436,9 @@ void Capacity(int ssl) {
     const int second = sceHttp2CreateRequestWithURL(client.tmpl, "GET", server.Url().c_str(), 0);
     Require(Throws([&] { sceHttp2SendRequest(second, nullptr, 0); }), "capacity wait throws before another connection");
     Require(sceHttp2DeleteRequest(client.request) == 0, "release capacity slot");
+    char unchanged = 'z';
+    Require(sceHttp2ReadData(client.request, &unchanged, 1) == static_cast<int>(0x817b1100) && unchanged == 'z',
+        "read after deletion leaves buffer untouched");
     Server independent(Mode::Normal);
     const int third = sceHttp2CreateRequestWithURL(client.tmpl, "GET", independent.Url().c_str(), 0);
     Require(sceHttp2SendRequest(third, nullptr, 0) == 0, "slot available after deletion");
