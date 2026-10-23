@@ -199,6 +199,7 @@ static void SocketsKeepTheirPath() {
 }
 
 static void FileFlagsRoundTrip() {
+    std::remove("kernel_fcntl_probe.bin");
     const int file = sceKernelOpen("kernel_fcntl_probe.bin", CreateReadWrite, 0644);
     Require(file >= 0);
     Require(sceKernelFcntl(file, GetFlags) == ReadWrite);
