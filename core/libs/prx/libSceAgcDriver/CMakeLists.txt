@@ -2064,6 +2064,12 @@ if(BUILD_TESTING)
         set_tests_properties(agc_driver_address_passes_targets_split PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
     endif()
+    add_test(NAME agc_driver_address_passes_draw_transitions COMMAND agc_driver_address_passes_tests --targets)
+    set_tests_properties(agc_driver_address_passes_draw_transitions PROPERTIES ENVIRONMENT "APS5_NO_ADDRESS_READ_PASSES=1;APS5_DRAW_TRANSITIONS=1" SKIP_RETURN_CODE 77 TIMEOUT 60)
+    if(WIN32)
+        set_tests_properties(agc_driver_address_passes_draw_transitions PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+    endif()
 endif()
 foreach(agcExecutionTestName IN LISTS ANYPS5_AGC_EXECUTION_TESTS)
     if(NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/execution/${agcExecutionTestName}.cpp)
@@ -2092,6 +2098,7 @@ target_link_libraries(agc_driver_gpu_map_on_fiber_tests PRIVATE libSceFiber)
 
 target_link_libraries(agc_driver_rect_list_corner_tests PRIVATE shader_recompiler_agc_driver)
 target_link_libraries(agc_driver_queue_zero_late_interrupt_tests PRIVATE libkernel)
+target_link_libraries(agc_driver_linear_target_completion_points_tests PRIVATE libkernel)
 
 target_link_libraries(agc_driver_storage_file_write_tests PRIVATE libkernel)
 
@@ -2106,6 +2113,16 @@ target_include_directories(agc_driver_image_table_cache_bounds_tests PRIVATE $<T
 target_include_directories(agc_driver_draw_cache_relocation_tests PRIVATE $<TARGET_PROPERTY:shader_recompiler_agc_driver,INTERFACE_INCLUDE_DIRECTORIES>)
 
 if(BUILD_TESTING)
+    add_test(NAME agc_driver_linear_target_completion_points_sync_flip COMMAND agc_driver_linear_target_completion_points_tests --flip)
+    set_tests_properties(agc_driver_linear_target_completion_points_sync_flip PROPERTIES
+            ENVIRONMENT "ANYPS5_NO_SHADER_CACHE=1;APS5_SYNC_FLIP=1" SKIP_RETURN_CODE 77 TIMEOUT 30 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    add_test(NAME agc_driver_linear_target_completion_points_unpipelined COMMAND agc_driver_linear_target_completion_points_tests --label --interrupt)
+    set_tests_properties(agc_driver_linear_target_completion_points_unpipelined PROPERTIES
+            ENVIRONMENT "ANYPS5_NO_SHADER_CACHE=1;APS5_PIPELINED_DRAWS=0" SKIP_RETURN_CODE 77 TIMEOUT 30 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    if(WIN32)
+        set_tests_properties(agc_driver_linear_target_completion_points_sync_flip agc_driver_linear_target_completion_points_unpipelined PROPERTIES ENVIRONMENT_MODIFICATION
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+    endif()
     add_test(NAME agc_driver_store_pending_identity COMMAND agc_driver_store_over_untracked_tests --pending-identity)
     set_tests_properties(agc_driver_store_pending_identity PROPERTIES
             ENVIRONMENT "ANYPS5_NO_SHADER_CACHE=1" SKIP_RETURN_CODE 77 TIMEOUT 30 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")

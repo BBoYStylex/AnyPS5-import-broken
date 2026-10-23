@@ -1109,7 +1109,7 @@ void importRequesterTests(const Context& context, const BdaTestAccess& access) {
     };
     const auto counted = [](ImportRequester requester) { return HostImportCounters().requesters[static_cast<std::size_t>(requester)]; };
     const auto made = [&](ImportRequester requester) { return counted(requester).made; };
-    Require(std::string(ImportRequesterName(ImportRequester::Map)) == "map" && std::string(ImportRequesterName(ImportRequester::Build)) == "build" && std::string(ImportRequesterName(ImportRequester::Access)) == "access" && std::string(ImportRequesterName(ImportRequester::Join)) == "join" && std::string(ImportRequesterName(ImportRequester::Segment)) == "segment", "an import requester has the wrong name");
+    Require(std::string(ImportRequesterName(ImportRequester::Map)) == "map" && std::string(ImportRequesterName(ImportRequester::Build)) == "build" && std::string(ImportRequesterName(ImportRequester::Access)) == "access" && std::string(ImportRequesterName(ImportRequester::Join)) == "join" && std::string(ImportRequesterName(ImportRequester::Segment)) == "segment" && std::string(ImportRequesterName(ImportRequester::ColorTarget)) == "color target", "an import requester has the wrong name");
     change(0, true);
     {
         GuestAllocations::Mapped ranges;
@@ -1195,9 +1195,25 @@ void importRequesterTests(const Context& context, const BdaTestAccess& access) {
         SetHostImportWindow(0);
         ::operator delete(joined, std::align_val_t{window});
     }
+    change(6, true);
+    change(7, true);
+    {
+        const auto decided = PrepareImportWatch(importing);
+        const auto before = counted(ImportRequester::ColorTarget);
+        SetImportWatch(importing, ImportWatch::Unwatch);
+        const auto* compared = HostImportFor(importing, address(6), 16, ImportRequester::ColorTarget);
+        const auto refused = counted(ImportRequester::ColorTarget);
+        SetImportWatch(importing, ImportWatch::Watch);
+        const auto* readOnly = HostImportFor(importing, address(7), 16, ImportRequester::ColorTarget);
+        const auto* outside = HostImportFor(importing, address(6), 16, ImportRequester::ColorTarget);
+        SetImportWatch(importing, decided);
+        Require(compared == nullptr && refused.made == before.made && refused.refused == before.refused && refused.failed == before.failed, "a color target's import was made where imports of its memory are compared");
+        Require(readOnly == nullptr && !HostImportCovers(importing, address(7), piece), "a color target's import was made of registered memory the guest cannot write");
+        Require(outside == nullptr && !HostImportCovers(importing, address(6), piece) && made(ImportRequester::ColorTarget) == before.made, "a color target's import was made of memory outside the write watch");
+    }
     const auto counts = HostImportCounters();
     Require(counts.live >= 4 && counts.liveBytes == HostImportLiveBytes(), "the live import counts disagree with the live bytes");
-    for (std::size_t index = 0; index < 6; ++index) change(index, false);
+    for (std::size_t index = 0; index < pieces; ++index) change(index, false);
     ClearHostImports(importing.device);
     ::operator delete(block, std::align_val_t{piece});
 }
@@ -1209,8 +1225,9 @@ void hostImportReportTests() {
     counts.requesters[static_cast<std::size_t>(ImportRequester::Map)] = {2, 1u << 20u, 0, 0, 0};
     counts.requesters[static_cast<std::size_t>(ImportRequester::Build)] = {5, 4u << 20u, 7, 7u << 19u, 1, 4};
     counts.requesters[static_cast<std::size_t>(ImportRequester::Segment)] = {1, 1u << 16u, 0, 0, 2};
+    counts.requesters[static_cast<std::size_t>(ImportRequester::ColorTarget)] = {1, 1u << 20u, 0, 0, 0};
     const auto text = FormatHostImportCounts(counts);
-    Require(text == "3 live (3.0 MiB); made 8 (5.1 MiB), refused 7 (3.5 MiB, 4 remembered), failed 3; by requester (made/refused/failed): map 2/0/0, build 5/7/1, access 0/0/0, join 0/0/0, segment 1/0/2", "the host import report is wrong: " + text);
+    Require(text == "3 live (3.0 MiB); made 9 (6.1 MiB), refused 7 (3.5 MiB, 4 remembered), failed 3; by requester (made/refused/failed): map 2/0/0, build 5/7/1, access 0/0/0, join 0/0/0, segment 1/0/2, color target 1/0/0", "the host import report is wrong: " + text);
 }
 
 class PieceWindow {

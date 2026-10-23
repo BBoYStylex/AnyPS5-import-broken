@@ -15,6 +15,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <functional>
 #include <span>
 #include <tuple>
 #include <utility>
@@ -203,6 +204,7 @@ public:
     bool BlockUnits() const { return blockUnits; }
     std::uint32_t TrackedUnits() const { return trackedLayers; }
     void MarkSliceDirty(std::uint32_t slice, std::uint32_t count = 1);
+    bool MarkDrawn(std::uint32_t slice, std::uint32_t count, VkRect2D scissor);
     void Flush();
     bool Dirty() const;
     // Stores every pending image overlapping the range, except `except`; returns whether any was.
@@ -219,6 +221,8 @@ public:
     static constexpr std::uint64_t SmallStoreBytes = 64 * 1024;
     static std::size_t StoreSmallPending(const char* reason);
     static void StoreReadbackBeforeLabel(const char* reason);
+    static std::size_t StoreDrawnLinear(const char* reason);
+    static std::size_t StoreDrawnLinearTouching(const char* reason, const std::function<bool(std::uint64_t, std::uint64_t)>& touches, bool all);
     static bool AnyPending();
     static void FlushDumpSelected(const char* reason);
     static bool StoreAtFlipRequested(const char* value);
@@ -480,6 +484,27 @@ private:
     // (`shadowed` receives those guest ranges, `imported` the pieces written to the import).
     std::uint64_t uploadWindows(const HostImport& import, std::span<const std::pair<std::uint64_t, std::uint64_t>> runs, bool discard = false);
     std::uint64_t writeBackWindows(std::span<const ImportSegment> segments, std::span<const std::pair<std::uint64_t, std::uint64_t>> keep, std::uint64_t firstStored, std::uint64_t lastStored, std::vector<ShadowedRange>& shadowed, std::vector<std::pair<std::uint64_t, std::uint64_t>>& imported, Buffer* save = nullptr);
+    struct DrawnRect {
+        std::uint32_t left = 0;
+        std::uint32_t top = 0;
+        std::uint32_t right = 0;
+        std::uint32_t bottom = 0;
+    };
+    struct DrawnArea {
+        bool drawn = false;
+        bool rect = false;
+        std::uint32_t left = 0;
+        std::uint32_t top = 0;
+        std::uint32_t right = 0;
+        std::uint32_t bottom = 0;
+        std::vector<DrawnRect> rects;
+    };
+    DrawnArea drawnArea() const;
+    std::vector<std::pair<std::uint64_t, std::uint64_t>> drawnSpans(const DrawnArea& area, std::span<const std::pair<std::uint64_t, std::uint64_t>> keep) const;
+    std::uint64_t storeDrawnRect(const DrawnArea& area, std::span<const ImportSegment> segments, std::span<const std::pair<std::uint64_t, std::uint64_t>> stores, const std::vector<std::uint32_t>& saveUnits);
+    void addDrawnRect(DrawnRect rect);
+    void forgetDrawn();
+    void noteStore(std::uint64_t note);
     // Per-layer validity (thin array surfaces whose layers are 64 KiB-aligned guest slices; every
     // other surface is one tracked layer): a layer's generation is the write generation its guest
     // bytes were last known to match the image at, and a pending layer holds results (a clear, a
@@ -639,6 +664,12 @@ private:
     VkFormat storageFormat = VK_FORMAT_UNDEFINED;
     // Results are on the GPU only (guarded by the pending-write registry lock).
     bool dirty = false;
+    bool drawnListed = false;
+    bool drawnWhole = false;
+    bool drawingTarget = false;
+    bool pendingFromOthers = false;
+    std::vector<DrawnRect> drawnRects;
+    std::vector<std::uint64_t> storeNotes;
     std::uint64_t version = 0;
     std::uint64_t writes = 0;
     // `original` holds the guest bytes; false after a GPU-side clear, which never read them.
