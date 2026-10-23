@@ -13,6 +13,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <ranges>
 #include <utility>
 #include <string_view>
 #include <vector>
@@ -33,6 +34,17 @@ enum class ShaderStage {
 struct MemoryRegion {
     std::uint64_t guestAddress;
     std::span<const std::byte> bytes;
+};
+
+class MemoryRegionView : public std::span<const MemoryRegion> {
+    using Base = std::span<const MemoryRegion>;
+public:
+    using Base::Base;
+    constexpr MemoryRegionView() noexcept = default;
+    constexpr MemoryRegionView(Base value) noexcept : Base(value) {}
+    template <std::ranges::contiguous_range TRange>
+        requires (!std::ranges::borrowed_range<TRange>)
+    MemoryRegionView(TRange&&) = delete;
 };
 
 struct ShaderBinary {
@@ -242,7 +254,7 @@ struct GuestContext {
     std::optional<ShaderComputeStageInfo> compute;
     std::optional<ShaderPixelStageInfo> pixel;
     std::optional<ShaderVertexStageInfo> vertex;
-    std::span<const MemoryRegion> memory;
+    MemoryRegionView memory;
     std::optional<ShaderFloatMode> floatMode;
     std::span<const std::uint32_t> linkedCallFallbacks;
     bool convertedSamples = false;
