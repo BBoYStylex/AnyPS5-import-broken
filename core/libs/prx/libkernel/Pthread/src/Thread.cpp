@@ -77,12 +77,7 @@ static GuestThreadState& CurrentGuestState() {
     return state;
 #endif
 }
-#ifdef __APPLE__
-// libc++'s ~mutex destroys the pthread mutex, so a lock during exit after static destruction throws EINVAL.
-static std::mutex& stackLock = *new std::mutex;
-#else
-static std::mutex stackLock;
-#endif
+static std::mutex& stackLock = *new std::mutex();
 static auto& liveStacks = *new std::map<PthreadPrivate*, std::pair<std::uintptr_t, std::uintptr_t>>();
 static auto& protectedStackPages = *new std::map<std::uintptr_t, std::size_t>();
 #if defined(__linux__)
