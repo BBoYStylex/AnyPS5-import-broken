@@ -2549,6 +2549,17 @@ bool StorageTexture::compareUntracked(std::uint64_t address, std::size_t bytes, 
 
 constexpr std::uint64_t GenerationBaselineBytes = 1ull << 20;
 
+bool SingleKeyColorFor(const GuestTextureResource& resource, std::uint64_t guestBytes, std::uint64_t collected, DccSingleProof& proof, VkFormat format, DccKeys keys, VkClearColorValue& clear) {
+    if (keys != DccKeys::ClearSingle || !ProvedSingleUniform(resource, guestBytes, collected, proof)) return false;
+    const auto elementBytes = BytesPerElement(resource.format);
+    if (elementBytes == 0 || elementBytes > sizeof(std::uint32_t) * 4) return false;
+    std::uint32_t pattern[4]{};
+    auto* bytes = reinterpret_cast<std::byte*>(pattern);
+    if (!ReadSingleElement(resource, std::span(bytes, elementBytes))) return false;
+    for (std::size_t at = elementBytes; at < sizeof(pattern); at += elementBytes) std::memcpy(bytes + at, bytes, elementBytes);
+    return FillClearColor(format, elementBytes, pattern, clear);
+}
+
 std::vector<bool> StorageTexture::cpuUploadLayers(const std::vector<bool>& units) const {
     if (descriptor.dimension != TextureDimension::k2DArray || descriptor.mipCount != 1 || descriptor.dccAddress != 0 || IsBlockCompressed(descriptor.format) || geometry.thick || arrayLayers <= 1 || geometry.imageLayers != arrayLayers || trackedLayerBytes == 0 || units.size() != trackedLayers) return {};
     std::vector<bool> selected(arrayLayers, false);
@@ -2597,7 +2608,8 @@ void StorageTexture::upload(const std::vector<bool>* layers) {
     uploadedKeys = ProvedClearKeys(descriptor, guestBytes, keyProof);
     filledKeys = DccKeys::Uncompressed;
     VkClearColorValue clearValue{};
-    if (IsDccClear(uploadedKeys) && ClearColorFor(storageFormat, uploadedKeys, clearValue)) {
+    const bool fastClear = IsDccClear(uploadedKeys) || uploadedKeys == DccKeys::ClearSingle;
+    if (fastClear && (ClearColorFor(storageFormat, uploadedKeys, clearValue) || SingleKeyColorFor(descriptor, guestBytes, now, singleProof, storageFormat, uploadedKeys, clearValue))) {
         // A fast-cleared surface is cleared on the GPU; its texel memory is neither read nor filled.
         // The clear is recorded into the open batch like a direct upload (the image kept by it): a
         // batch of its own submitted the recorder's work first and waited for all of it, 25-40 ms
@@ -3868,7 +3880,7 @@ void waitForIdlePublish(const char* reason) {
 
 }
 
-bool StorageTexture::FlushPending(std::uint64_t address, std::size_t bytes, const StorageTexture* except, const char* reason, PublishScope scope, bool* published) {
+bool StorageTexture::FlushPending(std::uint64_t address, std::size_t bytes, const StorageTexture* except, const char* reason, PublishScope scope, bool* published, bool waited) {
     static_cast<void>(FlushDepthPlanes(address, bytes));
     if (published != nullptr) *published = false;
     if (AgcDriver::DriverDetail::DrawPipeline::HeldReads(address, bytes)) {
@@ -3907,12 +3919,12 @@ bool StorageTexture::FlushPending(std::uint64_t address, std::size_t bytes, cons
         if (!flush.empty()) BumpPendingSerial();
     }
     if (flush.empty()) {
-        const bool waited = WaitForFlushing(address, bytes, except);
+        const bool stored = WaitForFlushing(address, bytes, except);
         // Units shadowed over the range (another image's results retiled into the import's unit
         // shadow, or an earlier flush's) still reach the import as the scope asks.
-        const bool units = PublishShadowsOnly(address, bytes, scope, reason);
+        const bool units = PublishShadowsOnly(address, bytes, scope, reason, waited || stored);
         if (published != nullptr) *published = units;
-        return waited;
+        return stored;
     }
     struct Unregister {
         const std::vector<std::shared_ptr<StorageTexture>>& flush;
@@ -3960,7 +3972,7 @@ bool StorageTexture::FlushPending(std::uint64_t address, std::size_t bytes, cons
     // The stores above went into the unit shadows where slabs took them: the consumer reads the
     // import, so they are published under the same hold, after every store.
     if (scope != PublishScope::None) {
-        const auto units = PublishShadow(address, bytes, scope, PublishReasonFor(reason));
+        const auto units = PublishShadow(address, bytes, scope, PublishReasonFor(reason), waited);
         if (units != 0) waitForIdlePublish(reason);
         if (published != nullptr) *published = units != 0;
     }
@@ -4124,10 +4136,10 @@ void StorageTexture::awaitStoredSave(const std::vector<bool>* layers) {
     if (outstanding()) recorder->Sync();
 }
 
-bool StorageTexture::PublishShadowsOnly(std::uint64_t address, std::size_t bytes, PublishScope scope, const char* reason) {
+bool StorageTexture::PublishShadowsOnly(std::uint64_t address, std::size_t bytes, PublishScope scope, const char* reason, bool waited) {
     if (scope == PublishScope::None || !AnyShadowedOverlaps(address, bytes)) return false;
     std::lock_guard gpu(GuestMemory::GpuMutex());
-    if (PublishShadow(address, bytes, scope, PublishReasonFor(reason)) == 0) return false;
+    if (PublishShadow(address, bytes, scope, PublishReasonFor(reason), waited) == 0) return false;
     waitForIdlePublish(reason);
     return true;
 }
