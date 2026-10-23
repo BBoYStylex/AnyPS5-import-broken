@@ -34,6 +34,20 @@
 #include <unistd.h>
 #endif
 
+#ifdef __linux__
+#include <sys/syscall.h>
+#else
+static const auto initialThreadId = std::this_thread::get_id();
+#endif
+
+extern "C" bool IsInitialPthread_nid_no_patch() {
+#ifdef __linux__
+    return ::syscall(SYS_gettid) == ::getpid();
+#else
+    return std::this_thread::get_id() == initialThreadId;
+#endif
+}
+
 static constexpr int SCE_OK = 0;
 
 static constexpr std::size_t HOST_STACK_MARGIN = 1u << 20;

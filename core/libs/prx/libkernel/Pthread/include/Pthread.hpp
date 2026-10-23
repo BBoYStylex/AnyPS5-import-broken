@@ -4,6 +4,7 @@
 #include <sched.h>
 #include "SceTypes.hpp"
 #include "prx/libkernel/Time/include/TimedWait.hpp"
+#include <array>
 #include <atomic>
 #include <bit>
 #include <condition_variable>
@@ -115,6 +116,7 @@ struct PthreadAttrPrivate {
     std::size_t _guardsize = 0x1000;
     int _solosched = 0;
     int _scope = GUEST_SCOPE_SYSTEM;
+    std::array<unsigned char, 24> affinityTail{};
 };
 
 inline std::atomic<std::int64_t> nextThreadId{100000};
