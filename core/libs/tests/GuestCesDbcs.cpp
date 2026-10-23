@@ -96,15 +96,15 @@ static std::uint32_t RoundTripMismatches(void* context) {
     for (std::uint32_t lead = 0x81; lead < 0xFF; ++lead) {
         for (std::uint32_t trail = 0x40; trail < 0xFF; ++trail) {
             const std::uint8_t source[2] = {static_cast<std::uint8_t>(lead), static_cast<std::uint8_t>(trail)};
-            std::uint16_t ucs2 = 0;
+            std::uint16_t ucs2[2] = {};
             std::uint32_t read = 0;
             std::uint32_t written = 0;
-            if (sceCesMbcsStrToUcs2Str(context, source, sizeof(source), &read, &ucs2, 1, &written) != 0) continue;
-            Require(read == 2 && written == 1);
-            std::uint8_t back[2] = {};
-            Require(sceCesUcs2StrToMbcsStr(context, &ucs2, 1, &read, back, sizeof(back), &written) == 0);
-            Require(read == 1 && written == 2);
-            if (std::memcmp(source, back, sizeof(back)) != 0) ++mismatches;
+            if (sceCesMbcsStrToUcs2Str(context, source, sizeof(source), &read, ucs2, 2, &written) != 0) continue;
+            Require(read == 2 && written == 1 && ucs2[1] == 0);
+            std::uint8_t back[3] = {};
+            Require(sceCesUcs2StrToMbcsStr(context, ucs2, 1, &read, back, sizeof(back), &written) == 0);
+            Require(read == 1 && written == 2 && back[2] == 0);
+            if (std::memcmp(source, back, sizeof(source)) != 0) ++mismatches;
         }
     }
     return mismatches;
