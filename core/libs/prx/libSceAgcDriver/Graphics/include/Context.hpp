@@ -218,6 +218,8 @@ struct Context {
     std::uint32_t maxCustomBorderColorSamplers = 0;
     std::atomic<std::uint32_t>* customBorderColorSamplers = nullptr;
     std::optional<std::uint64_t> borderColorTable;
+    VkSampleCountFlags truncatedCoverageSampleCounts = 0;
+    bool mixedAttachmentSamples = false;
     bool conservativeRasterization = false;
     bool meshWave32 = false;
     VkBuffer emptyBuffer = VK_NULL_HANDLE;
@@ -242,11 +244,13 @@ struct Context {
     bool imageTableUpdateAfterBind = false;
     bool samplerTableUpdateAfterBind = false;
     bool geometryShader = false;
+    bool largePoints = false;
     bool sampleRateShading = false;
     bool fillModeNonSolid = false;
     bool maintenance5 = false;
     bool storageImageMultisample = false;
     bool storageImageWriteWithoutFormat = false;
+    bool imageFormatList = false;
     bool shaderClipDistance = false;
     bool shaderCullDistance = false;
     bool nullDescriptors = false;
