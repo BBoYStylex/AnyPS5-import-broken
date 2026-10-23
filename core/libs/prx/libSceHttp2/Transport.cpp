@@ -282,6 +282,8 @@ struct Request::State {
         Require(!method.empty() && nghttp2_check_method(reinterpret_cast<const std::uint8_t*>(method.data()), method.size()),
             "sceHttp2CreateRequestWithURL: invalid method");
         Require(method != "CONNECT", "sceHttp2: CONNECT is not implemented");
+        Require(nghttp2_check_header_value_rfc9113(reinterpret_cast<const std::uint8_t*>(settings.userAgent.data()), settings.userAgent.size()),
+            "sceHttp2: invalid user agent");
     }
 
     ~State() { Close(); }
@@ -336,7 +338,7 @@ struct Request::State {
         for (const auto& address : job->addresses) {
             Check(connectDeadline);
             socket = sceNetSocket("http2", address.bytes[1], 1, 0);
-            if (socket < 0) return socket;
+            Require(socket >= 0, "sceHttp2: socket creation failed; console error mapping is unknown");
             int enabled = 1;
             Require(sceNetSetsockopt(socket, 0xffff, 0x1200, &enabled, sizeof(enabled)) == 0,
                 "sceHttp2: cannot set nonblocking socket");
@@ -347,6 +349,7 @@ struct Request::State {
                 int error = 0;
                 std::uint32_t size = sizeof(error);
                 result = sceNetGetsockopt(socket, 0xffff, 0x1007, &error, &size);
+                Require(result == 0, "sceHttp2: connect status unavailable; console error mapping is unknown");
                 if (result == 0 && error != 0) result = static_cast<int>(0x80410100u | static_cast<unsigned>(error));
             }
             if (result == 0) break;
@@ -504,6 +507,10 @@ struct Request::State {
 
     void Pump(Clock::time_point deadline) {
         Flush(std::min(deadline, Deadline(settings.sendTimeout)));
+        Receive(deadline);
+    }
+
+    void Receive(Clock::time_point deadline) {
         std::array<std::uint8_t, 16384> buffer;
         for (;;) {
             Check(deadline);
@@ -522,6 +529,7 @@ struct Request::State {
         std::unique_lock lock(mutex, std::try_to_lock);
         Require(lock.owns_lock(), "sceHttp2: concurrent operation on one request is not implemented");
         if (failure) std::rethrow_exception(failure);
+        Require(!cancelled.load(), "sceHttp2: request cancelled; console error mapping is unknown");
         return lock;
     }
 
@@ -550,9 +558,19 @@ int Request::Send(const void* data, std::size_t size) {
         state->networkResult = state->Connect();
         if (state->networkResult < 0) { state->Close(); return state->networkResult; }
         state->Setup(data, size);
-        const auto deadline = state->Deadline(state->settings.recvTimeout);
-        while (!state->ready || state->uploadOffset != size) state->Pump(deadline);
-        state->Flush(state->Deadline(state->settings.sendTimeout));
+        const auto sendDeadline = state->Deadline(state->settings.sendTimeout);
+        auto receiveDeadline = sendDeadline;
+        bool uploaded = false;
+        for (;;) {
+            state->Flush(uploaded ? state->Deadline(state->settings.sendTimeout) : sendDeadline);
+            if (!uploaded && state->uploadOffset == size) {
+                uploaded = true;
+                receiveDeadline = state->Deadline(state->settings.recvTimeout);
+            }
+            if (state->ready && uploaded) break;
+            Require(!state->ended, "sceHttp2: response ended before upload completed");
+            state->Receive(uploaded ? receiveDeadline : sendDeadline);
+        }
         state->upload = nullptr;
         if (state->ended && state->body.empty()) state->Close();
         return 0;
@@ -599,5 +617,19 @@ int Request::ContentLength(int* kind, std::uint64_t* length) {
 }
 
 void Request::Cancel() { state->cancelled.store(true); }
+
+void Request::Stop() {
+    Cancel();
+    std::lock_guard lock(state->mutex);
+    state->Close();
+}
+
+std::shared_ptr<Capacity> CreateCapacity_nid_no_patch(int maximum) {
+    return std::make_shared<Capacity>(maximum);
+}
+
+std::shared_ptr<Request> CreateRequest_nid_no_patch(int sslContext, std::shared_ptr<Capacity> capacity, Settings settings, std::string method, std::string url) {
+    return std::make_shared<Request>(sslContext, std::move(capacity), std::move(settings), std::move(method), std::move(url));
+}
 
 }

@@ -36,6 +36,7 @@ int APS5_VABI sceNetInit_nid_postfix();
 int APS5_VABI sceSslInit_nid_postfix(std::uint64_t);
 int APS5_VABI sceSslTerm_nid_postfix(int);
 int APS5_VABI sceSslLoadCert(int, int, SceSsl::Data**, SceSsl::Data*, SceSsl::Data*);
+int APS5_VABI sceSslGetMemoryPoolStats(int, SceSsl::MemoryPoolStats*);
 int APS5_VABI sceHttp2Init(int, int, std::size_t, int);
 int APS5_VABI sceHttp2Term(int);
 int APS5_VABI sceHttp2CreateTemplate(int, const char*, int, int);
@@ -50,6 +51,7 @@ int APS5_VABI sceHttp2GetResponseContentLength(int, int*, std::uint64_t*);
 int APS5_VABI sceHttp2GetAllResponseHeaders(int, char**, std::size_t*);
 int APS5_VABI sceHttp2AddRequestHeader(int, const char*, const char*, std::uint32_t);
 int APS5_VABI sceHttp2SetRecvTimeOut(int, std::uint32_t);
+int APS5_VABI sceHttp2SetSendTimeOut(int, std::uint32_t);
 int APS5_VABI sceHttp2SetConnectTimeOut(int, std::uint32_t);
 int APS5_VABI sceHttp2SetTimeOut(int, std::uint32_t);
 int APS5_VABI sceHttp2SetAutoRedirect(int, int);
@@ -71,7 +73,7 @@ bool Throws(TCall call) {
     return false;
 }
 
-enum class Mode { Normal, Large, NoLength, Head, NotFound, Redirect, Auth, Reset, Truncate, StallHandshake, StallHeaders, StallBody, NoAlpn, Informational };
+enum class Mode { Normal, Large, NoLength, Head, NotFound, Redirect, Auth, Reset, Truncate, StallHandshake, StallHeaders, StallBody, NoAlpn, Informational, StallUpload };
 const char* Protocols[] = {"h2", nullptr};
 
 class Server {
@@ -177,6 +179,7 @@ private:
     }
     static int Frame(nghttp2_session* session, const nghttp2_frame* frame, void* data) {
         auto& server = *static_cast<Server*>(data);
+        if (server.mode == Mode::StallUpload && frame->hd.type == NGHTTP2_HEADERS) { server.Stage(2); server.Stall(); }
         if (frame->hd.stream_id > 0 && (frame->hd.type == NGHTTP2_HEADERS || frame->hd.type == NGHTTP2_DATA) &&
             (frame->hd.flags & NGHTTP2_FLAG_END_STREAM)) server.Respond(session, frame->hd.stream_id);
         return 0;
@@ -316,7 +319,6 @@ void Success(int ssl, Mode mode, bool disableCa = false) {
     Require(sceHttp2SetAutoRedirect(client.request, 0) == 0 && sceHttp2SetAuthEnabled(client.request, 0) == 0, "manual policies");
     if (mode == Mode::NoLength) Require(sceHttp2SetRequestNoContentLength(client.request) == 0, "omit request length");
     Require(sceHttp2SendRequest(client.request, upload.data(), upload.size()) == 0, "send real request");
-    std::fprintf(stderr, "client sent\n");
     int status = -1;
     Require(sceHttp2GetStatusCode(client.request, &status) == 0, "status getter");
     const int expected = mode == Mode::NotFound ? 404 : mode == Mode::Redirect ? 302 : mode == Mode::Auth ? 401 : 200;
@@ -373,10 +375,13 @@ void Cancellation(int ssl, Mode mode, int teardown) {
     std::fprintf(stderr, "HTTP2 cancellation scenario %d teardown %d\n", static_cast<int>(mode), teardown);
     Server server(mode);
     Client client(ssl);
-    client.Create(server.Url());
+    const std::string upload = mode == Mode::StallUpload ? std::string(150000, 'u') : std::string{};
+    client.Create(server.Url(), upload.empty() ? "GET" : "POST", upload.size());
+    SceSsl::MemoryPoolStats before{};
+    Require(sceSslGetMemoryPoolStats(ssl, &before) == 0, "TLS pool baseline");
     auto pending = std::async(std::launch::async, [&] {
         return Throws([&] {
-            sceHttp2SendRequest(client.request, nullptr, 0);
+            sceHttp2SendRequest(client.request, upload.data(), upload.size());
             char byte;
             sceHttp2ReadData(client.request, &byte, 1);
         });
@@ -387,6 +392,11 @@ void Cancellation(int ssl, Mode mode, int teardown) {
     if (teardown == 1) Require(sceHttp2DeleteRequest(client.request) == 0, "delete pending request");
     if (teardown == 2) Require(sceHttp2DeleteTemplate(client.tmpl) == 0, "delete pending template");
     if (teardown == 3) { Require(sceHttp2Term(client.context) == 0, "term pending context"); client.context = 0; }
+    if (teardown) {
+        SceSsl::MemoryPoolStats after{};
+        Require(sceSslGetMemoryPoolStats(ssl, &after) == 0 && after.currentInuseSize == before.currentInuseSize,
+            "teardown releases TLS allocations before returning");
+    }
     Require(pending.wait_for(std::chrono::seconds(1)) == std::future_status::ready && pending.get(), "pending call observes cancellation");
     if (teardown) Require(sceHttp2DeleteRequest(client.request) == static_cast<int>(0x817b1100), "deleted request stays invalid");
 }
@@ -430,12 +440,14 @@ void Deadline(int ssl, Mode mode, bool overall) {
     std::fprintf(stderr, "HTTP2 deadline scenario %d overall %d\n", static_cast<int>(mode), overall);
     Server server(mode);
     Client client(ssl);
-    client.Create(server.Url());
+    const std::string upload = mode == Mode::StallUpload ? std::string(150000, 'u') : std::string{};
+    client.Create(server.Url(), upload.empty() ? "GET" : "POST", upload.size());
     const auto begin = std::chrono::steady_clock::now();
     Require((overall ? sceHttp2SetTimeOut(client.request, 80000) : mode == Mode::StallHandshake ?
-        sceHttp2SetConnectTimeOut(client.request, 80000) : sceHttp2SetRecvTimeOut(client.request, 80000)) == 0, "set deadline");
+        sceHttp2SetConnectTimeOut(client.request, 80000) : mode == Mode::StallUpload ? sceHttp2SetSendTimeOut(client.request, 80000) :
+        sceHttp2SetRecvTimeOut(client.request, 80000)) == 0, "set deadline");
     Require(Throws([&] {
-        sceHttp2SendRequest(client.request, nullptr, 0);
+        sceHttp2SendRequest(client.request, upload.data(), upload.size());
         char byte;
         sceHttp2ReadData(client.request, &byte, 1);
     }), "deadline terminates blocked operation");
@@ -458,7 +470,7 @@ int main() {
     for (const auto mode : {Mode::Normal, Mode::Large, Mode::NoLength, Mode::Head, Mode::NotFound, Mode::Redirect, Mode::Auth, Mode::Informational}) Success(ssl, mode);
     for (const auto mode : {Mode::NoAlpn, Mode::Reset, Mode::Truncate, Mode::Redirect, Mode::Auth}) Failure(ssl, mode);
     Failure(ssl, Mode::Normal, true);
-    for (const auto mode : {Mode::StallHandshake, Mode::StallHeaders, Mode::StallBody}) {
+    for (const auto mode : {Mode::StallHandshake, Mode::StallHeaders, Mode::StallBody, Mode::StallUpload}) {
         Deadline(ssl, mode, false);
         Deadline(ssl, mode, true);
         for (int teardown = 0; teardown < 4; ++teardown) Cancellation(ssl, mode, teardown);

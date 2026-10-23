@@ -53,7 +53,7 @@ static void ReleaseOwnedHandles(int owner) {
         const int id = child->first;
         ReleaseOwnedHandles(id);
         auto& handle = g_handles.at(id);
-        if (handle.transport) handle.transport->Cancel();
+        if (handle.transport) handle.transport->Stop();
         g_handles.erase(id);
     }
 }
@@ -63,6 +63,7 @@ static int Update(int id, const char* function, TUpdate update) {
     std::lock_guard lock(g_handlesMutex);
     auto* handle = FindAnyHandle(id);
     if (!handle) return ERROR_INVALID_ID;
+    if (handle->kind != Http2Kind::Template && handle->kind != Http2Kind::Request) NotImplemented_nid_no_patch(function);
     if (handle->transport) NotImplemented_nid_no_patch(function);
     update(handle->settings);
     return 0;
@@ -74,7 +75,7 @@ static std::shared_ptr<Http2::Request> Transport(int id, bool create) {
     if (!handle) return nullptr;
     if (create && !handle->transport) {
         if (handle->version != 3) NotImplemented_nid_no_patch("sceHttp2SendRequest: HTTP/1.x transport is not implemented");
-        handle->transport = std::make_shared<Http2::Request>(handle->sslContext, handle->capacity, handle->settings, handle->method, handle->url);
+        handle->transport = Http2::CreateRequest_nid_no_patch(handle->sslContext, handle->capacity, handle->settings, handle->method, handle->url);
     }
     if (!handle->transport) NotImplemented_nid_no_patch("sceHttp2: request has not been sent");
     return handle->transport;
@@ -102,7 +103,7 @@ int APS5_VABI sceHttp2CreateRequestWithURL(int tmpl_id, const char* method, cons
     std::lock_guard lock(g_handlesMutex);
     const auto* parent = FindHandle(tmpl_id, Http2Kind::Template);
     if (!parent) return ERROR_INVALID_ID;
-    if (!method || !url) return ERROR_NULL_POINTER;
+    if (!method || !url) NotImplemented_nid_no_patch(__func__);
     Http2Handle handle{Http2Kind::Request, tmpl_id, 0};
     handle.sslContext = parent->sslContext;
     handle.capacity = parent->capacity;
@@ -120,7 +121,7 @@ int APS5_VABI sceHttp2CreateTemplate(int lib_http2_ctx_id, const char* user_agen
     std::lock_guard lock(g_handlesMutex);
     const auto* parent = FindHandle(lib_http2_ctx_id, Http2Kind::Context);
     if (!parent) return ERROR_INVALID_ID;
-    if (!user_agent) return ERROR_NULL_POINTER;
+    if (!user_agent) NotImplemented_nid_no_patch(__func__);
     if (is_auto_proxy_conf || http_ver < 1 || http_ver > 3) NotImplemented_nid_no_patch(__func__);
     Http2Handle handle{Http2Kind::Template, lib_http2_ctx_id, 0};
     handle.sslContext = parent->sslContext;
@@ -137,7 +138,7 @@ int APS5_VABI sceHttp2DeleteRequest(int req_id) {
     std::lock_guard lock(g_handlesMutex);
     auto* handle = FindHandle(req_id, Http2Kind::Request);
     if (!handle) return ERROR_INVALID_ID;
-    if (handle->transport) handle->transport->Cancel();
+    if (handle->transport) handle->transport->Stop();
     g_handles.erase(req_id);
     return 0;
 }
@@ -172,7 +173,7 @@ int APS5_VABI sceHttp2Init(int libnet_mem_id, int libssl_ctx_id, size_t pool_siz
     std::lock_guard lock(g_handlesMutex);
     Http2Handle handle{Http2Kind::Context, 0, pool_size};
     handle.sslContext = libssl_ctx_id;
-    handle.capacity = std::make_shared<Http2::Capacity>(max_concurrent_request);
+    handle.capacity = Http2::CreateCapacity_nid_no_patch(max_concurrent_request);
     g_handles.emplace(id, std::move(handle));
     return id;
 }

@@ -68,7 +68,8 @@ int main() {
     const PoolStats previous = stats;
     try { sceHttp2GetMemoryPoolStats(http2, &stats); }
     catch (const std::exception&) { http2StatsThrow = true; }
-    Require(http2StatsThrow && std::memcmp(&stats, &previous, sizeof(stats)) == 0);
+    Require(http2StatsThrow && stats.pool_size == previous.pool_size && stats.max_inuse_size == previous.max_inuse_size &&
+        stats.current_inuse_size == previous.current_inuse_size && stats.reserved == previous.reserved);
     Require(sceHttp2GetMemoryPoolStats(http2, nullptr) == http2NullPointer);
     Require(sceHttp2GetMemoryPoolStats(12345, nullptr) == http2NullPointer);
     CheckRejected(sceHttp2GetMemoryPoolStats, 12345, http2InvalidId);

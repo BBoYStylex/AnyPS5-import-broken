@@ -42,11 +42,14 @@ public:
     int Status(int* status);
     int ContentLength(int* kind, std::uint64_t* length);
     void Cancel();
+    void Stop();
 private:
     struct State;
     std::unique_ptr<State> state;
 };
 
 void AddHeader(Settings& settings, const char* name, const char* value, std::uint32_t mode);
+std::shared_ptr<Capacity> CreateCapacity_nid_no_patch(int maximum);
+std::shared_ptr<Request> CreateRequest_nid_no_patch(int sslContext, std::shared_ptr<Capacity> capacity, Settings settings, std::string method, std::string url);
 
 }
