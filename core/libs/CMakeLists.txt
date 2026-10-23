@@ -248,6 +248,15 @@ if(BUILD_TESTING)
         set_tests_properties(guest_posix_scalar_io PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libkernel>")
     endif()
+    add_test_executable(guest_kernel_sys_sdk_version_tests tests/GuestKernelSysSdkVersion.cpp)
+    target_include_directories(guest_kernel_sys_sdk_version_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(guest_kernel_sys_sdk_version_tests PRIVATE libkernel_sys libkernel libc)
+    configure_windows_unwind(guest_kernel_sys_sdk_version_tests)
+    add_test(NAME guest_kernel_sys_sdk_version COMMAND guest_kernel_sys_sdk_version_tests)
+    if(WIN32)
+        set_tests_properties(guest_kernel_sys_sdk_version PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libkernel_sys>")
+    endif()
     add_test_executable(nid_buffer_validation_tests nid/tests/BufferValidation.cpp)
     target_include_directories(nid_buffer_validation_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/nid/include)
     target_compile_features(nid_buffer_validation_tests PRIVATE cxx_std_20)
@@ -618,6 +627,16 @@ if(BUILD_TESTING)
     add_test(NAME guest_np_cpp_web_api_intrusive_ptr COMMAND guest_np_cpp_web_api_intrusive_ptr_tests)
     if(WIN32)
         set_tests_properties(guest_np_cpp_web_api_intrusive_ptr PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceNpCppWebApi>")
+    endif()
+
+    add_test_executable(guest_np_cpp_web_api_signed_out_tests tests/GuestNpCppWebApiSignedOut.cpp)
+    target_include_directories(guest_np_cpp_web_api_signed_out_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(guest_np_cpp_web_api_signed_out_tests PRIVATE libSceNpCppWebApi libc)
+    configure_windows_unwind(guest_np_cpp_web_api_signed_out_tests)
+    add_test(NAME guest_np_cpp_web_api_signed_out COMMAND guest_np_cpp_web_api_signed_out_tests)
+    if(WIN32)
+        set_tests_properties(guest_np_cpp_web_api_signed_out PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceNpCppWebApi>")
     endif()
 
