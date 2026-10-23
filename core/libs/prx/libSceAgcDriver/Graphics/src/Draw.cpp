@@ -126,7 +126,16 @@ void PreparePixelFunctionLds(const Context& context, VkCommandBuffer commands, s
         context.Function<PFN_vkGetBufferMemoryRequirements>("vkGetBufferMemoryRequirements")(context.device, pool.buffer, &requirements);
         VkMemoryAllocateInfo allocation{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
         allocation.allocationSize = requirements.size;
-        allocation.memoryTypeIndex = context.MemoryType(requirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        constexpr auto hostCoherent = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+        constexpr auto deviceLocalHost = hostCoherent | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+        std::optional<std::uint32_t> deviceLocalType;
+        for (std::uint32_t i = 0; i < context.memory.memoryTypeCount; ++i) {
+            if ((requirements.memoryTypeBits & (1u << i)) != 0 && (context.memory.memoryTypes[i].propertyFlags & deviceLocalHost) == deviceLocalHost) {
+                deviceLocalType = i;
+                break;
+            }
+        }
+        allocation.memoryTypeIndex = deviceLocalType.value_or(context.MemoryType(requirements.memoryTypeBits, hostCoherent));
         const auto allocated = context.Function<PFN_vkAllocateMemory>("vkAllocateMemory")(context.device, &allocation, nullptr, &pool.memory);
         if (allocated != VK_SUCCESS) {
             context.Function<PFN_vkDestroyBuffer>("vkDestroyBuffer")(context.device, pool.buffer, nullptr);
