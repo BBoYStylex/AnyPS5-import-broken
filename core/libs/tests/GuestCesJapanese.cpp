@@ -90,7 +90,7 @@ int main() {
     Require(sceCesEucJpToUtf16(euc, Bytes("\xA4\xA2"), 2, &consumed, &utf16, 1, &produced) == 0 && consumed == 2 && utf16 == 0x3042);
     Require(sceCesEucJpToUtf16be(euc, Bytes("\x8E\xB1"), 2, &consumed, &utf16, 1, &produced) == 0);
     Require(std::memcmp(&utf16, "\xFF\x71", 2) == 0);
-    Require(sceCesEucJpToUtf32(euc, Bytes("\x8F\xB0\xA1"), 3, &consumed, &utf32) == 0 && consumed == 3 && utf32 == 0x4E02);
+    Require(sceCesEucJpToUtf32(euc, Bytes("\x8F\xB0\xA1"), 3, &consumed, &utf32) == invalidEncode);
     Require(sceCesEucJpToUtf32le(euc, Bytes("\xA4\xA2"), 2, &consumed, &utf32) == 0);
     Require(std::memcmp(&utf32, "\x42\x30\x00\x00", 4) == 0);
     Require(sceCesEucJpToUtf32(sjis, Bytes("\xA4\xA2"), 2, &consumed, &utf32) == invalidParameter);
@@ -104,7 +104,7 @@ int main() {
     Require(sceCesUcs2ToSJis(0x3042, euc, mbcs, sizeof(mbcs), &produced) == invalidParameter);
     Require(sceCesUcs2ToSJis(0x3042, sceCesRefersUcsProfileCp1252(), mbcs, sizeof(mbcs), &produced) == invalidParameter);
     Require(sceCesUcs2ToSJis(0x3042, sjis, nullptr, sizeof(mbcs), &produced) == invalidDstBuffer);
-    Require(sceCesUcs2ToEucJp(0x4E02, euc, mbcs, sizeof(mbcs), &produced) == 0 && produced == 3 && std::memcmp(mbcs, "\x8F\xB0\xA1", 3) == 0);
+    Require(sceCesUcs2ToEucJp(0x4E02, euc, mbcs, sizeof(mbcs), &produced) == unassignedCode);
     Require(sceCesUcs2ToEucJp(0xFF71, euc, mbcs, sizeof(mbcs), &produced) == 0 && produced == 2 && std::memcmp(mbcs, "\x8E\xB1", 2) == 0);
 
     Require(sceCesUtf8ToSJis(Bytes("\xE6\x97\xA5"), 3, &consumed, sjis, mbcs, sizeof(mbcs), &produced) == 0);
