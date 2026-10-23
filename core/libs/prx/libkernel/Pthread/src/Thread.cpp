@@ -78,16 +78,13 @@ static GuestThreadState& CurrentGuestState() {
 #endif
 }
 #ifdef __APPLE__
-// libc++'s ~mutex destroys the pthread mutex, so a lock during exit after static destruction throws EINVAL;
-// keep these alive for the whole process, as DirectMemory and GuestAllocations do with their state.
+// libc++'s ~mutex destroys the pthread mutex, so a lock during exit after static destruction throws EINVAL.
 static std::mutex& stackLock = *new std::mutex;
-static auto& liveStacks = *new std::map<PthreadPrivate*, std::pair<std::uintptr_t, std::uintptr_t>>;
-static auto& protectedStackPages = *new std::map<std::uintptr_t, std::size_t>;
 #else
 static std::mutex stackLock;
-static std::map<PthreadPrivate*, std::pair<std::uintptr_t, std::uintptr_t>> liveStacks;
-static std::map<std::uintptr_t, std::size_t> protectedStackPages;
 #endif
+static auto& liveStacks = *new std::map<PthreadPrivate*, std::pair<std::uintptr_t, std::uintptr_t>>();
+static auto& protectedStackPages = *new std::map<std::uintptr_t, std::size_t>();
 #if defined(__linux__)
 struct GuestStackMapping {
     std::uintptr_t mappingEnd;
@@ -95,7 +92,7 @@ struct GuestStackMapping {
     std::uintptr_t stackEnd;
 };
 static std::mutex guestStackMappingsLock;
-static std::map<std::uintptr_t, GuestStackMapping> guestStackMappings;
+static auto& guestStackMappings = *new std::map<std::uintptr_t, GuestStackMapping>();
 
 static void RegisterGuestStackMapping(PthreadPrivate* thread) {
     const auto mappingStart = reinterpret_cast<std::uintptr_t>(thread->guestStack);
