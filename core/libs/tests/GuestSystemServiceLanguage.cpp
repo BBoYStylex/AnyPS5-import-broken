@@ -51,16 +51,13 @@ int main() {
         if ((paramId >= 1 && paramId <= 5) || paramId == SYSTEM_SERVICE_PARAM_ID_100 || paramId == 400) continue;
         int value = -12345;
         if ((paramId >= 101 && paramId <= 111) || (paramId >= 200 && paramId <= 213) || paramId == 300) {
-            bool threw = false;
-            try {
-                static_cast<void>(sceSystemServiceParamGetInt(paramId, &value));
-            } catch (const std::runtime_error&) {
-                threw = true;
-            }
-            Require(threw);
-        } else {
-            Require(sceSystemServiceParamGetInt(paramId, &value) == SYSTEM_SERVICE_ERROR_PARAMETER);
+            static constexpr int settings101To111[] = {1, 2, 100, 0x20202, 0, 0, 100, 0, 100, 0x20202, 0};
+            static constexpr int settings200To213[] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 71, 0, 0, 0};
+            const int expected = paramId <= 111 ? settings101To111[paramId - 101] : paramId <= 213 ? settings200To213[paramId - 200] : 0;
+            Require(sceSystemServiceParamGetInt(paramId, &value) == SYSTEM_SERVICE_OK && value == expected);
+            continue;
         }
+        Require(sceSystemServiceParamGetInt(paramId, &value) == SYSTEM_SERVICE_ERROR_PARAMETER);
         Require(value == -12345);
     }
     for (int paramId : {std::numeric_limits<int>::min(), std::numeric_limits<int>::max()}) {

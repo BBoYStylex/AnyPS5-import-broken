@@ -310,11 +310,15 @@ int APS5_VABI sceSystemServiceParamGetInt(int paramId, int* value) {
   case SYSTEM_SERVICE_PARAM_ID_TIME_ZONE: *value = HostTimeZone().minutes; break;
   case SYSTEM_SERVICE_PARAM_ID_SUMMERTIME: *value = HostTimeZone().summer ? 1 : 0; break;
   case SYSTEM_SERVICE_PARAM_ID_100: *value = 0; break;
-  default:
-   if ((paramId >= 101 && paramId <= 111) || (paramId >= 200 && paramId <= 213) || paramId == 300) {
-    NotImplemented_nid_no_patch("sceSystemServiceParamGetInt: registry-backed parameter");
-   }
-   return SYSTEM_SERVICE_ERROR_PARAMETER;
+  default: {
+   static constexpr int Settings101To111[] = {1, 2, 100, 0x20202, 0, 0, 100, 0, 100, 0x20202, 0};
+   static constexpr int Settings200To213[] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 71, 0, 0, 0};
+   if (paramId >= 101 && paramId <= 111) *value = Settings101To111[paramId - 101];
+   else if (paramId >= 200 && paramId <= 213) *value = Settings200To213[paramId - 200];
+   else if (paramId == 300) *value = 0;
+   else return SYSTEM_SERVICE_ERROR_PARAMETER;
+   break;
+  }
  }
  return SYSTEM_SERVICE_OK;
 }
