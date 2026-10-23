@@ -217,9 +217,10 @@ int APS5_VABI scePadGetInfo_nid_postfix(PadInfo* info) {
 }
 
 int APS5_VABI scePadGetTriggerEffectState(int handle, PadTriggerEffectStateInformation* info) {
+ if (!Pad::IsInitialized()) return PAD_ERROR_NOT_INITIALIZED;
  if (handle != PAD_HANDLE) return PAD_ERROR_INVALID_HANDLE;
  if (info == nullptr) return PAD_ERROR_INVALID_ARG;
- std::memset(info, 0, sizeof(*info));
+ PadGetTriggerEffectState_nid_postfix(info->state);
  return PAD_OK;
 }
 
@@ -618,8 +619,10 @@ int APS5_VABI scePadSwitchConnection(std::int32_t handle, std::uint32_t flags) {
 }
 
 int APS5_VABI scePadDisableTriggerEffect(std::int32_t handle, bool disabled) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    if (!Pad::IsInitialized()) return PAD_ERROR_NOT_INITIALIZED;
+    if (handle != PAD_HANDLE) return PAD_ERROR_INVALID_HANDLE;
+    Pad::SetTriggerEffectsDisabled(disabled);
+    return PAD_OK;
 }
 
 int APS5_VABI scePadSetTriggerEffectStrength(std::int32_t handle, std::uint32_t strength) {
