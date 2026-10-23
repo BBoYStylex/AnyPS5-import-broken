@@ -1617,6 +1617,127 @@ void TestVideoSyncTolerance() {
     Check(allocations.blocks.empty(), "sync tolerance allocations leaked");
 }
 
+void TestAudioClockDriftGating() {
+    const auto open = [](Events& events) {
+        AvPlayerInitData init = InitData(&events);
+        auto* player = sceAvPlayerInit(&init);
+        Check(player != nullptr, "audio drift gating init failed");
+        Check(sceAvPlayerAddSource(player, "/app0/avplayer.mp4") == 0, "audio drift gating source failed");
+        Check(WaitFor([&] { return events.Seen(EventReady); }), "audio drift gating ready missing");
+        Check(sceAvPlayerEnableStream(player, EnglishAudioStream) == 0, "audio drift gating audio failed");
+        Check(sceAvPlayerStart(player) == 0, "audio drift gating start failed");
+        Check(WaitFor([&] { return events.Seen(EventPlay); }), "audio drift gating play missing");
+        return player;
+    };
+    const auto close = [](AvPlayerInternal* player) {
+        Check(sceAvPlayerClose(player) == 0, "audio drift gating close failed");
+        std::lock_guard lock(allocations.mutex);
+        Check(allocations.blocks.empty(), "audio drift gating allocations leaked");
+    };
+    const auto take = [](AvPlayerInternal* player, AvPlayerFrameInfo& sound, const char* missing) {
+        Check(WaitFor([&] { return sceAvPlayerGetAudioData(player, &sound) != 0; }), missing);
+    };
+
+    std::uint64_t secondTs = 0;
+    std::uint64_t beyondTs = 0;
+    {
+        Events events;
+        auto* player = open(events);
+        AvPlayerFrameInfo sound{};
+        take(player, sound, "probe first audio frame missing");
+        Check(sound.timestamp == 0, "first audio frame timestamp unexpected");
+        take(player, sound, "probe second audio frame missing");
+        Check(sound.timestamp > 0 && sound.timestamp <= 30, "second audio frame timestamp unexpected");
+        secondTs = sound.timestamp;
+        Check(WaitFor([&] {
+            while (sceAvPlayerGetAudioData(player, &sound)) {
+                if (sound.timestamp > 50) {
+                    beyondTs = sound.timestamp;
+                    return true;
+                }
+            }
+            return false;
+        }), "probe audio beyond 50ms missing");
+        close(player);
+    }
+    Check(beyondTs > 50, "probe timestamps unsuitable for drift gating");
+
+    {
+        Events events;
+        auto* player = open(events);
+        AvPlayerFrameInfo sound{};
+        take(player, sound, "within-threshold first audio missing");
+        AvPlayer::SetAvPlayerClockForTest_nid_no_patch(player, 0.0);
+        std::this_thread::sleep_for(std::chrono::milliseconds(40));
+        take(player, sound, "within-threshold second audio missing");
+        Check(sound.timestamp == secondTs, "within-threshold second timestamp changed");
+        Check(sceAvPlayerCurrentTime(player) == 0, "clock rebased despite audio being within drift threshold");
+        close(player);
+    }
+
+    {
+        Events events;
+        auto* player = open(events);
+        AvPlayerFrameInfo sound{};
+        take(player, sound, "clock-lead boundary first audio missing");
+        AvPlayer::SetAvPlayerClockForTest_nid_no_patch(player, static_cast<double>(secondTs + 50));
+        std::this_thread::sleep_for(std::chrono::milliseconds(40));
+        take(player, sound, "clock-lead boundary second audio missing");
+        Check(sound.timestamp == secondTs, "clock-lead boundary second timestamp changed");
+        Check(sceAvPlayerCurrentTime(player) == secondTs + 50, "exact 50ms clock-lead boundary rebased");
+        close(player);
+    }
+
+    {
+        Events events;
+        auto* player = open(events);
+        AvPlayerFrameInfo sound{};
+        take(player, sound, "audio-lead boundary first audio missing");
+        AvPlayer::SetAvPlayerClockForTest_nid_no_patch(player, static_cast<double>(beyondTs - 50));
+        std::this_thread::sleep_for(std::chrono::milliseconds(40));
+        Check(WaitFor([&] {
+            while (sceAvPlayerGetAudioData(player, &sound)) {
+                if (sound.timestamp >= beyondTs) return true;
+            }
+            return false;
+        }), "audio-lead boundary frame missing");
+        Check(sound.timestamp == beyondTs, "audio-lead boundary timestamp unexpected");
+        Check(sceAvPlayerCurrentTime(player) == beyondTs - 50, "exact 50ms audio-lead boundary rebased");
+        close(player);
+    }
+
+    {
+        Events events;
+        auto* player = open(events);
+        AvPlayerFrameInfo sound{};
+        take(player, sound, "clock-lead rebase first audio missing");
+        AvPlayer::SetAvPlayerClockForTest_nid_no_patch(player, static_cast<double>(secondTs + 51));
+        std::this_thread::sleep_for(std::chrono::milliseconds(40));
+        take(player, sound, "clock-lead rebase second audio missing");
+        Check(sound.timestamp == secondTs, "clock-lead rebase second timestamp changed");
+        Check(sceAvPlayerCurrentTime(player) == secondTs, "clock-lead beyond 50ms did not rebase");
+        close(player);
+    }
+
+    {
+        Events events;
+        auto* player = open(events);
+        AvPlayerFrameInfo sound{};
+        take(player, sound, "audio-lead rebase first audio missing");
+        AvPlayer::SetAvPlayerClockForTest_nid_no_patch(player, 0.0);
+        std::this_thread::sleep_for(std::chrono::milliseconds(40));
+        Check(WaitFor([&] {
+            while (sceAvPlayerGetAudioData(player, &sound)) {
+                if (sound.timestamp > 50) return true;
+            }
+            return false;
+        }), "audio-lead rebase frame missing");
+        Check(sound.timestamp == beyondTs, "audio-lead rebase timestamp unexpected");
+        Check(sceAvPlayerCurrentTime(player) == beyondTs, "audio-lead beyond 50ms did not rebase");
+        close(player);
+    }
+}
+
 }
 
 int main(int argc, char** argv) {
@@ -1656,6 +1777,7 @@ int main(int argc, char** argv) {
         TestLoopWarningWaitsForPlayback();
         TestEofStopLatency();
         TestVideoSyncTolerance();
+        TestAudioClockDriftGating();
         std::puts("AvPlayer tests passed");
         return 0;
     } catch (const std::exception& error) {
