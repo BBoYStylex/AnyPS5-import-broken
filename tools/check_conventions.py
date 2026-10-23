@@ -171,6 +171,7 @@ class Check:
             core = path.startswith("core/") and "tests" not in PurePosixPath(path).parts
             source = self.show(path).split("\n")
             masked = cpp_text("\n".join(source), preserve_comments=True).split("\n")
+            assembly = asm_exports("\n".join(source)) if core and path.startswith("core/libs/prx/") else {}
             for number, text in lines:
                 bare = masked[number - 1]
                 if ("//" in bare or "/*" in bare) and not ALLOWED_COMMENT.match(bare):
@@ -182,6 +183,7 @@ class Check:
                 if core and path.startswith("core/libs/prx/"):
                     unknowns.extend((nid, name, path, number) for nid, name in source_aliases(text) if "unknown" in name.lower())
                     symbols.extend((symbol, path, number) for symbol in nid_symbols(text))
+                exports.update((name, (path, number)) for name in assembly.get(number, ()) if not name.endswith(("_nid_no_patch", "_nid_no_patch_cut")))
                 match = EXPORT.search(bare)
                 if match and core and path.startswith("core/libs/prx/") and not match.group(1).endswith(("_nid_no_patch", "_nid_no_patch_cut")):
                     source = source or self.show(path).splitlines()
@@ -207,21 +209,23 @@ class Check:
     def duplicates(self, exports):
         if not exports:
             return
-        result = subprocess.run(["git", "-c", "core.quotePath=false", "grep", "-nF", "--full-name", "-f", "-", self.head, "--", ":(top)core/libs/prx"], input="\n".join(exports) + "\n", capture_output=True, encoding="utf-8", errors="replace")
-        hits = [line.split(":", 3)[1:] for line in filter(None, result.stdout.split("\n"))]
-        self.read(path for path, _, _ in hits)
-        sources = {}
-        for path, number, text in hits:
-            if path not in sources:
-                sources[path] = cpp_text(self.show(path)).split("\n")
-            source = sources[path]
-            match = next((match for match in EXPORT.finditer(source[int(number) - 1]) if match.group(1) in exports), None)
-            if match is None:
+        paths = sorted(path for path in self.objects if path.startswith("core/libs/prx/") and
+                       "tests" not in PurePosixPath(path).parts)
+        self.read(paths)
+        for path in paths:
+            text = self.show(path)
+            if "APS5_VABI" not in text and "ASM_FUNCTION" not in text:
                 continue
-            name = match.group(1)
-            own, own_number = exports[name]
-            if library(path) != library(own) and "tests" not in PurePosixPath(path).parts and function_body(source, int(number) - 1) is not None:
-                self.report("duplicate-export", own, own_number, f"{name} is also in {library(path)}")
+            source = cpp_text(text).split("\n")
+            assembly = asm_exports(text)
+            for number, line in enumerate(source):
+                names = [match.group(1) for match in EXPORT.finditer(line)
+                         if match.group(1) in exports and library(path) != library(exports[match.group(1)][0])
+                         and function_body(source, number) is not None]
+                names += [name for name in assembly.get(number + 1, ()) if name in exports and library(path) != library(exports[name][0])]
+                for name in names:
+                    own, own_number = exports[name]
+                    self.report("duplicate-export", own, own_number, f"{name} is also in {library(path)}")
 
     def unknown_nids(self, unknowns, symbols):
         if not unknowns and not symbols:
@@ -514,6 +518,16 @@ def symbol_nid(name):
         return None
     base = re.sub(r"_nid_disambig\d+$", "", name.removesuffix(NID_POSTFIX))
     return compute_nid(base) if base else None
+
+
+def asm_exports(text):
+    tokens = [match for match in CPP_TOKEN.finditer(text) if match.group("comment") is None]
+    exports = defaultdict(list)
+    for index, match in enumerate(tokens[:-2]):
+        name = tokens[index + 2].group()[1:-1]
+        if match.group() in ("APS5_ASM_FUNCTION", "APS5_SIGNAL_ASM_FUNCTION") and tokens[index + 1].group() == "(" and tokens[index + 2].group("string") is not None and IDENTIFIER.fullmatch(name):
+            exports[text.count("\n", 0, tokens[index + 2].start()) + 1].append(name)
+    return exports
 
 
 def nid_symbols(text):
