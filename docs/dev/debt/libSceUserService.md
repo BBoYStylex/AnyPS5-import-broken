@@ -77,7 +77,6 @@
 - [sceUserServiceGetHmd2GazeTarget](../../../core/libs/prx/libSceUserService/Export.cpp) (libSceUserService) - unknown signature
 - [sceUserServiceSetNpAccountUpgradeFlag](../../../core/libs/prx/libSceUserService/Export.cpp) (libSceUserService) - unknown signature
 - [sceUserServiceGetGlsMessageFilterLevel](../../../core/libs/prx/libSceUserService/Export.cpp) (libSceUserService) - unknown signature
-- [sceUserServiceGetTraditionalChineseInputType](../../../core/libs/prx/libSceUserService/Export.cpp) (libSceUserService) - unknown signature
 - [sceUserServiceSetImePointerMode](../../../core/libs/prx/libSceUserService/Export.cpp) (libSceUserService) - unknown signature
 - [sceUserServiceGetParentalDvd](../../../core/libs/prx/libSceUserService/Export.cpp) (libSceUserService) - unknown signature
 - [sceUserServiceSetHmd2CinematicAudioRotation](../../../core/libs/prx/libSceUserService/Export.cpp) (libSceUserService) - unknown signature
@@ -115,7 +114,6 @@
 - [sceUserServiceSetGlsAccessTokenUstream](../../../core/libs/prx/libSceUserService/Export.cpp) (libSceUserService) - unknown signature
 - [sceUserServiceSetProControllerUniqueId3](../../../core/libs/prx/libSceUserService/Export.cpp) (libSceUserService) - unknown signature
 - [sceUserServiceSetHrtf](../../../core/libs/prx/libSceUserService/Export.cpp) (libSceUserService) - unknown signature
-- [sceUserServiceGetJapaneseInputType](../../../core/libs/prx/libSceUserService/Export.cpp) (libSceUserService) - unknown signature
 - [sceUserServiceSetGlsTtsFlags](../../../core/libs/prx/libSceUserService/Export.cpp) (libSceUserService) - unknown signature
 - [sceUserServiceGetNotificationSettings_4](../../../core/libs/prx/libSceUserService/Export.cpp) (libSceUserService) - unknown signature
 - [sceUserServiceGetNpAge](../../../core/libs/prx/libSceUserService/Export.cpp) (libSceUserService) - unknown signature
@@ -139,7 +137,6 @@
 - [sceUserServiceLogout](../../../core/libs/prx/libSceUserService/Export.cpp) (libSceUserService) - unknown signature
 - [sceUserServiceSetNpDateOfBirth](../../../core/libs/prx/libSceUserService/Export.cpp) (libSceUserService) - unknown signature
 - [sceUserServiceSetPbtcWednesdayHoursStart](../../../core/libs/prx/libSceUserService/Export.cpp) (libSceUserService) - unknown signature
-- [sceUserServiceGetKeyboardType](../../../core/libs/prx/libSceUserService/Export.cpp) (libSceUserService) - unknown signature
 - [sceUserServiceGetSparkEqParam](../../../core/libs/prx/libSceUserService/Export.cpp) (libSceUserService) - unknown signature
 - [sceUserServiceSetEventSortEvent](../../../core/libs/prx/libSceUserService/Export.cpp) (libSceUserService) - unknown signature
 - [sceUserServiceSetGlsLiveQuality3](../../../core/libs/prx/libSceUserService/Export.cpp) (libSceUserService) - unknown signature
@@ -538,3 +535,4 @@
 - [sceUserServiceGetGlsCameraEffect](../../../core/libs/prx/libSceUserService/Export.cpp) (libSceUserService) - unknown signature
 - [sceUserServiceGetPbtcSundayHoursEnd](../../../core/libs/prx/libSceUserService/Export.cpp) (libSceUserService) - unknown signature
 - [sceUserServiceGetIsSpartacusEnabled](../../../core/libs/prx/libSceUserService/Export.cpp) (libSceUserService) - unknown signature
+- [sceUserServiceGetKeyboardType, sceUserServiceGetJapaneseInputType, sceUserServiceGetTraditionalChineseInputType](../../../core/libs/prx/libSceUserService/Export.cpp) (libSceUserService) - AnyPS5 stores no per-user keyboard setting, so the initial user reports the keyboard type of the configured system language (`ANYPS5_LANGUAGE`, English US by default) and 0 for the two input variants, and any other user id returns `USER_SERVICE_ERROR_UNKNOWN_USER`. The language-to-keyboard-type table is the repository owner's (languages 0 to 29); a valid language outside it, such as Ukrainian (30), reports 20 (US English). A value that is not a console language number is rejected by `sceSystemServiceParamGetInt` with an error naming `ANYPS5_LANGUAGE`; the call throws it and leaves the output untouched. The input variant is 0 because the owner's table gives 0 for Japanese and Traditional Chinese, the only languages needing one. `sceConvertKeycodeGetImeKeyboardType` consumes these values.
