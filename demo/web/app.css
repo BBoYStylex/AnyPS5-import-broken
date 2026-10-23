@@ -8,3 +8,24 @@
 .app-list li{padding:8px 0;border-top:1px solid var(--line)}
 .app-list strong,.app-list span{display:block;overflow-wrap:anywhere}
 .app-list strong{color:var(--text)}
+.setting-title{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.setting-title>label{font-size:12px;font-weight:600}
+.cpu-settings>label{display:block;font-size:12px;font-weight:600;margin-bottom:10px}
+.cpu-settings .choices label{padding:9px 10px}
+.cpu-settings .choices span{margin:0;font-size:13px;color:inherit}
+.language-status{font-size:11px;color:var(--muted);font-weight:500}
+.language-status.supported{color:var(--good)}
+.language-status.supported b{color:var(--good);font-size:9px;margin-right:4px}
+.language-status.not-supported b{color:var(--muted);font-size:9px;margin-right:4px}
+#ui-lang{font-size:11px;font-weight:600;letter-spacing:.05em;padding:4px 8px;border:1px solid var(--line);border-radius:4px;color:var(--muted);background:var(--surface);cursor:pointer;line-height:1}
+#ui-lang:hover{border-color:var(--text);color:var(--text)}
+[dir=rtl]{direction:rtl}
+[dir=rtl] body,[dir=rtl] button,[dir=rtl] input,[dir=rtl] select{font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans Arabic",sans-serif}
+[dir=rtl] .eyebrow,[dir=rtl] .fine{font-family:inherit;letter-spacing:normal}
+[dir=rtl] .mark{margin-right:0;margin-left:3px}
+[dir=rtl] .private b{margin-right:0;margin-left:5px}
+[dir=rtl] .language-status b{margin-right:0;margin-left:4px}
+[dir=rtl] .choices span{margin-left:0;margin-right:auto}
+[dir=rtl] .action-row>p{margin:0 0 0 auto}
+[dir=rtl] .warnings ul{padding-left:0;padding-right:18px}
+[dir=rtl] .app-list{padding-left:0;padding-right:22px}

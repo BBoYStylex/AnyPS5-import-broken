@@ -208,6 +208,31 @@ export class Archive {
     this.executable = executables[0];
     if (this.executable.name.includes("/")) throw new Error("Place the executable next to sce_sys and sce_module, not inside another folder");
     this.icon = this.files.find(item => item.name === "sce_sys/icon0.png" && !item.entry.directory);
+    const paramItem = this.files.find(item => item.name === "sce_sys/param.json" && !item.entry.directory);
+    let supportsArabic = false;
+    const detectedLanguages = [];
+    if (paramItem && paramItem.entry.uncompressedSize <= 2 * 1024 * 1024) {
+      try {
+        const raw = await boundedBytes(paramItem.entry, 2 * 1024 * 1024);
+        const parsed = JSON.parse(new TextDecoder("utf-8").decode(raw));
+        if (parsed.defaultLanguage) detectedLanguages.push(String(parsed.defaultLanguage));
+        if (parsed.localizedParameters && typeof parsed.localizedParameters === "object") {
+          for (const lang of Object.keys(parsed.localizedParameters)) {
+            if (!detectedLanguages.includes(lang)) detectedLanguages.push(lang);
+          }
+        }
+        if (Array.isArray(parsed.languages)) {
+          for (const lang of parsed.languages) {
+            if (!detectedLanguages.includes(lang)) detectedLanguages.push(String(lang));
+          }
+        }
+        const isArabic = code => {
+          const lower = String(code).toLowerCase();
+          return lower === "ar" || lower.startsWith("ar-") || lower.startsWith("ar_") || lower === "arabic";
+        };
+        supportsArabic = detectedLanguages.some(isArabic);
+      } catch {}
+    }
     this.selectedBytes = [this.executable, ...this.modules].reduce((sum, item) => sum + item.entry.uncompressedSize, 0);
     this.windowsSelectedBytes = this.selectedBytes + (this.icon?.entry.uncompressedSize ?? 0);
     if (this.selectedBytes > CONVERSION_LIMIT) throw new Error("Executable and modules exceed the 256 MiB conversion limit. Use the native relinker for this app.");
@@ -217,7 +242,7 @@ export class Archive {
     if (!this.files.some(item => item.name.startsWith("sce_module/"))) warnings.push("sce_module is missing. If the original app included this folder, leaving it out can prevent the app from starting.");
     if (selfModules.length > 0) warnings.push(`${selfModules.join(", ")} is a SELF container and was skipped: unwrap it to include that module.`);
     this.totalBytes = total;
-    return { name: this.executable.name, files: files.length, modules: this.modules.length, totalBytes: total, selectedBytes: this.selectedBytes, windowsSelectedBytes: this.windowsSelectedBytes, windowsIconTooLarge: (this.icon?.entry.uncompressedSize ?? 0) > ICON_LIMIT, root: prefix, warnings };
+    return { name: this.executable.name, files: files.length, modules: this.modules.length, totalBytes: total, selectedBytes: this.selectedBytes, windowsSelectedBytes: this.windowsSelectedBytes, windowsIconTooLarge: (this.icon?.entry.uncompressedSize ?? 0) > ICON_LIMIT, root: prefix, warnings, supportsArabic, detectedLanguages };
   }
 
   selectedBytesForTarget(target) {
@@ -353,6 +378,10 @@ export async function packageArchive(archive, converted, outputName, libraryFile
     for (const item of originalFiles) claim("app0/" + item.name);
     claim(outputName);
     if (converted.diagnostics) claim("windows-diagnostics-imports.txt");
+    const runnerName = options.language && options.language !== "1"
+      ? (outputName.toLowerCase().endsWith(".elf") ? "run.sh" : "run.bat")
+      : null;
+    if (runnerName) claim(runnerName);
     for (const module of converted.modules) {
       if (!module.name.startsWith("app0/sce_module/")) throw new Error("Invalid converted module path");
       claim(module.name);
@@ -362,6 +391,7 @@ export async function packageArchive(archive, converted, outputName, libraryFile
       ...originalFiles.map(item => ({ name: "app0/" + item.name, directory: item.entry.directory })),
       { name: outputName },
       ...(converted.diagnostics ? [{ name: "windows-diagnostics-imports.txt" }] : []),
+      ...(runnerName ? [{ name: runnerName }] : []),
       ...converted.modules.map(module => ({ name: module.name }))
     ];
     const files = new Set(outputEntries.filter(entry => !entry.directory).map(entry => entry.name.toLowerCase()));
@@ -375,6 +405,15 @@ export async function packageArchive(archive, converted, outputName, libraryFile
     const binary = { versionMadeBy: 0x31e, externalFileAttributes: (0o100755 << 16) >>> 0 };
     await writer.add(outputPath(outputName), new Uint8ArrayReader(converted.executable), binary);
     if (converted.diagnostics) await writer.add(outputPath("windows-diagnostics-imports.txt"), new Uint8ArrayReader(new TextEncoder().encode(converted.diagnostics)));
+    if (runnerName) {
+      const runnerScript = runnerName.endsWith(".sh")
+        ? `#!/bin/sh\nDIR="$(cd "$(dirname "$0")" && pwd)"\nexport ANYPS5_LANGUAGE=${options.language}\nexec "$DIR/${outputName}" "$@"\n`
+        : `@echo off\r\nset ANYPS5_LANGUAGE=${options.language}\r\n"%~dp0${outputName}" %*\r\n`;
+      const runnerAttributes = runnerName.endsWith(".sh")
+        ? { versionMadeBy: 0x31e, externalFileAttributes: (0o100755 << 16) >>> 0 }
+        : { versionMadeBy: 0x31e, externalFileAttributes: (0o100644 << 16) >>> 0 };
+      await writer.add(outputPath(runnerName), new Uint8ArrayReader(new TextEncoder().encode(runnerScript)), runnerAttributes);
+    }
     for (const module of converted.modules) await writer.add(outputPath(module.name), new Uint8ArrayReader(module.bytes), binary);
     for (const entry of libraryEntries) {
       if (entry.directory) await writer.add(outputPath(entry.filename), undefined, { directory: true });
