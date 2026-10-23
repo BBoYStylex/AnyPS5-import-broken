@@ -779,6 +779,28 @@ if(BUILD_TESTING)
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libkernel_sys>")
     endif()
 
+    add_test_executable(guest_libressl_ui_tests tests/GuestLibreSslUi.cpp)
+    target_include_directories(guest_libressl_ui_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(guest_libressl_ui_tests PRIVATE libSceLibreSsl)
+    configure_windows_unwind(guest_libressl_ui_tests)
+    add_test(NAME guest_libressl_ui COMMAND guest_libressl_ui_tests)
+    set_tests_properties(guest_libressl_ui PROPERTIES TIMEOUT 20)
+    if(WIN32)
+        set_tests_properties(guest_libressl_ui PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceLibreSsl>")
+    endif()
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        add_test_executable(guest_libressl_ui_allocation_tests
+            tests/GuestLibreSslUi.cpp prx/libSceLibreSsl/Export.cpp)
+        target_include_directories(guest_libressl_ui_allocation_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+        target_compile_definitions(guest_libressl_ui_allocation_tests PRIVATE ANYPS5_UI_ALLOC_FAILURES)
+        target_link_options(guest_libressl_ui_allocation_tests PRIVATE
+            LINKER:--wrap=malloc LINKER:--wrap=calloc LINKER:--wrap=free)
+        target_link_libraries(guest_libressl_ui_allocation_tests PRIVATE libc)
+        add_test(NAME guest_libressl_ui_allocation COMMAND guest_libressl_ui_allocation_tests)
+        set_tests_properties(guest_libressl_ui_allocation PROPERTIES TIMEOUT 20)
+    endif()
+
     add_test_executable(guest_posix_random_tests tests/GuestPosixRandom.cpp)
     target_include_directories(guest_posix_random_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_link_libraries(guest_posix_random_tests PRIVATE libScePosixForWebKit)
