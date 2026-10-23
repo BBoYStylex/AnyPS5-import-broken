@@ -41,6 +41,13 @@ static void* LoadLibraryFile(const std::filesystem::path& path) {
     if (!module) std::fprintf(stderr, "%s\n", dlerror());
 #endif
     Require(module != nullptr);
+#ifdef _WIN32
+    std::wstring loaded(32768, L'\0');
+    const auto length = GetModuleFileNameW(static_cast<HMODULE>(module), loaded.data(), static_cast<DWORD>(loaded.size()));
+    Require(length != 0 && length < loaded.size());
+    loaded.resize(length);
+    Require(std::filesystem::equivalent(path, std::filesystem::path(loaded)));
+#endif
     return module;
 }
 
@@ -65,7 +72,8 @@ int main(int argc, char** argv) {
     const std::string test = argv[3];
     auto* sys = LoadLibraryFile(directory / "libkernel_sys.prx");
     auto* kernel = LoadLibraryFile(directory / "libkernel.prx");
-    const auto error = LoadFunction<int* (APS5_VABI*)()>(kernel, "__error", patched);
+    auto* libc = LoadLibraryFile(directory / "libc.prx");
+    const auto error = LoadFunction<int* (APS5_VABI*)()>(libc, "__error", patched);
     const auto open = LoadFunction<int (APS5_VABI*)(const char*, int, int)>(kernel, "open", patched);
     const auto close = LoadFunction<int (APS5_VABI*)(int)>(kernel, "close", patched);
     const auto stat = LoadFunction<std::int64_t (APS5_VABI*)(const char*, FileStat*)>(kernel, "stat", patched);
