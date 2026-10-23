@@ -15,6 +15,10 @@
 #else
 #include <sys/mman.h>
 #endif
+#if defined(__APPLE__) && !defined(MAP_FIXED_NOREPLACE)
+// macOS has no MAP_FIXED_NOREPLACE; the address is then only a hint, and the heap checks that the mapping landed there.
+#define MAP_FIXED_NOREPLACE 0
+#endif
 #include <algorithm>
 #include <array>
 #include <cstdint>

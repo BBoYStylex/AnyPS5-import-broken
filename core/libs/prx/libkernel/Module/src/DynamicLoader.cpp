@@ -36,7 +36,12 @@ extern "C" void ForgetUnloadedUnwindImages_nid_no_patch();
 #endif
 
 namespace {
+#ifdef __APPLE__
+// macOS dlerror lists every path dyld tried, so a load failure needs more room than 512 bytes to keep the relink hint at its end.
+thread_local std::array<char, 4096> loaderError{};
+#else
 thread_local std::array<char, 512> loaderError{};
+#endif
 thread_local bool pendingError = false;
 void Error(const char* message) {
     std::snprintf(loaderError.data(), loaderError.size(), "%s", message);
