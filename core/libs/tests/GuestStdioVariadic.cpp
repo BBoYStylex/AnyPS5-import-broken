@@ -1,14 +1,19 @@
 #include "prx/libc/include/FileStream.hpp"
+#include "SceTypes.hpp"
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include <cstdarg>
+#include <cerrno>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <stdexcept>
 
 extern "C" {
 extern FileStream* __stdinp_nid_postfix;
+int APS5_VABI fscanf_nid_postfix(FileStream*, const char*, ...);
+int APS5_VABI sscanf_nid_postfix(const char*, const char*, ...);
 int APS5_VABI vfscanf_nid_postfix(FileStream*, const char*, void*);
 int APS5_VABI vscanf_nid_postfix(const char*, void*);
 int APS5_VABI scanf_nid_postfix(const char*, ...);
@@ -34,7 +39,10 @@ static void Require(bool value, const char* what) {
 
 static int APS5_VABI ScanStream(FileStream* stream, const char* format, ...) {
     APS5_VA_BEGIN(format);
+    VaList original;
+    std::memcpy(&original, args, sizeof(original));
     const int result = vfscanf_nid_postfix(stream, format, args);
+    Require(std::memcmp(&original, args, sizeof(original)) == 0, "vfscanf preserves the caller argument cursor");
     APS5_VA_END();
     return result;
 }
@@ -97,6 +105,127 @@ int main() {
     Require(scanf_nid_postfix("%d", &second) == 1 && second == 12, "scanf reads the guest standard input");
     __stdinp_nid_postfix = standardInput;
     input.Close();
+
+    FileStream wideInput(std::tmpfile());
+    Require(std::fputs("skip alpha 1 2 3 4 5 6 7!", wideInput.GetHandle()) >= 0, "seed wide variadic input");
+    std::rewind(wideInput.GetHandle());
+    char16_t wideWord[8]{};
+    int values[7]{};
+    int count = -1;
+    std::int64_t longCount = -1;
+    Require(ScanStream(&wideInput, "%*ls %5ls %d %d %d %d %d %d %d%ln%n", wideWord,
+        &values[0], &values[1], &values[2], &values[3], &values[4], &values[5], &values[6], &longCount, &count) == 8,
+        "vfscanf wide conversion and overflow pointer arguments");
+    Require(std::u16string(wideWord) == u"alpha", "vfscanf writes guest 16-bit characters");
+    for (int index = 0; index < 7; ++index) Require(values[index] == index + 1, "vfscanf mixed pointer values");
+    Require(count == 24 && longCount == 24 && std::ftell(wideInput.GetHandle()) == 24,
+        "vfscanf counts consumed input");
+    Require(std::fgetc(wideInput.GetHandle()) == '!', "vfscanf preserves the next unread byte");
+    Require(ScanStream(&wideInput, "%ls", wideWord) == EOF && std::feof(wideInput.GetHandle()), "vfscanf wide EOF");
+    Require((wideInput.GuestState().flags & 0x20) != 0, "vfscanf synchronizes guest EOF");
+    wideInput.Close();
+    errno = 0;
+    Require(ScanStream(&wideInput, "%ls", wideWord) == -1 && errno == 9, "vfscanf rejects a closed wide stream");
+
+    FileStream mismatch(std::tmpfile());
+    Require(std::fputs("1", mismatch.GetHandle()) >= 0, "seed wide matching failure");
+    std::rewind(mismatch.GetHandle());
+    wideWord[0] = u'!';
+    Require(ScanStream(&mismatch, "%l[a-z]", wideWord) == 0 && wideWord[0] == u'!', "vfscanf wide matching failure preserves destination");
+    Require(std::fgetc(mismatch.GetHandle()) == '1', "vfscanf wide matching failure preserves input");
+    mismatch.Close();
+
+    FileStream wideStandard(std::tmpfile());
+    Require(std::fputs("abc XYdef QZ", wideStandard.GetHandle()) >= 0, "seed wide standard input");
+    std::rewind(wideStandard.GetHandle());
+    __stdinp_nid_postfix = &wideStandard;
+    char16_t pair[3] = {u'!', u'!', u'!'};
+    Require(ScanInput("%l[a-c] %2lc", wideWord, pair) == 2, "vscanf wide scanset and width");
+    Require(std::u16string(wideWord) == u"abc" && pair[0] == u'X' && pair[1] == u'Y' && pair[2] == u'!',
+        "vscanf writes two-byte elements without terminating lc");
+    Require(scanf_nid_postfix("%S %C", wideWord, pair) == 2 && std::u16string(wideWord) == u"def" && pair[0] == u'Q',
+        "scanf guest standard input wide aliases");
+    Require(std::fgetc(wideStandard.GetHandle()) == 'Z', "scanf preserves next unread input");
+    __stdinp_nid_postfix = standardInput;
+    wideStandard.Close();
+
+#ifndef _WIN32
+    FileStream utf8(std::tmpfile());
+    Require(std::fputs("žluť 7 été!", utf8.GetHandle()) >= 0, "seed UTF-8 variadic input");
+    std::rewind(utf8.GetHandle());
+    longCount = -1;
+    Require(ScanStream(&utf8, "%4ls %d %2lc%ln", wideWord, &values[0], pair, &longCount) == 3,
+        "vfscanf mixed UTF-8 and narrow conversions");
+    Require(std::u16string(wideWord) == u"žluť" && values[0] == 7 && pair[0] == u'é' && pair[1] == u't' && pair[2] == u'!',
+        "vfscanf decodes UTF-8 and counts width in characters");
+    Require(longCount == 12 && std::ftell(utf8.GetHandle()) == 12, "vfscanf counts UTF-8 input bytes");
+    Require(ScanStream(&utf8, "%lc", pair) == 1 && pair[0] == u'é', "vfscanf restores multibyte lookahead");
+    Require(std::fgetc(utf8.GetHandle()) == '!', "vfscanf preserves input after a multibyte field");
+    utf8.Close();
+
+    FileStream utf8Set(std::tmpfile());
+    Require(std::fputs("abé", utf8Set.GetHandle()) >= 0, "seed UTF-8 scanset input");
+    std::rewind(utf8Set.GetHandle());
+    Require(ScanStream(&utf8Set, "%l[a-z]", wideWord) == 1 && std::u16string(wideWord) == u"ab",
+        "vfscanf scanset stops before a multibyte character");
+    Require(ScanStream(&utf8Set, "%lc", pair) == 1 && pair[0] == u'é', "vfscanf scanset preserves multibyte input");
+    utf8Set.Close();
+
+    for (const char* text : {"\xff", "\xc3", "\xf0\x9f\x98\x80"}) {
+        FileStream invalid(std::tmpfile());
+        Require(std::fputs(text, invalid.GetHandle()) >= 0, "seed unsupported wide input");
+        std::rewind(invalid.GetHandle());
+        wideWord[0] = u'!';
+        bool rejected = false;
+        try { ScanStream(&invalid, "%ls", wideWord); } catch (const std::runtime_error&) { rejected = true; }
+        Require(rejected && wideWord[0] == u'!' && std::ftell(invalid.GetHandle()) == 0,
+            "vfscanf rejects unsupported encoding without writing or consuming input");
+        invalid.Close();
+    }
+
+    struct FailureCase { const char* input; int result; int first; int second; std::int64_t count; };
+    for (const auto& test : {
+        FailureCase{"+", 0, -1, -1, -1},
+        FailureCase{"   +", 0, -1, -1, -1},
+        FailureCase{"x", 0, -1, -1, -1},
+        FailureCase{"", EOF, -1, -1, -1},
+        FailureCase{"   ", EOF, -1, -1, -1},
+        FailureCase{"7 +", 1, 7, -1, 1},
+        FailureCase{"7", 1, 7, -1, 1},
+        FailureCase{"7 8", 2, 7, 8, 1},
+        FailureCase{"7 8 ok", 3, 7, 8, 1}}) {
+        for (int variant = 0; variant < 3; ++variant) {
+            FileStream failure(std::tmpfile());
+            Require(std::fputs(test.input, failure.GetHandle()) >= 0, "seed conversion failure case");
+            std::rewind(failure.GetHandle());
+            int initial = -1, firstValue = -1, secondValue = -1;
+            std::int64_t afterFirst = -1;
+            char16_t tail[8]{};
+            const char* format = "%n%d%ln %d %ls";
+            const int result = variant == 0 ? ScanStream(&failure, format, &initial, &firstValue, &afterFirst, &secondValue, tail) :
+                variant == 1 ? fscanf_nid_postfix(&failure, format, &initial, &firstValue, &afterFirst, &secondValue, tail) :
+                sscanf_nid_postfix(test.input, format, &initial, &firstValue, &afterFirst, &secondValue, tail);
+            Require(result == test.result, "mixed scanner distinguishes matching failure and input failure");
+            Require(initial == 0 && firstValue == test.first && secondValue == test.second && afterFirst == test.count,
+                "mixed scanner preserves assignments and count conversion ordering");
+            if (result == 3) Require(std::u16string(tail) == u"ok", "mixed scanner successful control");
+            failure.Close();
+        }
+    }
+    for (const auto& test : {FailureCase{"+", 0, -1, -1, -1}, FailureCase{"", EOF, -1, -1, -1},
+        FailureCase{"7 +", 0, -1, -1, 1}, FailureCase{"7", 0, -1, -1, 1}, FailureCase{"7 8", 1, 8, -1, 1}}) {
+        FileStream failure(std::tmpfile());
+        Require(std::fputs(test.input, failure.GetHandle()) >= 0, "seed suppressed conversion failure");
+        std::rewind(failure.GetHandle());
+        int value = -1;
+        std::int64_t afterFirst = -1;
+        char16_t tail[8]{};
+        Require(ScanStream(&failure, "%*d%ln %d %ls", &afterFirst, &value, tail) == test.result,
+            "suppressed conversion does not turn matching failure into EOF");
+        Require(value == test.first && afterFirst == test.count, "suppressed conversion count and pointer order");
+        failure.Close();
+    }
+#endif
 
     FileStream written(std::tmpfile());
     Require(fwprintf_nid_postfix(&written, u"%d:%ls|", 7, u"été") == 6, "fwprintf counts wide characters");
