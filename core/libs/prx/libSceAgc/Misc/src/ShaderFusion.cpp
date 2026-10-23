@@ -161,10 +161,6 @@ GeometryLayout ComputeGeometryLayout(const char* function, const Shader* front, 
         else if (reg.offset == SPI_SHADER_PGM_RSRC2_GS) reg.value = resources[1];
     }
     layout.cx.assign(back->cx_registers, back->cx_registers + back->num_cx_registers);
-    for (std::uint32_t i = 0; i < front->num_cx_registers; ++i) {
-        const auto& reg = front->cx_registers[i];
-        if (std::none_of(layout.cx.begin(), layout.cx.end(), [&](const ShaderRegister& other) { return other.offset == reg.offset; })) layout.cx.push_back(reg);
-    }
     if (layout.sh.size() > 0xff || layout.cx.size() > 0xff) Fail(function, "fused register count exceeds the shader header");
     layout.headerOffset = AlignUp(layout.codeBytes, alignof(Shader));
     layout.shOffset = AlignUp(layout.headerOffset + sizeof(Shader), alignof(ShaderRegister));

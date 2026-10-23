@@ -151,8 +151,8 @@ void testFusion(std::size_t misalignment, std::uint32_t terminator = SSetpcS6) {
     check(find(fused, 0x08Bu)->value == ((6u << 1u) | (1u << 7u) | (1u << 15u)), "RSRC2 user SGPRs were not taken from the front half");
     check(find(fused, 0x0B2u) == nullptr, "a front-only SH register was added to the fused list");
     check(find(fused, 0x080u) == nullptr, "front program checksum was kept");
-    check(fused.num_sh_registers == halves.back.num_sh_registers && fused.num_cx_registers == 2, "fused register counts are wrong");
-    check(fused.cx_registers[0].offset == 0x29Bu && fused.cx_registers[0].value == 2u && fused.cx_registers[1].offset == 0x2D5u, "context registers were not merged");
+    check(fused.num_sh_registers == halves.back.num_sh_registers && fused.num_cx_registers == halves.back.num_cx_registers, "fused register counts are wrong");
+    check(fused.cx_registers[0].offset == 0x29Bu && fused.cx_registers[0].value == 2u, "context registers are not the back half's");
     check(fused.num_input_semantics == 2 && fused.input_semantics[1].semantic == 2, "front inputs were not kept");
     check(fused.num_output_semantics == 1 && fused.output_semantics[0].semantic == 3, "back outputs were not kept");
     check(fused.scratch_size_dw_per_thread == 16, "scratch size is not the larger half's");
