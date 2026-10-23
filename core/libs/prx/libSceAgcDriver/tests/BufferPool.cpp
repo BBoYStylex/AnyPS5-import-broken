@@ -1,4 +1,5 @@
 #include "prx/libSceAgcDriver/Graphics/include/BufferPool.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/MemoryAccounting.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Resources.hpp"
 #include "AllocationFailure.hpp"
 #include "SlabReturn.hpp"
@@ -1013,8 +1014,87 @@ void ImageMemoryReuse() {
     Expect(mock.frees == 35 && context.bufferPool->RetainedImages() == 1, "the pool retains image memory again after a trim");
 }
 
+void MemoryAccountingChecks() {
+    Expect(MemoryAccounting::Enabled(), "memory accounting is not enabled");
+    mock = MockDevice{};
+    auto context = budgetContext();
+    context.device = reinterpret_cast<VkDevice>(std::uintptr_t{101});
+    const auto find = [&](VkDeviceMemory memory) {
+        const auto snapshot = MemoryAccounting::Read(context.device);
+        Expect(snapshot.complete, "memory accounting became incomplete");
+        const auto found = std::find_if(snapshot.allocations.begin(), snapshot.allocations.end(), [&](const auto& entry) { return entry.memory == memory; });
+        if (found == snapshot.allocations.end()) throw std::runtime_error("live allocation is missing from memory accounting");
+        return *found;
+    };
+    VkMemoryAllocateInfo allocation{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+    allocation.allocationSize = 4 * MiB;
+    allocation.memoryTypeIndex = 0;
+    const auto image = AllocateImageMemory(context, allocation, 3, "first image");
+    const auto initial = find(image);
+    Expect(initial.bytes == 4 * MiB && initial.retained == 0 && initial.heap == 0 && initial.category == "first image", "a live image is not charged to its actual heap and category");
+    ReleaseImageMemory(context, image, 4 * MiB, 0);
+    Expect(find(image).retained == 4 * MiB, "released image memory is not reported as retained");
+    const auto reused = AllocateImageMemory(context, allocation, 3, "second image");
+    const auto active = find(reused);
+    Expect(reused == image && mock.allocations == 1 && active.retained == 0 && active.category == "second image", "image reuse double-counts memory or preserves its former category");
+    mock.results.push_back(VK_ERROR_OUT_OF_DEVICE_MEMORY);
+    const auto host = AllocateImageMemory(context, allocation, 3, "fallback image");
+    Expect(find(host).heap == 1 && find(host).bytes == 4 * MiB, "host fallback was charged to the refused device heap");
+    const auto count = MemoryAccounting::Read(context.device).allocations.size();
+    mock.results.push_back(VK_ERROR_DEVICE_LOST);
+    bool failed = false;
+    try {
+        AllocateImageMemory(context, allocation, 3, "failed image");
+    } catch (const std::runtime_error&) {
+        failed = true;
+    }
+    Expect(failed && MemoryAccounting::Read(context.device).allocations.size() == count, "a failed Vulkan allocation changed the live allocation count");
+    ReleaseImageMemory(context, host, 4 * MiB, 1);
+    Expect(MemoryAccounting::Read(context.device).allocations.size() == 1, "host fallback memory stayed counted after release");
+    ReleaseImageMemory(context, reused, 4 * MiB, 0);
+    context.bufferPool.reset();
+    Expect(MemoryAccounting::Read(context.device).allocations.empty() && mock.liveBytes == 0, "image pool destruction left accounted memory");
+    {
+        auto first = std::make_unique<Buffer>(context, 256, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+        auto second = std::make_unique<Buffer>(context, 256, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+        auto snapshot = MemoryAccounting::Read(context.device);
+        Expect(snapshot.allocations.size() == 1, "slab slots were counted as independent Vulkan allocations");
+        const auto slab = snapshot.allocations.front().memory;
+        const auto bytes = BufferPool::SlabBlockBytes(256);
+        Expect(find(slab).bytes == bytes && find(slab).retained == bytes - 512, "slab free slots were not separated from active slots");
+        first.reset();
+        Expect(find(slab).retained == bytes - 256, "a pooled slab buffer was not counted as retained");
+        second.reset();
+        Expect(find(slab).retained == bytes, "a fully retained slab still reports active bytes");
+        first = std::make_unique<Buffer>(context, 256, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+        Expect(find(slab).retained == bytes - 256, "taking a pooled slab buffer did not remove its retained charge");
+    }
+    context.bufferPool.reset();
+    Expect(MemoryAccounting::Read(context.device).allocations.empty() && mock.liveBytes == 0, "slab destruction left accounted memory");
+    auto other = context;
+    other.device = reinterpret_cast<VkDevice>(std::uintptr_t{102});
+    const auto first = AllocateImageMemory(context, allocation, 3, "device one");
+    const auto second = AllocateImageMemory(other, allocation, 3, "device two");
+    Expect(MemoryAccounting::Read(context.device).allocations.size() == 1 && MemoryAccounting::Read(other.device).allocations.size() == 1, "device allocation ledgers were mixed");
+    VkPhysicalDeviceMemoryBudgetPropertiesEXT reported{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT};
+    reported.heapUsage[0] = 1500 * MiB;
+    reported.heapBudget[0] = 2000 * MiB;
+    reported.heapUsage[1] = 32 * MiB;
+    reported.heapBudget[1] = 16000 * MiB;
+    MemoryAccounting::Report(context, reported, 100 * MiB, 200 * MiB, 512 * MiB);
+    ReleaseImageMemory(context, first, 4 * MiB, 0);
+    ReleaseImageMemory(other, second, 4 * MiB, 0);
+    context.bufferPool.reset();
+    other.bufferPool.reset();
+    Expect(MemoryAccounting::Read(context.device).allocations.empty() && MemoryAccounting::Read(other.device).allocations.empty(), "one device's cleanup left allocations counted");
+}
+
 int main(int argc, char** argv) {
     try {
+        if (argc == 2 && std::string_view(argv[1]) == "--memory-accounting") {
+            MemoryAccountingChecks();
+            return failures == 0 ? 0 : 1;
+        }
         if (argc == 2 && std::string_view(argv[1]) == "--small-device-retention") {
             SmallDeviceRetention();
             return failures == 0 ? 0 : 1;

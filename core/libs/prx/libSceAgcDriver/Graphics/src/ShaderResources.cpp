@@ -9,6 +9,7 @@
 #include "prx/libSceAgcDriver/Graphics/include/DepthSurface.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/PlaceholderImages.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/ShaderResources.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/MemoryAccounting.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Pipeline.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Recorder.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Draw.hpp"
@@ -584,7 +585,10 @@ std::uint64_t storageBudget(const Context& context) {
     context.memoryProperties2(context.physical, &properties);
     cached.device = context.physical;
     cached.read = now;
-    cached.budget = StorageTextureBudget(context.memory, &reported, SampledTextureMemory(), storageCacheBytes());
+    const auto sampled = SampledTextureMemory();
+    const auto storage = storageCacheBytes();
+    cached.budget = StorageTextureBudget(context.memory, &reported, sampled, storage);
+    MemoryAccounting::Report(context, reported, sampled, storage, cached.budget);
     return cached.budget;
 }
 
