@@ -181,6 +181,7 @@ struct Context {
     VkDeviceSize hostImportAlignment = 0;
     bool drawInputsInPlace = true;
     bool dmaBufImport = false;
+    bool discreteGpu = false;
     bool sparseBinding = false;
     std::uint32_t queueFamily = 0;
     std::uint32_t sparseFamily = VK_QUEUE_FAMILY_IGNORED;

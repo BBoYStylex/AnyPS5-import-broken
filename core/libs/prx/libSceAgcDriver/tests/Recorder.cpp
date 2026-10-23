@@ -317,6 +317,7 @@ public:
             context.physical = devices[*selectedIndex];
             const auto& selected = deviceProperties[*selectedIndex];
             std::cout << "Vulkan device: " << selected.deviceName << '\n';
+            context.discreteGpu = selected.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU;
             const auto extensions = function<PFN_vkEnumerateDeviceExtensionProperties>("vkEnumerateDeviceExtensionProperties");
             Check(extensions(context.physical, nullptr, &count, nullptr), "vkEnumerateDeviceExtensionProperties");
             std::vector<VkExtensionProperties> available(count);
@@ -3132,7 +3133,7 @@ bool readWrittenStagingTests(const Device& device, Recorder& recorder) {
         std::cout << "host imports unavailable: read and written staging not tested\n";
         return false;
     }
-    constexpr std::size_t bytes = 8u << 20u;
+    constexpr std::size_t bytes = 40u << 20u;
 #ifdef _WIN32
     void* block = VirtualAlloc(nullptr, bytes, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
 #else
@@ -3164,9 +3165,8 @@ bool readWrittenStagingTests(const Device& device, Recorder& recorder) {
     Require(!boundInPlace(address + 4096, 1u << 20u, false), "a written 1 MiB element was not staged");
     Require(boundInPlace(address + 4096, 4u << 20u, false), "a written-only 4 MiB element was staged past the written window");
     Require(!boundInPlace(address + 4096, 4u << 20u, true), "a read and written 4 MiB element was bound in place");
-    const auto buildInPlace = [&](std::uint64_t dispatchThreads, bool read, std::uint32_t stride, std::uint32_t extent) {
+    const auto buildInPlace = [&](std::uint64_t dispatchThreads, bool read, std::uint32_t stride, std::uint32_t extent, std::uint32_t elementBytes = 4u << 20u) {
         const auto element = address + 4096;
-        constexpr std::uint32_t elementBytes = 4u << 20u;
         const std::uint32_t records = stride != 0 ? elementBytes / stride : elementBytes;
         ShaderRecompiler::RecompileResult program;
         ShaderRecompiler::DescriptorBinding binding;
@@ -3191,7 +3191,12 @@ bool readWrittenStagingTests(const Device& device, Recorder& recorder) {
     Require(!buildInPlace((4u << 20u) / 16u, true, 16, 0), "a dispatch sweeping a read and written 4 MiB element bound it in place");
     Require(buildInPlace(1024, true, 16, 0), "a dispatch touching 16 KiB of a read and written 4 MiB element staged all of it");
     Require(buildInPlace(0, true, 16, 0), "a dispatch of unknown size staged a read and written 4 MiB element");
-    Require(buildInPlace((4u << 20u) / 16u, false, 16, 0), "a dispatch sweeping a written-only 4 MiB element staged it");
+    Require(buildInPlace((4u << 20u) / 32u, false, 32, 0) != context.discreteGpu, context.discreteGpu ? "a dispatch sweeping a written-only 4 MiB element of 32-byte records bound it in place on a discrete GPU" : "a dispatch sweeping a written-only 4 MiB element of 32-byte records staged it on a GPU without separate VRAM");
+    Require(buildInPlace((4u << 20u) / 16u, false, 16, 0), "a dispatch sweeping a written-only 4 MiB element of 16-byte records, which its stores write contiguously, staged it");
+    Require(buildInPlace(1024, false, 32, 0), "a dispatch touching 32 KiB of a written-only 4 MiB element staged all of it");
+    Require(buildInPlace((4u << 20u) / 32u, false, 0, 32), "a dispatch writing a written-only 4 MiB raw element staged it");
+    Require(buildInPlace(204800, false, 160, 0, 204800u * 160u) != context.discreteGpu, context.discreteGpu ? "a dispatch sweeping a written-only 31.25 MiB element of 160-byte records bound it in place on a discrete GPU" : "a dispatch sweeping a written-only 31.25 MiB element of 160-byte records staged it on a GPU without separate VRAM");
+    Require(buildInPlace(204800, true, 160, 0, 204800u * 160u) != context.discreteGpu, context.discreteGpu ? "a dispatch sweeping a read and written 31.25 MiB element bound it in place on a discrete GPU" : "a dispatch sweeping a read and written 31.25 MiB element staged it past the 16 MiB cap on a GPU without separate VRAM");
     Require(!buildInPlace((4u << 20u) / 32u, true, 0, 32), "a dispatch sweeping a read and written 4 MiB raw element bound it in place");
     Require(buildInPlace(1024, true, 0, 32), "a dispatch touching 32 KiB of a read and written 4 MiB raw element staged all of it");
     Require(buildInPlace((4u << 20u) / 32u, true, 0, 0), "a raw element without an access extent was staged");
