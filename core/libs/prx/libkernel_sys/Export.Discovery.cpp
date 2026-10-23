@@ -98,11 +98,6 @@ int APS5_VABI fchownat_nid_postfix(void) {
     return 0;
 }
 
-int APS5_VABI fstat_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
 int APS5_VABI futimesat_nid_postfix(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
@@ -313,11 +308,6 @@ int APS5_VABI lchflags_nid_postfix(void) {
     return 0;
 }
 
-int APS5_VABI lchmod_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
 int APS5_VABI lchown_nid_postfix(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
@@ -463,27 +453,12 @@ int APS5_VABI pthread_resume_user_context_np_nid_postfix(void) {
     return 0;
 }
 
-int APS5_VABI pthread_rwlock_reltimedrdlock_np_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI pthread_rwlock_reltimedwrlock_np_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
 int APS5_VABI pthread_rwlock_setname_np_nid_postfix(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
 int APS5_VABI pthread_rwlockattr_settype_np_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI pthread_set_defaultstacksize_np_nid_postfix(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -938,11 +913,6 @@ int APS5_VABI sceKernelGetChildApp(void) {
     return 0;
 }
 
-int APS5_VABI sceKernelGetCompiledSdkVersion(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
 int APS5_VABI sceKernelGetCompiledSdkVersionByPath(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
@@ -1104,16 +1074,6 @@ int APS5_VABI sceKernelGetKqueueFromEqueue(void) {
 }
 
 int APS5_VABI sceKernelGetMemoryPstate(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceKernelGetModuleInfoInternal(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceKernelGetModuleListInternal(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -2424,16 +2384,6 @@ int APS5_VABI scePthreadResumeAll(void) {
 }
 
 int APS5_VABI scePthreadSetBesteffort(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI scePthreadSetDefaultstacksize(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI scePthreadSetName(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
