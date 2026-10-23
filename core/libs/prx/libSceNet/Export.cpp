@@ -2590,10 +2590,16 @@ int APS5_VABI sceNetIoctl(int socketId, std::uint32_t command, void* argument) {
     constexpr std::uint32_t nonblockingRequest = 0x8004667e;
     constexpr std::uint32_t readableRequest = 0x4004667f;
     std::shared_ptr<NativeSocketHandle> native;
+#ifdef __APPLE__
+    bool datagram = false;
+#endif
     {
         std::lock_guard lk(g_mutex);
         const auto it = g_socks.find(socketId);
         if (it != g_socks.end()) native = it->second.native;
+#ifdef __APPLE__
+        if (it != g_socks.end()) datagram = it->second.type == NET_SOCK_DGRAM;
+#endif
     }
     if (!native) {
         if (!GuestSocketIsOpen_nid_no_patch(socketId)) return fail(NET_EBADF);
@@ -2608,6 +2614,12 @@ int APS5_VABI sceNetIoctl(int socketId, std::uint32_t command, void* argument) {
 #ifdef _WIN32
     u_long available = 0;
     if (ioctlsocket(native->value, FIONREAD, &available) != 0) return fail(native_error());
+#elif defined(__APPLE__)
+    // macOS's FIONREAD on a datagram socket counts more than the queued payload; SO_NREAD gives the next datagram's bytes, as Linux's FIONREAD does.
+    int available = 0;
+    socklen_t length = sizeof(available);
+    const int queried = datagram ? ::getsockopt(native->value, SOL_SOCKET, SO_NREAD, &available, &length) : ::ioctl(native->value, FIONREAD, &available);
+    if (queried != 0) return fail(native_error());
 #else
     int available = 0;
     if (::ioctl(native->value, FIONREAD, &available) != 0) return fail(native_error());
