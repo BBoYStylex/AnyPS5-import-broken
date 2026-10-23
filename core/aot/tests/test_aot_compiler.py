@@ -65,6 +65,12 @@ def compile_function(options, directory, name, code, arguments=6, opt=2, extra=(
     return output, assembly, result
 
 
+def abi():
+    return [(bytes.fromhex(instruction) + b"\xc3", lambda args, i=index: args[i])
+            for index, instruction in enumerate(("48 89 f8", "48 89 f0", "48 89 d0",
+                                                  "48 89 c8", "4c 89 c0", "4c 89 c8"))]
+
+
 def arithmetic():
     cases = []
     for width in (32, 64):
@@ -304,7 +310,8 @@ def main():
         elif options.group == "formats":
             formats(options, directory)
         else:
-            execute_cases(options, directory, {"arithmetic": arithmetic, "moves": moves, "shifts": shifts}[options.group]())
+            execute_cases(options, directory,
+                          {"abi": abi, "arithmetic": arithmetic, "moves": moves, "shifts": shifts}[options.group]())
 
 
 if __name__ == "__main__":

@@ -8,7 +8,7 @@ else()
     add_executable(aot_ir_check TestAotCompiler.cpp)
 endif()
 target_link_libraries(aot_ir_check PRIVATE aot_compiler LLVMIRReader)
-foreach(group IN ITEMS arithmetic moves shifts reject formats)
+foreach(group IN ITEMS abi arithmetic moves shifts reject formats)
     add_test(NAME aot_leaf_${group}
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_aot_compiler.py
         --compiler $<TARGET_FILE:aot_compiler_cli> --host-compiler ${CMAKE_CXX_COMPILER}
