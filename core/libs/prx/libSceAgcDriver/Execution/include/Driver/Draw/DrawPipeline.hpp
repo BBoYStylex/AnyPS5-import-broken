@@ -45,6 +45,7 @@ public:
     bool OverlapsAny(std::span<const std::pair<std::uint64_t, std::uint64_t>> ranges);
     std::optional<std::uint64_t> PendingLabel(std::uint64_t address, std::size_t bytes);
     static bool HeldReads(std::uint64_t address, std::size_t bytes);
+    static std::uint64_t HeldReadQueries();
     void ReleaseRunningReads();
 
     static bool MetadataPassesPipelined();
