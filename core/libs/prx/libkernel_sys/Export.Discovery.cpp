@@ -1,3 +1,5 @@
+#include "prx/libkernel/KernelErrors.hpp"
+#include "prx/libkernel/Pthread/include/Pthread.hpp"
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
 #include "prx/libkernel/KernelErrors.hpp"
@@ -387,8 +389,10 @@ int APS5_VABI pthread_attr_setaffinity_np_nid_postfix(void) {
     return 0;
 }
 
-int APS5_VABI pthread_attr_setcreatesuspend_np_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
+int APS5_VABI pthread_attr_setcreatesuspend_np_nid_postfix(PthreadAttr* attr) {
+    constexpr int GuestEinval = 22;
+    if (!attr || !*attr) return GuestEinval;
+    (*attr)->_createSuspended = true;
     return 0;
 }
 
@@ -427,8 +431,10 @@ int APS5_VABI pthread_main_np_nid_postfix(void) {
     return 0;
 }
 
+void APS5_VABI pthread_resume_all_np_nid_postfix(void);
+
 int APS5_VABI pthread_multi_np_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
+    pthread_resume_all_np_nid_postfix();
     return 0;
 }
 
@@ -462,14 +468,17 @@ int APS5_VABI pthread_mutexattr_setgen_np_nid_postfix(void) {
     return 0;
 }
 
-int APS5_VABI pthread_resume_all_np_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+void APS5_VABI scePthreadTestcancel();
+
+void APS5_VABI pthread_resume_all_np_nid_postfix(void) {
+    ResumeAllGuestThreads_nid_no_patch();
+    scePthreadTestcancel();
 }
 
-int APS5_VABI pthread_resume_np_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+int APS5_VABI pthread_resume_np_nid_postfix(Pthread thread) {
+    constexpr int GuestEinval = 22;
+    if (!thread) return GuestEinval;
+    return ResumeGuestThread_nid_no_patch(thread);
 }
 
 int APS5_VABI pthread_resume_user_context_np_nid_postfix(void) {
@@ -2276,9 +2285,9 @@ int APS5_VABI scePthreadAttrGetscope(void) {
     return 0;
 }
 
-int APS5_VABI scePthreadAttrSetcreatesuspend(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+int APS5_VABI scePthreadAttrSetcreatesuspend(PthreadAttr* attr) {
+    const int error = pthread_attr_setcreatesuspend_np_nid_postfix(attr);
+    return error == 0 ? 0 : SceKernelError(error);
 }
 
 int APS5_VABI scePthreadAttrSetscope(void) {
