@@ -423,7 +423,8 @@ private:
         if (input.Peek() < 0) return Outcome::Input;
         std::u16string item;
         if (directive.conversion == u'c') {
-            const std::size_t count = directive.width == 0 ? 1 : directive.width;
+            std::size_t count = directive.width == 0 ? 1 : directive.width;
+            if (sized && target != nullptr && directive.length == "l" && capacity != 0 && capacity < count) count = capacity;
             while (item.size() < count && input.Peek() >= 0) {
                 item.push_back(static_cast<char16_t>(input.Peek()));
                 input.Advance();
