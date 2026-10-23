@@ -65,6 +65,11 @@ alignas(256) constexpr std::array<std::uint32_t, 20> LaneCode{
     0xf42c0504u, 0x20000000u, 0xbf8cc07fu, 0xf09c0f08u, 0x00650000u, 0xbf8c0000u, 0xe0780000u, 0x80010000u, 0xbf810000u, 0xbf810000u,
 };
 
+alignas(256) constexpr std::array<std::uint32_t, 20> PointerCode{
+    0x7e200500u, 0x80100210u, 0x7e0002f0u, 0x7e0202f0u, 0xf4040200u, 0xfa000000u, 0xf4080300u, 0xfa000010u, 0xbf8cc07fu, 0x8f108510u,
+    0xf40c0504u, 0x20000000u, 0xbf8cc07fu, 0xf09c0f08u, 0x00650000u, 0xbf8c0000u, 0xe0780000u, 0x80010000u, 0xbf810000u, 0xbf810000u,
+};
+
 alignas(4096) std::array<std::array<float, 4>, 64> Outputs{};
 
 class GuestBlock {
@@ -106,6 +111,7 @@ public:
     std::uint8_t* Texture(std::uint32_t index) const { return block + static_cast<std::size_t>(index) * TextureStride; }
     std::uint32_t* Table() const { return reinterpret_cast<std::uint32_t*>(block + TableOffset); }
     std::uint32_t* Srt() const { return reinterpret_cast<std::uint32_t*>(block + SrtOffset); }
+    std::uint32_t* PointerSrt() const { return reinterpret_cast<std::uint32_t*>(block + SrtOffset) + 64; }
 
 private:
     std::uint8_t* block = nullptr;
@@ -201,6 +207,11 @@ void FillGuest(const GuestBlock& block) {
     const auto tableWords = BufferDescriptor(table, Entries * RecordBytes);
     std::copy(tableWords.begin(), tableWords.end(), srt);
     std::fill_n(srt + 4, 4, 0u);
+    auto* pointerSrt = block.PointerSrt();
+    const auto tableAddress = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(table));
+    pointerSrt[0] = static_cast<std::uint32_t>(tableAddress);
+    pointerSrt[1] = static_cast<std::uint32_t>(tableAddress >> 32u);
+    std::fill_n(pointerSrt + 2, 6, 0u);
 }
 
 struct Header {
@@ -210,6 +221,7 @@ struct Header {
 
 alignas(8) Header ComputeHeader{};
 alignas(8) Header LaneHeader{};
+alignas(8) Header PointerHeader{};
 
 void Registered(Header& header, const std::uint32_t* code, std::size_t bytes) {
     header.shader.file_header = 0x34333231u;
@@ -229,7 +241,7 @@ void Append(std::vector<std::uint32_t>& commands, std::uint32_t opcode, std::ini
 
 void Dispatch(std::vector<std::uint32_t>& words, const GuestBlock& block, std::uint32_t key, std::array<float, 4>& output, const std::uint32_t* code = ComputeCode.data(), std::uint32_t threads = 1u) {
     const auto address = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(code));
-    const auto srt = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(block.Srt()));
+    const auto srt = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(code == PointerCode.data() ? block.PointerSrt() : block.Srt()));
     const auto set = [&](std::uint32_t offset, std::uint32_t value) { Append(words, 0x76, {offset, value}); };
     set(0x20c, static_cast<std::uint32_t>(address >> 8u));
     set(0x20d, static_cast<std::uint32_t>(address >> 40u) & 0xffu);
@@ -292,10 +304,10 @@ void RequireTexel(const std::array<float, 4>& output, const std::array<float, 4>
 
 constexpr std::array<std::uint32_t, 10> ComputeKeys{3u, 1764u, 37u, 54u, 1495u, 72u, 1657u, 1600u, 33u, 1810u};
 
-void RunComputeKeys(const GuestBlock& block, bool lane = false) {
+void RunComputeKeys(const GuestBlock& block, const std::uint32_t* code = ComputeCode.data(), std::uint32_t threads = 1u) {
     for (std::size_t index = 0; index < ComputeKeys.size(); ++index) Outputs[index].fill(-1.0f);
     std::vector<std::uint32_t> words;
-    for (std::size_t index = 0; index < ComputeKeys.size(); ++index) Dispatch(words, block, ComputeKeys[index], Outputs[index], lane ? LaneCode.data() : ComputeCode.data(), lane ? 8u : 1u);
+    for (std::size_t index = 0; index < ComputeKeys.size(); ++index) Dispatch(words, block, ComputeKeys[index], Outputs[index], code, threads);
     SubmitCompute(words);
 }
 
@@ -333,21 +345,21 @@ void ComputeTable(const GuestBlock& block, bool device) {
     std::printf("second batch: the same texels%s\n", Describe(before, after).c_str());
 }
 
-void UnexpectedKeys(const GuestBlock& block) {
+void UnexpectedKeys(const GuestBlock& block, const std::uint32_t* code, const std::string& what) {
     Require(DeviceImageTable::KeepsUnexpectedPrograms(), "the unexpected-key run needs APS5_KEEP_UNEXPECTED_DEVICE_IMAGES");
     auto before = Read();
-    RunComputeKeys(block, true);
+    RunComputeKeys(block, code, 8u);
     auto after = Read();
-    Require(after.tables == 1u && after.heapComputeStages > before.heapComputeStages, "first batch: the lane-keyed compute stage is not GPU mode" + Describe(before, after));
+    Require(after.tables == 1u && after.heapComputeStages > before.heapComputeStages, "first batch: the " + what + " compute stage is not GPU mode" + Describe(before, after));
     Require(after.device.fallbacks == before.device.fallbacks, "first batch: the program whose keys come from a lane fell back to the CPU table map" + Describe(before, after));
     Require(after.device.expectedInserted == before.device.expectedInserted, "first batch: the driver inserted keys it cannot expect" + Describe(before, after));
-    Require(after.device.drained == before.device.drained + ComputeKeys.size(), "first batch: the ten keys from a lane were not recorded once each in the miss ring" + Describe(before, after));
+    Require(after.device.drained == before.device.drained + ComputeKeys.size(), "first batch: the ten " + what + " keys were not recorded once each in the miss ring" + Describe(before, after));
     for (std::size_t index = 0; index < ComputeKeys.size(); ++index) RequireTexel(Outputs[index], {0.0f, 0.0f, 0.0f, 0.0f}, "first batch, key " + std::to_string(ComputeKeys[index]) + " read from a lane, before the table holds it");
-    std::printf("first batch of %zu lane-keyed dispatches: zeros, each key recorded once%s\n", ComputeKeys.size(), Describe(before, after).c_str());
+    std::printf("first batch of %zu %s dispatches: zeros, each key recorded once%s\n", ComputeKeys.size(), what.c_str(), Describe(before, after).c_str());
     before = after;
-    RunComputeKeys(block, true);
+    RunComputeKeys(block, code, 8u);
     after = Read();
-    RequireComputeTexels("second batch of lane-keyed dispatches");
+    RequireComputeTexels("second batch of " + what + " dispatches");
     Require(after.device.inserted == before.device.inserted + ComputeKeys.size() && after.device.drained == before.device.drained && after.device.fallbacks == before.device.fallbacks, "second batch: the missed keys were not resolved for the next batch" + Describe(before, after));
     std::printf("second batch: texels for every key resolved from the miss ring%s\n", Describe(before, after).c_str());
 }
@@ -356,6 +368,7 @@ void UnexpectedKeys(const GuestBlock& block) {
 
 int main(int argc, char** argv) {
     const bool unexpected = argc > 1 && std::string(argv[1]) == "--unexpected";
+    const bool pointer = argc > 1 && std::string(argv[1]) == "--pointer";
     const bool requested = AgcDriver::Graphics::GpuPathEnabled();
 #ifdef _WIN32
     _putenv_s("APS5_EAGER_WRITEBACK", "1");
@@ -384,9 +397,13 @@ int main(int argc, char** argv) {
         Registered(ComputeHeader, ComputeCode.data(), sizeof(ComputeCode));
         std::printf("device image path %s\n", served ? "on" : "off");
         Registered(LaneHeader, LaneCode.data(), sizeof(LaneCode));
-        if (unexpected) {
+        Registered(PointerHeader, PointerCode.data(), sizeof(PointerCode));
+        if (pointer) {
+            Require(served, "the pointer-column run needs the device image path");
+            UnexpectedKeys(block, PointerCode.data(), "lane-keyed pointer-column");
+        } else if (unexpected) {
             Require(served, "the unexpected-key run needs the device image path");
-            UnexpectedKeys(block);
+            UnexpectedKeys(block, LaneCode.data(), "lane-keyed");
         } else {
             ComputeTable(block, served);
         }

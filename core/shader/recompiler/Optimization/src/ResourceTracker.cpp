@@ -1594,7 +1594,7 @@ private:
         if (!m_deviceImageTables) return;
         for (const auto& plan : m_tableColumns) {
             const auto& column = *m_sources[plan.source].tableColumn;
-            if (!column.sampler && !column.address && !column.indirect && column.pointerHops.empty()) m_deviceSources[plan.source] = 1u;
+            if (!column.sampler) m_deviceSources[plan.source] = 1u;
         }
         for (auto& block : m_program.Blocks()) {
             for (IrValue* inst : block->Instructions()) {
