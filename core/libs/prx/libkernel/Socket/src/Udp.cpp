@@ -58,6 +58,7 @@
 #include <vector>
 
 extern "C" int* APS5_VABI __error_nid_postfix();
+extern "C" int APS5_VABI getdtablesize_nid_postfix(void);
 extern "C" int APS5_VABI dup2_nid_postfix(int from, int to);
 namespace {
 #ifdef _WIN32
@@ -636,7 +637,7 @@ bool GuestSockets::PipeReady(int descriptor, short events, short& revents) {
 
 namespace {
 int DuplicateSocket_nid_no_patch(int descriptor, int minimum, bool closeOnExec) {
-    if (minimum < 0) return Fail(22);
+    if (minimum < 0 || minimum >= getdtablesize_nid_postfix()) return Fail(22);
     std::lock_guard lock(socketsMutex);
     const auto found = sockets.find(descriptor);
     if (found == sockets.end()) return Fail(9);

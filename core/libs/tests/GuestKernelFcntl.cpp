@@ -30,6 +30,7 @@ int APS5_VABI sceKernelOpen(const char*, int, std::uint16_t);
 int APS5_VABI sceKernelClose(int);
 std::int64_t APS5_VABI sceKernelRead(int, void*, std::size_t);
 std::int64_t APS5_VABI sceKernelLseek(int, std::int64_t, int);
+int APS5_VABI getdtablesize_nid_postfix(void);
 }
 static void Require(bool value) { if (!value) std::abort(); }
 static constexpr int DuplicateCommand = 0;
@@ -181,6 +182,15 @@ static void SocketsKeepTheirPath() {
     Require(sceKernelFcntl(socket, DuplicateCloseOnExec, -1) == SceEinval);
     Require(sceKernelFcntl(socket, Duplicate2Command, -1) == SceEbadf);
     Require(sceKernelFcntl(socket, Duplicate2CloseOnExec, -1) == SceEbadf);
+    const int socketTableSize = getdtablesize_nid_postfix();
+    RequireFailure(fcntl_nid_postfix(socket, DuplicateCommand, socketTableSize), GuestEinval);
+    RequireFailure(fcntl_nid_postfix(socket, DuplicateCloseOnExec, socketTableSize), GuestEinval);
+    RequireFailure(fcntl_nid_postfix(socket, DuplicateCommand, 100000), GuestEinval);
+    RequireFailure(fcntl_nid_postfix(socket, DuplicateCloseOnExec, 100000), GuestEinval);
+    Require(sceKernelFcntl(socket, DuplicateCommand, socketTableSize) == SceEinval);
+    Require(sceKernelFcntl(socket, DuplicateCloseOnExec, socketTableSize) == SceEinval);
+    Require(sceKernelFcntl(socket, DuplicateCommand, 100000) == SceEinval);
+    Require(sceKernelFcntl(socket, DuplicateCloseOnExec, 100000) == SceEinval);
     Require(sceKernelFcntl(socket, SetFlags, 0x8000) == SceEnotsup);
     Require(sceKernelFcntl(socket, GetFlags) == ReadWrite);
     Require(sceKernelFcntl(socket, 5) == SceEinval);
@@ -247,6 +257,15 @@ static void FileFlagsRoundTrip() {
 
     RequireFailure(fcntl_nid_postfix(file, DuplicateCommand, -1), GuestEinval);
     Require(sceKernelFcntl(file, DuplicateCommand, -1) == SceEinval);
+    const int fileTableSize = getdtablesize_nid_postfix();
+    RequireFailure(fcntl_nid_postfix(file, DuplicateCommand, fileTableSize), GuestEinval);
+    RequireFailure(fcntl_nid_postfix(file, DuplicateCloseOnExec, fileTableSize), GuestEinval);
+    RequireFailure(fcntl_nid_postfix(file, DuplicateCommand, 100000), GuestEinval);
+    RequireFailure(fcntl_nid_postfix(file, DuplicateCloseOnExec, 100000), GuestEinval);
+    Require(sceKernelFcntl(file, DuplicateCommand, fileTableSize) == SceEinval);
+    Require(sceKernelFcntl(file, DuplicateCloseOnExec, fileTableSize) == SceEinval);
+    Require(sceKernelFcntl(file, DuplicateCommand, 100000) == SceEinval);
+    Require(sceKernelFcntl(file, DuplicateCloseOnExec, 100000) == SceEinval);
     RequireFailure(fcntl_nid_postfix(file, 99), GuestEinval);
     RequireFailure(fcntl_nid_postfix(file, GetLock, nullptr), GuestEfault);
     GuestLock lock{0, 0, 0, 3, 0, 0};

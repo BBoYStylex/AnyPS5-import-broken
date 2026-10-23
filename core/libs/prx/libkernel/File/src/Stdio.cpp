@@ -631,8 +631,10 @@ static bool HasNonDirectoryPrefix(const std::filesystem::path& native) {
 
 extern "C" int APS5_VABI dup_nid_postfix(int d);
 extern "C" int APS5_VABI close_nid_postfix(int d);
+extern "C" int APS5_VABI getdtablesize_nid_postfix(void);
 
 int File::DuplicateFrom(int fd, int start) {
+    if (start < 0 || start >= getdtablesize_nid_postfix()) return PosixFailure(GUEST_EINVAL);
 #ifdef _WIN32
     std::vector<int> below;
     int duplicate;

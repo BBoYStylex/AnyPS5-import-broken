@@ -34,6 +34,7 @@
 
 extern "C" int* APS5_VABI __error_nid_postfix();
 extern "C" int APS5_VABI dup2_nid_postfix(int from, int to);
+extern "C" int APS5_VABI getdtablesize_nid_postfix(void);
 
 namespace {
 
@@ -459,7 +460,7 @@ int Fcntl(int fd, int command, std::intptr_t argument) {
         case DuplicateCommand:
         case DuplicateCloseOnExec: {
             if (fd < 0) return Fail(GuestEbadf);
-            if (static_cast<int>(argument) < 0) return Fail(GuestEinval);
+            if (static_cast<int>(argument) < 0 || static_cast<int>(argument) >= getdtablesize_nid_postfix()) return Fail(GuestEinval);
             if (!Classify(fd, "fcntl")) return Fail(GuestEbadf);
             const int duplicate = DuplicateFrom(fd, static_cast<int>(argument));
             if (duplicate >= 0 && command == DuplicateCloseOnExec) SetCloseOnExec(duplicate, true);
