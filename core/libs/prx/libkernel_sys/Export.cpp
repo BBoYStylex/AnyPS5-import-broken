@@ -81,14 +81,11 @@ constexpr std::size_t GuestPathMax = 1024;
 constexpr std::size_t GuestNameMax = 255;
 
 constexpr int PcLinkMax = 1;
-constexpr int PcMaxCanon = 2;
-constexpr int PcMaxInput = 3;
 constexpr int PcNameMax = 4;
 constexpr int PcPathMax = 5;
 constexpr int PcPipeBuf = 6;
 constexpr int PcChownRestricted = 7;
 constexpr int PcNoTrunc = 8;
-constexpr int PcVdisable = 9;
 constexpr int PcAllocSizeMin = 10;
 constexpr int PcFileSizeBits = 12;
 constexpr int PcRecIncrXferSize = 14;
@@ -97,7 +94,6 @@ constexpr int PcRecMinXferSize = 16;
 constexpr int PcRecXferAlign = 17;
 constexpr int PcSymlinkMax = 18;
 constexpr int PcMinHoleSize = 21;
-constexpr int PcAsyncIo = 53;
 constexpr int PcPrioIo = 54;
 constexpr int PcSyncIo = 55;
 constexpr int PcAclExtended = 59;
@@ -347,20 +343,15 @@ std::int64_t APS5_VABI pathconf_nid_postfix(const char* path, int name) {
     case PcSymlinkMax: return static_cast<std::int64_t>(GuestPathMax);
     case PcPrioIo: return 0;
     case PcSyncIo: return 0;
-    case PcMaxCanon:
-    case PcMaxInput:
-    case PcVdisable:
-    case PcAllocSizeMin:
-    case PcRecIncrXferSize:
-    case PcRecMinXferSize:
-    case PcRecXferAlign:
-    case PcMinHoleSize:
-    case PcAsyncIo:
-    case PcAclExtended:
-    case PcAclPathMax:
-    case PcMacPresent:
-    case PcAclNfs4:
-        throw std::runtime_error("pathconf: name " + std::to_string(name) + " depends on the console filesystem or kernel configuration");
+    case PcAllocSizeMin: return 65536;
+    case PcRecIncrXferSize: return 65536;
+    case PcRecMinXferSize: return 65536;
+    case PcRecXferAlign: return 16384;
+    case PcMinHoleSize: return 65536;
+    case PcAclExtended: return 0;
+    case PcAclPathMax: return 3;
+    case PcMacPresent: return 0;
+    case PcAclNfs4: return 0;
     default: return Fail(GuestEinval);
     }
 }
