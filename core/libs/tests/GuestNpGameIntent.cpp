@@ -36,6 +36,7 @@ static bool Throws(TCall call) {
 }
 
 int main() {
+    constexpr int kInvalidArgument = -2141898748;
     constexpr int kIntentNotFound = -2141898746;
     constexpr int kValueNotFound = -2141898745;
 
@@ -55,9 +56,18 @@ int main() {
     Require(info.user_id == -1, "info user_id mismatch");
 
     Require(sceNpGameIntentInitialize(&initParam) == 0, "initialization failed");
+    Require(sceNpGameIntentReceiveIntent(nullptr) == kInvalidArgument, "null receive intent did not fail");
     Require(sceNpGameIntentReceiveIntent(&info) == kIntentNotFound, "receive intent mismatch");
 
     char buf[64]{};
+    Require(sceNpGameIntentGetPropertyValueString(nullptr, "key", buf, sizeof(buf)) == kInvalidArgument,
+            "null intent data did not fail");
+    Require(sceNpGameIntentGetPropertyValueString(&info.intent_data, nullptr, buf, sizeof(buf)) == kInvalidArgument,
+            "null key did not fail");
+    Require(sceNpGameIntentGetPropertyValueString(&info.intent_data, "key", nullptr, sizeof(buf)) == kInvalidArgument,
+            "null value buf did not fail");
+    Require(sceNpGameIntentGetPropertyValueString(&info.intent_data, "key", buf, 0) == kInvalidArgument,
+            "zero buf size did not fail");
     Require(sceNpGameIntentGetPropertyValueString(&info.intent_data, "key", buf, sizeof(buf)) == kValueNotFound,
             "get property value mismatch");
 
