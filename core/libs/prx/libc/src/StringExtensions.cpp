@@ -30,7 +30,10 @@ long long APS5_VABI strtonum_nid_postfix(const char* text, long long minimum, lo
 }
 
 char* APS5_VABI basename_r_nid_postfix(const char* path, char* buffer) {
-    if (buffer == nullptr) throw std::invalid_argument("basename_r: null buffer");
+    if (buffer == nullptr) {
+        errno = 22;
+        return nullptr;
+    }
     std::string_view name = path && *path ? path : ".";
     while (name.size() > 1 && name.back() == '/') name.remove_suffix(1);
     if (name != "/") {
