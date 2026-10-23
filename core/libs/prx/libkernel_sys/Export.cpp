@@ -30,7 +30,7 @@
 #include "prx/libc/include/CreationMask.hpp"
 #include "prx/libkernel/File/include/FileFlags.hpp"
 #include "prx/libkernel/File/include/File.hpp"
-#include "prx/libkernel/KernelErrors.hpp"
+extern "C" int APS5_VABI getpid_nid_postfix(void);
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
