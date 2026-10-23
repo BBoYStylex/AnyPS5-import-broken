@@ -292,7 +292,18 @@ std::int64_t APS5_VABI imaxabs_nid_postfix(std::int64_t x) {
 
 float APS5_VABI fmodf_nid_postfix(float x, float y) {
     const int saved_errno = errno;
+#ifdef __APPLE__
+    // macOS fmodf returns NaN for a zero divisor or an infinite dividend without raising invalid; the arithmetic below
+    // raises it the way the PS5 does, and a signaling NaN operand raises it through the addition.
+    volatile float left = x;
+    volatile float right = y;
+    float result;
+    if (std::isnan(x) || std::isnan(y)) result = left + right;
+    else if (y == 0.0f || std::isinf(x)) result = (left * right) / (left * right);
+    else result = std::fmod(x, y);
+#else
     const float result = std::fmod(x, y);
+#endif
     errno = saved_errno;
     return result;
 }
