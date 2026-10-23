@@ -73,6 +73,10 @@ std::uint32_t LdsMemorySemantics(const SpirvEmitterState& state) {
     return spv::MemorySemanticsWorkgroupMemoryMask | (LdsInDeviceMemory(state) ? spv::MemorySemanticsUniformMemoryMask : 0u);
 }
 
+std::uint32_t LdsMemoryBarrierScope(const SpirvEmitterState& state) {
+    return state.deviceScopeLdsMemoryBarriers ? spv::ScopeDevice : spv::ScopeWorkgroup;
+}
+
 void EmitLdsBufferBase(SpirvEmitterState& state) {
     if (!LdsInDeviceMemory(state)) {
         return;

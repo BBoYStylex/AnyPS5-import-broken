@@ -293,6 +293,7 @@ struct SpirvTarget {
     bool float32FlushToZero = false;
     bool waveLdsMemoryBarriers = false;
     bool float32DenormPreserve = false;
+    bool deviceScopeLdsMemoryBarriers = false;
 };
 
 struct BindingLayout {
