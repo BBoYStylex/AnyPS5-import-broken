@@ -1,6 +1,7 @@
 import argparse
 import hashlib
 import json
+import os
 import struct
 import subprocess
 import sys
@@ -567,7 +568,26 @@ def classify(nid, library, providers, stubs, modules):
     return "implemented"
 
 
-def audit(imports, exports, stubs, libraries, modules, module_imports=None, module_exports=None, *, needed_libraries=()):
+def audit(imports, exports, stubs, libraries, modules, module_imports=None, module_exports=None, *, needed_libraries=(), windows_libraries=()):
+    windows_names = {}
+    for library in windows_libraries:
+        windows_names.setdefault(library.casefold(), set()).add(library)
+
+    def system_library(name):
+        if name:
+            for suffix in (".sprx", ".suprx", ".debug_prx"):
+                if name.endswith(suffix):
+                    normalized = name.removesuffix(suffix) + ".prx"
+                    candidates = windows_names.get(normalized.casefold(), ())
+                    if normalized in candidates:
+                        return normalized
+                    if len(candidates) == 1:
+                        return next(iter(candidates))
+        return name
+
+    def available(name):
+        return name in modules or system_library(name) in libraries
+
     records = {}
     for nid, library, weak in imports:
         record = records.setdefault((nid, library), {"nid": nid, "library": library, "references": 0, "weak": weak})
@@ -591,21 +611,21 @@ def audit(imports, exports, stubs, libraries, modules, module_imports=None, modu
         kind = classify(resolved_nid, library, providers, stubs, modules)
         record["class"] = kind
         record["providers"] = providers
-        record["library_mismatch"] = kind in ("implemented", "stub") and bool(library) and library not in providers and "libc.prx" not in providers
+        record["library_mismatch"] = kind in ("implemented", "stub") and bool(library) and system_library(library) not in providers and "libc.prx" not in providers
         record["name"] = next((stubs[(provider, resolved_nid)] for provider in providers if (provider, resolved_nid) in stubs), None) if kind == "stub" else None
     ordered = sorted(records.values(), key=lambda record: (record["class"], record["library"] or "", record.get("module") or "", record["nid"]))
     check_conservation(len(imports) + sum(len(symbols) for symbols, _ in (module_imports or {}).values()), ordered)
     missing = defaultdict(int)
     for library in needed_libraries:
-        if library not in libraries and library not in modules:
+        if not available(library):
             missing[library] = 0
     for record in ordered:
         library = record["library"]
-        if library and library not in libraries and library not in modules:
+        if library and not available(library):
             missing[library] += 1
     for _, needed in (module_imports or {}).values():
         for library in needed:
-            if library not in libraries and library not in modules:
+            if not available(library):
                 missing[library] += 1
     return ordered, dict(sorted(missing.items()))
 
@@ -688,7 +708,25 @@ def label(record):
     return f"{text}  (imported by {record['module']})" if record.get("module") else text
 
 
-def render(summary, records, missing, stops, missing_hosts=()):
+def locate_missing(names, roots, depth=4):
+    wanted = {name.lower(): name for name in names}
+    found = {}
+    for root in roots:
+        root = Path(root)
+        if not root.is_dir():
+            continue
+        base = len(root.parts)
+        for directory, directories, files in os.walk(root):
+            if len(Path(directory).parts) - base >= depth:
+                directories[:] = []
+            for file in files:
+                name = wanted.get(file.lower())
+                if name is not None and name not in found:
+                    found[name] = Path(directory)
+    return found
+
+
+def render(summary, records, missing, stops, missing_hosts=(), located=None):
     lines = [f"{summary['references']} references, {summary['unique_imports']} unique imports"]
     for kind in CLASSES:
         lines.append(f"  {kind:<12}{summary['unique_by_class'][kind]:>6} imports  {summary['references_by_class'][kind]:>6} references")
@@ -715,6 +753,8 @@ def render(summary, records, missing, stops, missing_hosts=()):
         lines.extend(f"  {library}: {count} imports" for library, count in missing.items())
         if any(count == 0 for count in missing.values()):
             lines.append("  Libraries with 0 imports are declared dependencies; Windows can skip them if no import needs them")
+        for library, directory in sorted((located or {}).items()):
+            lines.append(f"  {library} is in {directory}: pass that directory with --modules")
     if missing_hosts:
         lines.append("")
         lines.append(f"Host dependencies with no file in --libs or --modules ({len(missing_hosts)})")
@@ -757,7 +797,7 @@ def main(argv=None):
         modules = set(module_imports)
         modules |= {name.removesuffix(".guest.prx") for name in modules if name.endswith(".guest.prx")}
         modules = ModuleNames(modules, fold=bool(windows))
-        records, missing = audit(imports, exports, source_stubs(args.source), libraries, modules, module_imports, module_exports, needed_libraries=needed)
+        records, missing = audit(imports, exports, source_stubs(args.source), libraries, modules, module_imports, module_exports, needed_libraries=needed, windows_libraries=windows)
         missing_hosts = audit_host_dependencies(host_dependencies, libraries, modules, windows)
         if args.names:
             attach_names(records, load_names(args.names))
@@ -777,7 +817,8 @@ def main(argv=None):
     except OSError as error:
         print(f"FAIL: {error.strerror}: {error.filename}" if error.filename else f"FAIL: {error}", file=sys.stderr)
         return 2
-    print(render(summary, records, missing, stops, missing_hosts))
+    located = locate_missing(missing, {path.resolve().parent for path in args.registries}) if missing else None
+    print(render(summary, records, missing, stops, missing_hosts, located))
     return 1 if summary["unique_by_class"]["absent"] or missing or missing_hosts or (args.strict_providers and summary["library_mismatch"]) or (args.strict_stubs and summary["unique_by_class"]["stub"]) else 0
 
 

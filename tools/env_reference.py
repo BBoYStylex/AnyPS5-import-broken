@@ -77,7 +77,7 @@ def source_files(root):
     if not root.is_dir():
         return
     for path in sorted(root.rglob("*")):
-        if path.suffix not in EXTENSIONS or any(part in SKIP for part in path.parts):
+        if path.suffix not in EXTENSIONS or any(part in SKIP for part in path.relative_to(root).parts):
             continue
         yield path
 
@@ -92,10 +92,12 @@ def reads(roots, prefixes=PREFIXES):
                 continue
             lines = text.splitlines()
             for number, line in enumerate(lines, 1):
-                if not any(prefix in line for prefix in prefixes):
-                    continue
                 window = "\n".join(lines[number - 1:number + 2])
-                for reader, match in line_reads(line, prefixes):
+                if not any(prefix in window for prefix in prefixes):
+                    continue
+                for reader, match in line_reads(window, prefixes):
+                    if match.start() >= len(line):
+                        continue
                     found.setdefault(match.group("name"), []).append(
                         (path.as_posix(), number, kind_of(reader, window), default_of(match, window)))
     for sites in found.values():
@@ -172,6 +174,10 @@ def main(argv=None):
     args = parser.parse_args(argv)
     roots = args.root if args.root else ROOTS
     prefixes = tuple(args.prefix) if args.prefix else PREFIXES
+    for root in roots:
+        if not Path(root).is_dir():
+            print(f"error: scan root {root} is not a directory", file=sys.stderr)
+            return 1
     found = reads(roots, prefixes)
     if args.check:
         return check(found, args.doc, prefixes, sys.stdout)

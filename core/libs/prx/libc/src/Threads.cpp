@@ -412,6 +412,7 @@ static void RequireThrd(int result, const char* what) {
 
 static std::atomic<PthreadCreateFn_nid_no_patch> registeredPthreadCreate{nullptr};
 static std::atomic<PthreadJoinFn_nid_no_patch> registeredPthreadJoin{nullptr};
+static std::atomic<PthreadDetachFn_nid_no_patch> registeredPthreadDetach{nullptr};
 
 void RegisterPthreadCreate_nid_no_patch(PthreadCreateFn_nid_no_patch fn) {
     registeredPthreadCreate.store(fn, std::memory_order_release);
@@ -419,6 +420,10 @@ void RegisterPthreadCreate_nid_no_patch(PthreadCreateFn_nid_no_patch fn) {
 
 void RegisterPthreadJoin_nid_no_patch(PthreadJoinFn_nid_no_patch fn) {
     registeredPthreadJoin.store(fn, std::memory_order_release);
+}
+
+void RegisterPthreadDetach_nid_no_patch(PthreadDetachFn_nid_no_patch fn) {
+    registeredPthreadDetach.store(fn, std::memory_order_release);
 }
 
 static void* APS5_VABI PadEntry_nid_no_patch(void* argument) {
@@ -477,6 +482,12 @@ int APS5_VABI _Thrd_join_nid_postfix(void* thread, int* code) {
     return threadSuccess;
 }
 
+int APS5_VABI _Thrd_detach_nid_postfix(void* thread) {
+    const auto detach = registeredPthreadDetach.load(std::memory_order_acquire);
+    if (!detach) throw std::runtime_error("_Thrd_detach: pthread_detach is not registered");
+    return detach(thread) == 0 ? threadSuccess : threadError;
+}
+
 int APS5_VABI _Thrd_id_nid_postfix(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
@@ -484,6 +495,55 @@ int APS5_VABI _Thrd_id_nid_postfix(void) {
 
 [[noreturn]] void APS5_VABI _ZSt16_Throw_Cpp_errori_nid_postfix(int code) {
     ThrowCppError_nid_no_patch(code);
+}
+
+static std::atomic<const ThreadForwards_nid_no_patch*> registeredThreadForwards{nullptr};
+
+void RegisterThreadForwards_nid_no_patch(const ThreadForwards_nid_no_patch* forwards) {
+    registeredThreadForwards.store(forwards, std::memory_order_release);
+}
+
+static const ThreadForwards_nid_no_patch& ThreadForwards(const char* function) {
+    const auto* forwards = registeredThreadForwards.load(std::memory_order_acquire);
+    if (!forwards) throw std::runtime_error(std::string(function) + ": libkernel threads are not registered");
+    return *forwards;
+}
+
+void APS5_VABI _Call_once_nid_postfix(std::int32_t* flag, void (APS5_VABI* function)(void)) {
+    ThreadForwards(__func__).once(flag, function);
+}
+
+int APS5_VABI _Tss_create_nid_postfix(int* key, void (APS5_VABI* destructor)(void*)) {
+    return ThreadForwards(__func__).keyCreate(key, destructor);
+}
+
+int APS5_VABI _Tss_delete_nid_postfix(int key) {
+    return ThreadForwards(__func__).keyDelete(key);
+}
+
+void* APS5_VABI _Tss_get_nid_postfix(int key) {
+    return ThreadForwards(__func__).getSpecific(key);
+}
+
+int APS5_VABI _Tss_set_nid_postfix(int key, void* value) {
+    return ThreadForwards(__func__).setSpecific(key, value);
+}
+
+int APS5_VABI _Thrd_equal_nid_postfix(void* first, void* second) {
+    return ThreadForwards(__func__).equal(first, second);
+}
+
+void* APS5_VABI _Thrd_current_nid_postfix(void) {
+    return ThreadForwards(__func__).self();
+}
+
+[[noreturn]] void APS5_VABI _Thrd_exit_nid_postfix(int code) {
+    ThreadForwards(__func__).exit(reinterpret_cast<void*>(static_cast<std::uintptr_t>(static_cast<unsigned int>(code))));
+    std::abort();
+}
+
+int APS5_VABI _Mtx_current_owns_nid_postfix(void**) {
+    return 1;
 }
 
 }

@@ -1,9 +1,11 @@
 #include "prx/libSceAgcDriver/Execution/include/ProfileOutput.hpp"
 #include "prx/libSceAgcDriver/Execution/include/PerformanceTimer.hpp"
 #include "prx/libSceAgcDriver/Execution/include/CaptureTrace.hpp"
+#include "prx/libSceAgcDriver/Execution/include/Mutex.hpp"
 #include "ThreadOwned.hpp"
 #include "prx/libc/include/HostThreadLocal.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/MultisampleTarget.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/ColorTargetLayout.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/DepthSurface.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/PlaceholderImages.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/ShaderResources.hpp"
@@ -20,6 +22,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
+#include <functional>
 #include <stdexcept>
 #include "prx/libSceAgcDriver/Execution/include/GuestMemory.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Pm4.hpp"
@@ -127,7 +130,7 @@ struct CachedTexture {
 // eviction takes the back. APS5_NO_TEXTURE_HASH=1 finds entries by scanning the list (the index is
 // still kept), the linear lookup of before.
 struct TextureCache {
-    std::mutex mutex;
+    AgcDriver::Mutex mutex;
     std::list<CachedTexture> entries;
     std::unordered_map<TextureKey, std::list<CachedTexture>::iterator, TextureKeyHash> index;
     std::unordered_multimap<const StorageTexture*, std::list<CachedTexture>::iterator> views;
@@ -169,7 +172,7 @@ struct CacheHold {
     CacheHold& operator=(const CacheHold&) = delete;
 };
 
-bool AcquireCache(std::mutex& mutex) {
+bool AcquireCache(AgcDriver::Mutex& mutex) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(20);
     do {
         if (mutex.try_lock()) return true;
@@ -179,7 +182,7 @@ bool AcquireCache(std::mutex& mutex) {
 }
 
 struct UncachedImages {
-    std::mutex mutex;
+    AgcDriver::Mutex mutex;
     std::vector<std::weak_ptr<StorageTexture>> images;
     std::atomic<bool> any{false};
 };
@@ -461,7 +464,12 @@ private:
     bool outermost;
 };
 
-std::shared_ptr<StorageTexture> cachedStorageTexture(const Context& context, std::span<const std::uint32_t> words, const GuestTextureResource& resource, std::uint32_t mip, std::uint64_t guestBytes = 0, bool written = false);
+void refreshForView(StorageTexture& source, const GuestTextureResource& resource) {
+    if (resource.dimension == TextureDimension::k2D && source.ImageLayers() > 1) source.RefreshLayers(resource.baseArray, 1);
+    else source.Refresh();
+}
+
+std::shared_ptr<StorageTexture> cachedStorageTexture(const Context& context, std::span<const std::uint32_t> words, const GuestTextureResource& resource, std::uint32_t mip, std::uint64_t guestBytes = 0, bool written = false, std::optional<std::pair<std::uint32_t, std::uint32_t>> layers = std::nullopt);
 
 std::uint64_t heldBytes(const StorageTexture& image) {
     return image.BudgetBytes();
@@ -508,7 +516,7 @@ std::uint64_t DepthCopyMinBytes() {
 // they were when it failed (the allocation generation): pages committed later, or another surface
 // at the address, get a fresh attempt.
 struct StorageFailures {
-    std::mutex mutex;
+    AgcDriver::Mutex mutex;
     std::map<std::pair<std::uint64_t, std::uint64_t>, std::uint64_t> generations;
 };
 
@@ -570,7 +578,7 @@ std::uint64_t storageBudget(const Context& context) {
     if (forced != 0) return forced;
     if (context.memoryProperties2 == nullptr || context.physical == VK_NULL_HANDLE) return TextureCacheBudget(context.memory);
     static struct {
-        std::mutex mutex;
+        AgcDriver::Mutex mutex;
         VkPhysicalDevice device{VK_NULL_HANDLE};
         std::chrono::steady_clock::time_point read{};
         std::uint64_t budget{0};
@@ -676,6 +684,14 @@ std::shared_ptr<Texture> cachedTexture(const Context& context, std::span<const s
         auto target = MultisampleTargetTexture(context, resource, components, multisampleViewType);
         logLookup({target.get(), resource, 0, DccKeys::Uncompressed, 0, nullptr, true});
         return target;
+    }
+    if (resource.fmaskCmaskAddress != 0u) {
+        Require(!depthCompare, "FMASK depth comparison sampling is not implemented");
+        Require(resource.baseArray == 0u && resource.depthOrLastArray == 0u, "native FMASK array sampling is not implemented");
+        CompletePendingCpuWrites(context, resource.fmaskCmaskAddress, CmaskBytes(resource.width, resource.height));
+        auto native = MultisampleTargetFmaskTexture_nid_no_patch(context, resource, components);
+        Require(native != nullptr, "compressed FMASK sampling without a matching resident native target is not implemented");
+        return native;
     }
     CaptureTrace::Log("sampled-lookup address=%llx width=%u height=%u dcc=%llx", static_cast<unsigned long long>(resource.baseAddress), resource.width, resource.height, static_cast<unsigned long long>(resource.dccAddress));
     RequireNoMultisampleTarget(resource.baseAddress, guestBytes != 0 ? static_cast<std::size_t>(guestBytes) : 1u, "a texture read");
@@ -787,9 +803,9 @@ std::shared_ptr<Texture> cachedTexture(const Context& context, std::span<const s
     // so a write the game made since the last walk is invisible until a collect stamps its page. The
     // walk is memoized per packet, so a texture viewed from a storage image repeats it for free.
     auto generation = GuestMemory::CollectWrites(address, bytes);
-    if (source != nullptr && !GuestMemory::UnchangedSince(address, bytes, source->Generation())) {
+    if (source != nullptr && !GuestMemory::UnchangedSince(address, bytes, source->GenerationFor(address, bytes))) {
         // The CPU wrote the memory while results were pending: Refresh merges them the usual way.
-        source->Refresh();
+        refreshForView(*source, resource);
     }
     // Results stored to guest memory just now are stamped newer than `generation`; a snapshot read
     // after them is current at the generation of a second (memoized) collect. The store marks the
@@ -857,7 +873,7 @@ std::shared_ptr<Texture> cachedTexture(const Context& context, std::span<const s
             // written meanwhile is taken in by refreshing the image. A fast clear the image cannot
             // see (keys, and no pending results to prefer) ends the view: a snapshot holds the clear.
             if (!stagedFlushed && (source == nullptr || source == it->source) && (source != nullptr || *keys == DccKeys::Uncompressed) && StorageImageServesKeys(*it->source, resource.dccAddress)) {
-                if (!GuestMemory::UnchangedSince(address, bytes, it->source->Generation())) it->source->Refresh();
+                if (!GuestMemory::UnchangedSince(address, bytes, it->source->GenerationFor(address, bytes))) refreshForView(*it->source, resource);
                 if (it->texture->IsDepthCopy()) it->texture->RefreshDepthCopy();
                 it->keys = *keys;
                 touchTexture(cache, it);
@@ -987,7 +1003,7 @@ struct CachedStorageTexture {
 
 // As TextureCache: use order with a hash index by key, plus one by image for StorageImageCached.
 struct StorageTextureCache {
-    std::mutex mutex;
+    AgcDriver::Mutex mutex;
     std::list<CachedStorageTexture> entries;
     std::unordered_map<StorageKey, std::list<CachedStorageTexture>::iterator, StorageKeyHash> index;
     std::unordered_map<const StorageTexture*, std::list<CachedStorageTexture>::iterator> byImage;
@@ -1046,7 +1062,7 @@ std::array<std::uint32_t, 8> SurfaceKey(const Context& context, const GuestTextu
 }
 
 struct ExtendedSurfaces {
-    std::mutex mutex;
+    AgcDriver::Mutex mutex;
     std::map<std::array<std::uint32_t, 8>, std::uint32_t> levels;
     std::atomic<bool> any{false};
 };
@@ -1108,7 +1124,7 @@ static WrittenStorage WrittenStorageBytes(const GuestTextureResource& viewed, st
 }
 
 // `guestBytes` is the surface size when the caller described the surface already (0: described here).
-std::shared_ptr<StorageTexture> cachedStorageTexture(const Context& context, std::span<const std::uint32_t> words, const GuestTextureResource& requested, std::uint32_t mip, std::uint64_t guestBytes, bool written) {
+std::shared_ptr<StorageTexture> cachedStorageTexture(const Context& context, std::span<const std::uint32_t> words, const GuestTextureResource& requested, std::uint32_t mip, std::uint64_t guestBytes, bool written, std::optional<std::pair<std::uint32_t, std::uint32_t>> layers) {
     const auto viewed = ArrayLayerWindow(requested, context.limits.maxImageArrayLayers);
     if (viewed.baseAddress != requested.baseAddress) guestBytes = 0;
     Require(viewed.dimension != TextureDimension::k2DMsaa, "storage image access to a multisampled texture is not implemented");
@@ -1123,7 +1139,7 @@ std::shared_ptr<StorageTexture> cachedStorageTexture(const Context& context, std
             reportGuestAllocation(viewed, viewedBytes);
         }
     }
-    if (DepthPlanesStale() || written) static_cast<void>(FlushDepthPlanes(viewed.baseAddress, static_cast<std::size_t>(viewedBytes)));
+    if (DepthPlanesStale() || written) static_cast<void>(FlushDepthPlanes(viewed.baseAddress, static_cast<std::size_t>(viewedBytes), written ? DepthPlaneScope::Whole : DepthPlaneScope::Overlapped));
     if (written && DepthSurfaceOverlaps(context.device, viewed.baseAddress, viewedBytes)) {
         const auto storage = WrittenStorageBytes(viewed, mip);
         RetireCoveredDepthSurfaces(context.device, storage.bytes, storage.extents);
@@ -1154,7 +1170,8 @@ std::shared_ptr<StorageTexture> cachedStorageTexture(const Context& context, std
             it = cache.entries.end();
         }
         if (it != cache.entries.end()) {
-            it->texture->Refresh();
+            if (layers) it->texture->RefreshLayers(layers->first, layers->second);
+            else it->texture->Refresh();
             cache.entries.splice(cache.entries.begin(), cache.entries, it);
             texture = it->texture;
             counters.storageHits.fetch_add(1, std::memory_order_relaxed);
@@ -1436,6 +1453,10 @@ std::shared_ptr<StorageTexture> CachedStorageSurface(const Context& context, con
     return cachedStorageTexture(context, {}, resource, 0);
 }
 
+std::shared_ptr<StorageTexture> CachedStorageLayers(const Context& context, const GuestTextureResource& resource, std::uint32_t firstLayer, std::uint32_t layerCount) {
+    return cachedStorageTexture(context, {}, resource, 0, 0, false, std::pair{firstLayer, layerCount});
+}
+
 bool StorageImageServesKeys(const StorageTexture& image, std::uint64_t dccAddress) {
     GuestTextureResource resource{};
     resource.dccAddress = dccAddress;
@@ -1527,6 +1548,11 @@ ShaderResources::ShaderResources(const Context& context, const CompiledShader& c
     // Every use of a compute build is a recorded dispatch that calls MarkGpuWrites, which staged
     // buffers need (a synchronous draw's use would not).
     guestMemory.AllowDeviceStaging();
+    static const std::uint64_t addressStagingMinThreads = [] {
+        const char* value = std::getenv("APS5_BDA_STAGING_MIN_THREADS");
+        return value != nullptr ? std::strtoull(value, nullptr, 10) : 512ull;
+    }();
+    if (dispatchThreads != 0 && dispatchThreads < addressStagingMinThreads) guestMemory.DisallowAddressStaging();
     const std::span<const CompiledShader> shaders(&deferredCompute, 1);
     if (!deferred) {
         prepareAddressBindings(shaders, snapshots);
@@ -1613,7 +1639,7 @@ constexpr std::size_t BuildPhaseCount = static_cast<std::size_t>(ShaderResources
 constexpr std::array<const char*, BuildPhaseCount> BuildPhaseNames{"bindings", "precollect", "guest memory upload", "descriptors", "stage A", "images", "bda", "stage B"};
 
 struct BuildProfile {
-    std::mutex mutex;
+    AgcDriver::Mutex mutex;
     std::array<double, BuildPhaseCount> ms{};
     std::uint64_t builds = 0;
 };
@@ -1892,6 +1918,11 @@ void ShaderResources::buildPrepare(std::span<const CompiledShader> shaders, cons
         for (const auto& shader : shaders) {
             Require(shader.program != nullptr, "missing compiled shader");
             ShaderRecompiler::RuntimeAbi::RequireVersion(shader.program->runtimeAbiVersion);
+            if (shader.program->poisonedSrtReads != 0) {
+                const auto& programBindings = shader.program->bindings;
+                const auto flat = std::find_if(programBindings.begin(), programBindings.end(), [](const ShaderRecompiler::DescriptorBinding& binding) { return binding.role == ShaderRecompiler::DescriptorRole::FlattenedSrt; });
+                if (flat != programBindings.end()) srtGuardFaults.push_back({IrStage(shader.stage), flat->guestDescriptor});
+            }
             const VkShaderStageFlags flags = VulkanStage(shader.stage);
             std::uint64_t stageStorageBuffers = 0;
             std::uint64_t stageResources = shader.stage == ShaderRecompiler::ShaderStage::Fragment ? colorAttachments : 0;
@@ -2291,6 +2322,7 @@ void ShaderResources::buildComplete() {
         timing.uploadMs += phase(BuildPhase::Upload);
         if (usesBda) bda = std::make_unique<BdaResources>(context, guestMemory);
         else if (usesFaultBuffer) bda = std::make_unique<BdaResources>(context);
+        if (bda) bda->SetSrtGuards(std::move(srtGuardFaults));
         finishImageTables();
         phase(BuildPhase::Bda);
         if (_set != VK_NULL_HANDLE || fragment.set != VK_NULL_HANDLE) {
@@ -2528,7 +2560,7 @@ bool ShaderResources::NeverReusable(std::span<const CompiledShader> shaders) {
 
 // APS5_PROFILE_DRAW: the per-device descriptor caches' counters, every 10 s.
 void ShaderResources::reportDescriptorCaches() const {
-    static std::mutex reportMutex;
+    static AgcDriver::Mutex reportMutex;
     static auto lastReport = std::chrono::steady_clock::now();
     const auto now = std::chrono::steady_clock::now();
     std::lock_guard lock(reportMutex);
@@ -2880,21 +2912,57 @@ bool TemplateAuditDue(std::chrono::steady_clock::time_point last) {
 
 }
 
+void LastRecordIndices(std::span<const void* const> logged, std::span<const void* const> objects, std::vector<std::size_t>& indices) {
+    indices.assign(objects.size(), logged.size());
+    thread_local std::vector<std::pair<const void*, std::size_t>>* wantedSlot = nullptr;
+    auto& wanted = ShaderRecompiler::ThreadOwned(wantedSlot);
+    wanted.clear();
+    for (std::size_t i = 0; i < objects.size(); ++i) wanted.emplace_back(objects[i], i);
+    const auto byObject = [](const std::pair<const void*, std::size_t>& left, const std::pair<const void*, std::size_t>& right) { return std::less<const void*>{}(left.first, right.first); };
+    std::sort(wanted.begin(), wanted.end(), byObject);
+    std::size_t open = wanted.size();
+    for (auto at = logged.size(); at-- > 0 && open != 0;) {
+        const auto [first, last] = std::equal_range(wanted.begin(), wanted.end(), std::pair<const void*, std::size_t>{logged[at], 0}, byObject);
+        if (first == last || indices[first->second] != logged.size()) continue;
+        for (auto it = first; it != last; ++it) indices[it->second] = at;
+        open -= static_cast<std::size_t>(last - first);
+    }
+    if (wanted.capacity() > LookupLogBound + LookupLogBound / 2) {
+        wanted.clear();
+        wanted.shrink_to_fit();
+    }
+}
+
 // Turns the lookups' records into this object's per-texture validation records (see
 // ValidatedSurface); the last record of an object is the freshest.
 void ShaderResources::captureValidation() {
-    const auto record = [](const void* object) -> const LookupRecord* {
-        const auto& log = lookupLog();
-        for (auto it = log.rbegin(); it != log.rend(); ++it) {
-            if (it->object == object) return &*it;
-        }
-        return nullptr;
-    };
+    const auto& log = lookupLog();
+    thread_local std::vector<const void*>* loggedSlot = nullptr;
+    auto& logged = ShaderRecompiler::ThreadOwned(loggedSlot);
+    thread_local std::vector<const void*>* objectsSlot = nullptr;
+    auto& objects = ShaderRecompiler::ThreadOwned(objectsSlot);
+    thread_local std::vector<std::size_t>* indicesSlot = nullptr;
+    auto& indices = ShaderRecompiler::ThreadOwned(indicesSlot);
+    logged.clear();
+    for (const auto& entry : log) logged.push_back(entry.object);
+    objects.clear();
+    for (const auto& texture : textures) objects.push_back(texture.get());
+    LastRecordIndices(logged, objects, indices);
     validatedTextures.assign(textures.size(), {});
     for (std::size_t i = 0; i < textures.size(); ++i) {
-        if (const auto* found = record(textures[i].get())) validatedTextures[i] = {found->resource, found->bytes, found->keys, found->generation, 0, found->source, found->depth, true};
+        if (indices[i] == log.size()) continue;
+        const auto& found = log[indices[i]];
+        validatedTextures[i] = {found.resource, found.bytes, found.keys, found.generation, 0, found.source, found.depth, true};
     }
     lookupLog().clear();
+    const auto trim = [](auto& scratch) {
+        if (scratch.capacity() <= LookupLogBound + LookupLogBound / 2) return;
+        scratch.clear();
+        scratch.shrink_to_fit();
+    };
+    trim(logged);
+    trim(objects);
+    trim(indices);
 }
 
 std::size_t ShaderResources::LookupLogCapacity() {
@@ -2999,7 +3067,7 @@ bool ShaderResources::fastRevalidate(std::uint64_t serialBefore, std::span<const
         }
         if (source != nullptr) {
             if (!source->Cached()) return fail(FastFail::Evicted);
-            queries.push_back({address, bytes, source->Generation()});
+            queries.push_back({address, bytes, source->GenerationFor(address, bytes)});
             images.push_back(source);
         } else {
             queries.push_back({address, bytes, surface.generation});
@@ -3027,7 +3095,7 @@ bool ShaderResources::fastRevalidate(std::uint64_t serialBefore, std::span<const
         }
         if (!unchanged) query(address, address + bytes, image, nullptr, {i, true, false});
         if (!image->Cached()) return fail(FastFail::Evicted);
-        queries.push_back({address, bytes, image->Generation()});
+        queries.push_back({address, bytes, image->GenerationFor(address, bytes)});
         images.push_back(image);
     }
     if (!pending.empty()) {
@@ -3095,7 +3163,7 @@ bool ShaderResources::fastRevalidateEach() {
         if (surface.source != nullptr) {
             // The view follows the image: it needs the image current with guest memory, as the
             // lookup's Refresh would make it.
-            if (!StorageImageCached(context, surface.source) || !GuestMemory::UnchangedSince(address, bytes, surface.source->Generation())) return false;
+            if (!StorageImageCached(context, surface.source) || !GuestMemory::UnchangedSince(address, bytes, surface.source->GenerationFor(address, bytes))) return false;
         } else if (!GuestMemory::UnchangedSince(address, bytes, surface.generation)) {
             return false;
         }
@@ -3129,7 +3197,7 @@ bool ShaderResources::fastRevalidateEach() {
         if (GuestMemory::CollectWrites(address, bytes) == 0) return false;
         if (PendingStorageOverlaps(address, bytes, image)) return false;
         if (!StorageImageCached(context, image)) return false;
-        if (!GuestMemory::UnchangedSince(address, bytes, image->Generation())) return false;
+        if (!GuestMemory::UnchangedSince(address, bytes, image->GenerationFor(address, bytes))) return false;
     }
     // Every check passed: snapshot textures are current at the collects issued before them. Storage
     // images keep their own generation: nothing was stamped above it, so the blocks a later write
@@ -3163,9 +3231,9 @@ ShaderResources::OwnRefreshFallback ShaderResources::refreshOwnObjects(std::span
         if (found != nullptr && !Texture::CanCopyFrom(*found, surface.resource)) found.reset();
         if (found != nullptr) {
             if (found != source) return OwnRefreshFallback::ForeignView;
-            if (!GuestMemory::UnchangedSince(address, bytes, source->Generation())) {
+            if (!GuestMemory::UnchangedSince(address, bytes, source->GenerationFor(address, bytes))) {
                 countOwnRefresh(false);
-                source->Refresh();
+                refreshForView(*source, surface.resource);
             }
             return OwnRefreshFallback::Count;
         }
@@ -3256,7 +3324,54 @@ const ShaderRecompiler::DescriptorBinding* ShaderResources::tableImages(std::spa
     return nullptr;
 }
 
+bool ShaderResources::EpochProofs() {
+    return DrawPipelineEnabled();
+}
+
+namespace {
+void noteEpochProof(bool reused, bool verified, bool failed) {
+    static std::atomic<std::uint64_t> reuses{0}, proofs{0}, checks{0}, failures{0};
+    if (verified) checks.fetch_add(1, std::memory_order_relaxed);
+    if (failed) failures.fetch_add(1, std::memory_order_relaxed);
+    const auto count = (reused ? reuses : proofs).fetch_add(1, std::memory_order_relaxed) + 1u;
+    static const bool report = std::getenv("APS5_PROFILE_DRAW") != nullptr || std::getenv("APS5_VERIFY_DRAW_PIPELINE") != nullptr;
+    if (!report) return;
+    if (count % 262144u == 0u || (count & (count - 1u)) == 0u) std::fprintf(stderr, "[epoch-proofs] resource proofs: %llu reused the epoch's, %llu proved; verify: %llu checked, %llu failed; storage refreshes reused %llu\n", static_cast<unsigned long long>(reuses.load()), static_cast<unsigned long long>(proofs.load()), static_cast<unsigned long long>(checks.load()), static_cast<unsigned long long>(failures.load()), static_cast<unsigned long long>(StorageTexture::epochRefreshes.load()));
+}
+}
+
 bool ShaderResources::Revalidate(std::span<const CompiledShader> shaders, ProofReport* report) {
+    if (EpochProofs()) {
+        const auto epoch = GuestMemory::CollectEpoch();
+        const auto proof = GuestMemory::ProofSerial();
+        const auto pending = StorageTexture::PendingSerial();
+        if (epoch != 0 && provedEpoch == epoch && provedProof == proof && provedPending == pending) {
+            static const bool verify = std::getenv("APS5_VERIFY_DRAW_PIPELINE") != nullptr;
+            thread_local std::uint64_t reuses = 0;
+            if (verify && ++reuses % 64u == 0u) {
+                const bool ok = revalidateFull(shaders, report);
+                noteEpochProof(true, true, !ok);
+                return ok;
+            }
+            if (report != nullptr) *report = {ProofPath::Full, ProofFailure::None};
+            noteEpochProof(true, false, false);
+            return true;
+        }
+        const bool ok = revalidateFull(shaders, report);
+        noteEpochProof(false, false, false);
+        if (ok) {
+            provedEpoch = epoch;
+            provedProof = proof;
+            provedPending = pending;
+        } else {
+            provedEpoch = 0;
+        }
+        return ok;
+    }
+    return revalidateFull(shaders, report);
+}
+
+bool ShaderResources::revalidateFull(std::span<const CompiledShader> shaders, ProofReport* report) {
     if (report != nullptr) *report = {ProofPath::Full, ProofFailure::Other};
     if (!reusable || shaders.empty()) return false;
     static const bool profile = std::getenv("APS5_PROFILE_DRAW") != nullptr;
@@ -3527,7 +3642,7 @@ struct ChurnCounts {
 
 // Dispatch keys and draw keys are counted apart: what churns a draw's key decides the draw steps.
 struct ChurnProfile {
-    std::mutex mutex;
+    AgcDriver::Mutex mutex;
     std::unordered_map<std::uint64_t, ResourceCache::Key> lastByVariant;
     ChurnCounts dispatch;
     ChurnCounts draws;
@@ -4172,7 +4287,8 @@ std::size_t ShaderResources::addGuestBuffer(std::span<const std::uint32_t> words
     }
     Require(byteSize <= context.limits.maxStorageBufferRange, "shader buffer exceeds descriptor range limit");
     Require(byteSize <= std::numeric_limits<std::size_t>::max(), "shader buffer size exceeds host address space");
-    const auto size = static_cast<std::size_t>(byteSize);
+    auto size = static_cast<std::size_t>(byteSize);
+    if (const std::uint64_t stride = descriptor.Stride(); !written && target != nullptr && stride != 0 && address < target->address && address + size > target->address && address + size - target->address < stride) size = static_cast<std::size_t>(target->address - address);
     Require(target == nullptr || !overlap(address, size, target->address, target->bytes), "shader buffer aliases the render target");
     // APS5_ALL_BUFFERS_WRITTEN=1: every element is noted as written, as before bufferWritten existed.
     static const bool allWritten = std::getenv("APS5_ALL_BUFFERS_WRITTEN") != nullptr;
@@ -4257,7 +4373,7 @@ std::size_t ShaderResources::addDataBuffer(std::span<const std::uint32_t> words)
     const auto size = words.size() * sizeof(std::uint32_t);
     Require(size <= context.limits.maxStorageBufferRange, "shader data buffer exceeds descriptor range limit");
     const bool refreshable = TemplateDataRefresh() && size <= MaxRefreshBytes;
-    auto buffer = std::make_unique<Buffer>(context, size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | (refreshable ? VK_BUFFER_USAGE_TRANSFER_DST_BIT : 0u));
+    auto buffer = std::make_unique<Buffer>(context, size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT);
     std::memcpy(buffer->Bytes().data(), words.data(), size);
     Allocation allocation{0, size, false, std::move(buffer)};
     if (refreshable) allocation.dataWords.assign(words.begin(), words.end());
@@ -4331,6 +4447,31 @@ bool ShaderResources::refreshData(VkCommandBuffer commands, const CompiledShader
     if (timing != Recorder::NoTiming) recorder->EndGpuTiming(timing, refreshedBytes);
     if (recorded) rehashDataWords();
     return recorded;
+}
+
+std::optional<std::size_t> ShaderResources::shaderDataAllocation(const CompiledShader& shader) const {
+    Require(shader.program != nullptr, "missing compiled shader");
+    const auto& program = *shader.program;
+    if (program.bindings.size() != bindings.size()) return std::nullopt;
+    for (std::size_t index = 0; index < program.bindings.size(); ++index) {
+        if (program.bindings[index].role != ShaderRecompiler::DescriptorRole::ShaderData || bindings[index].allocations.size() != 1) continue;
+        const auto allocation = bindings[index].allocations.front();
+        if (allocations[allocation].guest || allocations[allocation].buffer == nullptr) return std::nullopt;
+        return allocation;
+    }
+    return std::nullopt;
+}
+
+VkBuffer ShaderResources::shaderDataBuffer(const CompiledShader& shader) const {
+    const auto allocation = shaderDataAllocation(shader);
+    return allocation.has_value() ? allocations[*allocation].buffer->Handle() : VK_NULL_HANDLE;
+}
+
+void ShaderResources::forgetShaderDataWords(const CompiledShader& shader) {
+    if (const auto allocation = shaderDataAllocation(shader)) {
+        allocations[*allocation].dataWords.clear();
+        rehashDataWords();
+    }
 }
 
 void ShaderResources::writeDataWords(VkCommandBuffer commands, std::size_t allocation, std::span<const std::uint32_t> words) const {
@@ -4547,7 +4688,7 @@ std::shared_ptr<Texture> ShaderResources::fastTexture(const ImageRecord& record)
     // keys and stays valid while they are unchanged); a change is the full lookup's to judge.
     if (keys != record.entryKeys) return nullptr;
     if (record.source != nullptr) {
-        if (!StorageImageCached(context, record.source.get()) || !GuestMemory::UnchangedSince(address, bytes, record.source->Generation())) return nullptr;
+        if (!StorageImageCached(context, record.source.get()) || !GuestMemory::UnchangedSince(address, bytes, record.source->GenerationFor(address, bytes))) return nullptr;
         if (record.resource.dccAddress != 0 && IsDccClear(record.source->FilledKeys())) return nullptr;
         // Under fast-clear keys the view holds only while its image's results are still pending over
         // the surface; flushed, the clear the image cannot see makes the lookup take a snapshot.
@@ -4604,14 +4745,15 @@ void ShaderResources::resolveImageBinding(const ShaderRecompiler::DescriptorBind
             const auto resource = record != nullptr && record->decoded ? record->resource : DecodeTextureResource(words);
             const bool forcedSrgb = ForcesDegammaOn(resource.format, binding.imageSamplers[element], shaderSamplers);
             RequireNonSeamlessCube(resource.dimension == TextureDimension::kCube, binding.imageSamplers[element], shaderSamplers);
-            const bool firstLayer = binding.imageShape == ShaderRecompiler::DescriptorImageShape::Image2D && resource.dimension == TextureDimension::k2DArray;
-            if (!firstLayer && !MatchesGuestDimension(*binding.imageShape, resource.dimension)) throw std::runtime_error("AGC graphics: guest texture dimension disagrees with the shader's declared image shape (shape " + std::to_string(static_cast<int>(*binding.imageShape)) + ", dimension " + std::to_string(static_cast<int>(resource.dimension)) + ")");
+            const bool depthCompare = !binding.imageDepthCompare.empty() && binding.imageDepthCompare.at(element);
+            const bool firstLayer = binding.imageShape == ShaderRecompiler::DescriptorImageShape::Image2D && (resource.dimension == TextureDimension::k2DArray || (depthCompare && resource.dimension == TextureDimension::k1DArray));
+            const bool depth1D = depthCompare && ((binding.imageShape == ShaderRecompiler::DescriptorImageShape::Image2D && resource.dimension == TextureDimension::k1D) || (binding.imageShape == ShaderRecompiler::DescriptorImageShape::Image2DArray && resource.dimension == TextureDimension::k1DArray));
+            if (!firstLayer && !depth1D && !MatchesGuestDimension(*binding.imageShape, resource.dimension)) throw std::runtime_error("AGC graphics: guest texture dimension disagrees with the shader's declared image shape (shape " + std::to_string(static_cast<int>(*binding.imageShape)) + ", dimension " + std::to_string(static_cast<int>(resource.dimension)) + ")");
             const VkComponentMapping components = ViewComponents(resource);
             const auto guestBytes = record != nullptr && record->decoded ? record->guestBytes : DescribeSurface(resource).guestBytes;
             CompletePendingCpuWrites(context, resource.baseAddress, static_cast<std::size_t>(guestBytes));
             if (resource.dccAddress != 0) CompletePendingCpuWrites(context, resource.dccAddress, DccKeyBytes(guestBytes));
             std::shared_ptr<Texture> texture;
-            const bool depthCompare = !binding.imageDepthCompare.empty() && binding.imageDepthCompare.at(element);
             const VkImageViewType multisampleViewType = binding.imageShape == ShaderRecompiler::DescriptorImageShape::Image2DMultisampleArray ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D;
             if (previousSampled.texture != nullptr && previousSampled.depthCompare == depthCompare && previousSampled.multisampleViewType == multisampleViewType && words.size() == 8 && std::equal(words.begin(), words.end(), previousSampled.words.begin())) texture = previousSampled.texture;
             if (texture == nullptr && record != nullptr && record->texture != nullptr) {
@@ -4949,8 +5091,10 @@ void ShaderResources::resolveImageTables() {
             try {
                 resource = DecodeTextureResource(words);
                 shape = binding.imageShapes.at(element);
-                firstLayer = shape == ShaderRecompiler::DescriptorImageShape::Image2D && resource.dimension == TextureDimension::k2DArray;
-                if (!firstLayer && !MatchesGuestDimension(shape, resource.dimension)) throw std::runtime_error("AGC graphics: guest texture dimension disagrees with the table entry's image shape (shape " + std::to_string(static_cast<int>(shape)) + ", dimension " + std::to_string(static_cast<int>(resource.dimension)) + ")");
+                const bool depthCompare = element < binding.imageDepthCompare.size() && binding.imageDepthCompare[element];
+                firstLayer = shape == ShaderRecompiler::DescriptorImageShape::Image2D && (resource.dimension == TextureDimension::k2DArray || (depthCompare && resource.dimension == TextureDimension::k1DArray));
+                const bool depth1D = depthCompare && ((shape == ShaderRecompiler::DescriptorImageShape::Image2D && resource.dimension == TextureDimension::k1D) || (shape == ShaderRecompiler::DescriptorImageShape::Image2DArray && resource.dimension == TextureDimension::k1DArray));
+                if (!firstLayer && !depth1D && !MatchesGuestDimension(shape, resource.dimension)) throw std::runtime_error("AGC graphics: guest texture dimension disagrees with the table entry's image shape (shape " + std::to_string(static_cast<int>(shape)) + ", dimension " + std::to_string(static_cast<int>(resource.dimension)) + ")");
                 guestBytes = DescribeSurface(resource).guestBytes;
                 if (!GuestMemory::Accessible(reinterpret_cast<const void*>(resource.baseAddress), static_cast<std::size_t>(guestBytes)) && GuestMemory::CommittedRanges(resource.baseAddress, static_cast<std::size_t>(guestBytes), false).empty()) throw std::runtime_error("AGC graphics: the table entry's surface at 0x" + HexText(resource.baseAddress) + " (0x" + HexText(guestBytes) + " bytes) is not mapped");
                 static_cast<void>(ResolveTextureFormat(resource.format));
@@ -5541,6 +5685,7 @@ void ShaderResources::WriteBack() {
     } catch (const BdaUnalignedAccess&) {
         unaligned = std::current_exception();
     }
+    if (!guestMemory.Writes().empty() || std::find(storageWritten.begin(), storageWritten.end(), true) != storageWritten.end() || (usesBda && !bdaReadOnly)) GuestMemory::BreakProofs();
     if (!SkipWriteBack()) {
         for (std::size_t index = 0; index < storageTextures.size(); ++index) {
             if (!storageWritten[index] || storageTextures[index] == nullptr) continue;
