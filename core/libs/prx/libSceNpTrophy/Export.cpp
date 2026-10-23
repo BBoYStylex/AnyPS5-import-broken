@@ -164,6 +164,11 @@ int APS5_VABI sceNpTrophyDestroyHandle(int handle) {
     return g_handles.erase(handle) == 1 ? 0 : NP_TROPHY_ERROR_INVALID_HANDLE;
 }
 
+int APS5_VABI sceNpTrophyAbortHandle(int handle) {
+    std::lock_guard lock(g_mutex);
+    return g_handles.contains(handle) ? 0 : NP_TROPHY_ERROR_INVALID_HANDLE;
+}
+
 int APS5_VABI sceNpTrophyRegisterContext(int contextId, int handle, std::uint64_t options) {
     if (options != 0) return NP_TROPHY_ERROR_INVALID_ARGUMENT;
     std::lock_guard lock(g_mutex);
