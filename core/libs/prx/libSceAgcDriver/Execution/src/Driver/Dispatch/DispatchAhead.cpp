@@ -1,10 +1,12 @@
 #include "prx/libSceAgcDriver/Execution/include/ProfileOutput.hpp"
 #include "ThreadOwned.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver/Driver.hpp"
+#include "prx/libSceAgcDriver/Execution/include/Driver/Shaders/ShaderRegistry.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver/Draw/DrawPipeline.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver/Synchronization/DeferredLabels.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Pm4.hpp"
 #include "prx/libSceAgcDriver/Execution/include/VideoOutput.hpp"
+#include "Optimization/ResourceProgram.hpp"
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
@@ -107,7 +109,8 @@ void Driver::resolveGroupAhead(const Submission& submission, const QueueState& l
     static const bool allQueues = std::getenv("APS5_GROUP_CAPTURE_ALL_QUEUES") != nullptr;
     if (!allQueues && submission.queue == 0) return;
     auto& resolved = resolvedAhead();
-    if (resolved.contains(from) || device.Load() == nullptr) return;
+    const auto localDevice = device.Load();
+    if (resolved.contains(from) || localDevice == nullptr) return;
     if (submission.queue == 0 && DrawPipeline::Depth() != 0 && DrawPipeline::Queue0().Busy()) DrawPipeline::Queue0().Drain(DrawPipeline::DrainReason::Packet, (submission.commands[from] >> 8u) & 0xffu);
     auto& stats = groupCaptureStats();
     const auto begin = std::chrono::steady_clock::now();
@@ -126,6 +129,83 @@ void Driver::resolveGroupAhead(const Submission& submission, const QueueState& l
         }
     } resolving;
     const auto& commands = submission.commands;
+    if (submission.shaders != nullptr) {
+        QueueState preview = live;
+        std::vector<PreparedShaders*> pendingShaders;
+        std::vector<PreparedShaders*> submittedShaders;
+        for (std::size_t scan = from; scan < commands.size();) {
+            const auto header = commands[scan];
+            if (Pm4::FillerPacket(header)) {
+                ++scan;
+                continue;
+            }
+            const auto count = Pm4::PacketWords(header);
+            if (scan + count > commands.size()) break;
+            const auto packet = std::span(commands).subspan(scan, count);
+            const auto opcode = (header >> 8u) & 0xffu;
+            const auto next = scan + count;
+            if (header == FlipPacketHeader || header == RenderingWaitPacketHeader || opcode == 0x22 || opcode == 0x3f || opcode == 0x3c || opcode == 0x93) break;
+            if (opcode == 0x15 || opcode == 0x16) {
+                if (count < (opcode == 0x15 ? 5u : 3u)) break;
+                try {
+                    const auto low = preview.shader.find(0x20c);
+                    const auto high = preview.shader.find(0x20d);
+                    if (low != preview.shader.end() && high != preview.shader.end()) {
+                        const auto address = (static_cast<std::uint64_t>(low->second) << 8u) | (static_cast<std::uint64_t>(high->second & 0xffu) << 40u);
+                        if (auto registered = RegisteredProgram(*submission.shaders, address, {0}); registered != nullptr && registered->type == 0) {
+                            bool isPending = false;
+                            bool isEmpty = false;
+                            {
+                                std::lock_guard lock(registered->prepared->mutex);
+                                isPending = registered->prepared->pending;
+                                isEmpty = registered->prepared->entries.empty();
+                            }
+                            if (isPending) {
+                                if (std::ranges::find(pendingShaders, registered->prepared.get()) == pendingShaders.end()) {
+                                    pendingShaders.push_back(registered->prepared.get());
+                                }
+                            } else if (isEmpty && std::ranges::find(submittedShaders, registered->prepared.get()) == submittedShaders.end()) {
+                                const auto codeOffset = static_cast<std::size_t>((address - registered->codeAddress) / sizeof(std::uint32_t));
+                                if (codeOffset < registered->code.size()) {
+                                    submittedShaders.push_back(registered->prepared.get());
+                                    const auto rsrc2 = preview.shader.find(0x213);
+                                    const auto userCount = rsrc2 != preview.shader.end() ? ((rsrc2->second >> 1u) & 0x1fu) : 0u;
+                                    std::vector<std::uint32_t> userData(userCount, 0u);
+                                    for (std::uint32_t i = 0; i < userCount; ++i) {
+                                        if (const auto reg = preview.shader.find(0x240u + i); reg != preview.shader.end()) userData[i] = reg->second;
+                                    }
+                                    auto compute = Graphics::DecodeComputeStageInfo(preview.shader, registered->header);
+                                    const auto wave = (packet.back() & 0x8000u) != 0 ? 32u : 64u;
+                                    SubmitRegistrationPreparation([registered, localDevice, address, codeOffset, wave, compute, userData = std::move(userData), state = preview.shader]() mutable {
+                                        std::vector<ShaderRecompiler::MemoryRegion> memory{{registered->codeAddress, std::as_bytes(std::span(registered->code))}};
+                                        if (!registered->header.empty()) memory.push_back({registered->headerAddress, registered->header});
+                                        ShaderRecompiler::RecompileRequest request{
+                                            {ShaderRecompiler::ShaderStage::Compute, address, std::span(registered->code).subspan(codeOffset), registered->headerAddress, registered->header},
+                                            {wave, 0, userData, compute, std::nullopt, std::nullopt, memory, DispatchFloatMode(*registered, state)},
+                                            localDevice->ComputeTarget(wave),
+                                            {0, 0, 0, 128}
+                                        };
+                                        try { static_cast<void>(InvocationFor(*registered, codeOffset, request)); } catch (...) {}
+                                    }, registered->prepared.get());
+                                }
+                            }
+                        }
+                    }
+                    Pm4::NoteDispatchRegisters(packet, preview); } catch (...) {}
+            } else if (Pm4::IndirectRegisterOpcode(opcode)) {
+                const auto found = submission.registerLists.find(scan);
+                if (found != submission.registerLists.end() && Pm4::IndirectRegistersValid(found->second)) {
+                    try { Pm4::ExecuteIndirectRegisters(packet, found->second, preview); } catch (...) {}
+                }
+            } else if (!Pm4::AccessesMemory(header) && opcode != 0x3c && opcode != 0x93 && opcode != 0x37 && opcode != 0x42 && opcode != 0x46 && opcode != 0x49 && opcode != 0x58) {
+                try { Pm4::Execute(packet, preview); } catch (...) {}
+            }
+            scan = next;
+        }
+        for (auto it = pendingShaders.rbegin(); it != pendingShaders.rend(); ++it) {
+            PrioritizeRegistrationPreparation(**it);
+        }
+    }
     for (std::size_t cursor = from; cursor < commands.size();) {
         const auto header = commands[cursor];
         if (Pm4::FillerPacket(header)) {
@@ -141,7 +221,7 @@ void Driver::resolveGroupAhead(const Submission& submission, const QueueState& l
         if (opcode == 0x3c || opcode == 0x93) {
             if (!Pm4::WaitSatisfiedUnchecked(packet) && !WrittenByRun(packet, labels)) break;
         } else if (opcode == 0x15 || opcode == 0x16) {
-            if (resolved.contains(cursor)) break;
+            if (count < (opcode == 0x15 ? 5u : 3u) || resolved.contains(cursor)) break;
             if (opcode == 0x16) {
                 std::uint64_t arguments = 0;
                 try {
