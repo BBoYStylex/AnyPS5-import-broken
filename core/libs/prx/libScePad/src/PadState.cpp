@@ -21,6 +21,9 @@ namespace {
     std::uint64_t pressedAt = 0;
     constexpr std::uint64_t kLatchExpiry = 100000;
     PadOutputState output;
+    std::array<std::uint8_t, 2> liveTriggerEffects{};
+    std::array<std::uint8_t, 2> liveTriggerStatuses{};
+    bool liveTriggerStatusValid = false;
     std::chrono::steady_clock::time_point audioHapticEnd;
     std::array<std::uint8_t, 2> audioHapticRumble{};
     PadAudioHapticQueue legacyHaptics;
@@ -117,6 +120,19 @@ namespace {
 
     std::uint8_t scaleStrength(std::uint8_t s) {
         return s == 0 ? 0 : static_cast<std::uint8_t>(std::min(255, 32 * std::min<int>(s, 8)));
+    }
+
+    std::int32_t triggerState(std::uint8_t effect, std::uint8_t status) {
+        switch (effect) {
+            case 1:
+                return status == 0 ? 1 : status == 1 ? 2 : 0;
+            case 2:
+                return status == 0 ? 3 : status == 1 ? 4 : status == 2 ? 5 : 0;
+            case 3:
+                return status == 0 ? 6 : status == 1 ? 7 : 0;
+            default:
+                return 0;
+        }
     }
 }
 
@@ -349,7 +365,14 @@ void Pad::SetTriggerCommand(int trigger, const std::uint8_t* command) {
     if (!req.valid) req.fallback = 0;
     std::lock_guard lock(stateMutex);
     output.trigger[trigger] = req;
-    output.triggerTouched = true;
+    output.triggerTouched[trigger] = true;
+    ++output.sequence;
+}
+
+void Pad::SetTriggerEffectsDisabled(bool disabled) {
+    std::lock_guard lock(stateMutex);
+    if (output.triggerDisabled == disabled) return;
+    output.triggerDisabled = disabled;
     ++output.sequence;
 }
 
@@ -412,6 +435,29 @@ extern "C" bool PadFetchOutput_nid_postfix(std::uint32_t* seenSequence, PadOutpu
     *seenSequence = output.sequence;
     *out = output;
     return true;
+}
+
+extern "C" void PadPublishTriggerStatus_nid_postfix(std::uint8_t leftEffect, std::uint8_t leftStatus, std::uint8_t rightEffect, std::uint8_t rightStatus) {
+    std::lock_guard lock(stateMutex);
+    if (liveTriggerStatusValid && liveTriggerEffects[0] == leftEffect && liveTriggerStatuses[0] == leftStatus &&
+        liveTriggerEffects[1] == rightEffect && liveTriggerStatuses[1] == rightStatus) return;
+    liveTriggerEffects[0] = leftEffect;
+    liveTriggerEffects[1] = rightEffect;
+    liveTriggerStatuses[0] = leftStatus;
+    liveTriggerStatuses[1] = rightStatus;
+    liveTriggerStatusValid = true;
+}
+
+extern "C" void PadGetTriggerEffectState_nid_postfix(std::int32_t* states) {
+    if (states == nullptr) return;
+    std::lock_guard lock(stateMutex);
+    if (!liveTriggerStatusValid) {
+        states[0] = 0;
+        states[1] = 0;
+        return;
+    }
+    states[0] = triggerState(liveTriggerEffects[0], liveTriggerStatuses[0]);
+    states[1] = triggerState(liveTriggerEffects[1], liveTriggerStatuses[1]);
 }
 
 extern "C" void PadSubmitAudioHaptics_nid_postfix(std::uint8_t large, std::uint8_t small) {
