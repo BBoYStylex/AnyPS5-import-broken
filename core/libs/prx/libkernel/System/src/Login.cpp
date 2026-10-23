@@ -2,6 +2,9 @@
 #include <array>
 #include <cerrno>
 #include <cstring>
+#include <optional>
+#include <stdexcept>
+#include <string>
 #include <system_error>
 #ifdef _WIN32
 #include <windows.h>
@@ -11,8 +14,19 @@
 #include <unistd.h>
 #endif
 
+extern "C" int* APS5_VABI __error_nid_postfix();
+
 namespace {
+std::optional<std::string> g_loginForTest;
+
 int ReadLogin(char* output, int size) {
+    if (g_loginForTest) {
+        if (g_loginForTest->empty()) throw std::runtime_error("getlogin_r: host effective user has no account name");
+        const std::size_t length = g_loginForTest->size() + 1;
+        if (length > static_cast<std::size_t>(size)) return 34;
+        std::memcpy(output, g_loginForTest->c_str(), length);
+        return 0;
+    }
 #ifdef _WIN32
     std::array<wchar_t, UNLEN + 1> name{};
     DWORD count = static_cast<DWORD>(name.size());
@@ -43,6 +57,11 @@ int ReadLogin(char* output, int size) {
 }
 }
 
+extern "C" void LoginNameForTest_nid_no_patch(const char* name) {
+    if (name == nullptr) g_loginForTest.reset();
+    else g_loginForTest = name;
+}
+
 extern "C" int APS5_VABI getlogin_r_nid_postfix(char* output, int size) {
     if (size <= 0) return 34;
     if (output == nullptr) return 14;
@@ -50,4 +69,13 @@ extern "C" int APS5_VABI getlogin_r_nid_postfix(char* output, int size) {
     const int result = ReadLogin(output, size);
     errno = saved;
     return result;
+}
+
+extern "C" char* APS5_VABI getlogin_nid_postfix(void) {
+    static char logname[33];
+    if (const int error = getlogin_r_nid_postfix(logname, static_cast<int>(sizeof(logname))); error != 0) {
+        *__error_nid_postfix() = error;
+        return nullptr;
+    }
+    return logname[0] != '\0' ? logname : nullptr;
 }
