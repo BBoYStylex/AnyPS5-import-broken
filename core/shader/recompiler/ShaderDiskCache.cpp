@@ -33,12 +33,14 @@
 #include <deque>
 #include <fstream>
 #include <limits>
+#include <list>
 #include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <system_error>
 #include <thread>
+#include <tuple>
 #include <type_traits>
 #include <unordered_map>
 #include <utility>
@@ -1382,6 +1384,22 @@ LoadStatus unwrapEntry(std::span<const std::byte> file, std::span<const std::byt
 
 std::atomic<unsigned> runningWriters{0};
 
+std::uint64_t specializedCap(const char* name, std::uint64_t fallback) {
+    const char* text = std::getenv(name);
+    const auto value = text != nullptr ? std::strtoull(text, nullptr, 10) : 0ull;
+    return value != 0 ? value : fallback;
+}
+
+std::uint64_t specializedEntryCap() {
+    static const auto cap = specializedCap("APS5_SPECIALIZED_DISK_CACHE_ENTRIES", 65536u);
+    return cap;
+}
+
+std::uint64_t specializedByteCap() {
+    static const auto cap = specializedCap("APS5_SPECIALIZED_DISK_CACHE_MAX_MIB", 2048u) << 20u;
+    return cap;
+}
+
 class DiskStore {
 public:
     explicit DiskStore(bool stopped) {
@@ -1389,6 +1407,7 @@ public:
         if (root.empty()) return;
         this->root = root;
         directory = root / hex(SourceVersion());
+        specializedDirectory = directory / "specialized";
         discoverPrebuilt();
         stopping = stopped;
         if (stopping) return;
@@ -1414,6 +1433,22 @@ public:
 
     void StorePlan(std::vector<std::byte> key, std::shared_ptr<const IrResourcePlan> plan) {
         enqueue({std::move(key), nullptr, std::move(plan)});
+    }
+
+    template<typename TDecode>
+    bool LoadSpecialized(std::span<const std::byte> key, TDecode&& decode) {
+        const auto name = EntryName(key);
+        std::vector<std::byte> file;
+        std::span<const std::byte> payload;
+        const bool loaded = ReadWholeFile(specializedDirectory / name, file) && unwrapEntry(file, key, payload) == LoadStatus::Loaded && decode(payload);
+        (loaded ? specializedHits : specializedMisses).fetch_add(1, std::memory_order_relaxed);
+        if (loaded) touchSpecialized(name);
+        report(false);
+        return loaded;
+    }
+
+    void StoreSpecialized(std::vector<std::byte> key, std::shared_ptr<const std::vector<std::byte>> file) {
+        enqueue({std::move(key), nullptr, nullptr, std::move(file)});
     }
 
     std::shared_ptr<const CompiledVariant> Persist(std::span<const std::byte> key, const CompiledVariant& variant) {
@@ -1466,6 +1501,10 @@ public:
         counters.prebuiltHits = prebuiltHits.load(std::memory_order_relaxed);
         counters.prebuiltMisses = prebuiltMisses.load(std::memory_order_relaxed);
         counters.prebuiltRejected = prebuiltRejected.load(std::memory_order_relaxed);
+        counters.specializedHits = specializedHits.load(std::memory_order_relaxed);
+        counters.specializedMisses = specializedMisses.load(std::memory_order_relaxed);
+        counters.specializedWrites = specializedWrites.load(std::memory_order_relaxed);
+        counters.specializedEvictions = specializedEvictions.load(std::memory_order_relaxed);
         counters.lookupNanoseconds = lookupNanoseconds.load(std::memory_order_relaxed);
         counters.readNanoseconds = readNanoseconds.load(std::memory_order_relaxed);
         counters.decodeNanoseconds = decodeNanoseconds.load(std::memory_order_relaxed);
@@ -1529,6 +1568,12 @@ private:
         std::vector<std::byte> key;
         std::shared_ptr<const CompiledVariant> variant;
         std::shared_ptr<const IrResourcePlan> plan;
+        std::shared_ptr<const std::vector<std::byte>> specialized;
+    };
+
+    struct SpecializedEntry {
+        std::string name;
+        std::uint64_t bytes = 0;
     };
 
     bool loadPrebuilt(std::span<const std::byte> key, CompiledVariant& variant) {
@@ -1660,6 +1705,10 @@ private:
     }
 
     void write(const Job& job) {
+        if (job.specialized != nullptr) {
+            writeSpecialized(job.key, *job.specialized);
+            return;
+        }
         const auto file = job.plan != nullptr ? EncodePlanEntry(job.key, *job.plan) : EncodeEntry(job.key, *job.variant);
         if (!file.empty() && WriteFileAtomically(directory / EntryName(job.key), file)) {
             (job.plan != nullptr ? planWrites : writes).fetch_add(1, std::memory_order_relaxed);
@@ -1667,6 +1716,75 @@ private:
         } else {
             const auto failures = writeFailures.fetch_add(1, std::memory_order_relaxed);
             if (failures < 4) std::fprintf(stderr, "[shader-disk-cache] cannot write %s\n", (directory / EntryName(job.key)).string().c_str());
+        }
+    }
+
+    void writeSpecialized(std::span<const std::byte> key, const std::vector<std::byte>& file) {
+        auto name = EntryName(key);
+        if (!WriteFileAtomically(specializedDirectory / name, file)) {
+            const auto failures = writeFailures.fetch_add(1, std::memory_order_relaxed);
+            if (failures < 4) std::fprintf(stderr, "[shader-disk-cache] cannot write %s\n", (specializedDirectory / name).string().c_str());
+            return;
+        }
+        specializedWrites.fetch_add(1, std::memory_order_relaxed);
+        std::lock_guard lock(specializedMutex);
+        scanSpecialized();
+        addSpecialized(std::move(name), file.size());
+        evictSpecialized();
+    }
+
+    void touchSpecialized(const std::string& name) {
+        std::lock_guard lock(specializedMutex);
+        scanSpecialized();
+        if (const auto found = specializedIndex.find(name); found != specializedIndex.end()) specializedEntries.splice(specializedEntries.end(), specializedEntries, found->second);
+        std::error_code error;
+        std::filesystem::last_write_time(specializedDirectory / name, std::filesystem::file_time_type::clock::now(), error);
+    }
+
+    void scanSpecialized() {
+        if (specializedScanned) return;
+        specializedScanned = true;
+        const auto now = std::filesystem::file_time_type::clock::now();
+        std::vector<std::tuple<std::filesystem::file_time_type, std::string, std::uint64_t>> found;
+        std::error_code error;
+        for (std::filesystem::directory_iterator it(specializedDirectory, error), end; !error && it != end; it.increment(error)) {
+            std::error_code fileError;
+            if (!it->is_regular_file(fileError)) continue;
+            auto name = it->path().filename().string();
+            const auto written = it->last_write_time(fileError);
+            if (fileError) continue;
+            if (name.find(".tmp.") != std::string::npos) {
+                if (now - written > std::chrono::hours(1)) std::filesystem::remove(it->path(), fileError);
+                continue;
+            }
+            const auto bytes = it->file_size(fileError);
+            if (!fileError) found.emplace_back(written, std::move(name), bytes);
+        }
+        std::sort(found.begin(), found.end());
+        for (auto& [written, name, bytes] : found) addSpecialized(std::move(name), bytes);
+        evictSpecialized();
+    }
+
+    void addSpecialized(std::string name, std::uint64_t bytes) {
+        if (const auto found = specializedIndex.find(name); found != specializedIndex.end()) {
+            specializedBytes -= found->second->bytes;
+            specializedEntries.erase(found->second);
+            specializedIndex.erase(found);
+        }
+        specializedBytes += bytes;
+        specializedEntries.push_back({name, bytes});
+        specializedIndex.emplace(std::move(name), std::prev(specializedEntries.end()));
+    }
+
+    void evictSpecialized() {
+        while (!specializedEntries.empty() && (specializedEntries.size() > specializedEntryCap() || specializedBytes > specializedByteCap())) {
+            const auto victim = std::move(specializedEntries.front());
+            specializedEntries.pop_front();
+            specializedIndex.erase(victim.name);
+            specializedBytes -= victim.bytes;
+            std::error_code error;
+            std::filesystem::remove(specializedDirectory / victim.name, error);
+            specializedEvictions.fetch_add(1, std::memory_order_relaxed);
         }
     }
 
@@ -1719,7 +1837,20 @@ private:
         const auto delta = [](std::uint64_t after, std::uint64_t before) { return static_cast<unsigned long long>(after - before); };
         const auto baseChanged = totals.hits != reported.hits || totals.misses != reported.misses || totals.writes != reported.writes || totals.loadFailures != reported.loadFailures || totals.writeFailures != reported.writeFailures || totals.planHits != reported.planHits || totals.planMisses != reported.planMisses || totals.planWrites != reported.planWrites || totals.planLoadFailures != reported.planLoadFailures;
         const auto prebuiltChanged = totals.prebuiltHits != reported.prebuiltHits || totals.prebuiltMisses != reported.prebuiltMisses || totals.prebuiltRejected != reported.prebuiltRejected;
-        if (!baseChanged && !prebuiltChanged) return;
+        const auto specializedChanged = totals.specializedHits != reported.specializedHits || totals.specializedMisses != reported.specializedMisses || totals.specializedWrites != reported.specializedWrites || totals.specializedEvictions != reported.specializedEvictions;
+        if (!baseChanged && !prebuiltChanged && !specializedChanged) return;
+        if (specializedChanged) {
+            std::size_t entries = 0;
+            std::uint64_t bytes = 0;
+            {
+                std::lock_guard lock(specializedMutex);
+                entries = specializedEntries.size();
+                bytes = specializedBytes;
+            }
+            std::fprintf(stderr, "[shader-disk-cache] specialized modules (10 s): %llu hits, %llu misses, %llu writes, %llu evicted; %zu entries (%.1f MiB) of %llu / %llu MiB\n",
+                         delta(totals.specializedHits, reported.specializedHits), delta(totals.specializedMisses, reported.specializedMisses), delta(totals.specializedWrites, reported.specializedWrites), delta(totals.specializedEvictions, reported.specializedEvictions),
+                         entries, static_cast<double>(bytes) / (1024.0 * 1024.0), static_cast<unsigned long long>(specializedEntryCap()), static_cast<unsigned long long>(specializedByteCap() >> 20u));
+        }
         if (baseChanged) std::fprintf(stderr, "[shader-disk-cache] (10 s): %llu hits, %llu misses, %llu writes (%.1f MiB), %llu load failures, %llu write failures; resource plans: %llu hits, %llu misses, %llu writes, %llu load failures; %.1f MiB read in %.1f ms (totals: %llu hits, %llu misses, %llu writes; plans %llu hits, %llu misses)\n",
                      delta(totals.hits, reported.hits), delta(totals.misses, reported.misses), delta(totals.writes, reported.writes), static_cast<double>(totals.bytesWritten - reported.bytesWritten) / (1024.0 * 1024.0),
                      delta(totals.loadFailures, reported.loadFailures), delta(totals.writeFailures, reported.writeFailures),
@@ -1736,6 +1867,13 @@ private:
 
     std::filesystem::path root;
     std::filesystem::path directory;
+    std::filesystem::path specializedDirectory;
+    std::mutex specializedMutex;
+    bool specializedScanned = false;
+    std::list<SpecializedEntry> specializedEntries;
+    std::unordered_map<std::string, std::list<SpecializedEntry>::iterator> specializedIndex;
+    std::uint64_t specializedBytes = 0;
+    std::atomic<std::uint64_t> specializedHits{0}, specializedMisses{0}, specializedWrites{0}, specializedEvictions{0};
     std::vector<std::unique_ptr<CachePack>> packs;
     std::vector<std::filesystem::path> looseDirectories;
     std::mutex mutex;
@@ -1949,6 +2087,50 @@ unsigned Writers() {
 
 Counters Totals() {
     return store().Totals();
+}
+
+namespace {
+
+std::vector<std::byte> specializedKey(std::span<const std::byte> key) {
+    std::vector<std::byte> full(key.begin(), key.end());
+    const auto& switches = switchKey();
+    full.insert(full.end(), switches.begin(), switches.end());
+    return full;
+}
+
+}
+
+std::uint64_t ContentHash(std::span<const std::byte> bytes, std::uint64_t seed) {
+    return HashBytes(bytes, seed);
+}
+
+bool LoadSpecialized(std::span<const std::byte> key, StoredSpecialization& module) {
+    auto& instance = store();
+    if (!instance.Enabled()) return false;
+    return instance.LoadSpecialized(specializedKey(key), [&](std::span<const std::byte> payload) {
+        Reader reader(payload);
+        StoredSpecialization decoded;
+        reader.Value(decoded.pushData);
+        reader.Values(decoded.bindings);
+        reader.Values(decoded.spirv);
+        if (!reader.Done() || decoded.spirv.size() < 5u) return false;
+        module = std::move(decoded);
+        return true;
+    });
+}
+
+void StoreSpecialized(std::span<const std::byte> key, const StoredSpecialization& module) {
+    auto& instance = store();
+    if (!instance.Enabled()) return;
+    auto full = specializedKey(key);
+    std::vector<std::byte> payload;
+    payload.reserve(module.spirv.size() * sizeof(std::uint32_t) + module.bindings.size() * sizeof(std::uint32_t) + 32u);
+    Writer writer(payload);
+    writer.Value(module.pushData);
+    writer.Values(std::span<const std::uint32_t>(module.bindings));
+    writer.Values(std::span<const std::uint32_t>(module.spirv));
+    auto file = std::make_shared<const std::vector<std::byte>>(wrapEntry(full, payload));
+    instance.StoreSpecialized(std::move(full), std::move(file));
 }
 
 }
