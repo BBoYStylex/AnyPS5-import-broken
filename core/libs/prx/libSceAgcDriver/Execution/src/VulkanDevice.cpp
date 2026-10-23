@@ -3730,10 +3730,29 @@ void VulkanDevice::NoteDeviceImageProgram(const ShaderRecompiler::RecompileResul
     if (auto* table = Graphics::DeviceImageTable::Existing(state->context)) table->NoteProgram(result.Identity(), codeAddress);
 }
 
-std::optional<std::string> VulkanDevice::ExpectDeviceImages(std::span<const ShaderRecompiler::DeviceImageTableAbi::Expectation> images) const {
+std::optional<std::string> VulkanDevice::ExpectDeviceImages(std::span<const ShaderRecompiler::DeviceImageTableAbi::Expectation> images, bool unexpected) const {
     auto* table = Graphics::DeviceImageTable::Existing(state->context);
     require(table != nullptr && state->recorder != nullptr, "expected device images need the device's table and its recorder");
-    return table->Expect(graphicsContext(), *state->recorder, images);
+    auto unserved = table->Expect(graphicsContext(), *state->recorder, images);
+    if (unexpected) table->NoteUnexpectedBatch(*state->recorder);
+    return unserved;
+}
+
+void VulkanDevice::SettleDeviceImageMisses() const {
+    if (!state->deviceImagePath || !Graphics::DeviceImageTable::KeepsUnexpectedPrograms() || state->recorder == nullptr) return;
+    auto* table = Graphics::DeviceImageTable::Existing(state->context);
+    if (table == nullptr) return;
+    std::uint64_t serial = 0;
+    {
+        std::lock_guard lock(GuestMemory::GpuMutex());
+        serial = table->UnexpectedSerial(*state->recorder);
+        if (serial != 0u && !state->recorder->HasTimeline()) state->recorder->Sync();
+    }
+    if (serial == 0u) return;
+    if (state->recorder->HasTimeline()) state->recorder->WaitSerial(serial);
+    std::lock_guard lock(GuestMemory::GpuMutex());
+    if (state->recorder->HasTimeline()) state->recorder->FinishUpTo(serial);
+    table->Settle(graphicsContext(), *state->recorder);
 }
 
 void VulkanDevice::FallBackDeviceImages(const ShaderRecompiler::RecompileResult& result, std::uint64_t codeAddress, const std::string& reason) const {
