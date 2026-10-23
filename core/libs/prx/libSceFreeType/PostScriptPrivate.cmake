@@ -15,7 +15,9 @@ if(BUILD_TESTING)
     add_test(NAME guest_freetype_postscript_private_nid COMMAND guest_freetype_postscript_private_tests ${PATCHED_DIR}/libSceFreeType.prx patched)
     set_tests_properties(guest_freetype_postscript_private guest_freetype_postscript_private_nid PROPERTIES TIMEOUT 20)
     if(WIN32)
-        set_tests_properties(guest_freetype_postscript_private guest_freetype_postscript_private_nid PROPERTIES ENVIRONMENT_MODIFICATION
+        set_tests_properties(guest_freetype_postscript_private PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceFreeType>")
+        set_tests_properties(guest_freetype_postscript_private_nid PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${PATCHED_DIR}")
     endif()
 endif()
