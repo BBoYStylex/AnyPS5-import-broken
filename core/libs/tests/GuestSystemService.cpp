@@ -73,21 +73,23 @@ namespace {
 
 void TestActivation() {
     Require(sceShellCoreUtilActivateInit(0, nullptr) == SYSTEM_SERVICE_ERROR_PARAMETER);
-    std::intptr_t handle = 0;
-    Require(sceShellCoreUtilActivateInit(0, &handle) == SYSTEM_SERVICE_OK);
-    Require(handle != 0);
-
-    Require(sceShellCoreUtilActivateIsActivated(handle, nullptr) == SYSTEM_SERVICE_ERROR_PARAMETER);
-    bool activated = false;
-    Require(sceShellCoreUtilActivateIsActivated(handle, &activated) == SYSTEM_SERVICE_OK);
-    Require(activated == true);
-
+    Require(sceShellCoreUtilActivateIsActivated(1, nullptr) == SYSTEM_SERVICE_ERROR_PARAMETER);
+    Require(sceShellCoreUtilActivateGetStatus(1, nullptr, nullptr) == SYSTEM_SERVICE_ERROR_PARAMETER);
     std::int32_t status = -1;
     std::int32_t result = -1;
-    Require(sceShellCoreUtilActivateGetStatus(handle, nullptr, &result) == SYSTEM_SERVICE_ERROR_PARAMETER);
-    Require(sceShellCoreUtilActivateGetStatus(handle, &status, nullptr) == SYSTEM_SERVICE_ERROR_PARAMETER);
-    Require(sceShellCoreUtilActivateGetStatus(handle, &status, &result) == SYSTEM_SERVICE_OK);
-    Require(status == 0 && result == 0);
+    Require(sceShellCoreUtilActivateGetStatus(1, nullptr, &result) == SYSTEM_SERVICE_ERROR_PARAMETER);
+    Require(sceShellCoreUtilActivateGetStatus(1, &status, nullptr) == SYSTEM_SERVICE_ERROR_PARAMETER);
+
+    std::intptr_t handle = 0;
+    Require(Throws([&] { return sceShellCoreUtilActivateInit(0, &handle); }));
+    Require(handle == 0);
+    bool activated = true;
+    Require(Throws([&] { return sceShellCoreUtilActivateIsActivated(1, &activated); }));
+    Require(activated == true);
+    status = -1;
+    result = -1;
+    Require(Throws([&] { return sceShellCoreUtilActivateGetStatus(1, &status, &result); }));
+    Require(status == -1 && result == -1);
 
     Require(sceShellCoreUtilActivateStart(handle) == SYSTEM_SERVICE_OK);
     Require(sceShellCoreUtilActivateStartAsync(handle) == SYSTEM_SERVICE_OK);

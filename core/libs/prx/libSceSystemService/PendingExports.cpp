@@ -698,23 +698,22 @@ int APS5_VABI sceShellCoreUtilActivateAbort(std::intptr_t handle) {
 
 int APS5_VABI sceShellCoreUtilActivateGetStatus(std::intptr_t handle, std::int32_t* status, std::int32_t* result) {
     (void)handle;
-    if (!status || !result) return SystemServiceParameterInvalid;
-    *status = 0;
-    *result = 0;
+    if (status == nullptr || result == nullptr) return SystemServiceParameterInvalid;
+    NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
 int APS5_VABI sceShellCoreUtilActivateInit(std::int32_t type, std::intptr_t* handle) {
     (void)type;
-    if (!handle) return SystemServiceParameterInvalid;
-    *handle = 1;
+    if (handle == nullptr) return SystemServiceParameterInvalid;
+    NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
 int APS5_VABI sceShellCoreUtilActivateIsActivated(std::intptr_t handle, bool* activated) {
     (void)handle;
-    if (!activated) return SystemServiceParameterInvalid;
-    *activated = true;
+    if (activated == nullptr) return SystemServiceParameterInvalid;
+    NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
