@@ -261,21 +261,6 @@ int APS5_VABI CRYPTO_set_mem_functions_nid_postfix(void) {
     return 0;
 }
 
-int APS5_VABI DES_ecb_encrypt_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI DES_set_key_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI DES_set_odd_parity_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
 int APS5_VABI DTLSv1_client_method_nid_postfix(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
