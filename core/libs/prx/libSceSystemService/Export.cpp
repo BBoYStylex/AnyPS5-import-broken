@@ -69,6 +69,12 @@ int WriteStatus(bool* status, bool value, const char* function) {
     return SYSTEM_SERVICE_OK;
 }
 
+int WriteStatusOrRefuse(bool* status, bool value, int nullOutputError) {
+    if (status == nullptr) return nullOutputError;
+    *status = value;
+    return SYSTEM_SERVICE_OK;
+}
+
 constexpr char MainExecutable[] = "/app0/eboot.bin";
 constexpr char ApplicationRoot[] = "/app0/";
 constexpr char MainExecutableVariable[] = "APS5_EBOOT";
@@ -313,9 +319,9 @@ int APS5_VABI sceLncUtilBlockAppSuspend(const char* reason) {
 }
 
 int APS5_VABI sceLncUtilUnblockAppSuspend(const char* reason) {
-    if (reason == nullptr) NotImplemented_nid_no_patch("sceLncUtilUnblockAppSuspend with a null reason");
     std::lock_guard lock(appSuspendBlockMutex);
-    if (appSuspendBlocks == 0) NotImplemented_nid_no_patch("sceLncUtilUnblockAppSuspend with no block left");
+    if (appSuspendBlocks == 0) return SCE_KERNEL_ERROR_EBUSY;
+    if (reason == nullptr) NotImplemented_nid_no_patch("sceLncUtilUnblockAppSuspend with a null reason while a block is held");
     --appSuspendBlocks;
     return SYSTEM_SERVICE_OK;
 }
@@ -337,16 +343,15 @@ int APS5_VABI sceSystemServiceDisableSuspendNotification() {
 }
 
 int APS5_VABI sceShellCoreUtilGetRemotePlayStatus(bool* active) {
-    return WriteStatus(active, false, __func__);
+    return WriteStatusOrRefuse(active, false, SHELL_CORE_UTIL_ERROR_NULL_OUTPUT);
 }
 
 int APS5_VABI sceSystemServiceGetRemoteplayStatus(bool* active) {
-    if (active == nullptr) return SYSTEM_SERVICE_ERROR_PARAMETER;
     return sceShellCoreUtilGetRemotePlayStatus(active);
 }
 
 int APS5_VABI sceShellCoreUtilGetSharePlayStatus(bool* active) {
-    return WriteStatus(active, false, __func__);
+    return WriteStatusOrRefuse(active, false, SHELL_CORE_UTIL_ERROR_NULL_OUTPUT);
 }
 
 bool APS5_VABI sceShellCoreUtilIsGameLiveStreamingOnAir() {
@@ -358,7 +363,7 @@ bool APS5_VABI sceSystemServiceIsGameLiveStreamingOnAir() {
 }
 
 int APS5_VABI sceShellCoreUtilGetGameLiveStreamingStatus(bool* active) {
-    return WriteStatus(active, sceShellCoreUtilIsGameLiveStreamingOnAir(), __func__);
+    return WriteStatusOrRefuse(active, sceShellCoreUtilIsGameLiveStreamingOnAir(), SHELL_CORE_UTIL_ERROR_NULL_OUTPUT);
 }
 
 bool APS5_VABI sceLncUtilIsShellUiFgAndGameBgCpuMode() {
@@ -416,7 +421,7 @@ bool APS5_VABI sceShellCoreUtilIsExternalStorageAppMoveInProgress() {
 }
 
 int APS5_VABI sceLncUtilIsPs2Emu(bool* emulated) {
-    return WriteStatus(emulated, false, __func__);
+    return WriteStatusOrRefuse(emulated, false, LNC_UTIL_ERROR_NULL_OUTPUT);
 }
 
 int APS5_VABI sceSystemServiceHideSplashScreen(void) {
