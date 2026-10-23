@@ -868,6 +868,20 @@ static void CheckHyperbolic() {
     Require(Near(acosh_nid_postfix(1e300), 691.4686750787736, 1e-15));
 }
 
+static void CheckAsinhfMsunBoundaries() {
+    Require(std::bit_cast<std::uint32_t>(asinhf_nid_postfix(0.0f)) == 0x00000000u);
+    Require(std::bit_cast<std::uint32_t>(asinhf_nid_postfix(-0.0f)) == 0x80000000u);
+    for (const std::uint32_t bits : {0x317fffffu, 0x31800000u, 0x3fffffffu, 0x40000000u,
+                                     0x40000001u, 0x4d800000u, 0x4d800001u, 0x7f7fffffu}) {
+        const float x = std::bit_cast<float>(bits);
+        Require(Near(asinhf_nid_postfix(x), std::asinh(static_cast<double>(x)), 1e-6));
+        Require(Near(asinhf_nid_postfix(-x), std::asinh(-static_cast<double>(x)), 1e-6));
+    }
+    Require(std::isinf(asinhf_nid_postfix(INFINITY)) && asinhf_nid_postfix(INFINITY) > 0.0f);
+    Require(std::isinf(asinhf_nid_postfix(-INFINITY)) && asinhf_nid_postfix(-INFINITY) < 0.0f);
+    Require(std::isnan(asinhf_nid_postfix(std::numeric_limits<float>::quiet_NaN())));
+}
+
 static void CheckScaledHyperbolic() {
     const int rounding = std::fegetround();
     Require(std::fesetround(FE_TONEAREST) == 0);
@@ -1586,6 +1600,7 @@ int main() {
     Require(std::isinf(__powidf2_nid_postfix(-0.0, -3)) && std::signbit(__powidf2_nid_postfix(-0.0, -3)));
     Require(__powidf2_nid_postfix(2.0, -127) == 0x1p-127);
     CheckHyperbolic();
+    CheckAsinhfMsunBoundaries();
     CheckScaledHyperbolic();
     CheckSinhf();
     CheckAtanhf();
