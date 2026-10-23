@@ -496,6 +496,7 @@ private:
     bool prepared = false;
     bool uploaded = false;
     bool committed = false;
+    mutable std::uint64_t directWritesGeneration = 0;
 };
 
 }
