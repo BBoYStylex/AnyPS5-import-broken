@@ -59,6 +59,7 @@ namespace AgcDriver::DriverDetail {
 struct DriverTestAccess {
     static void UseDevice(std::shared_ptr<VulkanDevice> device) { Driver::Get().device = std::move(device); }
     static std::shared_ptr<VulkanDevice> GetDevice() { return Driver::Get().device.Load(); }
+    static void Stop() { Driver::Get().stop(); }
     static void WaitQueue() {
         auto& driver = Driver::Get();
         std::unique_lock lock(driver.mutex);
@@ -2137,28 +2138,33 @@ int CheckDriverPath(bool queued) {
     std::shared_ptr<AgcDriver::VulkanDevice> device = OpenVulkanTestDevice();
     if (device == nullptr) return VulkanTestSkipped;
     AgcDriver::DriverDetail::DriverTestAccess::UseDevice(device);
-    const auto context = AgcDriver::VulkanDeviceTestAccess::ContextOf(*device);
-    auto* recorder = Recorder::Active();
-    Require(recorder != nullptr && recorder->Device() == context.device, "the driver's device did not activate its recorder");
+    const int result = [&] {
+        const auto context = AgcDriver::VulkanDeviceTestAccess::ContextOf(*device);
+        auto* recorder = Recorder::Active();
+        Require(recorder != nullptr && recorder->Device() == context.device, "the driver's device did not activate its recorder");
 #ifdef _WIN32
-    if (queued && PrepareImportWatch(context) == ImportWatch::Unwatch) {
-        std::printf("skipped, host imports are compared here, not write-watched, and a queued fill's HTILE proof needs a write-watched import\n");
-        return VulkanTestSkipped;
-    }
+        if (queued && PrepareImportWatch(context) == ImportWatch::Unwatch) {
+            std::printf("skipped, host imports are compared here, not write-watched, and a queued fill's HTILE proof needs a write-watched import\n");
+            return VulkanTestSkipped;
+        }
 #else
-    SetImportWatch(context, ImportWatch::Watch);
+        SetImportWatch(context, ImportWatch::Watch);
 #endif
-    const auto supported = [&](std::uint32_t samples) { return DepthSupported(context, VK_FORMAT_D32_SFLOAT_S8_UINT, samples) && (context.limits.framebufferStencilSampleCounts & samples) != 0u; };
-    Require(supported(4u), "the native depth driver-path regression requires sampled D32S8 with four samples");
-    std::uint32_t checked = 0u, unavailable = 0u;
-    for (const auto samples : {2u, 4u, 8u}) {
-        if (!supported(samples)) { unavailable += 2u; continue; }
-        for (const bool one : {false, true}) { CheckDriverPathTarget(context, *recorder, samples, one, queued ? DriverFill::Queued : DriverFill::Whole); ++checked; }
-    }
-    if (!queued) CheckDriverPathTarget(context, *recorder, 4u, false, DriverFill::Partial);
-    AgcDriverWaitIdle_nid_postfix();
-    std::printf("Native depth on the driver's device cases checked=%u unavailable=%u\n", checked, unavailable);
-    return 0;
+        const auto supported = [&](std::uint32_t samples) { return DepthSupported(context, VK_FORMAT_D32_SFLOAT_S8_UINT, samples) && (context.limits.framebufferStencilSampleCounts & samples) != 0u; };
+        Require(supported(4u), "the native depth driver-path regression requires sampled D32S8 with four samples");
+        std::uint32_t checked = 0u, unavailable = 0u;
+        for (const auto samples : {2u, 4u, 8u}) {
+            if (!supported(samples)) { unavailable += 2u; continue; }
+            for (const bool one : {false, true}) { CheckDriverPathTarget(context, *recorder, samples, one, queued ? DriverFill::Queued : DriverFill::Whole); ++checked; }
+        }
+        if (!queued) CheckDriverPathTarget(context, *recorder, 4u, false, DriverFill::Partial);
+        AgcDriverWaitIdle_nid_postfix();
+        std::printf("Native depth on the driver's device cases checked=%u unavailable=%u\n", checked, unavailable);
+        return 0;
+    }();
+    device.reset();
+    AgcDriver::DriverDetail::DriverTestAccess::Stop();
+    return result;
 }
 
 }
