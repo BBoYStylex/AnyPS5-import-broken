@@ -22,6 +22,7 @@
 #include <span>
 #include <string>
 #include <tuple>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -998,6 +999,28 @@ void RequireBarrierBeforeRingReadBack(const ShaderRecompiler::SpirvTarget& targe
     Require(std::any_of(stores.begin(), stores.end(), [&](std::size_t store) { return store > first && store < second; }), "the merged hull program reading control point 2's output back waits at no barrier after its control-point writes");
 }
 
+void RequireMergedHullConstantIndices(const ShaderRecompiler::SpirvTarget& target) {
+    std::uint32_t cursor = 0;
+    const auto hull = Compile(target, ShaderStage::TessellationControl, MergedHullCode, cursor, MergedTriangles);
+    const auto words = hull.spirv.Words();
+    std::unordered_set<std::uint32_t> constants;
+    std::unordered_set<std::uint32_t> folded;
+    for (std::size_t at = 5; at + 1u < words.size(); at += words[at] >> 16u) {
+        const auto count = words[at] >> 16u;
+        Require(count != 0u && at + count <= words.size(), "the merged hull program compiled to a malformed SPIR-V instruction");
+        const auto opcode = words[at] & 0xffffu;
+        if (opcode == spv::OpConstant && count >= 3u) constants.insert(words[at + 2u]);
+        const bool integer = opcode == spv::OpIAdd || opcode == spv::OpIMul || opcode == spv::OpUDiv || opcode == spv::OpUMod || opcode == spv::OpShiftRightLogical || opcode == spv::OpBitwiseAnd;
+        const auto operand = [&](std::uint32_t id) { return constants.contains(id) || folded.contains(id); };
+        if (integer && count == 5u && operand(words[at + 3u]) && operand(words[at + 4u])) folded.insert(words[at + 2u]);
+        if (opcode == spv::OpAccessChain) {
+            for (std::uint32_t index = 4u; index < count; ++index) {
+                Require(!folded.contains(words[at + index]), "the merged hull program indexes a tessellation attribute with arithmetic on constants instead of a constant, which AMD's Windows driver reads wrongly");
+            }
+        }
+    }
+}
+
 void RequireRegisteredMergedStages() {
     const auto low = [](const auto& code) { return static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(code.data()) >> 8u); };
     const auto high = [](const auto& code) { return static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(code.data()) >> 40u); };
@@ -1055,6 +1078,7 @@ int main() {
         ExpectRefusal(target, ShaderStage::TessellationControl, MergedHullOutsidePatch, "reads LDS outside its patch's control point records", MergedTriangles);
         ExpectRefusal(target, ShaderStage::TessellationControl, MergedHullReadLane, "another lane's register", MergedTriangles);
         RequireMergedHullWithoutSubgroups(target);
+        RequireMergedHullConstantIndices(target);
         RequirePatches(*device, target, MergedHullCode, "merged hull program", MergedTriangles, MergedHullCode);
         RequirePatches(*device, target, MergedHullRegisters, "merged hull program storing its local part's registers", MergedTriangles, MergedHullRegisters);
         RequireBarrierBeforeRingReadBack(target);

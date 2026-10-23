@@ -1,6 +1,9 @@
 #include "IntermediateRepresentation/IrBuilder.hpp"
 #include "IntermediateRepresentation/IrProgram.hpp"
+#include "Optimization/ShaderStageInputInfo.hpp"
 #include "Optimization/TessellationLowering.hpp"
+#include "SpirvBackend/SpirvEmitter.hpp"
+#include <spirv/unified1/spirv.hpp>
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -8,7 +11,9 @@
 #include <exception>
 #include <functional>
 #include <iterator>
+#include <stdexcept>
 #include <string>
+#include <unordered_map>
 
 using namespace ShaderRecompiler;
 
@@ -250,6 +255,52 @@ void SkipHullProgram(Hull& hull, IrBlock& entry, std::uint32_t lanes, IrBlock& s
     info.condition = &outside;
 }
 
+std::uint32_t EmittedEvaluationControlPoint(std::uint32_t address) {
+    constexpr std::uint32_t ControlStride = 16u;
+    IrProgram program;
+    IrBuilder builder{program};
+    program.SetWaveSize(64);
+    program.Resources().stage = IrShaderStage::TessellationEvaluation;
+    program.Resources().srtPlanComplete = true;
+    program.Resources().resourceTrackingComplete = true;
+    program.Metadata().shaderInfoComplete = true;
+    program.Metadata().bindingLayoutComplete = true;
+    program.Metadata().tessellationControlStride = ControlStride;
+    auto& block = program.CreateBlock();
+    program.SetEntryBlock(block);
+    program.BlockOrder().push_back(&block);
+    BlockInfo info;
+    info.id = block.Id();
+    program.Metadata().blockInfo.push_back(info);
+    builder.SetInsertionPoint(block);
+    auto& read = builder.Emit(IrOpcode::GetTessellationAttribute, IrType::U32, {&builder.Constant(static_cast<std::uint32_t>(TessellationAttribute::EvaluationInput)), &builder.Constant(address), &builder.ConstantBool(true)});
+    static_cast<void>(builder.Emit(IrOpcode::ReferenceU32, IrType::Void, {&read}));
+    ShaderVertexInputInfo vertex;
+    vertex.tess.inputControlPoints = InputControlPoints;
+    vertex.tess.outputControlPoints = InputControlPoints;
+    vertex.tess.domain = 1u;
+    vertex.tess.partitioning = 2u;
+    vertex.tess.outputTopology = 2u;
+    ShaderStageInputInfo inputs;
+    inputs.vertex = &vertex;
+    CompiledBindingLayout bindings;
+    bindings.layout = program.Metadata().bindings;
+    SpirvTargetOptions target{};
+    target.vulkanVersion = 0x00401000;
+    target.spirvVersion = 0x00010300;
+    target.subgroupSize = 64;
+    const auto words = SpirvEmitter().Emit(program, inputs, bindings, target);
+    std::unordered_map<std::uint32_t, std::uint32_t> constants;
+    for (std::size_t at = 5; at < words.size(); at += words[at] >> 16u) {
+        const auto count = words[at] >> 16u;
+        if (count == 0u || at + count > words.size()) throw std::runtime_error("the domain program compiled to a malformed SPIR-V instruction");
+        const auto opcode = words[at] & 0xffffu;
+        if (opcode == spv::OpConstant && count == 4u) constants[words[at + 2u]] = words[at + 3u];
+        if (opcode == spv::OpAccessChain && count == 7u) return constants.at(words[at + 4u]);
+    }
+    throw std::runtime_error("the domain program reads no control point attribute");
+}
+
 bool run(const char* name, const std::function<bool()>& body) {
     bool passed = false;
     try {
@@ -433,6 +484,10 @@ int main() {
         hull.writeRing(hull.ownControlPoint(0u));
         hull.readRing(hull.controlPoint(OutputControlPoints, 0u), hull.builder.ConstantBool(true));
         return RingRefusedBecause(hull.program, "reads off-chip memory outside its patch's control points");
+    });
+
+    passed &= run("a domain read at an immediate address past the last control point reads the last control point", [] {
+        return EmittedEvaluationControlPoint(InputControlPoints * 16u) == InputControlPoints - 1u;
     });
 
     return passed ? 0 : 1;
