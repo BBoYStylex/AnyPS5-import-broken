@@ -1315,6 +1315,7 @@ int APS5_VABI bind_nid_postfix(int descriptor, const void* address, std::uint32_
     sockaddr_storage native{};
     socklen_t size;
     if (!Address(address, length, native, size)) return -1;
+    if (native.ss_family != (socket->family == 2 ? AF_INET : AF_INET6)) return Fail(47);
     return ::bind(socket->value, reinterpret_cast<sockaddr*>(&native), size) ? Fail(NativeError()) : 0;
 }
 int APS5_VABI shutdown_nid_postfix(int descriptor, int how) {
