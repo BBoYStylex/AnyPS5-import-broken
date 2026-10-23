@@ -89,6 +89,17 @@ std::int64_t NativePwrite(std::int32_t fd, const void* buf, std::size_t nbyte, s
     return NativePositioned_nid_no_patch(fd, const_cast<void*>(buf), nbyte, offset, true);
 #else
     const auto result = File::PwriteSharedMemory_nid_no_patch(fd, buf, nbyte, offset);
+#ifdef __APPLE__
+    // macOS pwrite honours the offset on an O_APPEND descriptor; the PS5 writes at the end and leaves the offset unchanged.
+    if (const int flags = ::fcntl(fd, F_GETFL); result == -2 && flags >= 0 && (flags & O_APPEND) != 0) {
+        const off_t position = ::lseek(fd, 0, SEEK_CUR);
+        const auto written = static_cast<std::int64_t>(::write(fd, buf, nbyte));
+        const int error = errno;
+        if (position >= 0) ::lseek(fd, position, SEEK_SET);
+        errno = error;
+        return written;
+    }
+#endif
     return result == -2 ? static_cast<std::int64_t>(::pwrite(fd, buf, nbyte, static_cast<off_t>(offset))) : result;
 #endif
 }

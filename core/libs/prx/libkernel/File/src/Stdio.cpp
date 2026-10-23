@@ -399,8 +399,28 @@ static int NativeFlock(int descriptor, int operation) {
 static std::int64_t NativePread(int descriptor, void* buf, std::size_t nbytes, std::int64_t offset) {
     return static_cast<std::int64_t>(::pread(descriptor, buf, nbytes, static_cast<off_t>(offset)));
 }
+#ifdef __APPLE__
+// macOS pwrite and pwritev honour the offset on an O_APPEND descriptor; the PS5 and Linux write at the end of the file and
+// leave the file offset unchanged, so on macOS such writes go through write or writev and the offset is put back.
+static std::int64_t AppendingWritev(int descriptor, const struct iovec* iov, int iovcnt) {
+    const int flags = ::fcntl(descriptor, F_GETFL);
+    if (flags < 0 || (flags & O_APPEND) == 0) return -2;
+    const off_t position = ::lseek(descriptor, 0, SEEK_CUR);
+    const auto result = static_cast<std::int64_t>(::writev(descriptor, iov, iovcnt));
+    const int error = errno;
+    if (position >= 0) ::lseek(descriptor, position, SEEK_SET);
+    errno = error;
+    return result;
+}
+#endif
 static std::int64_t NativePwrite(int descriptor, const void* buf, std::size_t nbytes, std::int64_t offset) {
     const auto result = File::PwriteSharedMemory_nid_no_patch(descriptor, buf, nbytes, offset);
+#ifdef __APPLE__
+    if (result == -2) {
+        const struct iovec single{const_cast<void*>(buf), nbytes};
+        if (const auto appended = AppendingWritev(descriptor, &single, 1); appended != -2) return appended;
+    }
+#endif
     return result == -2 ? static_cast<std::int64_t>(::pwrite(descriptor, buf, nbytes, static_cast<off_t>(offset))) : result;
 }
 static_assert(sizeof(KernelIovec) == sizeof(struct iovec));
@@ -1608,6 +1628,7 @@ int64_t APS5_VABI sceKernelPwritev(int d, const KernelIovec* guestIov, int iovcn
     if (sharedResult != -2) return sharedResult < 0 ? SceErrorFromErrno(errno) : sharedResult;
 #ifdef __APPLE__
     if (iovcnt == 0) return 0;
+    if (const auto appended = AppendingWritev(d, NativeIovecs(iov), iovcnt); appended != -2) return appended < 0 ? SceErrorFromErrno(errno) : appended;
 #endif
     const auto result = static_cast<std::int64_t>(::pwritev(d, NativeIovecs(iov), iovcnt, static_cast<off_t>(offset)));
     return result < 0 ? SceErrorFromErrno(errno) : result;
