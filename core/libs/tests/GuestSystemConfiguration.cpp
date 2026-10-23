@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <stdexcept>
 #include <vector>
 struct SceKernelSystemSwVersion {
@@ -383,8 +384,64 @@ static void CheckOsReleaseDateSysctl() {
     length = sizeof(value);
     Require(sysctl_nid_postfix(deeper, 3, &value, &length, nullptr, 0) == -1 && *__error_nid_postfix() == 20);
 }
+struct BootTimeval {
+    std::int64_t tv_sec;
+    std::int64_t tv_usec;
+};
+static_assert(sizeof(BootTimeval) == 16);
+struct BootTimespec {
+    std::int64_t tv_sec;
+    std::int64_t tv_nsec;
+};
+extern "C" int APS5_VABI clock_gettime_nid_postfix(int, BootTimespec*);
+static void CheckBootTimeSysctl() {
+    const int mib[] = {1, 21};
+    *__error_nid_postfix() = 13;
+    std::size_t length = 0;
+    Require(sysctl_nid_postfix(mib, 2, nullptr, &length, nullptr, 0) == 0 && length == sizeof(BootTimeval));
+    length = 0;
+    Require(sysctlbyname_nid_postfix("kern.boottime", nullptr, &length, nullptr, 0) == 0 && length == sizeof(BootTimeval));
+    BootTimeval first{};
+    length = sizeof(first);
+    Require(sysctl_nid_postfix(mib, 2, &first, &length, nullptr, 0) == 0 && length == sizeof(first));
+    Require(first.tv_sec > 0 && first.tv_sec <= static_cast<std::int64_t>(std::time(nullptr)));
+    Require(first.tv_usec >= 0 && first.tv_usec < 1000000);
+    BootTimespec now{};
+    BootTimespec uptime{};
+    Require(clock_gettime_nid_postfix(5, &uptime) == 0 && clock_gettime_nid_postfix(0, &now) == 0);
+    const std::int64_t drift = (first.tv_sec + uptime.tv_sec - now.tv_sec) * 1000000 + first.tv_usec + uptime.tv_nsec / 1000 - now.tv_nsec / 1000;
+    Require(drift > -1000000 && drift < 1000000);
+    BootTimeval second{};
+    length = sizeof(second);
+    Require(sysctl_nid_postfix(mib, 2, &second, &length, nullptr, 0) == 0 && length == sizeof(second));
+    Require(second.tv_sec == first.tv_sec && second.tv_usec == first.tv_usec);
+    BootTimeval named{};
+    length = 32;
+    Require(sysctlbyname_nid_postfix("kern.boottime", &named, &length, nullptr, 0) == 0 && length == sizeof(named));
+    Require(named.tv_sec == first.tv_sec && named.tv_usec == first.tv_usec);
+    Require(*__error_nid_postfix() == 13);
+
+    int namedMib[3] = {0x5a5a5a5a, 0x5a5a5a5a, 0x5a5a5a5a};
+    std::size_t mibLength = 3;
+    Require(sysctlnametomib_nid_postfix("kern.boottime", namedMib, &mibLength) == 0 && mibLength == 2);
+    Require(namedMib[0] == 1 && namedMib[1] == 21 && namedMib[2] == 0x5a5a5a5a);
+
+    unsigned char truncated[16];
+    std::memset(truncated, 0xaa, sizeof(truncated));
+    length = 8;
+    Require(sysctl_nid_postfix(mib, 2, truncated, &length, nullptr, 0) == -1 && *__error_nid_postfix() == 12);
+    Require(length == 8 && std::memcmp(truncated, &first.tv_sec, 8) == 0 && truncated[8] == 0xaa);
+    std::memset(truncated, 0xaa, sizeof(truncated));
+    length = 8;
+    Require(sysctlbyname_nid_postfix("kern.boottime", truncated, &length, nullptr, 0) == -1 && *__error_nid_postfix() == 12);
+    Require(length == 8 && truncated[8] == 0xaa);
+
+    length = sizeof(first);
+    Require(sysctl_nid_postfix(mib, 2, &first, &length, &first, sizeof(first)) == -1 && *__error_nid_postfix() == 1);
+    Require(sysctlbyname_nid_postfix("kern.boottime", &first, &length, &first, sizeof(first)) == -1 && *__error_nid_postfix() == 1);
+}
 static void CheckLeafWithTrailingComponent() {
-    const int leaves[][2] = {{6, 3}, {6, 2}, {6, 5}, {6, 7}, {1, 24}, {1, 37}, {1, 50}};
+    const int leaves[][2] = {{6, 3}, {6, 2}, {6, 5}, {6, 7}, {1, 21}, {1, 24}, {1, 37}, {1, 50}};
     for (const auto& leaf : leaves) {
         const int mib[] = {leaf[0], leaf[1], 0};
         char buffer[8] = {};
@@ -688,6 +745,7 @@ static void CheckNameToMib() {
         {"hw.physmem", {6, 5}, 2},
         {"hw.realmem", {6, 12}, 2},
         {"kern.arandom", {1, 37}, 2},
+        {"kern.boottime", {1, 21}, 2},
         {"kern.rng_pseudo", {1, 50}, 2},
         {"kern.proc.pathname", {1, 14, 12}, 3},
     };
@@ -794,6 +852,7 @@ int main() {
     CheckSystemStringSysctl();
     CheckSystemStringNames();
     CheckOsReleaseDateSysctl();
+    CheckBootTimeSysctl();
     CheckLeafWithTrailingComponent();
     CheckMeasuredAbsentSysctlMibs();
     CheckSystemSwVersion();
