@@ -111,6 +111,18 @@ int main() {
     Require(data[0].x_axis == -300 && data[0].y_axis == 150 && data[0].buttons == 0);
     Require(sceMouseRead(MOUSE_HANDLE, data, 1) == 0);
 
+    MouseInputEvent still{};
+    MousePublishInput_nid_no_patch(still);
+    Require(sceMouseRead(MOUSE_HANDLE, data, 1) == 0);
+    for (int i = 0; i < 300; ++i) {
+        MouseInputEvent alternating{};
+        alternating.x = i % 2;
+        MousePublishInput_nid_no_patch(alternating);
+    }
+    Require(sceMouseRead(MOUSE_HANDLE, data, 8) == 1);
+    Require(data[0].x_axis == 150 && data[0].y_axis == 0);
+    Require(sceMouseRead(MOUSE_HANDLE, data, 1) == 0);
+
     MouseInputEvent step{};
     step.x = 3;
     MousePublishInput_nid_no_patch(step);

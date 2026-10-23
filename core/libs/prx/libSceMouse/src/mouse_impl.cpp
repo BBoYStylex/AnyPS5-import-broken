@@ -119,6 +119,7 @@ void Publish(const MouseInputEvent& event) {
         return;
     }
     if (!opened) return;
+    if (event.button == 0 && !event.resetButtons && !event.connectionChange && event.x == 0 && event.y == 0 && event.wheel == 0 && event.tilt == 0) return;
     if (event.resetButtons) buttons = 0;
     if (event.button != 0) {
         if (event.pressed) buttons |= event.button;
