@@ -201,10 +201,7 @@ int CreateAnonymousFile() {
         const int error = _wsopen_s(&descriptor, path.c_str(),
                                     _O_CREAT | _O_EXCL | _O_RDWR | _O_BINARY | _O_TEMPORARY | _O_SHORT_LIVED | _O_NOINHERIT,
                                     _SH_DENYNO, _S_IREAD | _S_IWRITE);
-        if (error == 0) {
-            File::RememberDescriptor(descriptor, SCE_KERNEL_O_RDWR, true);
-            return descriptor;
-        }
+        if (error == 0) return descriptor;
         if (error != EEXIST) {
             errno = error;
             return -1;
@@ -467,7 +464,12 @@ extern "C" int APS5_VABI shm_open_nid_postfix(const char* path, int flags, int m
     }
     if (accessMode == SCE_KERNEL_O_RDONLY) return Fail(GuestInvalid);
     const int descriptor = CreateAnonymousFile();
-    if (descriptor >= 0) return descriptor;
+    if (descriptor >= 0) {
+#ifdef _WIN32
+        File::RememberDescriptor(descriptor, flags, true);
+#endif
+        return descriptor;
+    }
     const int error = errno;
     if (const int guest = GuestError(error)) return Fail(guest);
     throw std::runtime_error("shm_open: creating the host anonymous file failed, errno=" + std::to_string(error));
