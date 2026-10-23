@@ -26,8 +26,10 @@ def high_refresh_limitation(output):
     return bool(reasons) and all(HIGH_REFRESH_LIMITATION.fullmatch(reason) for reason in reasons)
 
 
-def skips(path):
+def skips(path, require_tests=False):
+    found = False
     for case in ET.parse(path).getroot().iter("testcase"):
+        found = True
         if case.get("status") == "disabled":
             raise ValueError(f"{path}: testcase {case.get('name')!r} is disabled and was not run")
         skipped = case.find("skipped")
@@ -39,6 +41,8 @@ def skips(path):
         output = ["skipped, " + reason.strip() for reason in (skipped.get("message", ""), skipped.text or "") if reason.strip()]
         output += [case.findtext(channel) or "" for channel in ("system-out", "system-err")]
         yield name, "\n".join(output)
+    if require_tests and not found:
+        raise ValueError(f"{path}: report contains no testcases")
 
 
 def main(argv=None):
@@ -49,9 +53,10 @@ def main(argv=None):
     parser.add_argument("junit", type=Path, help="the file written by ctest --output-junit")
     parser.add_argument("--job", choices=("linux", "windows"), default="linux")
     parser.add_argument("--list", action="store_true", help="print the skipped tests and why the file says they skipped")
+    parser.add_argument("--require-tests", action="store_true", help="fail if the report contains no testcases")
     args = parser.parse_args(argv)
     try:
-        found = sorted(skips(args.junit))
+        found = sorted(skips(args.junit, require_tests=args.require_tests))
     except (OSError, ET.ParseError, ValueError) as error:
         parser.error(str(error))
     if args.list:
