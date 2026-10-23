@@ -4435,7 +4435,7 @@ void GuestBufferMemory::UploadPrepare(bool addressable) {
 
 void GuestBufferMemory::completeSpaceWrites() const {
     auto* recorder = Recorder::Active();
-    if (recorder == nullptr || Recorder::InCompletion()) return;
+    if (recorder == nullptr || Recorder::InCompletion() || !AnyPendingCpuWrites(context)) return;
     const auto& base = space->base;
     std::vector<std::pair<std::uint64_t, std::uint64_t>> writes;
     std::vector<std::size_t> candidates;
