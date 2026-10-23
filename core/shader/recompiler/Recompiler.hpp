@@ -395,6 +395,7 @@ struct FragmentParameter {
     bool custom = false;
     bool flatP10 = false;
     bool vertexOrder = false;
+    bool flatP20 = false;
     bool operator==(const FragmentParameter&) const = default;
 };
 

@@ -70,6 +70,8 @@ struct ColorTarget {
     std::uint32_t dccControl = 0;
     std::uint32_t partialWriteMask = 0;
     std::uint32_t mergeBlend = 0;
+    std::uint64_t fmaskAddress = 0;
+    std::uint32_t fmaskPipeBankXor = 0;
 };
 
 struct DepthTarget {
@@ -142,6 +144,7 @@ struct State {
     bool ditheredAlphaToCoverage = false;
     bool perSampleShading = false;
     bool mergedCoverage = false;
+    bool truncatedCoverage = false;
     VkConservativeRasterizationModeEXT conservativeRasterization = VK_CONSERVATIVE_RASTERIZATION_MODE_DISABLED_EXT;
     VkRect2D scissor;
     VkCullModeFlags cullMode;
