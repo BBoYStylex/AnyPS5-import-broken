@@ -218,7 +218,7 @@ if(TARGET mimalloc)
     target_compile_features(pe_import_first PRIVATE cxx_std_20)
     if(MINGW)
         target_compile_options(pe_import_first PRIVATE -fasynchronous-unwind-tables)
-        target_link_options(pe_import_first PRIVATE -static -static-libgcc -static-libstdc++)
+        target_link_options(pe_import_first PRIVATE -municode -static -static-libgcc -static-libstdc++)
     endif()
     add_custom_command(
             OUTPUT ${PATCHED_DIR}/mimalloc.dll
@@ -713,9 +713,11 @@ if(BUILD_TESTING)
 
     add_test_executable(guest_vorbis_dec_tests tests/GuestVorbisDec.cpp)
     target_include_directories(guest_vorbis_dec_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-    target_link_libraries(guest_vorbis_dec_tests PRIVATE libSceVorbisDec libc)
+    target_compile_definitions(guest_vorbis_dec_tests PRIVATE OV_EXCLUDE_STATIC_CALLBACKS)
+    target_link_libraries(guest_vorbis_dec_tests PRIVATE libSceVorbisDec vorbisenc vorbisfile vorbis ogg libc)
     configure_windows_unwind(guest_vorbis_dec_tests)
     add_test(NAME guest_vorbis_dec COMMAND guest_vorbis_dec_tests)
+    set_tests_properties(guest_vorbis_dec PROPERTIES TIMEOUT 30)
     if(WIN32)
         set_tests_properties(guest_vorbis_dec PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceVorbisDec>")
