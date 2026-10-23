@@ -748,6 +748,19 @@ if(BUILD_TESTING)
     endif()
 endif()
 
+if(BUILD_TESTING AND NOT WIN32)
+    add_test_executable(agc_collect_memo_generation_tests
+            tests/CollectMemoGeneration.cpp
+            Execution/src/GuestMemory.cpp
+            Execution/src/PerformanceTraceThread.cpp
+    )
+    target_include_directories(agc_collect_memo_generation_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(agc_collect_memo_generation_tests PRIVATE shader_recompiler_agc_driver libc)
+    set_target_properties(agc_collect_memo_generation_tests PROPERTIES CXX_EXTENSIONS OFF)
+    add_test(NAME agc_collect_memo_generation COMMAND agc_collect_memo_generation_tests)
+    set_tests_properties(agc_collect_memo_generation PROPERTIES TIMEOUT 30)
+endif()
+
 add_test_executable(agc_thread_priority_tests EXCLUDE_FROM_ALL
         tests/ThreadPriority.cpp
         Execution/src/ThreadPriority.cpp
@@ -1447,6 +1460,7 @@ target_include_directories(agc_driver_recorder_tests PRIVATE
 )
 
 target_link_libraries(agc_driver_recorder_tests PRIVATE
+        libSceAgc
         libkernel
         libSceAgcDriver
         SDL2-static
@@ -1464,6 +1478,12 @@ if(BUILD_TESTING)
         ENVIRONMENT "APS5_PROFILE_GPU=1" TIMEOUT 15 SKIP_RETURN_CODE 77)
     if(WIN32)
         set_tests_properties(agc_recorder_device_selection agc_gpu_timing_complete agc_gpu_timing_incomplete PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+    endif()
+    add_test(NAME agc_command_memory_reuse COMMAND agc_driver_recorder_tests --command-reuse-only)
+    set_tests_properties(agc_command_memory_reuse PROPERTIES SKIP_RETURN_CODE 77)
+    if(WIN32)
+        set_tests_properties(agc_command_memory_reuse PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
     endif()
     add_test(NAME agc_pipeline_cache COMMAND agc_driver_recorder_tests --pipeline-cache-only)
@@ -3187,12 +3207,15 @@ if(BUILD_TESTING)
     set_tests_properties(agc_driver_covered_centroid_state PROPERTIES TIMEOUT 30)
     add_test(NAME agc_driver_sample_location_grid_fallback COMMAND agc_driver_graphics_tests --sample-location-grid-fallback)
     set_tests_properties(agc_driver_sample_location_grid_fallback PROPERTIES TIMEOUT 30)
+    add_test(NAME agc_driver_unobserved_provoking_vertex COMMAND agc_driver_graphics_tests --unobserved-provoking-vertex)
+    set_tests_properties(agc_driver_unobserved_provoking_vertex PROPERTIES TIMEOUT 30)
     add_test(NAME agc_driver_sample_order_planning COMMAND agc_driver_graphics_tests --sample-order)
     set_tests_properties(agc_driver_sample_order_planning PROPERTIES TIMEOUT 30)
     if(WIN32)
         set_tests_properties(agc_compute_descriptor_layout_flags PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
         set_tests_properties(agc_driver_covered_centroid_state PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
         set_tests_properties(agc_driver_sample_location_grid_fallback PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+        set_tests_properties(agc_driver_unobserved_provoking_vertex PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
         set_tests_properties(agc_driver_sample_order_planning PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
     endif()
     add_test(NAME agc_compute_pipeline_capture COMMAND agc_compute_pipeline_capture_tests)
