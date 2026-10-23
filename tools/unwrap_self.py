@@ -33,6 +33,7 @@ import argparse
 import math
 import struct
 import sys
+import tempfile
 from collections import Counter
 from pathlib import Path
 
@@ -235,8 +236,8 @@ def check_decrypted(data, headers):
 
 
 def unwrap(path, output, verbose=False):
-    source, destination = Path(path), Path(output)
-    if source.resolve() == destination.resolve() or (destination.exists() and source.samefile(destination)):
+    source, destination = Path(path), Path(output).resolve()
+    if source.resolve() == destination or (destination.exists() and source.samefile(destination)):
         raise Refused("output aliases the input container")
     data = bytes(source.read_bytes())
     if len(data) < FIRST_REGION:
@@ -326,10 +327,18 @@ def unwrap(path, output, verbose=False):
             print("  [%2d] %-18s vaddr=%#011x filesz=%#010x offset=%#010x%s"
                   % (item["index"], name, item["vaddr"], item["size"], item["new"], moved))
 
-    destination = Path(output)
-    if destination.parent != Path(""):
-        destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_bytes(result)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="wb", dir=destination.parent, prefix=".unwrap-self-", delete=False) as temporary:
+            temporary_path = Path(temporary.name)
+            temporary.write(result)
+        if sys.platform != "win32" and destination.exists():
+            temporary_path.chmod(destination.stat().st_mode)
+        temporary_path.replace(destination)
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
     return len(result)
 
 
