@@ -1276,14 +1276,17 @@ int APS5_VABI sceNetConnect(int s, const void* addr, uint32_t addrlen) {
     if (native.ss_family != (socket.family == NET_AF_INET ? AF_INET : AF_INET6)) return fail(NET_EAFNOSUPPORT);
 #ifdef __APPLE__
     if (ConnectRetryingLoopbackReset_nid_no_patch(socket.native->value, reinterpret_cast<const sockaddr*>(&native), native_length, socket.type == NET_SOCK_STREAM && !socket.native->nonblock.load()) == 0) {
+        note_local_address(s, socket);
+        return 0;
+    }
 #else
     if (::connect(socket.native->value, reinterpret_cast<const sockaddr*>(&native), native_length) == 0) {
-#endif
-#if defined(_WIN32) || defined(__APPLE__)
+#ifdef _WIN32
         note_local_address(s, socket);
 #endif
         return 0;
     }
+#endif
 #ifdef _WIN32
     if (WSAGetLastError() == WSAEWOULDBLOCK) {
         if (socket.native->nonblock) return fail(NET_EINPROGRESS);
