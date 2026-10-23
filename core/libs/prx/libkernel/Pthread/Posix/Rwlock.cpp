@@ -13,7 +13,6 @@ namespace {
 
 constexpr int GUEST_REALTIME_CLOCK = 0;
 constexpr int PROCESS_PRIVATE = 0;
-PthreadRwlockattr const DESTROYED_ATTR = reinterpret_cast<PthreadRwlockattr>(std::uintptr_t{1});
 
 int toPosix(int result) {
     if (result == 0)
@@ -51,9 +50,9 @@ int APS5_VABI pthread_rwlock_init_nid_postfix(PthreadRwlock* rwlock, const Pthre
 }
 
 int APS5_VABI pthread_rwlockattr_destroy_nid_postfix(PthreadRwlockattr* attr) {
-    if (attr && *attr == DESTROYED_ATTR) throw std::runtime_error("pthread_rwlockattr_destroy: destroyed attr");
+    if (attr && *attr == DESTROYED_RWLOCKATTR) throw std::runtime_error("pthread_rwlockattr_destroy: destroyed attr");
     const int result = toPosix(scePthreadRwlockattrDestroy(attr));
-    *attr = DESTROYED_ATTR;
+    *attr = DESTROYED_RWLOCKATTR;
     return result;
 }
 
