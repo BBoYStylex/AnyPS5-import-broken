@@ -256,18 +256,32 @@ static void CheckShortCharacterFields() {
     Require(swscanf_nid_postfix(u"5 a", u"%d %3lc%n", &value, output, &count) == 2 && value == 5 && count == 3,
             "short character field after another assignment");
     Require(output[0] == u'a' && output[1] == 0xa55a && output[2] == 0xa55a, "short field after assignment does not terminate");
-    for (unsigned int capacity : {0u}) {
-        char16_t guarded[]{0xa55a, 0xa55a, 0xa55a};
-        Require(Throws([&] { swscanf_s_nid_postfix(u"a", u"%3lc", guarded + 1, capacity); }),
-                "short secure field with capacity below width is explicitly unsupported");
-        Require(guarded[0] == 0xa55a && guarded[1] == 0xa55a && guarded[2] == 0xa55a,
-                "unsupported short secure field leaves output untouched");
-    }
     char bytes[]{'?', '?', '?', '?'};
     count = -1;
     Require(swscanf_nid_postfix(u"ab", u"%3c%n", bytes + 1, &count) == 1 && count == 2,
             "short narrow destination follows FreeBSD character conversion");
     Require(bytes[0] == '?' && bytes[1] == 'a' && bytes[2] == 'b' && bytes[3] == '?', "short narrow destination bounds");
+}
+
+static void CheckZeroCapacityCharacterFields() {
+    for (const char16_t* input : {u"a", u"ab", u"abc", u"abcd"}) {
+        char16_t output[]{0xa55a, 0xa55a, 0xa55a};
+        int count = -1, result = -1;
+        *__error_nid_postfix() = 0;
+        Require(!Throws([&] { result = swscanf_s_nid_postfix(input, u"%3lc%n", output + 1, 0u, &count); }),
+                "zero-capacity wide character field does not throw");
+        const int error = *__error_nid_postfix();
+        Require(result == 0, "zero-capacity wide character field returns no assignment");
+        Require(count == -1, "zero-capacity wide character field does not reach percent n");
+        Require(error == 0, "zero-capacity wide character field preserves errno");
+        for (const char16_t unit : output) Require(unit == 0xa55a, "zero-capacity wide character field leaves output untouched");
+    }
+    char16_t output[]{0xa55a, 0xa55a, 0xa55a};
+    int value = -1, count = -1, result = -1;
+    Require(!Throws([&] { result = swscanf_s_nid_postfix(u"7 a", u"%d %3lc%n", &value, output + 1, 0u, &count); }),
+            "zero-capacity field after an assignment does not throw");
+    Require(result == 1 && value == 7 && count == -1, "zero-capacity field retains only prior assignments");
+    for (const char16_t unit : output) Require(unit == 0xa55a, "zero-capacity field after an assignment leaves output untouched");
 }
 
 static void CheckSecureCharacterCapacities() {
@@ -316,6 +330,7 @@ static void CheckSecureCharacterCapacities() {
 }
 
 int main() {
+    CheckZeroCapacityCharacterFields();
     CheckSecureCharacterCapacities();
     CheckShortCharacterFields();
     CheckStoul();

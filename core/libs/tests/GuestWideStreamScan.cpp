@@ -202,6 +202,23 @@ static void CheckShortCharacterFields() {
     }
 }
 
+static void CheckZeroCapacityCharacterFields() {
+    for (bool indirect : {false, true}) {
+        FileStream* stream = Open("a");
+        char16_t output[]{0xa55a, 0xa55a, 0xa55a};
+        int count = -1;
+        *__error_nid_postfix() = 0;
+        const int result = indirect ? ScanStreamSized(stream, u"%3lc%n", output + 1, 0u, &count)
+                                    : fwscanf_s_nid_postfix(stream, u"%3lc%n", output + 1, 0u, &count);
+        const int error = *__error_nid_postfix();
+        Require(result == 0, "zero-capacity stream character field returns no assignment");
+        Require(count == -1, "zero-capacity stream character field does not reach percent n");
+        Require(error == 0, "zero-capacity stream character field preserves errno");
+        for (const char16_t unit : output) Require(unit == 0xa55a, "zero-capacity stream character field leaves output untouched");
+        Close(stream);
+    }
+}
+
 static void CheckSecureCharacterCapacities() {
     const char* inputs[]{"", "a", "ab", "abc", "abcd"};
     for (const char* input : inputs) {
@@ -244,6 +261,7 @@ static void CheckSecureCharacterCapacities() {
 }
 
 int main() {
+    CheckZeroCapacityCharacterFields();
     CheckSecureCharacterCapacities();
     CheckShortCharacterFields();
     CheckConsumption();
