@@ -31,6 +31,9 @@
 #include <unistd.h>
 #ifdef __linux__
 #include <sys/uio.h>
+#elif defined(__APPLE__)
+#include <mach/mach.h>
+#include <mach/mach_vm.h>
 #endif
 #endif
 #include "prx/libc/include/General.hpp"
@@ -705,13 +708,14 @@ extern "C" bool GuestCopyOut_nid_no_patch(void* destination, const void* source,
     const ssize_t copied = ::process_vm_writev(::getpid(), &local, 1, &remote, 1, 0);
     if (copied < 0) {
         if (errno == EFAULT) return false;
-        std::memcpy(destination, source, bytes);
-        return true;
+        throw std::runtime_error("GuestCopyOut: process_vm_writev failed with errno " + std::to_string(errno));
     }
     return static_cast<std::size_t>(copied) == bytes;
+#elif defined(__APPLE__)
+    return ::mach_vm_write(::mach_task_self(), reinterpret_cast<mach_vm_address_t>(destination),
+        reinterpret_cast<vm_offset_t>(source), static_cast<mach_msg_type_number_t>(bytes)) == KERN_SUCCESS;
 #else
-    std::memcpy(destination, source, bytes);
-    return true;
+    throw std::runtime_error("GuestCopyOut: no checked write is available on this host");
 #endif
 }
 
