@@ -334,9 +334,13 @@ int APS5_VABI sceKernelReleaseDirectMemory(int64_t start, size_t len) {
 }
 
 int APS5_VABI sceKernelReserveVirtualRange(void** addr, size_t len, int flags, size_t alignment) {
- const int result = DoReserveVirtual(addr, len, flags, alignment);
- if (result == 0) _releaseFlexible(reinterpret_cast<uintptr_t>(*addr), len);
- return result;
+ try {
+  const int result = DoReserveVirtual(addr, len, flags, alignment);
+  if (result == 0) _releaseFlexible(reinterpret_cast<uintptr_t>(*addr), len);
+  return result;
+ } catch (const std::exception&) {
+  return SCE_KERNEL_ERROR_EINVAL;
+ }
 }
 
 int APS5_VABI sceKernelVirtualQuery(const void* addr, int flags, VirtualQueryInfo* info, uint64_t info_size) {
