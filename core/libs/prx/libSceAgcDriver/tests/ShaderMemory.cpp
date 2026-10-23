@@ -7,6 +7,8 @@
 #include "Optimization/DescriptorBindingBuilder.hpp"
 #include "Optimization/RequestMemoryView.hpp"
 #include "Optimization/ResourceMaterializer.hpp"
+#include "RdnaDecoder/RdnaDescriptorFormat.hpp"
+#include "RdnaDecoder/RdnaInstructionDecoder.hpp"
 #include "Optimization/ResourceProgram.hpp"
 #include "Optimization/ShaderStageInputInfo.hpp"
 #include "Optimization/SrtWalker.hpp"
@@ -7503,6 +7505,125 @@ void verifyFmaskImageMode() {
     expectFailure([&] { static_cast<void>(ResourceMaterializer::RuntimeImageMode(image, descriptor, modes)); }, "FMASK requires a direct 32-bit image load", "an incompatible FMASK operation was accepted");
 }
 
+class GcnGuestShaderScope {
+public:
+    GcnGuestShaderScope() { ShaderRecompiler::SetGcnGuestShaders(true); }
+    ~GcnGuestShaderScope() { ShaderRecompiler::SetGcnGuestShaders(false); }
+};
+
+constexpr std::array<std::uint32_t, 8> GcnVolumeDescriptor{0x00001000u, 0x00a00000u, 0x0003c00fu, 0xa0800facu, 0x0001e00fu, 0u, 0u, 0u};
+
+void verifyGcnRuntimeImageDimensions() {
+    using namespace ShaderRecompiler;
+    const auto offers = [](const std::vector<ImageResource>& modes, RdnaImageDimension dimension, bool cube) {
+        return std::ranges::any_of(modes, [&](const ImageResource& mode) {
+            return mode.numericClass == IrTextureNumericClass::Float && mode.dimension == dimension && mode.cube == cube && !mode.depthBits && mode.conversionFormat == IrBufferFormat::Invalid && (mode.emulatedCompare & EmulatedCompare::Enabled) == 0u;
+        });
+    };
+    ImageResource image{};
+    image.resourceClass = ImageResourceClass::Sampled;
+    image.dimension = RdnaImageDimension::Dim2D;
+    require(!offers(ResourceMaterializer::RuntimeImageModes(image), RdnaImageDimension::Dim1DArray, false), "GCN dimensions: a PS5 2D image offered a 1D-array mode");
+    GcnGuestShaderScope gcn;
+    const auto modes = ResourceMaterializer::RuntimeImageModes(image);
+    for (const auto dimension : {RdnaImageDimension::Dim1D, RdnaImageDimension::Dim1DArray, RdnaImageDimension::Dim2D, RdnaImageDimension::Dim2DArray, RdnaImageDimension::Dim3D}) {
+        require(offers(modes, dimension, false), "GCN dimensions: a 2D-inferred image does not offer every T# dimension at run time");
+    }
+    require(offers(modes, RdnaImageDimension::Dim2DArray, true), "GCN dimensions: a 2D-inferred image does not offer a cube at run time");
+    DescriptorValue volume{};
+    const auto converted = GcnImageWords(std::span<const std::uint32_t, 8>(GcnVolumeDescriptor));
+    std::copy(converted.begin(), converted.end(), volume.dwords.begin());
+    volume.dwordCount = 8u;
+    const auto selected = modes[ResourceMaterializer::RuntimeImageMode(image, volume, modes)];
+    require(selected.dimension == RdnaImageDimension::Dim3D && !selected.cube, "GCN dimensions: a 3D T# under a 2D-inferred sample did not select a volume mode");
+    auto array = volume;
+    array.dwords[3] = 0xd0000facu;
+    const auto arrayMode = modes[ResourceMaterializer::RuntimeImageMode(image, array, modes)];
+    require(arrayMode.dimension == RdnaImageDimension::Dim2DArray && !arrayMode.cube, "GCN dimensions: a 2D-array T# under a 2D-inferred sample did not select an array mode");
+    auto gathered = image;
+    gathered.gathered = true;
+    const auto gatherModes = ResourceMaterializer::RuntimeImageModes(gathered);
+    require(!offers(gatherModes, RdnaImageDimension::Dim1D, false) && !offers(gatherModes, RdnaImageDimension::Dim1DArray, false) && !offers(gatherModes, RdnaImageDimension::Dim3D, false), "GCN dimensions: a gathered image offered a dimension SPIR-V cannot gather");
+    require(offers(gatherModes, RdnaImageDimension::Dim2DArray, true), "GCN dimensions: a gathered image does not offer a cube");
+    expectFailure([&] { static_cast<void>(ResourceMaterializer::RuntimeImageMode(gathered, volume, gatherModes)); }, "incompatible with the static runtime image interface", "GCN dimensions: a gather through a 3D T# was accepted");
+    auto compared = image;
+    compared.depthCompare = true;
+    require(!offers(ResourceMaterializer::RuntimeImageModes(compared), RdnaImageDimension::Dim3D, false), "GCN dimensions: a depth comparison offered a volume mode");
+}
+
+void verifyGcnSampleThroughVolume() {
+    using namespace ShaderRecompiler;
+    GcnGuestShaderScope gcn;
+    const std::vector<std::uint32_t> code{
+        0xc0c40100u,
+        0xc0880108u,
+        0xc08a0110u,
+        0xbf8c007fu,
+        0x7e0002f0u,
+        0x7e0202f0u,
+        0x7e0402f0u,
+        0xf09c0f00u, 0x00820400u,
+        0xbf8c0f70u,
+        0xe0780000u, 0x80050400u,
+        0xbf810000u,
+    };
+    std::array<std::uint32_t, 4> output{};
+    const auto outputAddress = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(output.data()));
+    std::array<std::uint32_t, 20> srt{};
+    std::copy(GcnVolumeDescriptor.begin(), GcnVolumeDescriptor.end(), srt.begin());
+    const std::array<std::uint32_t, 4> sampler{0u, 0x00fff000u, 0x05500000u, 0u};
+    std::copy(sampler.begin(), sampler.end(), srt.begin() + 8);
+    const std::array<std::uint32_t, 4> outputV{static_cast<std::uint32_t>(outputAddress), static_cast<std::uint32_t>((outputAddress >> 32u) & 0xffffu), 16u, 0x77facu};
+    std::copy(outputV.begin(), outputV.end(), srt.begin() + 16);
+    const auto srtAddress = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(srt.data()));
+    const std::array<std::uint32_t, 2> userData{static_cast<std::uint32_t>(srtAddress), static_cast<std::uint32_t>(srtAddress >> 32u)};
+    const std::array<std::uint32_t, 4> capabilities{29u, spv::CapabilityInt64, spv::CapabilityPhysicalStorageBufferAddresses, spv::CapabilityStorageBuffer8BitAccess};
+    const std::array<std::string_view, 2> extensions{"SPV_KHR_physical_storage_buffer", "SPV_KHR_8bit_storage"};
+    RecompileRequest request{};
+    request.shader = {ShaderStage::Compute, 0x24000u, code, 0, {}};
+    request.context.waveSize = 64u;
+    request.context.userDataBaseRegister = 0;
+    request.context.userData = userData;
+    request.context.compute = ShaderComputeStageInfo{{64u, 1u, 1u}, 0u, {false, false, false}, false, 1u};
+    request.target.vulkanVersion = 0x00401000u;
+    request.target.spirvVersion = 0x00010300u;
+    request.target.subgroupSize = 64;
+    request.target.supportedCapabilities = capabilities;
+    request.target.supportedExtensions = extensions;
+    request.target.bdaAbiVersion = BdaAbi::Version;
+    request.target.fragmentShaderBarycentricEnabled = false;
+    request.layout.pushConstantSizeBytes = 128;
+    const auto plan = GetResourcePlan(request);
+    require(plan->info.images.size() == 1u && plan->info.images[0].dimension == RdnaImageDimension::Dim2D, "GCN volume sample: the GCN sample was not inferred as one 2D image");
+    AgcDriver::ShaderMemory memory({});
+    const auto capture = memory.Capture(request);
+    request.context.memory = memory.Regions();
+    const auto compiled = Recompile(request, *capture);
+    const auto& words = compiled->spirv;
+    std::map<std::uint32_t, std::uint32_t> resultTypes;
+    std::map<std::uint32_t, std::uint32_t> vectorSizes;
+    std::map<std::uint32_t, std::uint32_t> imageDims;
+    std::map<std::uint32_t, std::uint32_t> sampledImages;
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> samples;
+    for (std::size_t cursor = 5; cursor < words.size();) {
+        const auto length = words[cursor] >> 16u;
+        const auto op = words[cursor] & 0xffffu;
+        require(length != 0 && length <= words.size() - cursor, "GCN volume sample: truncated SPIR-V instruction");
+        if (op == spv::OpTypeVector) vectorSizes[words[cursor + 1]] = words[cursor + 3];
+        if (op == spv::OpTypeImage) imageDims[words[cursor + 1]] = words[cursor + 3];
+        if (op == spv::OpTypeSampledImage) sampledImages[words[cursor + 1]] = words[cursor + 2];
+        if (op == spv::OpImageSampleExplicitLod) samples.emplace_back(words[cursor + 3], words[cursor + 4]);
+        if (length > 2u && op != spv::OpTypeVector && op != spv::OpTypeImage && op != spv::OpTypeSampledImage && op != spv::OpStore && op != spv::OpDecorate && op != spv::OpMemberDecorate && op != spv::OpName) resultTypes[words[cursor + 2]] = words[cursor + 1];
+        cursor += length;
+    }
+    require(!samples.empty(), "GCN volume sample: the sample was not emitted");
+    for (const auto& [sampledImage, coordinate] : samples) {
+        const auto sampledType = resultTypes[sampledImage];
+        require(imageDims[sampledImages[sampledType]] == spv::Dim3D, "GCN volume sample: a sample through a 3D T# does not read a 3D image");
+        require(vectorSizes[resultTypes[coordinate]] == 3u, "GCN volume sample: a sample through a 3D T# does not take three coordinates");
+    }
+}
+
 void verifyCubeDepthCompareMode() {
     using namespace ShaderRecompiler;
     ImageResource image{};
@@ -7801,6 +7922,8 @@ int main(int argc, char** argv) {
         verifyArrayVolumeStoreMode();
         verifyVolumeBiasTableRejection();
         verifyDynamicStorageMipChain();
+        verifyGcnRuntimeImageDimensions();
+        verifyGcnSampleThroughVolume();
         verifySrgbDepthCompareModes();
         verifyQuadMaskNeighbourReads();
         verifyCoherentGds();
