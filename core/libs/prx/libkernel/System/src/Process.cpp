@@ -721,20 +721,21 @@ int APS5_VABI getrlimit_nid_postfix(int resource, GuestResourceLimit* limit) {
         *__error_nid_postfix() = guestFault;
         return -1;
     }
+    GuestResourceLimit result{};
     switch (resource) {
     case guestRlimitData: {
 #ifdef _WIN32
         const std::int64_t memory = hostMemoryLimit();
-        limit->rlim_cur = memory;
-        limit->rlim_max = memory;
+        result.rlim_cur = memory;
+        result.rlim_max = memory;
 #else
         rlimit native{};
         if (::getrlimit(RLIMIT_DATA, &native) != 0)
             throw std::system_error(errno, std::generic_category(), "getrlimit: getrlimit failed");
-        limit->rlim_cur = toGuestLimit(native.rlim_cur);
-        limit->rlim_max = toGuestLimit(native.rlim_max);
+        result.rlim_cur = toGuestLimit(native.rlim_cur);
+        result.rlim_max = toGuestLimit(native.rlim_max);
 #endif
-        return 0;
+        break;
     }
     case guestRlimitNofile: {
         std::lock_guard lock(openFileLimitMutex);
@@ -749,17 +750,17 @@ int APS5_VABI getrlimit_nid_postfix(int resource, GuestResourceLimit* limit) {
             guestOpenFileLimit = GuestResourceLimit{toGuestLimit(native.rlim_cur), toGuestLimit(native.rlim_max)};
 #endif
         }
-        *limit = *guestOpenFileLimit;
-        return 0;
+        result = *guestOpenFileLimit;
+        break;
     }
     case guestRlimitStack:
-        limit->rlim_cur = guestStackLimit;
-        limit->rlim_max = guestStackLimit;
-        return 0;
+        result.rlim_cur = guestStackLimit;
+        result.rlim_max = guestStackLimit;
+        break;
     case guestRlimitNproc:
-        limit->rlim_cur = guestProcessLimit;
-        limit->rlim_max = guestProcessLimit;
-        return 0;
+        result.rlim_cur = guestProcessLimit;
+        result.rlim_max = guestProcessLimit;
+        break;
     case guestRlimitCpu:
     case guestRlimitFsize:
     case guestRlimitCore:
@@ -771,12 +772,17 @@ int APS5_VABI getrlimit_nid_postfix(int resource, GuestResourceLimit* limit) {
     case guestRlimitSwap:
     case guestRlimitKqueues:
     case guestRlimitUmtxp:
-        limit->rlim_cur = guestRlimitInfinity;
-        limit->rlim_max = guestRlimitInfinity;
-        return 0;
+        result.rlim_cur = guestRlimitInfinity;
+        result.rlim_max = guestRlimitInfinity;
+        break;
     default:
         throw std::runtime_error("getrlimit: unsupported resource " + std::to_string(resource));
     }
+    if (!WriteGuest(limit, &result, sizeof(result))) {
+        *__error_nid_postfix() = guestFault;
+        return -1;
+    }
+    return 0;
 }
 
 int APS5_VABI getpriority_nid_postfix(int which, int who) {
