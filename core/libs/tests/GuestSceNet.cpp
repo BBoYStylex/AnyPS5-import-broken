@@ -35,6 +35,7 @@ extern const std::uint8_t in6addr_loopback_nid_postfix[16];
 int APS5_VABI sceNetInit_nid_postfix(void);
 int APS5_VABI sceNetShowNetstatWithMemory(int);
 int APS5_VABI sceNetShowNetstat(void);
+int APS5_VABI sceNetShowNetstatEx(std::uint32_t);
 int APS5_VABI sceNetShowIfconfig(void);
 int APS5_VABI sceNetShowRoute(void);
 int APS5_VABI sceNetShowRoute6(void);
@@ -266,6 +267,7 @@ static void CheckNetstat() {
         }
         Require(unsupported);
     }
+    Require(sceNetShowNetstatEx(0) == 0);
     Require(sceNetShowRoute() == 0);
     Require(sceNetShowRoute6() == 0);
     Require(Failed(sceNetShowNetstatWithMemory(-1), 9));
