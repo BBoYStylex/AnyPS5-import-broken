@@ -2,6 +2,7 @@
 #include "prx/libSceAgcDriver/Execution/include/Driver/Diagnostics.hpp"
 #include "prx/libSceAgcDriver/Execution/include/GuestMemory.hpp"
 #include <algorithm>
+#include <bit>
 
 namespace AgcDriver::DriverDetail {
 
@@ -51,6 +52,10 @@ void Driver::lookupDraw(const Submission& submission, const std::shared_ptr<Vulk
                 mix(vertex.fetchBufferReg);
                 mix(vertex.fetchEmbedded);
                 mix(vertex.paClVsOutCntl);
+                mix(vertex.pointList);
+                mix(std::bit_cast<std::uint32_t>(vertex.pointSize));
+                mix(std::bit_cast<std::uint32_t>(vertex.pointSizeMin));
+                mix(std::bit_cast<std::uint32_t>(vertex.pointSizeMax));
                 for (std::uint32_t r = 0; r < vertex.resourcesNum; ++r) {
                     for (const auto field : vertex.resources[r].fields) mix(field);
                     const auto& destination = vertex.resourcesDst[r];
@@ -82,6 +87,7 @@ void Driver::lookupDraw(const Submission& submission, const std::shared_ptr<Vulk
             mix(pixel.iteratesSamples);
             mix(static_cast<std::uint64_t>(pixel.positionLocation));
             for (const auto location : pixel.sampleLocations) mix(location);
+            for (const auto order : pixel.sampleOrder) mix(order);
             std::lock_guard cacheLock(drawCacheMutex);
             ++drawEntryCounters.lookups;
             const auto found = drawCache.find(drawKey);

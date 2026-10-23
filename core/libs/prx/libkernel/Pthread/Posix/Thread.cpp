@@ -18,9 +18,16 @@ int APS5_VABI scePthreadCreate(Pthread* thread, const PthreadAttr* attr, Pthread
 int APS5_VABI scePthreadDetach(Pthread thread);
 void APS5_VABI scePthreadExit(void* retval);
 int APS5_VABI scePthreadJoin(Pthread thread, void** retval);
+int APS5_VABI JoinThread_nid_no_patch(Pthread thread, void** retval, const KernelTimespec* abstime);
 int APS5_VABI scePthreadRename(Pthread thread, const char* name);
 int APS5_VABI scePthreadGetname(Pthread thread, char* name);
 Pthread APS5_VABI scePthreadSelf();
+int APS5_VABI scePthreadEqual(Pthread thread1, Pthread thread2);
+int APS5_VABI scePthreadOnce(int32_t* once, void (APS5_VABI* init)(void));
+int APS5_VABI scePthreadKeyCreate(PthreadKey* key, pthread_key_destructor_func_t destructor);
+int APS5_VABI scePthreadKeyDelete(PthreadKey key);
+void* APS5_VABI scePthreadGetspecific(PthreadKey key);
+int APS5_VABI scePthreadSetspecific(PthreadKey key, void* value);
 int APS5_VABI scePthreadCancel(Pthread thread);
 int APS5_VABI scePthreadSetcancelstate(int state, int* old_state);
 int APS5_VABI scePthreadSetcanceltype(int type, int* old_type);
@@ -235,12 +242,29 @@ int APS5_VABI pthread_join_nid_postfix(Pthread thread, void** value) {
     return PosixThread::ToErrno(scePthreadJoin(thread, value));
 }
 
+int APS5_VABI pthread_timedjoin_np_nid_postfix(Pthread thread, void** value, const KernelTimespec* abstime) {
+    if (abstime == nullptr || abstime->tv_sec < 0 || abstime->tv_nsec < 0 || abstime->tv_nsec >= 1000000000)
+        return PosixThread::GUEST_EINVAL;
+    return PosixThread::ToErrno(JoinThread_nid_no_patch(thread, value, abstime));
+}
+
 namespace {
 struct RegisterPthreadOnLoad {
     RegisterPthreadOnLoad() {
         RegisterPthreadCreate_nid_no_patch(reinterpret_cast<PthreadCreateFn_nid_no_patch>(pthread_create_nid_postfix));
         RegisterPthreadJoin_nid_no_patch(reinterpret_cast<PthreadJoinFn_nid_no_patch>(pthread_join_nid_postfix));
         RegisterPthreadDetach_nid_no_patch(reinterpret_cast<PthreadDetachFn_nid_no_patch>(pthread_detach_nid_postfix));
+        static const ThreadForwards_nid_no_patch forwards{
+            reinterpret_cast<decltype(forwards.once)>(scePthreadOnce),
+            reinterpret_cast<decltype(forwards.keyCreate)>(scePthreadKeyCreate),
+            scePthreadKeyDelete,
+            scePthreadGetspecific,
+            scePthreadSetspecific,
+            reinterpret_cast<decltype(forwards.equal)>(scePthreadEqual),
+            reinterpret_cast<decltype(forwards.self)>(scePthreadSelf),
+            scePthreadExit,
+        };
+        RegisterThreadForwards_nid_no_patch(&forwards);
     }
 };
 const RegisterPthreadOnLoad gRegisterPthread;

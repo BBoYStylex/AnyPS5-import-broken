@@ -3,6 +3,7 @@
 #include "prx/libkernel/File/include/File.hpp"
 #include "prx/libkernel/File/include/RandomDevice.hpp"
 #include "prx/libkernel/File/include/ArchivedFile.hpp"
+#include "prx/libkernel/Socket/include/SocketRuntime.hpp"
 #include "prx/libc/include/GuestArena.hpp"
 #include "prx/libc/include/FileLock.hpp"
 #include "prx/libc/include/general/VabiMacros.hpp"
@@ -114,6 +115,7 @@ enum class Kind { File, Directory, Pipe, Socket, Device, RandomDevice, ArchivedF
 struct Entry {
     bool closeOnExec = false;
     std::shared_ptr<int> status;
+    bool fixedSizeWrites = false;
 };
 
 std::mutex g_mutex;
@@ -552,9 +554,9 @@ int Ioctl(int fd, std::uint64_t request, void* argument) {
     Unsupported("ioctl", std::string("request ") + hex, *kind, fd);
 }
 
-void RememberDescriptor(int fd, int openFlags) {
+void RememberDescriptor(int fd, int openFlags, bool fixedSizeWrites) {
     std::lock_guard lock(g_mutex);
-    g_entries[fd] = Entry{(openFlags & OpenCloseOnExec) != 0, std::make_shared<int>(openFlags & OpenStatusFlags)};
+    g_entries[fd] = Entry{(openFlags & OpenCloseOnExec) != 0, std::make_shared<int>(openFlags & OpenStatusFlags), fixedSizeWrites};
 #ifdef _WIN32
     GuestFileLockForget_nid_no_patch(fd);
 #endif
@@ -563,8 +565,8 @@ void RememberDescriptor(int fd, int openFlags) {
 void ShareDescriptor(int from, int to) {
     File::ShareArchivedFile(from, to);
     std::lock_guard lock(g_mutex);
-    auto status = Materialize(from).status;
-    g_entries[to] = Entry{false, std::move(status)};
+    const auto original = Materialize(from);
+    g_entries[to] = Entry{false, original.status, original.fixedSizeWrites};
 #ifdef _WIN32
     File::SharePositionedTransfer(from, to);
     GuestFileLockShare_nid_no_patch(from, to);
@@ -577,10 +579,26 @@ void ForgetDescriptor(int fd) {
     g_entries.erase(fd);
 }
 
+bool HasFixedSizeWrites(int fd) {
+    std::lock_guard lock(g_mutex);
+    const auto found = g_entries.find(fd);
+    return found != g_entries.end() && found->second.fixedSizeWrites;
+}
+
 bool Appends(int fd) {
     std::lock_guard lock(g_mutex);
     const auto found = g_entries.find(fd);
     return found != g_entries.end() && found->second.status && (*found->second.status & Append) != 0;
+}
+
+bool IsCharacterDevice(int fd) {
+    if (fd < 0) return false;
+#ifdef _WIN32
+    return DescriptorIsOpen_nid_no_patch(fd) && !GuestSockets::IsOpen(fd) && !File::DirectoryDescriptorPath(fd) && ::GetFileType(WindowsDescriptorHandle_nid_no_patch(fd)) == FILE_TYPE_CHAR;
+#else
+    struct stat status{};
+    return ::fstat(fd, &status) == 0 && S_ISCHR(status.st_mode);
+#endif
 }
 
 bool IsVnode(int fd) {
@@ -595,4 +613,8 @@ bool IsVnode(int fd) {
 #endif
 }
 
+}
+
+extern "C" bool DescriptorHasNoVnode_nid_no_patch(int fd) {
+    return !File::IsVnode(fd) && !File::IsCharacterDevice(fd) && !File::IsRandomDevice(fd);
 }

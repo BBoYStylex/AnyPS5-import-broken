@@ -6,6 +6,7 @@
 #endif
 #include <mutex>
 #include <vulkan/vulkan.h>
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <cstdio>
@@ -212,6 +213,8 @@ struct Context {
     bool samplerFilterMinmax = false;
     bool nonSeamlessCubeMap = false;
     VkSampleCountFlags mergedCoverageSampleCounts = 0;
+    VkSampleCountFlags truncatedCoverageSampleCounts = 0;
+    bool mixedAttachmentSamples = false;
     bool conservativeRasterization = false;
     bool meshWave32 = false;
     VkBuffer emptyBuffer = VK_NULL_HANDLE;
@@ -236,8 +239,13 @@ struct Context {
     bool imageTableUpdateAfterBind = false;
     bool samplerTableUpdateAfterBind = false;
     bool geometryShader = false;
+    bool largePoints = false;
     bool sampleRateShading = false;
+    bool fillModeNonSolid = false;
+    bool maintenance5 = false;
     bool storageImageMultisample = false;
+    bool storageImageWriteWithoutFormat = false;
+    bool imageFormatList = false;
     bool shaderClipDistance = false;
     bool shaderCullDistance = false;
     bool nullDescriptors = false;
@@ -258,6 +266,8 @@ struct Context {
     bool singlePassStorage = false;
     VkSampleCountFlags sampleLocationSampleCounts = 0;
     VkSampleCountFlags sampleLocationGridSampleCounts = 0;
+    std::array<VkExtent2D, 4> sampleLocationGridSizes{};
+    bool shaderStencilExport = false;
     PipelineCacheSynchronization* pipelineCacheSynchronization = nullptr;
     bool shaderTerminateInvocation = false;
 

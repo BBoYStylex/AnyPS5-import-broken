@@ -3,6 +3,7 @@
 #include "prx/libkernel/File/include/SharedMemory.hpp"
 #include "prx/libc/include/CreationMask.hpp"
 #include "prx/libkernel/File/include/File.hpp"
+#include "prx/libkernel/File/include/DescriptorControl.hpp"
 
 #include <cerrno>
 #include <algorithm>
@@ -200,7 +201,10 @@ int CreateAnonymousFile() {
         const int error = _wsopen_s(&descriptor, path.c_str(),
                                     _O_CREAT | _O_EXCL | _O_RDWR | _O_BINARY | _O_TEMPORARY | _O_SHORT_LIVED | _O_NOINHERIT,
                                     _SH_DENYNO, _S_IREAD | _S_IWRITE);
-        if (error == 0) return descriptor;
+        if (error == 0) {
+            File::RememberDescriptor(descriptor, SCE_KERNEL_O_RDWR, true);
+            return descriptor;
+        }
         if (error != EEXIST) {
             errno = error;
             return -1;

@@ -36,6 +36,13 @@ static void* LoadLibraryFile(const std::filesystem::path& path) {
     if (!module) std::fprintf(stderr, "%s\n", dlerror());
 #endif
     Require(module != nullptr);
+#ifdef _WIN32
+    std::wstring loaded(32768, L'\0');
+    const auto length = GetModuleFileNameW(static_cast<HMODULE>(module), loaded.data(), static_cast<DWORD>(loaded.size()));
+    Require(length != 0 && length < loaded.size());
+    loaded.resize(length);
+    Require(std::filesystem::equivalent(path, std::filesystem::path(loaded)));
+#endif
     return module;
 }
 
@@ -58,15 +65,19 @@ int main(int argc, char** argv) {
     const bool patched = std::strcmp(argv[2], "patched") == 0;
     auto* sys = LoadLibraryFile(directory / "libkernel_sys.prx");
     auto* kernel = LoadLibraryFile(directory / "libkernel.prx");
+    auto* libc = LoadLibraryFile(directory / "libc.prx");
     using Pwrite = std::int64_t (APS5_VABI*)(int, const void*, std::size_t, std::int64_t);
     const auto writeAt = LoadFunction<Pwrite>(sys, "pwrite", patched);
     const auto kernelWriteAt = LoadFunction<Pwrite>(kernel, "pwrite", patched, "pwrite_nid_disambig1_nid_postfix");
     Require(writeAt != kernelWriteAt);
     const auto open = LoadFunction<int (APS5_VABI*)(const char*, int, int)>(kernel, "open", patched);
     const auto close = LoadFunction<int (APS5_VABI*)(int)>(kernel, "close", patched);
+    const auto duplicate = LoadFunction<int (APS5_VABI*)(int)>(kernel, "dup", patched);
+    const auto duplicateTo = LoadFunction<int (APS5_VABI*)(int, int)>(kernel, "dup2", patched);
+    const auto write = LoadFunction<std::int64_t (APS5_VABI*)(int, const char*, std::int64_t)>(kernel, "write", patched);
     const auto seek = LoadFunction<std::int64_t (APS5_VABI*)(int, std::int64_t, int)>(kernel, "lseek", patched);
     const auto readAt = LoadFunction<std::int64_t (APS5_VABI*)(int, void*, std::size_t, std::int64_t)>(kernel, "pread", patched);
-    const auto error = LoadFunction<int* (APS5_VABI*)()>(kernel, "__error", patched);
+    const auto error = LoadFunction<int* (APS5_VABI*)()>(libc, "__error", patched);
     const auto shmOpen = LoadFunction<int (APS5_VABI*)(const char*, int, int)>(kernel, "shm_open", patched);
     const auto truncate = LoadFunction<int (APS5_VABI*)(int, std::int64_t)>(kernel, "ftruncate", patched);
     const auto pipe = LoadFunction<int (APS5_VABI*)(int*)>(kernel, "pipe", patched);
@@ -138,7 +149,20 @@ int main(int argc, char** argv) {
     Require(writeAt(shared, "tail", 4, 0x3ffe) == 2);
     Require(readAt(shared, contents, 4, 0x3ffe) == 2 && std::memcmp(contents, "ta", 2) == 0);
     Require(seek(shared, 0, SEEK_CUR) == 7);
+    Require(seek(shared, 0, SEEK_END) == 0x4000);
+    const int copy = duplicate(shared);
+    Require(copy >= 0 && close(shared) == 0);
+    Require(kernelWriteAt(copy, "edge", 4, 0x3ffe) == 2);
+    Require(writeAt(copy, "x", 1, 0x4000) == 0 && seek(copy, 0, SEEK_END) == 0x4000);
+    Require(seek(copy, 0x3fff, SEEK_SET) == 0x3fff);
+    Require(write(copy, "ab", 2) == 1 && write(copy, "x", 1) == 0);
+    Require(seek(copy, 0, SEEK_END) == 0x4000);
+    Require(close(copy) == 0);
+    const int ordinary = open(path.c_str(), SCE_KERNEL_O_RDWR, 0);
+    Require(ordinary >= 0 && duplicateTo(ordinary, shared) == shared);
+    Require(writeAt(shared, "grow", 4, 16) == 4 && seek(shared, 0, SEEK_END) == 20);
     Require(close(shared) == 0);
+    if (ordinary != shared) Require(close(ordinary) == 0);
     std::filesystem::remove_all(root);
     return 0;
 }
