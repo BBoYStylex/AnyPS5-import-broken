@@ -55,6 +55,7 @@ std::uint64_t DrawRenderPassKey(const Context& context, const State& state, std:
     mix(state.renderExtent.height);
     mix(state.samples);
     mix(state.mergedCoverage);
+    mix(state.truncatedCoverage);
     mix(state.customSampleLocations);
     if (state.customSampleLocations) {
         mix(state.sampleLocationGrid);
@@ -670,6 +671,7 @@ bool ValidationKey(const Context& context, std::span<const CompiledShader> shade
         add(context.viewportIndexLayer);
         add(context.shaderTerminateInvocation);
         add(state.paClVsOutCntl);
+        add(state.vertexPoints);
         add(state.stages.mesh.has_value());
         if (state.stages.mesh) {
             const auto& mesh = *state.stages.mesh;
