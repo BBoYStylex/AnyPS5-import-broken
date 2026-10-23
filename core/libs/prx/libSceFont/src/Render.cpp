@@ -7,6 +7,7 @@
 #include <cstring>
 #include <limits>
 #include <new>
+#include <stdexcept>
 
 #include <ft2build.h>
 #include FT_FREETYPE_H
@@ -22,6 +23,15 @@ constexpr std::uint16_t GENERATE_GLYPH_DETAIL_ID = 0x0FD3;
 std::uint16_t ClampToU16(float value) {
     if (value <= 0.0f) return 0;
     return static_cast<std::uint16_t>(std::lround(std::min(value, static_cast<float>(std::numeric_limits<std::uint16_t>::max()))));
+}
+
+void ValidateSurfaceStride(const FontRenderSurface* surface, FontGlyphMetrics* metrics, FontRenderOutput* result) {
+    if (!surface || !surface->buffer || surface->width <= 0 || surface->height <= 0 || surface->widthByte <= 0) return;
+    const int bytesPerPixel = surface->pixelSizeByte;
+    if (bytesPerPixel != 1 && bytesPerPixel != 4) return;
+    if (surface->width <= surface->widthByte / bytesPerPixel) return;
+    ClearRenderOutputs(metrics, result);
+    throw std::runtime_error("libSceFont: render surface stride is smaller than its pixel width");
 }
 
 std::uint8_t* LayoutCacheBytes(FontHandleNative* font) {
@@ -108,6 +118,7 @@ int RenderDirectional(FontHandle fontHandle, std::uint32_t code, FontRenderSurfa
         ClearRenderOutputs(metrics, result);
         return SCE_FONT_ERROR_INVALID_PARAMETER;
     }
+    if (font->renderer) ValidateSurfaceStride(surface, metrics, result);
     std::uint32_t fontLock = 0;
     if (!AcquireFontLock(font, fontLock)) {
         ClearRenderOutputs(metrics, result);
@@ -219,6 +230,7 @@ int APS5_VABI sceFontGetRenderScaledKerning(FontHandle fontHandle, std::uint32_t
 
 int APS5_VABI sceFontRenderCharGlyphImage(FontHandle fontHandle, std::uint32_t code, FontRenderSurface* surface, float x, float y, FontGlyphMetrics* metrics, FontRenderOutput* result) {
     auto* font = GetNativeFont(fontHandle);
+    if (font && font->magic == HANDLE_MAGIC && font->renderer && code != 0 && metrics && result) ValidateSurfaceStride(surface, metrics, result);
     std::uint32_t fontLock = 0;
     if (!font || font->magic != HANDLE_MAGIC || !AcquireFontLock(font, fontLock)) {
         ClearRenderOutputs(metrics, result);
