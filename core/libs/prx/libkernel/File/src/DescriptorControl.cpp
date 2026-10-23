@@ -115,6 +115,7 @@ enum class Kind { File, Directory, Pipe, Socket, Device, RandomDevice, ArchivedF
 struct Entry {
     bool closeOnExec = false;
     std::shared_ptr<int> status;
+    bool fixedSizeWrites = false;
 };
 
 std::mutex g_mutex;
@@ -553,9 +554,9 @@ int Ioctl(int fd, std::uint64_t request, void* argument) {
     Unsupported("ioctl", std::string("request ") + hex, *kind, fd);
 }
 
-void RememberDescriptor(int fd, int openFlags) {
+void RememberDescriptor(int fd, int openFlags, bool fixedSizeWrites) {
     std::lock_guard lock(g_mutex);
-    g_entries[fd] = Entry{(openFlags & OpenCloseOnExec) != 0, std::make_shared<int>(openFlags & OpenStatusFlags)};
+    g_entries[fd] = Entry{(openFlags & OpenCloseOnExec) != 0, std::make_shared<int>(openFlags & OpenStatusFlags), fixedSizeWrites};
 #ifdef _WIN32
     GuestFileLockForget_nid_no_patch(fd);
 #endif
@@ -564,8 +565,8 @@ void RememberDescriptor(int fd, int openFlags) {
 void ShareDescriptor(int from, int to) {
     File::ShareArchivedFile(from, to);
     std::lock_guard lock(g_mutex);
-    auto status = Materialize(from).status;
-    g_entries[to] = Entry{false, std::move(status)};
+    const auto original = Materialize(from);
+    g_entries[to] = Entry{false, original.status, original.fixedSizeWrites};
 #ifdef _WIN32
     File::SharePositionedTransfer(from, to);
     GuestFileLockShare_nid_no_patch(from, to);
@@ -576,6 +577,12 @@ void ForgetDescriptor(int fd) {
     File::ForgetArchivedFile(fd);
     std::lock_guard lock(g_mutex);
     g_entries.erase(fd);
+}
+
+bool HasFixedSizeWrites(int fd) {
+    std::lock_guard lock(g_mutex);
+    const auto found = g_entries.find(fd);
+    return found != g_entries.end() && found->second.fixedSizeWrites;
 }
 
 bool Appends(int fd) {
