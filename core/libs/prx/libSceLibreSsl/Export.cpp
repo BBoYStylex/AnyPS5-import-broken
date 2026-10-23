@@ -2,6 +2,7 @@
 #include <cstdio>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <stdexcept>
 #include <string>
@@ -14,6 +15,25 @@ namespace {
 constexpr std::size_t DesScheduleBytes = 128;
 
 }
+
+struct LibreSslUi;
+struct LibreSslUiString;
+using UiOpener = int (APS5_VABI *)(LibreSslUi*);
+using UiWriter = int (APS5_VABI *)(LibreSslUi*, LibreSslUiString*);
+
+struct LibreSslUiMethod {
+    char* name;
+    UiOpener opener;
+    UiWriter writer;
+    UiOpener flusher;
+    UiWriter reader;
+    UiOpener closer;
+    char* (APS5_VABI *promptConstructor)(LibreSslUi*, const char*, const char*);
+};
+
+static_assert(sizeof(LibreSslUiMethod) == 56);
+static_assert(offsetof(LibreSslUiMethod, opener) == 8);
+static_assert(offsetof(LibreSslUiMethod, writer) == 16);
 
 extern "C" {
 
@@ -1562,14 +1582,22 @@ int APS5_VABI UI_OpenSSL_nid_postfix(void) {
     return 0;
 }
 
-int APS5_VABI UI_create_method_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+LibreSslUiMethod* APS5_VABI UI_create_method_nid_postfix(char* name) {
+    auto* method = static_cast<LibreSslUiMethod*>(std::malloc(sizeof(LibreSslUiMethod)));
+    if (method == nullptr) return nullptr;
+    *method = {};
+    if (name != nullptr) {
+        const auto size = std::strlen(name) + 1;
+        method->name = static_cast<char*>(std::malloc(size));
+        if (method->name != nullptr) std::memcpy(method->name, name, size);
+    }
+    return method;
 }
 
-int APS5_VABI UI_destroy_method_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+void APS5_VABI UI_destroy_method_nid_postfix(LibreSslUiMethod* method) {
+    if (method == nullptr) NotImplemented_nid_no_patch(__func__);
+    std::free(method->name);
+    std::free(method);
 }
 
 int APS5_VABI UI_get0_user_data_nid_postfix(void) {
@@ -1592,9 +1620,8 @@ int APS5_VABI UI_method_get_closer_nid_postfix(void) {
     return 0;
 }
 
-int APS5_VABI UI_method_get_opener_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+UiOpener APS5_VABI UI_method_get_opener_nid_postfix(LibreSslUiMethod* method) {
+    return method == nullptr ? nullptr : method->opener;
 }
 
 int APS5_VABI UI_method_get_reader_nid_postfix(void) {
@@ -1612,8 +1639,9 @@ int APS5_VABI UI_method_set_closer_nid_postfix(void) {
     return 0;
 }
 
-int APS5_VABI UI_method_set_opener_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
+int APS5_VABI UI_method_set_opener_nid_postfix(LibreSslUiMethod* method, UiOpener opener) {
+    if (method == nullptr) return -1;
+    method->opener = opener;
     return 0;
 }
 
@@ -1622,8 +1650,9 @@ int APS5_VABI UI_method_set_reader_nid_postfix(void) {
     return 0;
 }
 
-int APS5_VABI UI_method_set_writer_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
+int APS5_VABI UI_method_set_writer_nid_postfix(LibreSslUiMethod* method, UiWriter writer) {
+    if (method == nullptr) return -1;
+    method->writer = writer;
     return 0;
 }
 
