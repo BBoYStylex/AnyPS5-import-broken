@@ -1,9 +1,11 @@
 #include "SceTypes.hpp"
 #include "prx/libc/include/general/VabiMacros.hpp"
+#include "prx/libSceUserService/UserService.hpp"
 #include <cstdint>
 #include <cstdlib>
 #include <initializer_list>
 #include <stdexcept>
+#include <string>
 
 extern "C" {
 int APS5_VABI sceConvertKeycodeGetVirtualKeycode(std::uint16_t, std::uint32_t, std::uint16_t*);
@@ -12,6 +14,74 @@ int APS5_VABI sceConvertKeycodeGetCharacter(std::uint16_t, std::uint32_t, std::u
 }
 
 static void Require(bool value) { if (!value) std::abort(); }
+
+static void SetKeyboardLayout(const char* value) {
+#ifdef _WIN32
+    Require(_putenv_s("ANYPS5_KEYBOARD_LAYOUT", value != nullptr ? value : "") == 0);
+#else
+    Require((value != nullptr ? ::setenv("ANYPS5_KEYBOARD_LAYOUT", value, 1) : ::unsetenv("ANYPS5_KEYBOARD_LAYOUT")) == 0);
+#endif
+}
+
+static void TestImeKeyboardLayout() {
+    std::uint32_t layout = 0xFFFFFFFFu;
+    SetKeyboardLayout(nullptr);
+    Require(sceConvertKeycodeGetImeKeyboardType(USER_SERVICE_INITIAL_USER_ID, &layout) == 0);
+    Require(layout == 4);
+    char16_t character = 0;
+    Require(sceConvertKeycodeGetCharacter(4, 0x4000000, layout, &character) == 0 && character == u'a');
+    SetKeyboardLayout("");
+    Require(sceConvertKeycodeGetImeKeyboardType(USER_SERVICE_INITIAL_USER_ID, &layout) == 0 && layout == 4);
+    for (std::uint32_t configured = 1; configured <= 30; ++configured) {
+        const auto value = std::to_string(configured);
+        SetKeyboardLayout(value.c_str());
+        Require(sceConvertKeycodeGetImeKeyboardType(USER_SERVICE_INITIAL_USER_ID, &layout) == 0 && layout == configured);
+    }
+    SetKeyboardLayout("9");
+    Require(sceConvertKeycodeGetImeKeyboardType(USER_SERVICE_INITIAL_USER_ID, &layout) == 0);
+    Require(sceConvertKeycodeGetCharacter(4, 0x4000000, layout, &character) == 0 && character == u'q');
+    SetKeyboardLayout("2");
+    Require(sceConvertKeycodeGetImeKeyboardType(USER_SERVICE_INITIAL_USER_ID, &layout) == 0);
+    Require(sceConvertKeycodeGetCharacter(28, 0x4000000, layout, &character) == 0 && character == u'z');
+    for (const auto* value : {"0", "-1", "40", "+4", " 4", "4 ", "4x", "0x4", "4294967296", "999999999999999999999", "layout"}) {
+        SetKeyboardLayout(value);
+        layout = 0xABCD;
+        bool rejected = false;
+        try {
+            sceConvertKeycodeGetImeKeyboardType(USER_SERVICE_INITIAL_USER_ID, &layout);
+        } catch (const std::runtime_error&) {
+            rejected = true;
+        }
+        Require(rejected && layout == 0xABCD);
+        Require(sceConvertKeycodeGetImeKeyboardType(USER_SERVICE_INITIAL_USER_ID, nullptr) == static_cast<int>(0x80BC0031u));
+        Require(sceConvertKeycodeGetImeKeyboardType(-1, &layout) == static_cast<int>(0x80BC0010u));
+        Require(layout == 0xABCD);
+    }
+    for (std::uint32_t configured = 31; configured <= 39; ++configured) {
+        const auto value = std::to_string(configured);
+        SetKeyboardLayout(value.c_str());
+        layout = 0xABCD;
+        bool rejected = false;
+        try {
+            sceConvertKeycodeGetImeKeyboardType(USER_SERVICE_INITIAL_USER_ID, &layout);
+        } catch (const std::runtime_error&) {
+            rejected = true;
+        }
+        Require(rejected && layout == 0xABCD);
+    }
+    SetKeyboardLayout("4");
+    for (const auto userId : {0, 1, USER_SERVICE_INITIAL_USER_ID + 1, 0x7FFFFFFF}) {
+        layout = 0xABCD;
+        bool rejected = false;
+        try {
+            sceConvertKeycodeGetImeKeyboardType(userId, &layout);
+        } catch (const std::runtime_error&) {
+            rejected = true;
+        }
+        Require(rejected && layout == 0xABCD);
+    }
+    SetKeyboardLayout(nullptr);
+}
 
 int main() {
     constexpr int invalidAddress = static_cast<int>(0x80BC0031u);
@@ -52,6 +122,8 @@ int main() {
         rejected = true;
     }
     Require(rejected && type == 0xFFFFFFFFu);
+
+    TestImeKeyboardLayout();
 
     Require(sceConvertKeycodeGetCharacter(4, 0, 0, nullptr) == invalidAddress);
     char16_t character = u'?';

@@ -264,6 +264,10 @@ Leave the variable unset to keep the explicit error. Any other value also stops 
 
 Press F12 in the game window to save the next displayed frame as a PNG at the resolution of the game's display buffer, without the window's scaling, letterbox or [performance overlay](#performance-overlay). A BT.2100 PQ display buffer is saved converted to SDR, also while it is shown through [HDR output](#hdr-output). Files are named `<title ID>-<YYYYMMDD-HHMMSS>.png` and written to an `anyps5-screenshots/` directory beside the output executable, which is created when needed; set `ANYPS5_SCREENSHOTS` to use another directory. The saved path is printed to stderr. Presses while the previous screenshot is still being written are merged into one. The key is the `Screenshot` action of the [input mapping](INPUT_MAPPING.md). A screenshot that cannot be written stops the game with the error.
 
+### Keyboard layout
+
+`sceConvertKeycodeGetImeKeyboardType` returns the initial user's configured layout. Set `ANYPS5_KEYBOARD_LAYOUT` to its numeric layout, independently of `ANYPS5_LANGUAGE`. An unset or empty value selects English (US), layout `4`. Examples are German `2`, English (UK) `5`, French `9`, Japanese Latin input `22`, Japanese kana input `23`, Korean `24`, simplified Chinese `25` and Arabic `30`. Layouts 1–30 are supported; layouts 31–39 still throw because their SDK compatibility mapping is unavailable. A malformed value or a value outside 1–39 fails the query without writing its output. Settings for other user ids are unavailable.
+
 ### GPU selection
 
 The game runs on the first Vulkan 1.1 device with graphics and compute queues and swapchain presentation, preferring a discrete GPU over an integrated one. Set `ANYPS5_GPU` to a part of a device name, compared without regard to case, to run on another device; the names are printed at start-up in the `Physical device candidate` lines. When no usable device contains the text, the start fails and the error lists the device names.

@@ -3,6 +3,7 @@
 #include <stdexcept>
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
+#include "prx/libSceUserService/UserService.hpp"
 
 namespace {
 constexpr int kErrInvalidAddress = static_cast<int>(0x80BC0031u);
@@ -2400,7 +2401,11 @@ extern "C" {
 int APS5_VABI sceConvertKeycodeGetImeKeyboardType(int32_t userId, uint32_t* type) {
  if (type == nullptr) return kErrInvalidAddress;
  if (userId < 0) return kErrInvalidUserId;
- throw std::runtime_error("sceConvertKeycodeGetImeKeyboardType: user keyboard language and variant are unavailable");
+ if (userId != USER_SERVICE_INITIAL_USER_ID) throw std::runtime_error("sceConvertKeycodeGetImeKeyboardType: keyboard settings are unavailable for this user");
+ const auto layout = UserServiceImeKeyboardLayout_nid_no_patch();
+ if (layout >= 31) throw std::runtime_error("sceConvertKeycodeGetImeKeyboardType: guest sdk version is unavailable");
+ *type = layout;
+ return 0;
 }
 int APS5_VABI sceConvertKeycodeGetVirtualKeycode(std::uint16_t keycode, std::uint32_t keyboardType, std::uint16_t* virtualKeycode) {
     if (virtualKeycode == nullptr) return kErrInvalidAddress;

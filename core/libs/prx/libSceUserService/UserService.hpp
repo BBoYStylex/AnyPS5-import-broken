@@ -3,6 +3,12 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <charconv>
+#include <cstdlib>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <system_error>
 
 struct UserServiceInitParam {
  std::int32_t priority;
@@ -24,5 +30,17 @@ constexpr int USER_SERVICE_ERROR_BUFFER_TOO_SHORT = -2137653238;
 constexpr int USER_SERVICE_ERROR_UNKNOWN_USER = static_cast<int>(0x80960105u);
 constexpr std::size_t USER_SERVICE_MAX_USER_NAME_LENGTH = 16;
 constexpr const char* USER_SERVICE_INITIAL_USER_NAME = "Player";
+
+inline std::uint32_t UserServiceImeKeyboardLayout_nid_no_patch() {
+ const char* configured = std::getenv("ANYPS5_KEYBOARD_LAYOUT");
+ if (configured == nullptr || configured[0] == '\0') return 4;
+ const std::string_view text(configured);
+ std::uint32_t layout = 0;
+ const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), layout);
+ if (error != std::errc{} || end != text.data() + text.size() || layout < 1 || layout > 39) {
+  throw std::runtime_error("ANYPS5_KEYBOARD_LAYOUT must be a keyboard layout number from 1 to 39, not \"" + std::string(text) + "\"");
+ }
+ return layout;
+}
 
 #endif

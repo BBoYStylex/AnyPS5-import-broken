@@ -513,6 +513,12 @@ The code reads environment names through `getenv`, `IsEnvironmentSet`, `kibSetti
 |------|------|--------|---------|-------------|
 | `ANYPS5_LANGUAGE` | integer | `core/libs/prx/libSceSystemService/Export.cpp` | 1 | console language number returned by sceSystemServiceParamGetInt, defaulting to English US |
 
+### libSceUserService
+
+| Name | Kind | Source | Default | Description |
+|------|------|--------|---------|-------------|
+| `ANYPS5_KEYBOARD_LAYOUT` | integer | `core/libs/prx/libSceUserService/UserService.hpp` | 4 | initial user's IME keyboard layout returned by sceConvertKeycodeGetImeKeyboardType, independent of console language; 1–30 are supported, 31–39 require unavailable SDK compatibility rules; invalid values throw |
+
 ### libSceVideoOut
 
 | Name | Kind | Source | Default | Description |
