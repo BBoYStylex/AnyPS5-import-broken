@@ -274,6 +274,12 @@ int APS5_VABI fstatfs_nid_postfix(int d, void* buf) {
     return _fstatfs_nid_postfix(d, buf);
 }
 
+std::int64_t APS5_VABI _fstat_nid_postfix(int d, FileStat* sb);
+
+int APS5_VABI fstat_nid_postfix(int d, FileStat* sb) {
+    return static_cast<int>(_fstat_nid_postfix(d, sb));
+}
+
 std::int64_t APS5_VABI readlink_nid_postfix(const char* path, char* buffer, std::size_t size) {
     if (size > static_cast<std::size_t>(std::numeric_limits<std::int64_t>::max())) return Fail(GuestEinval);
     if (path == nullptr) return Fail(GuestEfault);
@@ -567,6 +573,23 @@ int APS5_VABI fchmodat_nid_postfix(int fd, const char* path, int mode, int flag)
 #endif
     RecordWrittenPath_nid_no_patch(native);
     return 0;
+}
+
+int APS5_VABI lchmod_nid_postfix(const char* path, std::uint16_t mode) {
+#ifndef __APPLE__
+    std::filesystem::path native;
+    if (path != nullptr && *path != '\0' && ResolvePathError_nid_no_patch(path, native) == 0) {
+#ifdef _WIN32
+        const DWORD attributes = GetFileAttributesW(native.wstring().c_str());
+        const bool symbolic = attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+#else
+        std::error_code status;
+        const bool symbolic = std::filesystem::is_symlink(std::filesystem::symlink_status(native, status));
+#endif
+        if (symbolic) NotImplemented_nid_no_patch("lchmod: the mode of a symbolic link on a host that cannot change it");
+    }
+#endif
+    return fchmodat_nid_postfix(GuestAtFdcwd, path, mode, GuestAtSymlinkNofollow);
 }
 
 int APS5_VABI fchown_nid_postfix(int fd, std::uint32_t uid, std::uint32_t gid) {
