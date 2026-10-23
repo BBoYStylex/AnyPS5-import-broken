@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <cstdlib>
+#include <initializer_list>
 
 extern "C" {
 bool MouseIsOpen_nid_no_patch();
@@ -122,6 +123,23 @@ int main() {
     Require(sceMouseRead(MOUSE_HANDLE, data, 8) == 1);
     Require(data[0].x_axis == 150 && data[0].y_axis == 0);
     Require(sceMouseRead(MOUSE_HANDLE, data, 1) == 0);
+
+    MouseInputEvent zero{};
+    MouseInputEvent two{};
+    two.x = 2;
+    MouseInputEvent three{};
+    three.x = 3;
+    MouseInputEvent down{};
+    down.button = 1;
+    down.pressed = true;
+    MouseInputEvent up{};
+    up.button = 1;
+    for (const MouseInputEvent& report : {two, zero, down, zero, three, zero, up, zero}) MousePublishInput_nid_no_patch(report);
+    Require(sceMouseRead(MOUSE_HANDLE, data, 64) == 4);
+    Require(data[0].x_axis == 2 && data[0].buttons == 0);
+    Require(data[1].x_axis == 0 && data[1].buttons == 1);
+    Require(data[2].x_axis == 3 && data[2].buttons == 1);
+    Require(data[3].x_axis == 0 && data[3].buttons == 0);
 
     MouseInputEvent step{};
     step.x = 3;
