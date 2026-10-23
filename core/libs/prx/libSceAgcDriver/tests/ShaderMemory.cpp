@@ -3222,6 +3222,52 @@ void verifyDevicePointerColumns() {
     check(chainRequest, "indirect", records.data(), sizeof(records), true);
 }
 
+void verifyDeviceRuntimeAddressColumns() {
+    using namespace ShaderRecompiler;
+    static TableTexture texture;
+    alignas(256) static std::array<std::uint32_t, 0x3000> root{};
+    static std::array<std::uint32_t, 4> output{};
+    const auto outputV = TableV(output.data(), 0u, static_cast<std::uint32_t>(sizeof(output)));
+    std::copy(outputV.begin(), outputV.end(), root.begin() + 4);
+    const auto descriptor = TableT(texture.bytes.data(), TableFormat8888UNorm, TableType2D);
+    std::copy(descriptor.begin(), descriptor.end(), root.begin() + 0x40u / 4u);
+    const auto base = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(root.data()));
+    const std::array<std::uint32_t, 2> userData{static_cast<std::uint32_t>(base), static_cast<std::uint32_t>(base >> 32u)};
+    const auto code = [](std::uint32_t addend) {
+        return std::vector<std::uint32_t>{0xf4080700u, 0xfa000010u, 0xf4080800u, 0xfa000020u, 0x7da80086u, 0x7e220500u, 0xd7460001u, 0x00010b00u | (addend << 18u), 0x7e260501u, 0x8f128511u,
+            0xf4080900u, 0x24000040u, 0xf4080a00u, 0x26000040u, 0xf09c0f08u, 0x01090000u, 0xe0700000u, 0x80070000u, 0xbf810000u};
+    };
+    const auto mode = [](RecompileRequest request, bool gpuMode, bool deviceTables) {
+        request.target.gpuResolvedImages = gpuMode;
+        request.target.descriptorMemory = gpuMode;
+        request.target.deviceImageTables = deviceTables;
+        return request;
+    };
+    for (const std::uint32_t addend : {0xa0u, 0x88u}) {
+        const auto split = code(addend);
+        auto request = TableRequest(split, userData);
+        request.shader.codeAddress = 0x3c000u + addend * 0x100u;
+        expectFailure([&] { static_cast<void>(GetResourcePlan(mode(request, true, false))); }, "GetImageResource dword 0 is not a valid runtime value", "device runtime-address columns: a T# whose address is known only at run time was accepted with the device image table off");
+        expectFailure([&] { static_cast<void>(GetResourcePlan(mode(request, false, true))); }, "GetImageResource dword 0 is not a valid runtime value", "device runtime-address columns: a T# whose address is known only at run time was accepted on the per-draw path");
+        const auto device = mode(request, true, true);
+        const auto plan = GetResourcePlan(device);
+        require(plan->info.images.size() == 1u && plan->info.images[0].table != NoTable && plan->info.images[0].deviceTable, "device runtime-address columns: a GPU-mode stage does not read a T# behind a run-time address through the device image table");
+        require(plan->info.deviceImageUses.size() == 1u && plan->info.deviceImageUses[0].image == 0u && !plan->requiresSpecializationMemory, "device runtime-address columns: the T# behind a run-time address is not a device image use");
+        SrtRuntime runtime;
+        runtime.userData = userData;
+        runtime.shaderBase = device.shader.codeAddress;
+        bool complete = true;
+        static_cast<void>(ResourceMaterializer::ExpectedDeviceImages(*plan, runtime, complete));
+        require(!complete, "device runtime-address columns: the pre-pass called a T# behind a lane's address complete");
+        const auto compiled = CompileTable(device);
+        const auto& result = *compiled.result;
+        require(result.deviceImageTables && result.gpuResolvedImages && ScanDeviceTableSpirv(result.spirv.Words()).lookup, "device runtime-address columns: the module does not call the device image lookup");
+#if ANYPS5_ENABLE_SPIRV_TOOLS
+        static_cast<void>(ValidateAndOptimizeSpirv(result.spirv, device.target.vulkanVersion, device.target.spirvVersion));
+#endif
+    }
+}
+
 void verifyTableTrailer() {
     using namespace ShaderRecompiler;
     namespace Abi = ImageTableAbi;
@@ -8067,6 +8113,11 @@ int main(int argc, char** argv) {
         if (argc == 2 && std::string_view(argv[1]) == "--device-pointer-columns") {
             verifyDevicePointerColumns();
             std::cout << "GPU-mode stages read pointer and indirect image table columns through the device image table\n";
+            return 0;
+        }
+        if (argc == 2 && std::string_view(argv[1]) == "--device-runtime-address-columns") {
+            verifyDeviceRuntimeAddressColumns();
+            std::cout << "GPU-mode stages read a T# whose address is known only at run time through the device image table\n";
             return 0;
         }
         if (argc == 2 && std::string_view(argv[1]) == "--table-trailer") {
