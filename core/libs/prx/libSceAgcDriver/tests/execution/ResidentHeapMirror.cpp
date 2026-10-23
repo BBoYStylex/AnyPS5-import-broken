@@ -342,6 +342,15 @@ int main() {
             std::puts("skipped, no guest write watch: heap mirrors need one");
             return VulkanTestSkipped;
         }
+#ifdef __APPLE__
+        // MoltenVK has no sparse binding, so every heap mirror is a whole copy; only the copied-mirror checks apply.
+        const auto context = device->graphicsContext();
+        if (!context.sparseBinding || !context.sparseResidencyBuffer || !context.sparseResidencyAliased) {
+            CopiedTests(*device);
+            std::puts("resident heap mirror tests passed (copied mirrors only: the device has no sparse residency)");
+            return 0;
+        }
+#endif
         ResidentTests(*device);
         ReusedAddressTests(*device);
         JoinedImportTests(*device);
