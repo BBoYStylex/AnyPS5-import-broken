@@ -2251,11 +2251,6 @@ int APS5_VABI scePthreadBarrierattrSetpshared(void** attr, int pshared) {
     return SceResult(pthread_barrierattr_setpshared_nid_postfix(attr, pshared));
 }
 
-int APS5_VABI scePthreadCondattrGetclock(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
 int APS5_VABI scePthreadGetconcurrency(void) {
     return pthread_getconcurrency_nid_postfix();
 }
