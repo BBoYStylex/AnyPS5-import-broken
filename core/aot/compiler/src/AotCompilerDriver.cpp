@@ -151,6 +151,7 @@ CompilationStatistics AotCompilerDriver::Compile(const CompilerOptions& options)
             outputs.push_back(std::move(output));
         }
         for (const auto& output : outputs) {
+            ValidatePaths(options);
             Write(output);
         }
         statistics.Success = true;

@@ -14,7 +14,7 @@ MASK = (1 << 64) - 1
 
 def run(command, success=True):
     result = subprocess.run([str(part) for part in command], capture_output=True, text=True, timeout=20)
-    if (result.returncode == 0) != success:
+    if result.returncode != (0 if success else 1):
         raise AssertionError(f"{command}: exit {result.returncode}\n{result.stdout}\n{result.stderr}")
     return result
 
@@ -246,6 +246,11 @@ def reject(options, directory):
     ):
         run([*base, *extra], success=False)
     run([options.compiler, "--input", source, "--output", output], success=False)
+    if source.with_name(source.name.upper()).exists():
+        alias = directory / "alias.o"
+        result = run([*base, "--output", alias, "--emit-llvm", directory / "ALIAS.O"], success=False)
+        if not result.stderr.strip() or (alias.exists() and alias.read_bytes().startswith(b";")):
+            raise AssertionError("Aliased outputs must fail without replacing the object with IR")
     source.write_bytes(elf(b"\x48\x89\xf8\xc3"))
     run([*base, "--args", "0"], success=False)
     print(f"Rejected {len(invalid_inputs)} invalid or unsupported inputs and invalid CLI/output requests")
