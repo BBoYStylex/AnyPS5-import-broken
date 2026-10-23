@@ -980,7 +980,24 @@ std::shared_ptr<const SpecializedModule> specializeModule(const CompiledShaderAr
     return entry->module;
 }
 
-RecompileResult materializeResult(const CompiledVariant& variant, const RecompileRequest& request, const ResourceSnapshot& snapshot, bool registrationDefaults = false) {
+const ResourceSnapshot& mergeTargetImage(const CompiledVariant& variant, const RecompileRequest& request, const ResourceSnapshot& snapshot, bool registrationDefaults, ResourceSnapshot& merged) {
+    const auto& images = variant.info.info.images;
+    const auto image = std::ranges::find_if(images, [](const ImageResource& candidate) { return candidate.targetMerge; });
+    if (image == images.end() || registrationDefaults) return snapshot;
+    if (!request.context.pixel || request.context.pixel->targetMerge.mask == 0u) throw std::runtime_error("ShaderRecompiler: a color target merge variant was materialized without the merged target");
+    if (image + 1 != images.end() || snapshot.images.size() + 1u != images.size()) throw std::runtime_error("ShaderRecompiler: the captured images do not precede the color target merge image");
+    merged = snapshot;
+    DescriptorValue descriptor;
+    std::ranges::copy(request.context.pixel->targetMerge.descriptor, descriptor.dwords.begin());
+    descriptor.dwordCount = 8u;
+    descriptor.availableDwordMask = 0xffu;
+    merged.images.push_back(descriptor);
+    return merged;
+}
+
+RecompileResult materializeResult(const CompiledVariant& variant, const RecompileRequest& request, const ResourceSnapshot& captured, bool registrationDefaults = false) {
+    ResourceSnapshot merged;
+    const auto& snapshot = mergeTargetImage(variant, request, captured, registrationDefaults, merged);
     RecompileResult result;
     const auto& artifact = variant.artifact;
     static_cast<CompiledShaderArtifact&>(result) = {
@@ -1397,6 +1414,16 @@ std::uint64_t snapshotHash(const RecompileRequest& request, const ResourceSnapsh
         mix(request.context.pixel->reversedBlend);
         mix(static_cast<std::uint64_t>(request.context.pixel->rasterPrimitive));
         mix(request.context.pixel->layerExported);
+        const auto& merge = request.context.pixel->targetMerge;
+        mix(merge.target);
+        mix(merge.mask);
+        mix(merge.samples);
+        mix(static_cast<std::uint64_t>(merge.packing));
+        mix(merge.blendControl);
+        mix(merge.layered);
+        mix(merge.firstSlice);
+        mix(merge.lastSlice);
+        for (const auto word : merge.descriptor) mix(word);
     }
     if (request.context.vertex) {
         const auto& vertex = *request.context.vertex;
