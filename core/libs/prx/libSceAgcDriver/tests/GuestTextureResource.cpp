@@ -184,8 +184,15 @@ void RunGuestTextureResourceTests() {
     fmaskArray.baseArray = 1u;
     const auto fmaskArrayResource = DecodeTextureResource(pack(fmaskArray));
     Require(fmaskArrayResource.format == 20u && fmaskArrayResource.baseArray == 1u && fmaskArrayResource.depthOrLastArray == 2u, "FMASK normalization changed the array view");
+    auto twoFragments = compressedFmask;
+    twoFragments.format = 159u;
+    twoFragments.metaPipeAligned = true;
+    twoFragments.writeCompress = false;
+    Require(DecodeTextureResource(pack(twoFragments)).format == 5u, "a two-fragment CMASK FMASK was not normalized to its 8-bit storage");
+    twoFragments.metaCompress = false;
+    rejectFields(twoFragments, "FMASK format is not implemented");
     for (std::uint32_t format = 156u; format <= 168u; ++format) {
-        if (format == 166u) continue;
+        if (format == 159u || format == 166u) continue;
         auto unsupported = fmask;
         unsupported.format = format;
         rejectFields(unsupported, "FMASK format is not implemented");

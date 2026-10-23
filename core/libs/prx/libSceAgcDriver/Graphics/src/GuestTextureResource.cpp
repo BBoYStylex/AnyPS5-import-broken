@@ -180,7 +180,7 @@ GuestTextureResource DecodeTextureResource(std::span<const std::uint32_t> words)
 
     const bool fmask = ShaderRecompiler::IsFmaskTextureFormat(static_cast<ShaderRecompiler::IrBufferFormat>(format));
     if (fmask) {
-        Require(format == static_cast<std::uint32_t>(ShaderRecompiler::IrBufferFormat::Fmask32_S8_F8), "guest FMASK format is not implemented");
+        Require(format == static_cast<std::uint32_t>(ShaderRecompiler::IrBufferFormat::Fmask32_S8_F8) || (format == static_cast<std::uint32_t>(ShaderRecompiler::IrBufferFormat::Fmask8_S2_F2) && metaCompress), "guest FMASK format is not implemented");
         Require(!writeCompress && (!metaCompress || metaAddr != 0u), "FMASK CMASK compression is not implemented without readable metadata");
         Require(!metaCompress || metaPipeAligned, "FMASK CMASK metadata must be pipe aligned");
         Require((typeRaw == 9u || typeRaw == 13u) && tileModeRaw == 24u && baseLevel == 0u && lastLevel == 0u && maxMip == 0u, "FMASK reads require a single-mip 2D or 2D-array Z_64KB_X surface");
@@ -265,7 +265,7 @@ GuestTextureResource DecodeTextureResource(std::span<const std::uint32_t> words)
     result.lastLevel = lastLevel;
     result.tileMode = tileMode;
     result.dimension = dimension;
-    result.format = fmask ? static_cast<std::uint32_t>(ShaderRecompiler::IrBufferFormat::Format32UInt) : format;
+    result.format = !fmask ? format : static_cast<std::uint32_t>(format == static_cast<std::uint32_t>(ShaderRecompiler::IrBufferFormat::Fmask8_S2_F2) ? ShaderRecompiler::IrBufferFormat::Format8UInt : ShaderRecompiler::IrBufferFormat::Format32UInt);
     result.dstSelX = static_cast<std::uint8_t>(dstSelX);
     result.dstSelY = static_cast<std::uint8_t>(dstSelY);
     result.dstSelZ = static_cast<std::uint8_t>(dstSelZ);
