@@ -98,6 +98,10 @@ static ExclusiveState& Exclusive() {
     return state;
 }
 
+bool Ngs2RenderingHere(const Ngs2System& system) {
+    return system.renderDepth != 0;
+}
+
 bool Ngs2ExclusiveElsewhere() {
     return Exclusive().depth != 0 && Exclusive().owner != std::this_thread::get_id();
 }
@@ -208,13 +212,15 @@ static Ngs2SystemOption DefaultSystemOption() {
     option.max_grain_samples = 512;
     option.num_grain_samples = 256;
     option.sample_rate = 48000;
+    option.max_voice_channels = 8;
     return option;
 }
 
 static Ngs2SystemOption CheckedSystemOption(const Ngs2SystemOption* option) {
     if (option == nullptr) return DefaultSystemOption();
     if (option->size != sizeof(Ngs2SystemOption)) throw std::invalid_argument("NGS2: unexpected system option size " + std::to_string(option->size));
-    if (option->flags != 0) throw std::runtime_error("NGS2: system option flags are not implemented");
+    constexpr std::uint32_t knownFlags = 0x2;
+    if ((option->flags & ~knownFlags) != 0) throw std::runtime_error("NGS2: system option flags " + Ngs2Hex(option->flags) + " are not implemented");
     if (option->sample_rate == 0 || option->max_grain_samples < MIN_GRAIN_SAMPLES || option->num_grain_samples == 0 ||
         option->num_grain_samples > option->max_grain_samples) {
         throw std::invalid_argument("NGS2: invalid system grain or sample rate");
@@ -273,6 +279,7 @@ int APS5_VABI sceNgs2SystemDestroy(uintptr_t system_handle, Ngs2ContextBufferInf
         system = Ngs2FindSystem(system_handle);
     }
     if (system == nullptr) return SCE_NGS2_ERROR_INVALID_SYSTEM_HANDLE;
+    if (Ngs2RenderingHere(*system)) throw std::runtime_error("NGS2: destroying a system from its own render (a voice callback) is not implemented");
     while (!system->racks.empty()) {
         const int result = Ngs2DestroyRack(*system->racks.back(), nullptr);
         if (result != SCE_NGS2_OK) return result;
@@ -400,21 +407,24 @@ int APS5_VABI sceNgs2SystemRender(uintptr_t system_handle, const Ngs2RenderBuffe
         state = &found;
     }
     Ngs2EnterExclusive();
+    system->renderDepth++;
     struct Release {
         SystemLockState* state;
+        Ngs2System* system;
         ~Release() {
+            system->renderDepth--;
             Ngs2LeaveExclusive();
             Ngs2NotifyWaiters();
             std::lock_guard locks(SystemLockMutex());
             ReleaseSystemLock(*state);
         }
-    } release{state};
+    } release{state, system};
     Ngs2RenderSystem(*system, buffer_info, num_buffer_info);
     return SCE_NGS2_OK;
 }
 
 int APS5_VABI sceNgs2SystemResetOption(Ngs2SystemOption* option) {
-    if (option == nullptr) APS5_INVALID_ARG_EX;
+    if (option == nullptr) return SCE_NGS2_ERROR_INVALID_OUT_ADDRESS;
     *option = DefaultSystemOption();
     return SCE_NGS2_OK;
 }
