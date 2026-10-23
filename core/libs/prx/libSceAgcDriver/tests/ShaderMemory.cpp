@@ -39,6 +39,7 @@
 #include <initializer_list>
 #include <iostream>
 #include <map>
+#include <set>
 #include <future>
 #include <memory>
 #include <new>
@@ -2898,7 +2899,7 @@ void verifyImageTableRegistration() {
     const auto* storeTable = TableBinding(*store.result, DescriptorRole::ImageStorageTable);
     require((storeFault & Abi::PoisonFlag) == 0u && storeTable != nullptr && storeTable->count != 0u && std::all_of(storeTable->imageWritten.begin(), storeTable->imageWritten.end(), [](bool written) { return written; }), "image table registration: the store's table was not bound as written storage elements");
     require(TableBinding(*store.result, DescriptorRole::ImageTable) == nullptr || TableBinding(*store.result, DescriptorRole::ImageTable)->count == 0u, "image table registration: a store-only table bound sampled elements");
-    const std::array<std::pair<std::uint32_t, const char*>, 3> unsupportedStores{{{0xf0240f08u, "image_store_mip"}, {0xf0280f08u, "image_store_pck"}, {0xf0440108u, "image_atomic_add"}}};
+    const std::array<std::pair<std::uint32_t, const char*>, 2> unsupportedStores{{{0xf0240f08u, "image_store_mip"}, {0xf0280f08u, "image_store_pck"}}};
     for (const auto& [instruction, name] : unsupportedStores) {
         auto code = storeCode;
         code[8] = instruction;
@@ -3316,7 +3317,7 @@ void verifySelectedRecordDirectOperations() {
         require(TableBinding(*compiled.result, DescriptorRole::ImageTable) == nullptr && compiled.result->imageTableFaults == 0u && TableCovered(compiled.regions, &heap[2], sizeof(heap[2])), (what + " through a T# whose record the CPU evaluates was not bound from its record").c_str());
         const auto wholeCode = WithImageOperation(TableWholeCode, word0, false);
         const auto whole = GetResourcePlan(TableRequest(wholeCode, userData));
-        require(whole->info.images.size() == 1u && whole->info.images[0].table == 0u && whole->info.images[0].tableOperation == (word0 == 0xf0200f08u ? TableOperation::Supported : TableOperation::Unsupported), (what + " through a T# keyed per lane left the image table or has the wrong table operation").c_str());
+        require(whole->info.images.size() == 1u && whole->info.images[0].table == 0u && whole->info.images[0].tableOperation == (word0 == 0xf0200f08u || word0 == 0xf0440108u ? TableOperation::Supported : TableOperation::Unsupported), (what + " through a T# keyed per lane left the image table or has the wrong table operation").c_str());
     }
     const auto mixedCode = WithImageOperation(TableSrtKeyCode, 0xf0200f08u, true);
     const auto mixed = GetResourcePlan(TableRequest(mixedCode, userData));
@@ -4507,6 +4508,33 @@ void verifySingleLaneVertexWave() {
     request.target.vertexSubgroups = true;
     RecompileCacheKey::Build(request, withKey);
     require(withoutKey != withKey, "single-lane vertex wave: vertex subgroup support did not change the cache key");
+}
+
+void verifyExtensionKey() {
+    using namespace ShaderRecompiler;
+    RecompileRequest request{};
+    request.shader.stage = ShaderStage::Compute;
+    const std::array<std::string_view, 2> first{"VK_KHR_a", "VK_KHR_bb"};
+    const std::string copied[2] = {"VK_KHR_a", "VK_KHR_bb"};
+    const std::array<std::string_view, 2> same{copied[0], copied[1]};
+    const std::array<std::string_view, 2> second{"VK_KHR_a", "VK_KHR_bc"};
+    std::vector<std::uint64_t> firstKey, againKey, sameKey, secondKey, backKey;
+    request.target.supportedExtensions = first;
+    RecompileCacheKey::BuildInterface(request, firstKey);
+    RecompileCacheKey::BuildInterface(request, againKey);
+    request.target.supportedExtensions = same;
+    RecompileCacheKey::BuildInterface(request, sameKey);
+    request.target.supportedExtensions = second;
+    RecompileCacheKey::BuildInterface(request, secondKey);
+    request.target.supportedExtensions = first;
+    RecompileCacheKey::BuildInterface(request, backKey);
+    require(firstKey == againKey && firstKey == sameKey && firstKey == backKey, "extension key: the same extension names built different keys");
+    require(firstKey != secondKey, "extension key: a changed extension name kept the key");
+    std::vector<std::uint64_t> expected{2u, 8u};
+    for (const char byte : std::string_view("VK_KHR_a")) expected.push_back(static_cast<unsigned char>(byte));
+    expected.push_back(9u);
+    for (const char byte : std::string_view("VK_KHR_bb")) expected.push_back(static_cast<unsigned char>(byte));
+    require(std::search(firstKey.begin(), firstKey.end(), expected.begin(), expected.end()) != firstKey.end(), "extension key: the names no longer enter the key byte by byte");
 }
 
 void verifyMeshConfiguration() {
@@ -6124,6 +6152,68 @@ void verifyCoherentBufferAccesses() {
     const auto invalidated = compile(true, false, true);
     require(!declared(invalidated, "buffers_coherent") && decorated(invalidated, "buffers", spv::DecorationCoherent), "coherent buffers: a program that invalidates the vector caches does not keep every buffer access coherent");
     require(only(invalidated.loads, "buffers") && only(invalidated.stores, "buffers"), "coherent buffers: a program that invalidates the vector caches does not use the coherent buffer array");
+}
+
+void verifyAddressedCoherentBufferAccesses() {
+    using namespace ShaderRecompiler;
+    alignas(256) static std::array<std::uint32_t, 64> input{};
+    alignas(256) static std::array<std::uint32_t, 64> output{};
+    const auto inputAddress = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(input.data()));
+    const auto outputAddress = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(output.data()));
+    const std::array<std::uint32_t, 8> userData{
+        static_cast<std::uint32_t>(inputAddress), static_cast<std::uint32_t>((inputAddress >> 32u) & 0xffffu), 256u, 0x31016facu,
+        static_cast<std::uint32_t>(outputAddress), static_cast<std::uint32_t>((outputAddress >> 32u) & 0xffffu), 256u, 0x31016facu};
+    const std::array<std::string_view, 2> extensions{"SPV_KHR_physical_storage_buffer", "SPV_KHR_8bit_storage"};
+    const std::array<std::uint32_t, 4> capabilities{spv::CapabilityInt64, spv::CapabilityInt64Atomics, spv::CapabilityPhysicalStorageBufferAddresses, spv::CapabilityStorageBuffer8BitAccess};
+    struct Counts {
+        std::uint32_t loads = 0, stores = 0, wideLoads = 0;
+    };
+    const auto compile = [&](bool glc, bool pair) {
+        const std::uint32_t loadOp = pair ? 0xe0341000u : 0xe0301000u;
+        const std::uint32_t storeOp = pair ? 0xe0741000u : 0xe0701000u;
+        std::vector<std::uint32_t> code{0x34020082u, loadOp | (glc ? 0x4000u : 0u), 0x80000201u, 0xbf8c3f70u, storeOp | (glc ? 0x4000u : 0u), 0x80010201u, 0xbf810000u};
+        RecompileRequest request{};
+        request.shader = {ShaderStage::Compute, 0x5b000u, code, 0, {}};
+        request.context.waveSize = 32;
+        request.context.userDataBaseRegister = 0;
+        request.context.userData = userData;
+        request.context.compute = ShaderComputeStageInfo{{32u, 1u, 1u}, 0u, {false, false, false}, false, 1u};
+        request.target.vulkanVersion = 0x00401000u;
+        request.target.spirvVersion = 0x00010300u;
+        request.target.subgroupSize = 32;
+        request.target.bdaAbiVersion = BdaAbi::Version;
+        request.target.supportedCapabilities = capabilities;
+        request.target.supportedExtensions = extensions;
+        request.target.fragmentShaderBarycentricEnabled = false;
+        request.target.gpuResolvedImages = true;
+        request.target.descriptorMemory = true;
+        request.layout.pushConstantSizeBytes = 128;
+        request.useCache = false;
+        const auto words = Recompile(request).spirv;
+        std::set<std::uint32_t> wideTypes;
+        Counts counts;
+        for (std::size_t cursor = 5; cursor < words.size();) {
+            const auto count = words[cursor] >> 16u;
+            const auto opcode = words[cursor] & 0xffffu;
+            require(count != 0 && count <= words.size() - cursor, "addressed coherent buffers: truncated SPIR-V instruction");
+            if (opcode == spv::OpTypeInt && words[cursor + 2] == 64u) wideTypes.insert(words[cursor + 1]);
+            if (opcode == spv::OpAtomicLoad) ++(wideTypes.contains(words[cursor + 1]) ? counts.wideLoads : counts.loads);
+            if (opcode == spv::OpAtomicStore) ++counts.stores;
+            cursor += count;
+        }
+        return counts;
+    };
+
+    const auto plain = compile(false, false);
+    require(plain.loads == 0u && plain.stores == 0u && plain.wideLoads == 0u, "addressed coherent buffers: accesses without GLC became atomics");
+
+    const auto single = compile(true, false);
+    require(single.loads != 0u, "addressed coherent buffers: a GLC load through a buffer address is not an atomic load");
+    require(single.stores != 0u, "addressed coherent buffers: a GLC store through a buffer address is not an atomic store");
+
+    const auto wide = compile(true, true);
+    require(wide.wideLoads != 0u, "addressed coherent buffers: a GLC two-dword load through a buffer address is not one 64-bit atomic load");
+    require(wide.stores != 0u, "addressed coherent buffers: a GLC two-dword store through a buffer address is not an atomic store");
 }
 
 void verifyUnnormalizedSamplers() {
@@ -7974,6 +8064,7 @@ int main(int argc, char** argv) {
         verifyFusedExactArithmetic();
         verifyNarrowVertexWave();
         verifySingleLaneVertexWave();
+        verifyExtensionKey();
         verifyMeshConfiguration();
         verifyPixelInputs();
         verifyCanonicalVersion20And21Requests();
@@ -7991,6 +8082,7 @@ int main(int argc, char** argv) {
         verifyInt64AtomicCapabilities();
         verifySpecializedBufferAtomicBindings();
         verifyCoherentBufferAccesses();
+        verifyAddressedCoherentBufferAccesses();
         verifyUnnormalizedSamplers();
         verifyUnusedUnnormalizedSampler();
         verifyNullVolumeUnnormalizedSampler();
