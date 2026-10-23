@@ -101,14 +101,14 @@ class ReleasePackageTests(unittest.TestCase):
     def test_opus_library_archives_include_the_bundled_license(self):
         (self.source / "core/libs/prx/libSceOpusDec").mkdir()
         (self.library.parent / "libSceOpusDec.prx").write_bytes(b"Opus library bytes")
-        license_file = self.build / "core/libs/licenses/COPYING.opus"
+        license_file = self.source / "3rdparty/opus/COPYING"
         license_file.parent.mkdir(parents=True)
         license_file.write_bytes(b"Opus redistribution notice\n")
         package_release.package("linux", self.build, self.output, "v1")
         with zipfile.ZipFile(self.output / "prx-linux-v1.zip") as archive:
-            self.assertEqual(archive.read("libs/COPYING.opus"), license_file.read_bytes())
+            self.assertEqual(archive.read("libs/licenses/opus.txt"), license_file.read_bytes())
         with tarfile.open(self.output / "prx-linux-v1.tar.gz") as archive:
-            self.assertEqual(archive.extractfile("libs/COPYING.opus").read(), license_file.read_bytes())
+            self.assertEqual(archive.extractfile("libs/licenses/opus.txt").read(), license_file.read_bytes())
 
     def test_opus_release_without_its_license_is_rejected(self):
         (self.source / "core/libs/prx/libSceOpusCeltDec").mkdir()
