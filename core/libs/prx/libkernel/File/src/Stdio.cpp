@@ -323,6 +323,11 @@ static std::int64_t NativeTransferBuffer(int descriptor, void* buf, std::size_t 
         throw std::runtime_error("NativeTransfer: nbytes exceeds platform limit");
     }
     if (write) {
+        if (File::HasFixedSizeWrites(descriptor)) {
+            const auto position = WithoutParameterHandler([descriptor] { return ::_lseeki64(descriptor, 0, SEEK_CUR); });
+            if (position < 0 || !LimitSharedMemoryWrite(descriptor, nbytes, position)) return -1;
+            if (nbytes == 0) return 0;
+        }
         const auto result = File::WriteSharedMemory_nid_no_patch(descriptor, buf, nbytes);
         if (result != -2) return result;
         if (File::Appends(descriptor)) {
