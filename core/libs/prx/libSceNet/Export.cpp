@@ -727,8 +727,6 @@ int native_message_flags(int flags) {
 
 #if defined(_WIN32) || defined(__APPLE__)
 #ifdef __APPLE__
-// Like Winsock, macOS neither wakes a receive blocked on an unbound datagram socket when it is shut down nor fails
-// that receive, so the same wait for a local address applies. An unbound socket reports port 0 instead of failing.
 bool has_local_address(NativeSocket native) {
     sockaddr_storage local{};
     NativeLength local_length = sizeof(local);
@@ -760,16 +758,16 @@ int wait_for_datagram(const Sock& socket, std::chrono::steady_clock::time_point 
     const auto now = std::chrono::steady_clock::now();
     if (now >= deadline) return NET_EAGAIN;
     const auto remaining = std::chrono::ceil<std::chrono::milliseconds>(deadline - now).count();
-#ifdef __APPLE__
-    pollfd descriptor{};
-    descriptor.fd = socket.native->value;
-    descriptor.events = POLLIN;
-    return ::poll(&descriptor, 1, static_cast<int>(std::min<long long>(remaining, INT_MAX))) == 0 ? NET_EAGAIN : 0;
-#else
+#ifdef _WIN32
     WSAPOLLFD descriptor{};
     descriptor.fd = socket.native->value;
     descriptor.events = POLLRDNORM;
     return WSAPoll(&descriptor, 1, static_cast<INT>(std::min<long long>(remaining, INT_MAX))) == 0 ? NET_EAGAIN : 0;
+#else
+    pollfd descriptor{};
+    descriptor.fd = socket.native->value;
+    descriptor.events = POLLIN;
+    return ::poll(&descriptor, 1, static_cast<int>(std::min<long long>(remaining, INT_MAX))) == 0 ? NET_EAGAIN : 0;
 #endif
 }
 
@@ -1283,7 +1281,7 @@ int APS5_VABI sceNetConnect(int s, const void* addr, uint32_t addrlen) {
     }
 #else
     if (::connect(socket.native->value, reinterpret_cast<const sockaddr*>(&native), native_length) == 0) {
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__APPLE__)
         note_local_address(s, socket);
 #endif
         return 0;
