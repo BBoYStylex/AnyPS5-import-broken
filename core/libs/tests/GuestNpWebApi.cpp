@@ -138,6 +138,7 @@ void TestUserContexts() {
     Require(sceNpWebApiCreateContext(context, onlineId) == UserContextAlreadyExist, "a second user context for the same user");
 
     Require(sceNpWebApiDeleteContext(user + 1) == UserContextNotFound, "delete an unknown user context");
+    Require(sceNpWebApiDeleteContext(-1) == LibContextNotFound, "delete user context -1");
     Require(sceNpWebApiDeleteContext((other << 16) | 1) == LibContextNotFound, "delete a user context of a terminated library context");
     Require(sceNpWebApiDeleteContext(user) == 0, "delete the user context");
     Require(sceNpWebApiDeleteContext(user) == UserContextNotFound, "user context deleted twice");
@@ -165,6 +166,7 @@ void TestRequests() {
     Require(sceNpWebApiCreateRequest(user, "group", "/path", MethodPatch, nullptr, &request) == InvalidArgument, "PATCH with SDK 2.50 or later");
     Require(sceNpWebApiCreateRequest(user + 1, "group", "/path", MethodGet, nullptr, &request) == UserContextNotFound, "request of an unknown user context");
     Require(sceNpWebApiCreateRequest(0, "group", "/path", MethodGet, nullptr, &request) == LibContextNotFound, "request of user context 0");
+    Require(sceNpWebApiCreateRequest(-1, "group", "/path", MethodGet, nullptr, &request) == LibContextNotFound, "request of user context -1");
     Require(request == 0, "a failed request leaves the id alone");
 
     const ContentParameter empty{0, nullptr, {}};
@@ -182,6 +184,8 @@ void TestRequests() {
     Require(sceNpWebApiSendRequest(1, nullptr, 0) == LibContextNotFound, "send a request of library context 0");
 
     Require(sceNpWebApiAbortRequest(request + 0x10000) == RequestNotFound, "abort an unknown request");
+    Require(sceNpWebApiAbortRequest(-1) == LibContextNotFound, "abort request -1");
+    Require(sceNpWebApiDeleteRequest(-1) == LibContextNotFound, "delete request -1");
     Require(sceNpWebApiAbortRequest(request) == 0, "abort the request");
     Require(sceNpWebApiAbortRequest(request) == 0, "abort the request twice");
     Require(sceNpWebApiSendRequest(request, body, sizeof(body)) == Aborted, "send an aborted request");
