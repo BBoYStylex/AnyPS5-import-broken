@@ -1,4 +1,5 @@
 #include "SceTypes.hpp"
+#include "prx/libkernel/File/include/File.hpp"
 #include "prx/libc/include/General.hpp"
 #include "prx/libkernel/KernelErrors.hpp"
 #include <cstddef>
@@ -86,9 +87,8 @@ int APS5_VABI fchownat_nid_postfix(void) {
     return 0;
 }
 
-int APS5_VABI futimesat_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+int APS5_VABI futimesat_nid_postfix(int directory, const char* path, const KernelTimeval* times) {
+    return PosixUtimesAt_nid_no_patch(directory, path, times);
 }
 
 int APS5_VABI get_authinfo_nid_postfix(void) {
@@ -2409,9 +2409,8 @@ int APS5_VABI sigreturn_nid_postfix(void) {
     return 0;
 }
 
-int APS5_VABI statfs_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+int APS5_VABI statfs_nid_postfix(const char* path, KernelStatfs* buf) {
+    return PosixStatfs_nid_no_patch(path, buf);
 }
 
 int APS5_VABI swapcontext_nid_postfix(void) {
@@ -2424,10 +2423,6 @@ int APS5_VABI swapon_nid_postfix(void) {
     return 0;
 }
 
-int APS5_VABI symlinkat_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
 
 int APS5_VABI sysKernelGetIntdevModeForInternalLibc_nid_postfix(void) {
     NotImplemented_nid_no_patch(__func__);
