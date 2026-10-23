@@ -129,17 +129,29 @@ void PreparePixelFunctionLds(const Context& context, VkCommandBuffer commands, s
         constexpr auto hostCoherent = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
         constexpr auto deviceLocalHost = hostCoherent | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
         std::optional<std::uint32_t> deviceLocalType;
+        std::optional<std::uint32_t> hostOnlyType;
         for (std::uint32_t i = 0; i < context.memory.memoryTypeCount; ++i) {
-            if ((requirements.memoryTypeBits & (1u << i)) != 0 && (context.memory.memoryTypes[i].propertyFlags & deviceLocalHost) == deviceLocalHost) {
+            if ((requirements.memoryTypeBits & (1u << i)) == 0) continue;
+            const auto flags = context.memory.memoryTypes[i].propertyFlags;
+            const auto heap = context.memory.memoryTypes[i].heapIndex;
+            if (!deviceLocalType && (flags & deviceLocalHost) == deviceLocalHost && context.memory.memoryHeaps[heap].size >= requirements.size) {
                 deviceLocalType = i;
-                break;
+            }
+            if (!hostOnlyType && (flags & hostCoherent) == hostCoherent && (flags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) == 0) {
+                hostOnlyType = i;
             }
         }
-        allocation.memoryTypeIndex = deviceLocalType.value_or(context.MemoryType(requirements.memoryTypeBits, hostCoherent));
-        const auto allocated = context.Function<PFN_vkAllocateMemory>("vkAllocateMemory")(context.device, &allocation, nullptr, &pool.memory);
+        const auto hostType = hostOnlyType.value_or(context.MemoryType(requirements.memoryTypeBits, hostCoherent));
+        allocation.memoryTypeIndex = deviceLocalType.value_or(hostType);
+        auto allocated = context.Function<PFN_vkAllocateMemory>("vkAllocateMemory")(context.device, &allocation, nullptr, &pool.memory);
+        if (allocated != VK_SUCCESS && deviceLocalType && allocation.memoryTypeIndex == *deviceLocalType && hostType != *deviceLocalType) {
+            allocation.memoryTypeIndex = hostType;
+            allocated = context.Function<PFN_vkAllocateMemory>("vkAllocateMemory")(context.device, &allocation, nullptr, &pool.memory);
+        }
         if (allocated != VK_SUCCESS) {
             context.Function<PFN_vkDestroyBuffer>("vkDestroyBuffer")(context.device, pool.buffer, nullptr);
             pool.buffer = VK_NULL_HANDLE;
+            pool.memory = VK_NULL_HANDLE;
             Check(allocated, "vkAllocateMemory pixel function LDS");
         }
         Check(context.Function<PFN_vkBindBufferMemory>("vkBindBufferMemory")(context.device, pool.buffer, pool.memory, 0), "vkBindBufferMemory pixel function LDS");
