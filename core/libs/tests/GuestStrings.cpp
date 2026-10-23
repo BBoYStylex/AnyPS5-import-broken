@@ -135,7 +135,7 @@ static void CheckBoundsCheckedFunctions() {
     char strOverlap[16] = "abcdef";
     Require(strncpy_s_nid_postfix(strOverlap + 1, 10, strOverlap, 3) == 22 && strOverlap[1] == '\0');
     char catOverlap[16] = "abcdef";
-    Require(strncat_s_nid_postfix(catOverlap + 3, 10, catOverlap, 3) == 22 && catOverlap[3] == '\0');
+    Require(strncat_s_nid_postfix(catOverlap + 3, 10, catOverlap, 3) == 0 && std::strcmp(catOverlap + 3, "defabc") == 0);
     char nonOverlap[16] = {};
     std::strcpy(nonOverlap + 8, "cd");
     Require(strcpy_s_nid_postfix(nonOverlap, (std::size_t{1} << 61) - 1, nonOverlap + 8) == 0 && std::strcmp(nonOverlap, "cd") == 0);
@@ -189,10 +189,14 @@ static void CheckSecureStringSizeLimits() {
 
 static int handlerCalls = 0;
 static int handlerError = 0;
+static void* handlerPointer = nullptr;
+static std::string handlerMessage;
 
-static void APS5_VABI CountViolation(const char*, void*, int error) {
+static void APS5_VABI CountViolation(const char* message, void* pointer, int error) {
     ++handlerCalls;
     handlerError = error;
+    handlerPointer = pointer;
+    handlerMessage = message;
 }
 
 static void CheckConstraintHandlerCalls() {
@@ -200,12 +204,23 @@ static void CheckConstraintHandlerCalls() {
     char small[4] = "zz";
     handlerCalls = 0;
     Require(strcpy_s_nid_postfix(small, sizeof(small), "abcd") == 34 && handlerCalls == 1 && handlerError == 34);
+    Require(handlerMessage == "strcpy_s: buffer too small" && handlerPointer == nullptr);
     Require(strcpy_s_nid_postfix(small, 0, "a") == 22 && handlerCalls == 2 && handlerError == 22);
+    Require(handlerMessage == "strcpy_s: bad destination argument" && handlerPointer == nullptr);
     Require(strcpy_s_nid_postfix(small, sizeof(small), "abc") == 0 && handlerCalls == 2);
     char bytes[4] = {};
     Require(memcpy_s_nid_postfix(bytes, 2, "abcd", 4) == 34 && handlerCalls == 3 && handlerError == 34);
     Require(memmove_s_nid_postfix(bytes, 2, nullptr, 1) == 22 && handlerCalls == 4 && handlerError == 22);
+    Require(handlerMessage == "memmove_s: bad argument");
     Require(strncat_s_nid_postfix(nullptr, 4, "a", 1) == 22 && handlerCalls == 5);
+    char overlap[8] = "abcdef";
+    Require(strcpy_s_nid_postfix(overlap, sizeof(overlap), overlap + 1) == 22 && overlap[0] == '\0' && overlap[1] == 'b');
+    Require(handlerMessage == "strcpy_s: buffer overlap" && handlerPointer == nullptr);
+    char appended[8] = "ab";
+    Require(strncat_s_nid_postfix(appended, sizeof(appended), appended, 2) == 0 && std::strcmp(appended, "abab") == 0);
+    std::strcpy(appended, "ab");
+    Require(strcat_s_nid_postfix(appended, sizeof(appended), appended + 1) == 22 && appended[0] == '\0');
+    Require(handlerMessage == "strcat_s: buffer overlap");
     set_constraint_handler_s_nid_postfix(previous);
 }
 
