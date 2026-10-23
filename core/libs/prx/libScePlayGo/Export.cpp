@@ -13,6 +13,7 @@
 #include <string>
 
 // The game is fully installed on the host, so every chunk is local and nothing is pending.
+static constexpr int SCE_PLAYGO_ERROR_INVALID_ARGUMENT = static_cast<int>(0x80B20004);
 static constexpr int SCE_PLAYGO_ERROR_BAD_POINTER = static_cast<int>(0x80B2000A);
 static constexpr int SCE_PLAYGO_ERROR_BAD_HANDLE = static_cast<int>(0x80B20009);
 static constexpr int PLAYGO_HANDLE = 1;
@@ -265,8 +266,9 @@ int APS5_VABI scePlayGoTerminate(void) {
     return 0;
 }
 
-int APS5_VABI scePlayGoRequestNextChunk() {
-    NotImplemented_nid_no_patch(__func__);
+int APS5_VABI scePlayGoRequestNextChunk(int handle, const void* reserved) {
+    if (handle != PLAYGO_HANDLE) return SCE_PLAYGO_ERROR_BAD_HANDLE;
+    if (reserved) return SCE_PLAYGO_ERROR_INVALID_ARGUMENT;
     return 0;
 }
 

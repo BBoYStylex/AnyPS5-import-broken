@@ -1,0 +1,16 @@
+add_library(libSceComposite SHARED EXCLUDE_FROM_ALL Export.cpp)
+target_include_directories(libSceComposite PRIVATE ${LIBS_INCLUDE_DIR})
+configure_windows_unwind(libSceComposite)
+
+if(BUILD_TESTING)
+    add_test_executable(composite_index_tests tests/CompositeIndex.cpp)
+    target_include_directories(composite_index_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(composite_index_tests PRIVATE libSceComposite)
+    configure_windows_unwind(composite_index_tests)
+    add_test(NAME composite_index COMMAND composite_index_tests)
+    set_tests_properties(composite_index PROPERTIES TIMEOUT 30)
+    if(WIN32)
+        set_tests_properties(composite_index PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceComposite>")
+    endif()
+endif()

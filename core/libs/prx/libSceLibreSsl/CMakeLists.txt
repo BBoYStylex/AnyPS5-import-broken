@@ -1,4 +1,4 @@
-add_library(libSceLibreSsl SHARED EXCLUDE_FROM_ALL ${CMAKE_CURRENT_SOURCE_DIR}/Export.cpp ${CMAKE_CURRENT_SOURCE_DIR}/src/Digest.cpp)
+add_library(libSceLibreSsl SHARED EXCLUDE_FROM_ALL ${CMAKE_CURRENT_SOURCE_DIR}/Export.cpp ${CMAKE_CURRENT_SOURCE_DIR}/src/Digest.cpp ${CMAKE_CURRENT_SOURCE_DIR}/src/Stack.cpp)
 target_include_directories(libSceLibreSsl PRIVATE ${LIBS_INCLUDE_DIR})
 configure_windows_unwind(libSceLibreSsl)
 
@@ -9,8 +9,16 @@ if(BUILD_TESTING)
     configure_windows_unwind(guest_libressl_digest_tests)
     add_test(NAME guest_libressl_digest COMMAND guest_libressl_digest_tests)
     set_tests_properties(guest_libressl_digest PROPERTIES TIMEOUT 30)
+    add_test_executable(guest_libressl_stack_tests ${CMAKE_CURRENT_SOURCE_DIR}/tests/Stack.cpp)
+    target_include_directories(guest_libressl_stack_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_libressl_stack_tests PRIVATE libSceLibreSsl)
+    configure_windows_unwind(guest_libressl_stack_tests)
+    add_test(NAME guest_libressl_stack COMMAND guest_libressl_stack_tests)
+    set_tests_properties(guest_libressl_stack PROPERTIES TIMEOUT 30)
     if(WIN32)
         set_tests_properties(guest_libressl_digest PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceLibreSsl>")
+        set_tests_properties(guest_libressl_stack PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceLibreSsl>")
     endif()
 endif()

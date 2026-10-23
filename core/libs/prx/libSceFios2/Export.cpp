@@ -1,4 +1,5 @@
 #include <cstdint>
+#include <limits>
 #include <cstddef>
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
@@ -820,14 +821,15 @@ int APS5_VABI sceFiosTimeGetCurrent() {
     return 0;
 }
 
-int APS5_VABI sceFiosTimeIntervalFromNanoseconds() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+std::int64_t APS5_VABI sceFiosTimeIntervalFromNanoseconds(std::int64_t nanoseconds) {
+    return nanoseconds / 1000;
 }
 
-int APS5_VABI sceFiosTimeIntervalToNanoseconds() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+std::int64_t APS5_VABI sceFiosTimeIntervalToNanoseconds(std::int64_t interval) {
+    if (interval < std::numeric_limits<std::int64_t>::min() / 1000 || interval > std::numeric_limits<std::int64_t>::max() / 1000) {
+        NotImplemented_nid_no_patch(__func__);
+    }
+    return interval * 1000;
 }
 
 int APS5_VABI sceFiosTraceTimestamp() {

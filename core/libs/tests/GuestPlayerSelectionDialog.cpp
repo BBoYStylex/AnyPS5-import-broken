@@ -1,6 +1,8 @@
 #include "prx/libc/include/general/VabiMacros.hpp"
+#include <algorithm>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <stdexcept>
 #include "prx/libSceCommonDialog/CommonDialog.hpp"
 #include "prx/libSceUserService/UserService.hpp"
@@ -44,14 +46,16 @@ int main() {
     Require(scePlayerSelectionDialogOpen(&param) == kErrNotInitialized);
     Require(scePlayerSelectionDialogClose() == kErrNotInitialized);
     Require(scePlayerSelectionDialogParamInitialize(nullptr) == kErrArgNull);
-    bool threw = false;
-    try {
-        scePlayerSelectionDialogParamInitialize(&param);
-    } catch (const std::runtime_error&) {
-        threw = true;
-    }
-    Require(threw);
+    std::memset(&param, 0xA5, sizeof(param));
+    Require(scePlayerSelectionDialogParamInitialize(&param) == 0);
+    Require(param.base.size == sizeof(param.base));
+    Require(param.base.magic == static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(&param.base)) - 1060003575u);
     Require(param.size == sizeof(param));
+    Require(param.userId == -1 && param.maxPlayers == 256);
+    Require(param.mode == 0 && param.players == nullptr && param.playerCount == 0);
+    Require(std::all_of(std::begin(param.base.reserved), std::end(param.base.reserved), [](std::uint8_t value) { return value == 0; }));
+    Require(std::all_of(std::begin(param.reserved), std::end(param.reserved), [](std::uint8_t value) { return value == 0; }));
+    param.userId = USER_SERVICE_INITIAL_USER_ID;
     Require(scePlayerSelectionDialogGetResult(&result) == kErrNotInitialized);
     Require(scePlayerSelectionDialogGetStatus() == 0);
     Require(scePlayerSelectionDialogUpdateStatus() == 0);

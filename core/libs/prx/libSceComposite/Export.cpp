@@ -1,13 +1,28 @@
 #include <cstdint>
 #include <cstddef>
+#include <mutex>
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
+
+namespace {
+
+std::mutex indexMutex;
+std::uint32_t allocatedIndices;
+
+}
 
 extern "C" {
 
 int APS5_VABI sceCompositorAllocateIndex() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    std::lock_guard lock(indexMutex);
+    for (int index = 0; index < 16; ++index) {
+        const auto mask = std::uint32_t{1} << index;
+        if ((allocatedIndices & mask) == 0) {
+            allocatedIndices |= mask;
+            return index;
+        }
+    }
+    return -1;
 }
 
 int APS5_VABI sceCompositorCheckCrash() {
@@ -185,9 +200,12 @@ int APS5_VABI sceCompositorReleaseCommandBuffer() {
     return 0;
 }
 
-int APS5_VABI sceCompositorReleaseIndex() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+void APS5_VABI sceCompositorReleaseIndex(std::uint32_t index) {
+    if (index >= 16) {
+        return;
+    }
+    std::lock_guard lock(indexMutex);
+    allocatedIndices &= ~(std::uint32_t{1} << index);
 }
 
 int APS5_VABI sceCompositorReleaseLocalStall() {

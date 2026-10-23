@@ -8,8 +8,15 @@ if(BUILD_TESTING)
     target_link_libraries(guest_mbus_tests PRIVATE libSceMbus libc)
     configure_windows_unwind(guest_mbus_tests)
     add_test(NAME guest_mbus COMMAND guest_mbus_tests)
+
+    add_test_executable(mbus_event_callback_funcs_init_tests tests/EventCallbackFuncsInit.cpp)
+    target_include_directories(mbus_event_callback_funcs_init_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(mbus_event_callback_funcs_init_tests PRIVATE libSceMbus libc)
+    configure_windows_unwind(mbus_event_callback_funcs_init_tests)
+    add_test(NAME mbus_event_callback_funcs_init COMMAND mbus_event_callback_funcs_init_tests)
+    set_tests_properties(mbus_event_callback_funcs_init PROPERTIES TIMEOUT 30)
     if(WIN32)
-        set_tests_properties(guest_mbus PROPERTIES ENVIRONMENT_MODIFICATION
+        set_tests_properties(guest_mbus mbus_event_callback_funcs_init PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceMbus>")
     endif()
 endif()

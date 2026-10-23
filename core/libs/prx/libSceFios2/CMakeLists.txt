@@ -1,0 +1,16 @@
+add_library(libSceFios2 SHARED EXCLUDE_FROM_ALL Export.cpp)
+target_include_directories(libSceFios2 PRIVATE ${LIBS_INCLUDE_DIR})
+configure_windows_unwind(libSceFios2)
+
+if(BUILD_TESTING)
+    add_test_executable(fios_time_tests tests/FiosTimeTest.cpp)
+    target_include_directories(fios_time_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(fios_time_tests PRIVATE libSceFios2)
+    configure_windows_unwind(fios_time_tests)
+    add_test(NAME fios_time COMMAND fios_time_tests)
+    set_tests_properties(fios_time PROPERTIES TIMEOUT 30)
+    if(WIN32)
+        set_tests_properties(fios_time PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceFios2>")
+    endif()
+endif()

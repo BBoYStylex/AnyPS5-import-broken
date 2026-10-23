@@ -4,13 +4,20 @@ configure_windows_unwind(libScePlayerSelectionDialog)
 target_link_libraries(libScePlayerSelectionDialog PRIVATE libSceUserService)
 
 if(BUILD_TESTING)
+    add_test_executable(player_selection_dialog_param_initialize_tests tests/PlayerSelectionDialogParamInitialize.cpp)
+    target_include_directories(player_selection_dialog_param_initialize_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(player_selection_dialog_param_initialize_tests PRIVATE libScePlayerSelectionDialog)
+    configure_windows_unwind(player_selection_dialog_param_initialize_tests)
+    add_test(NAME player_selection_dialog_param_initialize COMMAND player_selection_dialog_param_initialize_tests)
+    set_tests_properties(player_selection_dialog_param_initialize PROPERTIES TIMEOUT 30)
+
     add_test_executable(guest_player_selection_dialog_tests ${LIBS_INCLUDE_DIR}/tests/GuestPlayerSelectionDialog.cpp)
     target_include_directories(guest_player_selection_dialog_tests PRIVATE ${LIBS_INCLUDE_DIR})
     target_link_libraries(guest_player_selection_dialog_tests PRIVATE libScePlayerSelectionDialog libSceUserService libc)
     configure_windows_unwind(guest_player_selection_dialog_tests)
     add_test(NAME guest_player_selection_dialog COMMAND guest_player_selection_dialog_tests)
     if(WIN32)
-        set_tests_properties(guest_player_selection_dialog PROPERTIES ENVIRONMENT_MODIFICATION
+        set_tests_properties(guest_player_selection_dialog player_selection_dialog_param_initialize PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libScePlayerSelectionDialog>")
     endif()
 endif()
