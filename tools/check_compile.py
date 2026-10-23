@@ -115,6 +115,29 @@ def syntax_only(entry, source):
     return syntax_arguments(arguments, directory, source)
 
 
+def preprocessor_arguments(argument):
+    options = iter(argument[4:].split(","))
+    kept = []
+    for option in options:
+        if option in ("-MD", "-MMD", "-MF", "-MT", "-MQ", "--write-dependencies", "--write-user-dependencies"):
+            if not next(options, None):
+                raise ValueError(f"missing value for {option} in {argument}")
+            continue
+        if option in ("-M", "-MM", "-MG", "-MP", "--dependencies", "--user-dependencies",
+                      "--print-missing-file-dependencies") or option.startswith(("-MF", "-MT", "-MQ")):
+            continue
+        kept.append(option)
+        if option in ("-D", "-U", "-A", "-I", "-include", "-imacros", "-isystem", "-iquote", "-idirafter",
+                      "-iprefix", "-iwithprefix", "-iwithprefixbefore", "-isysroot", "-imultilib", "-F",
+                      "--define-macro", "--undefine-macro", "--assert", "--include", "--imacros", "--include-directory",
+                      "--include-directory-after", "--include-prefix", "--include-with-prefix",
+                      "--include-with-prefix-after", "--include-with-prefix-before", "--dump", "--embed-directory"):
+            value = next(options, None)
+            if value is not None:
+                kept.append(value)
+    return "-Wp," + ",".join(kept) if kept else None
+
+
 def syntax_arguments(arguments, directory, source):
     if not isinstance(arguments, list) or not arguments or any(not isinstance(argument, str) for argument in arguments) or not arguments[0]:
         raise ValueError("arguments must be a nonempty list of strings with an executable")
@@ -126,6 +149,11 @@ def syntax_arguments(arguments, directory, source):
     index = 0
     while index < len(arguments):
         argument = arguments[index]
+        if argument.startswith("-Wp,"):
+            if forwarded := preprocessor_arguments(argument):
+                trimmed.append(forwarded)
+            index += 1
+            continue
         if argument in DROP_WITH_VALUE:
             index += 2
             continue
