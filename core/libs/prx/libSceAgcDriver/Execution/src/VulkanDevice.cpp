@@ -4436,6 +4436,24 @@ struct RecordedDispatch {
     std::array<std::uint32_t, 3> threadLimit{};
 };
 
+struct DispatchCompletion {
+    const Graphics::Context& context;
+    const std::array<Graphics::CompiledShader, 1>& shaders;
+    VkShaderStageFlags pushStages;
+    const std::array<std::byte, Graphics::PipelinePushConstantBytes>& pushBytes;
+    const std::shared_ptr<ComputePipelineObjects>& objects;
+    const std::shared_ptr<Graphics::ShaderResources>& resources;
+    const ResourceCache::Key& contentKey;
+    bool cacheable;
+    bool fromCache;
+    double revalidateMs;
+    const std::shared_ptr<Graphics::ShaderResources::DrawBindings>& overlay;
+    std::uint64_t lookupsBefore;
+    DispatchTimer& timer;
+    PerformanceTimer& timing;
+    char* groupsText;
+};
+
 VkDevice VulkanDevice::Device() const {
     return state->device;
 }
@@ -5351,6 +5369,27 @@ VulkanDevice::IndirectOutcome VulkanDevice::dispatch(const ShaderRecompiler::Rec
         timing.Mark("pipeline_create");
         timer.phase(PhasePipeline);
     }
+    DispatchCompletion completion{context, shaders, pushStages, pushBytes, objects, resources, contentKey, cacheable, fromCache, revalidateMs, overlay, lookupsBefore, timer, timing, groupsText};
+    return recordCompletedDispatch(shader, x, y, z, arguments, programAddress, recipeOut, threadGroup, htileClear, completion);
+}
+
+VulkanDevice::IndirectOutcome VulkanDevice::recordCompletedDispatch(const ShaderRecompiler::RecompileResult& shader, std::uint32_t x, std::uint32_t y, std::uint32_t z, std::uint64_t arguments, std::uint64_t programAddress, std::shared_ptr<const Recipe>* recipeOut, const std::array<std::uint32_t, 3>& threadGroup, std::optional<std::pair<std::uint64_t, std::size_t>> htileClear, DispatchCompletion& completion) {
+    static const bool profile = std::getenv("APS5_PROFILE_DRAW") != nullptr;
+    const auto& context = completion.context;
+    const auto& shaders = completion.shaders;
+    const auto pushStages = completion.pushStages;
+    const auto& pushBytes = completion.pushBytes;
+    const auto& objects = completion.objects;
+    const auto& resources = completion.resources;
+    const auto& contentKey = completion.contentKey;
+    const bool cacheable = completion.cacheable;
+    const bool fromCache = completion.fromCache;
+    const double revalidateMs = completion.revalidateMs;
+    const auto& overlay = completion.overlay;
+    const auto lookupsBefore = completion.lookupsBefore;
+    auto& timer = completion.timer;
+    auto& timing = completion.timing;
+    auto* groupsText = completion.groupsText;
     // Recorded into the device's open batch: the CPU moves on to the next command while the GPU
     // works; the batch is waited for where the guest expects results (labels, flips, CPU reads).
     auto& recorder = *state->recorder;
