@@ -1101,6 +1101,12 @@ int main() {
         Require(stat_nid_postfix(fileLink.string().c_str(), &followed) == 0 && (followed.st_mode & 0170000) == 0100000);
         Require(followed.st_ino == status.st_ino && linkStatus.st_ino != status.st_ino && linkStatus.st_dev == status.st_dev);
         Require(stat_nid_postfix(directoryLink.string().c_str(), &followed) == 0 && (followed.st_mode & 0170000) == 0040000);
+        const auto renameThroughLoop = statLoop.string() + "\\inside";
+        const auto renameTarget = (root / "rename-target").string();
+        Require(sceKernelRename(renameThroughLoop.c_str(), renameTarget.c_str()) == static_cast<int>(0x8002003eu));
+        Require(rename_nid_postfix(renameThroughLoop.c_str(), renameTarget.c_str()) == -1 && *__error_nid_postfix() == 62);
+        Require(sceKernelRename(present.string().c_str(), renameThroughLoop.c_str()) == static_cast<int>(0x8002003eu));
+        Require(rename_nid_postfix(present.string().c_str(), renameThroughLoop.c_str()) == -1 && *__error_nid_postfix() == 62);
         Require(stat_nid_postfix(fileLink.string().c_str(), &status) == 0 && status.st_size == 5);
         FileStat absoluteStatus{};
         Require(lstat_nid_postfix(absoluteLink.string().c_str(), &absoluteStatus) == 0);
