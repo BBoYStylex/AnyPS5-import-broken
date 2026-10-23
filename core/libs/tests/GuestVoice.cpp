@@ -145,6 +145,24 @@ int main() {
     Require(sceVoiceSetThreadsParams(&threads) == invalidArgument);
     threads.mode = 1;
     RequireThrows([&] { sceVoiceSetThreadsParams(&threads); });
+    VoiceThreadsParams scheduled{1, 700, 0x7f, 700, 0, 0x7f, 700, 0, 0x7f};
+    Require(sceVoiceSetThreadsParams(&scheduled) == 0);
+    scheduled = {1, 256, 0x1fff, 767, 0, 1, 512, 0, 0x1000};
+    Require(sceVoiceSetThreadsParams(&scheduled) == 0);
+    for (const auto priority : {255, 768, 0, -1}) {
+        for (int slot = 0; slot < 3; ++slot) {
+            VoiceThreadsParams outside{1, 700, 0x7f, 700, 0, 0x7f, 700, 0, 0x7f};
+            (slot == 0 ? outside.firstPriority : slot == 1 ? outside.secondPriority : outside.thirdPriority) = priority;
+            RequireThrows([&] { sceVoiceSetThreadsParams(&outside); });
+        }
+    }
+    for (const std::uint64_t affinity : {std::uint64_t{0}, std::uint64_t{0x2000}, std::uint64_t{0x3fff}, UINT64_MAX}) {
+        for (int slot = 0; slot < 3; ++slot) {
+            VoiceThreadsParams outside{1, 700, 0x7f, 700, 0, 0x7f, 700, 0, 0x7f};
+            (slot == 0 ? outside.firstAffinity : slot == 1 ? outside.secondAffinity : outside.thirdAffinity) = affinity;
+            RequireThrows([&] { sceVoiceSetThreadsParams(&outside); });
+        }
+    }
     threads.mode = 0;
     Require(sceVoiceStart(nullptr) == invalidArgument);
     Require(sceVoiceStart(&start) == invalidArgument);
@@ -161,6 +179,8 @@ int main() {
     start.mem_size = 0x40000;
     Require(sceVoiceSetThreadsParams(nullptr) == invalidArgument);
     Require(sceVoiceSetThreadsParams(&threads) == static_cast<std::int32_t>(0x804e080bu));
+    scheduled = {1, 700, 0x7f, 700, 0, 0x7f, 700, 0, 0x7f};
+    Require(sceVoiceSetThreadsParams(&scheduled) == static_cast<std::int32_t>(0x804e080bu));
     Require(sceVoiceGetResourceInfo(nullptr) == invalidArgument);
     struct ResourceOutput {
         VoiceResourceInfo info;
