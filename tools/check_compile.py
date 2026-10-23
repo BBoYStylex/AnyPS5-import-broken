@@ -45,7 +45,7 @@ def entries(build):
         raise ValueError(f"{build} is not a directory; configure the build first")
     manifest = build / "compile_commands.json"
     if manifest.is_file():
-        return json.loads(manifest.read_text(encoding="utf-8"))
+        return json.loads(manifest.read_text(encoding="utf-8-sig"))
     ninja = shutil.which("ninja")
     if ninja is None:
         raise ValueError(f"no {manifest} and ninja is not on PATH")
@@ -118,6 +118,9 @@ def syntax_only(entry, source):
 def syntax_arguments(arguments, directory, source):
     if not isinstance(arguments, list) or not arguments or any(not isinstance(argument, str) for argument in arguments) or not arguments[0]:
         raise ValueError("arguments must be a nonempty list of strings with an executable")
+    for argument in arguments[1:]:
+        if argument.startswith("@"):
+            raise ValueError(f"unexpanded response file {argument[1:]}; provide expanded compile arguments before checking syntax")
     wanted = source.resolve()
     trimmed = []
     index = 0
@@ -166,7 +169,10 @@ def check(root, build, files, jobs=1):
     tasks = []
     for file in files:
         source = file.resolve()
-        name = os.path.relpath(source, root).replace(os.sep, "/")
+        try:
+            name = source.relative_to(root.resolve()).as_posix()
+        except ValueError:
+            name = source.as_posix()
         tasks.append((source, name, build, commands.get(name)))
     checked = failed = 0
     with (ThreadPoolExecutor(max_workers=jobs) if jobs > 1 else nullcontext()) as executor:

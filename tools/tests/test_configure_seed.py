@@ -47,6 +47,29 @@ class ConfigureSeedPathTests(unittest.TestCase):
         self.assertEqual(self.cache.read_bytes(), self.original)
         self.assertEqual(Path(seed).read_bytes(), self.original)
 
+    def test_unreadable_cache_is_reported_without_a_traceback(self):
+        missing = self.root / "no cache dir" / "CMakeCache.txt"
+        result = subprocess.run([sys.executable, str(TOOL), str(missing), str(self.root / "seed.cmake")],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn(str(missing), result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertFalse((self.root / "seed.cmake").exists())
+
+    def test_missing_seed_directory_is_created(self):
+        seed = self.root / "new dir" / "nested" / "seed.cmake"
+        result = self.run_seed(seed)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("HAVE_FEATURE", seed.read_text(encoding="utf-8"))
+
+    def test_unwritable_seed_is_reported_without_a_traceback(self):
+        seed_dir = self.root / "seed_dir"
+        seed_dir.mkdir()
+        result = self.run_seed(seed_dir)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn(str(seed_dir), result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
     def test_same_path_preserves_cache(self):
         self.assert_rejected(self.cache)
 

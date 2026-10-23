@@ -33,6 +33,13 @@
 #include <mutex>
 #include <atomic>
 #include <pthread.h>
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <process.h>
+#endif
 #ifdef __GLIBC__
 #include <malloc.h>
 #endif
@@ -227,6 +234,216 @@ bool ProgramUsesWorkgroup(const ShaderSnapshot& snapshot, std::size_t codeOffset
     });
     if (codeOffset == 0) snapshot.workgroupUse->store(used ? Used : Unused, std::memory_order_release);
     return used;
+}
+
+namespace {
+
+bool readOnlyMemoryOp(ShaderRecompiler::RdnaOpcode op) {
+    using Op = ShaderRecompiler::RdnaOpcode;
+    switch (op) {
+        case Op::SLoadDword:
+        case Op::SLoadDwordx2:
+        case Op::SLoadDwordx4:
+        case Op::SLoadDwordx8:
+        case Op::SLoadDwordx16:
+        case Op::BufferLoadFormatX:
+        case Op::BufferLoadFormatXy:
+        case Op::BufferLoadFormatXyz:
+        case Op::BufferLoadFormatXyzw:
+        case Op::BufferLoadDword:
+        case Op::BufferLoadDwordx2:
+        case Op::BufferLoadDwordx4:
+        case Op::ImageSample:
+        case Op::ImageSampleLz:
+        case Op::ImageSampleBCl:
+        case Op::ImageSampleBClO:
+        case Op::ImageSampleBO:
+        case Op::ImageSampleC:
+        case Op::ImageSampleCB:
+        case Op::ImageSampleCBCl:
+        case Op::ImageSampleCBClO:
+        case Op::ImageSampleCBO:
+        case Op::ImageSampleCCl:
+        case Op::ImageSampleCClO:
+        case Op::ImageSampleCD:
+        case Op::ImageSampleCDCl:
+        case Op::ImageSampleCDClO:
+        case Op::ImageSampleCDO:
+        case Op::ImageSampleCL:
+        case Op::ImageSampleCLzO:
+        case Op::ImageSampleCLO:
+        case Op::ImageSampleCO:
+        case Op::ImageSampleCl:
+        case Op::ImageSampleClO:
+        case Op::ImageSampleD:
+        case Op::ImageSampleDCl:
+        case Op::ImageSampleDO:
+        case Op::ImageSampleLzO:
+        case Op::ImageSampleO:
+        case Op::ImageSampleCd:
+        case Op::ImageSampleCdCl:
+        case Op::ImageSampleCCd:
+        case Op::ImageSampleCCdCl:
+        case Op::ImageSampleCdO:
+        case Op::ImageSampleCdClO:
+        case Op::ImageSampleCCdO:
+        case Op::ImageSampleCCdClO:
+        case Op::ImageSampleDG16:
+        case Op::ImageSampleDClG16:
+        case Op::ImageSampleCDG16:
+        case Op::ImageSampleCDClG16:
+        case Op::ImageSampleDOG16:
+        case Op::ImageSampleDClOG16:
+        case Op::ImageSampleCDOG16:
+        case Op::ImageSampleCDClOG16:
+        case Op::ImageSampleCdG16:
+        case Op::ImageSampleCdClG16:
+        case Op::ImageSampleCCdG16:
+        case Op::ImageSampleCCdClG16:
+        case Op::ImageSampleCdOG16:
+        case Op::ImageSampleCdClOG16:
+        case Op::ImageSampleCCdOG16:
+        case Op::ImageSampleCCdClOG16:
+        case Op::ImageLoad:
+        case Op::ImageGetResinfo:
+        case Op::SBufferLoadDword:
+        case Op::SBufferLoadDwordx2:
+        case Op::SBufferLoadDwordx4:
+        case Op::SBufferLoadDwordx8:
+        case Op::SBufferLoadDwordx16:
+        case Op::SScratchLoadDword:
+        case Op::SScratchLoadDwordx2:
+        case Op::SScratchLoadDwordx4:
+        case Op::BufferLoadUbyte:
+        case Op::BufferLoadSbyte:
+        case Op::BufferLoadUshort:
+        case Op::BufferLoadSshort:
+        case Op::BufferLoadDwordx3:
+        case Op::BufferLoadUbyteD16:
+        case Op::BufferLoadUbyteD16Hi:
+        case Op::BufferLoadSbyteD16:
+        case Op::BufferLoadSbyteD16Hi:
+        case Op::BufferLoadShortD16:
+        case Op::BufferLoadShortD16Hi:
+        case Op::TbufferLoadFormatX:
+        case Op::TbufferLoadFormatXy:
+        case Op::TbufferLoadFormatXyz:
+        case Op::TbufferLoadFormatXyzw:
+        case Op::TbufferLoadFormatD16X:
+        case Op::TbufferLoadFormatD16Xy:
+        case Op::TbufferLoadFormatD16Xyz:
+        case Op::TbufferLoadFormatD16Xyzw:
+        case Op::BufferLoadFormatD16X:
+        case Op::BufferLoadFormatD16Xy:
+        case Op::BufferLoadFormatD16Xyz:
+        case Op::BufferLoadFormatD16Xyzw:
+        case Op::BufferLoadFormatD16HiX:
+        case Op::FlatLoadUbyte:
+        case Op::FlatLoadSbyte:
+        case Op::FlatLoadUshort:
+        case Op::FlatLoadSshort:
+        case Op::FlatLoadDword:
+        case Op::FlatLoadDwordx2:
+        case Op::FlatLoadDwordx3:
+        case Op::FlatLoadDwordx4:
+        case Op::GlobalLoadDwordAddtid:
+        case Op::FlatLoadUbyteD16:
+        case Op::FlatLoadUbyteD16Hi:
+        case Op::FlatLoadSbyteD16:
+        case Op::FlatLoadSbyteD16Hi:
+        case Op::FlatLoadShortD16:
+        case Op::FlatLoadShortD16Hi:
+        case Op::ImageGetLod:
+        case Op::ImageLoadMip:
+        case Op::ImageLoadPck:
+        case Op::ImageLoadPckSgn:
+        case Op::ImageLoadMipPck:
+        case Op::ImageLoadMipPckSgn:
+        case Op::ImageLoadBy2:
+        case Op::ImageLoadBy4:
+        case Op::ImageLoadMipBy2:
+        case Op::ImageLoadMipBy4:
+        case Op::ImageLoadPck2:
+        case Op::ImageLoadPck4:
+        case Op::ImageLoadMipPck2:
+        case Op::ImageLoadMipPck4:
+        case Op::ImageMsaaLoad:
+        case Op::ImageGather4Lz:
+        case Op::ImageGather4C:
+        case Op::ImageGather4CLz:
+        case Op::ImageGather4LzO:
+        case Op::ImageGather4CO:
+        case Op::ImageGather4CLzO:
+        case Op::ImageGather4h:
+        case Op::ImageGather4hPck:
+        case Op::ImageGather4:
+        case Op::ImageGather4B:
+        case Op::ImageGather4BCl:
+        case Op::ImageGather4BClO:
+        case Op::ImageGather4BO:
+        case Op::ImageGather4Cl:
+        case Op::ImageGather4ClO:
+        case Op::ImageGather4CB:
+        case Op::ImageGather4CBCl:
+        case Op::ImageGather4CBClO:
+        case Op::ImageGather4CBO:
+        case Op::ImageGather4CCl:
+        case Op::ImageGather4CClO:
+        case Op::ImageGather4CL:
+        case Op::ImageGather4CLO:
+        case Op::ImageGather4L:
+        case Op::ImageGather4LO:
+        case Op::ImageGather4O:
+        case Op::ImageBvhIntersectRay:
+        case Op::SGl1Inv:
+        case Op::SDcacheInv:
+        case Op::SDcacheWb:
+        case Op::SMemtime:
+        case Op::SMemrealtime:
+        case Op::SDcacheDiscard:
+        case Op::SDcacheDiscardX2:
+        case Op::BufferGl0Inv:
+        case Op::BufferGl1Inv:
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool decodedWritesMemory(std::span<const std::uint32_t> code) {
+    using Family = ShaderRecompiler::RdnaInstructionFamily;
+    using Op = ShaderRecompiler::RdnaOpcode;
+    try {
+        const auto decoded = ShaderRecompiler::RdnaInstructionDecoder{}.Decode(code);
+        return std::any_of(decoded.instructions.begin(), decoded.instructions.end(), [](const auto& instruction) {
+            switch (instruction.family) {
+            case Family::MUBUF: case Family::MTBUF: case Family::FLAT: case Family::MIMG: case Family::SMEM:
+                return !readOnlyMemoryOp(instruction.op);
+            case Family::DS:
+                return instruction.gds || instruction.op == Op::DsGwsInit || instruction.op == Op::DsGwsBarrier || instruction.op == Op::DsGwsSemaV || instruction.op == Op::DsGwsSemaP || instruction.op == Op::DsGwsSemaBr || instruction.op == Op::DsGwsSemaReleaseAll || instruction.op == Op::DsOrderedCount || instruction.op == Op::DsAppend || instruction.op == Op::DsConsume;
+            case Family::Unknown:
+                return true;
+            default:
+                return instruction.op == Op::SSetpcB64 || instruction.op == Op::SSwappcB64 || instruction.op == Op::SRfeB64;
+            }
+        });
+    } catch (const std::exception&) {
+        return true;
+    }
+}
+
+}
+
+bool ProgramWritesMemory(const ShaderSnapshot& snapshot, std::size_t codeOffset) {
+    constexpr std::uint8_t Unknown = 0, Reads = 1, Writes = 2;
+    if (codeOffset == 0) {
+        const auto cached = snapshot.memoryWrites->load(std::memory_order_acquire);
+        if (cached != Unknown) return cached == Writes;
+    }
+    if (codeOffset > snapshot.code.size()) return true;
+    const bool writes = decodedWritesMemory(std::span(snapshot.code).subspan(codeOffset));
+    if (codeOffset == 0) snapshot.memoryWrites->store(writes ? Writes : Reads, std::memory_order_release);
+    return writes;
 }
 
 std::uint32_t PositionExportLayout(const ShaderSnapshot* snapshot, std::size_t codeOffset, std::span<const std::uint32_t> code, std::uint32_t paClVsOutCntl, const ShaderSnapshot* continuation) {
@@ -811,7 +1028,7 @@ std::optional<ShaderRecompiler::ShaderFloatMode> DecodeFloatMode(const Registers
     case 0: rsrc1 = 0x212; fp16OverflowBit = 26; break;
     case 1: rsrc1 = 0x00a; fp16OverflowBit = 29; break;
     case 2: case 4: case 6: rsrc1 = 0x08a; fp16OverflowBit = 31; break;
-    case 5: case 7: rsrc1 = 0x10a; fp16OverflowBit = 30; break;
+    case 3: case 5: case 7: rsrc1 = 0x10a; fp16OverflowBit = 30; break;
     default: return std::nullopt;
     }
     const auto found = registers.find(rsrc1);
@@ -909,7 +1126,7 @@ std::unique_ptr<RegisteredPreparation> PlanRegistered(const ShaderSnapshot& snap
     case 1: stage = Stage::Fragment; programRegister = 0x008; resourceRegister = 0x00b; break;
     case 2: stage = Stage::Vertex; programRegister = 0x0c8; resourceRegister = 0x08b; firstUser = 8; break;
     case 4: stage = Stage::Mesh; programRegister = 0x0c8; resourceRegister = 0x08b; break;
-    case 5: return {};
+    case 3: case 5: return {};
     case 6: stage = Stage::Mesh; programRegister = 0x088; resourceRegister = 0x08b; break;
     case 7: stage = Stage::TessellationControl; programRegister = 0x108; resourceRegister = 0x10b; break;
     default:
@@ -1139,9 +1356,8 @@ public:
             Closing() = true;
             pools = {Existing(), ExistingPrebuild()};
         }
-        for (auto* pool : pools) {
-            if (pool != nullptr) pool->Close();
-        }
+        if (pools[0] != nullptr) pools[0]->Close(false);
+        if (pools[1] != nullptr) pools[1]->Close(true);
     }
 
 private:
@@ -1197,25 +1413,60 @@ public:
         idle.wait(lock, [&] { return unfinished.empty() || *unfinished.begin() > ticket; });
     }
 
-    void Close() {
-        std::vector<pthread_t> joined;
+    void Close(bool dropQueued) {
+        std::vector<Worker> joined;
+        std::deque<Task> dropped;
         {
             std::unique_lock lock(mutex);
             closed = true;
+            if (dropQueued) {
+                dropped.swap(tasks);
+                for (const auto& task : dropped) unfinished.erase(task.sequence);
+                idle.notify_all();
+            }
             idle.wait(lock, [&] { return tasks.empty() && running == 0; });
             joined.swap(workers);
         }
         ready.notify_all();
-        for (const auto worker : joined) {
-            if (!pthread_equal(worker, pthread_self())) pthread_join(worker, nullptr);
-        }
+        for (const auto& worker : joined) Join(worker);
     }
 
 private:
+    static constexpr std::size_t StackBytes = 64u << 20u;
+
+#ifdef _WIN32
+    struct Worker {
+        HANDLE handle;
+        unsigned id;
+    };
+
+    static void Join(const Worker& worker) {
+        if (worker.id != GetCurrentThreadId()) WaitForSingleObject(worker.handle, INFINITE);
+        CloseHandle(worker.handle);
+    }
+#else
+    using Worker = pthread_t;
+
+    static void Join(Worker worker) {
+        if (!pthread_equal(worker, pthread_self())) pthread_join(worker, nullptr);
+    }
+#endif
+
     explicit RegistrationPreparePool(unsigned count) {
+#ifdef _WIN32
+        for (unsigned index = 0; index < count; ++index) {
+            unsigned id = 0;
+            const auto thread = _beginthreadex(nullptr, static_cast<unsigned>(StackBytes), &RegistrationPreparePool::WindowsMain, this, STACK_SIZE_PARAM_IS_A_RESERVATION, &id);
+            if (thread != 0) {
+                workers.push_back({reinterpret_cast<HANDLE>(thread), id});
+                ++threads;
+                liveWorkers.fetch_add(1, std::memory_order_acq_rel);
+            }
+        }
+#else
         pthread_attr_t attributes;
         pthread_attr_init(&attributes);
-        pthread_attr_setstacksize(&attributes, 64u << 20u);
+        pthread_attr_setstacksize(&attributes, StackBytes);
         for (unsigned index = 0; index < count; ++index) {
             pthread_t thread;
             if (pthread_create(&thread, &attributes, &RegistrationPreparePool::Main, this) == 0) {
@@ -1225,7 +1476,15 @@ private:
             }
         }
         pthread_attr_destroy(&attributes);
+#endif
     }
+
+#ifdef _WIN32
+    static unsigned __stdcall WindowsMain(void* argument) {
+        Main(argument);
+        return 0;
+    }
+#endif
 
     static void* Main(void* argument) {
         auto& pool = *static_cast<RegistrationPreparePool*>(argument);
@@ -1271,7 +1530,7 @@ private:
     std::condition_variable ready;
     std::condition_variable idle;
     std::deque<Task> tasks;
-    std::vector<pthread_t> workers;
+    std::vector<Worker> workers;
     unsigned threads = 0;
     inline static std::atomic<unsigned> liveWorkers{0};
     unsigned running = 0;
@@ -1358,13 +1617,13 @@ std::vector<PreparedGraphicsStage> PrepareGraphicsStages(const DrawDecode& decod
     require(expected == decoded.roles, "graphics ABI linked programs do not match the stage routing");
     std::vector<ShaderRecompiler::LinkedProgram> linked;
     std::vector<ShaderRecompiler::MemoryRegion> memory;
+    AppendProgramMemory(memory, decoded.programs);
     for (std::size_t index = 0; index < decoded.programs.size(); ++index) {
         const auto& program = decoded.programs[index];
         require(program.snapshot != nullptr && program.codeOffset < program.snapshot->code.size(), "graphics ABI has an invalid registered entry point");
         const auto code = std::span(program.snapshot->code).subspan(program.codeOffset);
         require(program.binary.code.data() == code.data() && program.binary.code.size() == code.size() && program.binary.codeAddress == program.snapshot->codeAddress + program.codeOffset * sizeof(std::uint32_t), "graphics ABI entry point differs from its snapshot");
         linked.push_back({decoded.roles[index], program.binary, program.userDataBase, program.firstUserSgpr, program.userData});
-        memory.insert(memory.end(), program.memory.begin(), program.memory.end());
     }
     std::vector<PreparedGraphicsStage> prepared;
     std::uint32_t pushOffset = 0;
@@ -1391,7 +1650,10 @@ std::vector<PreparedGraphicsStage> PrepareGraphicsStages(const DrawDecode& decod
             prepared.push_back({program.snapshot, {program.codeOffset, nullptr}, program.binary.stage, offset, nullptr});
             continue;
         }
-        if (vertex) vertex->paClVsOutCntl = PositionExportLayout(program.snapshot.get(), program.codeOffset, program.binary.code, decoded.state.paClVsOutCntl, program.tailContinuation.get()) | decoded.state.layerExports;
+        if (vertex) {
+            vertex->paClVsOutCntl = PositionExportLayout(program.snapshot.get(), program.codeOffset, program.binary.code, decoded.state.paClVsOutCntl, program.tailContinuation.get()) | decoded.state.layerExports;
+            Graphics::ApplyPointSize(decoded.state, *vertex);
+        }
         ShaderRecompiler::RecompileRequest request{program.binary, {wave, program.firstUserSgpr, program.userData, {}, fragment ? std::optional(decoded.pixel) : std::nullopt, vertex, memory, RegisteredFloatMode(*program.snapshot)}, target, {0, 0, offset, room}, ShaderRecompiler::GraphicsCompileContext{program.firstUserSgpr, linked, decoded.state.stages.mesh, decoded.state.stages.tessellation, {}}};
         std::vector<std::uint64_t> key;
         ShaderRecompiler::BuildPreparedShaderKey(request, key);
