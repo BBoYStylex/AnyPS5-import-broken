@@ -33,6 +33,7 @@ public:
     static std::atomic<std::uint64_t>& EpochToken();
     static void FollowEpoch(std::uint64_t token);
     static unsigned Committers();
+    static unsigned Reapers();
 
     void Enqueue(Commit commit, std::vector<Range> writes, std::uint64_t labelAddress = 0, std::vector<std::byte> labelBytes = {}, std::vector<Range> reads = {}, bool draw = false);
     void Drain(DrainReason reason, std::uint32_t opcode = 0x100);
@@ -61,6 +62,8 @@ private:
     };
     DrawPipeline() = default;
     void run();
+    void retire(Item&& item);
+    void reap();
     void rethrowFailure();
     void report(std::chrono::steady_clock::time_point now);
     void countWrites(const std::vector<Range>& writes, bool added);
@@ -70,7 +73,6 @@ private:
     std::condition_variable idle;
     std::deque<Item> items;
     std::vector<std::pair<Range, std::uint32_t>> queuedWrites;
-    std::vector<Item> retired;
     std::exception_ptr failure;
     std::atomic<std::size_t> outstanding{0};
     std::uint32_t idleWaiters = 0;
@@ -81,6 +83,12 @@ private:
     std::uint64_t wakes = 0;
     std::uint64_t lockWaitNs = 0;
     std::thread thread;
+    std::mutex retireMutex;
+    std::condition_variable reapWake;
+    std::deque<Item> retired;
+    std::thread reaper;
+    bool reaperWaiting = false;
+    bool reaperStopping = false;
     std::uint64_t commits = 0;
     std::uint64_t commitNs = 0;
     std::uint64_t commitErrors = 0;

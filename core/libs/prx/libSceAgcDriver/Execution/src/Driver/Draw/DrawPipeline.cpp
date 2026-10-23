@@ -22,6 +22,7 @@ namespace {
 constexpr std::array<const char*, static_cast<std::size_t>(DrawPipeline::DrainReason::Count)> DrainNames{"packet", "flush", "labels", "capture", "indirect", "submission"};
 
 std::atomic<unsigned> runningCommitters{0};
+std::atomic<unsigned> runningReapers{0};
 
 std::uint64_t elapsedNs(std::chrono::steady_clock::time_point since) {
     return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - since).count());
@@ -282,6 +283,10 @@ unsigned DrawPipeline::Committers() {
     return runningCommitters.load(std::memory_order_acquire);
 }
 
+unsigned DrawPipeline::Reapers() {
+    return runningReapers.load(std::memory_order_acquire);
+}
+
 void DrawPipeline::rethrowFailure() {
     if (failure == nullptr) return;
     auto error = std::exchange(failure, nullptr);
@@ -291,12 +296,8 @@ void DrawPipeline::rethrowFailure() {
 void DrawPipeline::Enqueue(Commit commit, std::vector<Range> writes, std::uint64_t labelAddress, std::vector<std::byte> labelBytes, std::vector<Range> reads, bool draw) {
     if (DrawFinisher::Busy() && !DrawFinisher::OnFinisherThread()) DrawFinisher::Get().Drain();
     static const bool profile = std::getenv("APS5_PROFILE_DRAW") != nullptr;
-    struct ReclaimStorage {};
-    auto& reclaim = HostThreadLocal<std::vector<Item>, ReclaimStorage>();
-    reclaim.clear();
     const auto lockStart = profile ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
     std::unique_lock lock(mutex);
-    if (!retired.empty()) std::swap(retired, reclaim);
     if (profile) lockWaitNs += elapsedNs(lockStart);
     rethrowFailure();
     if (closing) {
@@ -406,18 +407,62 @@ void DrawPipeline::run() {
             stopped = true;
             if (!shutdown) Driver::Get().ReportFailure(fatal);
         }
-        std::lock_guard lock(mutex);
-        countWrites(items.front().writes, false);
-        retired.push_back(std::move(items.front()));
-        items.pop_front();
-        ++commits;
-        commitNs += spent;
-        if (failed) ++commitErrors;
-        if (fatal != nullptr && failure == nullptr) failure = fatal;
-        outstanding.fetch_sub(1, std::memory_order_release);
-        if (idleWaiters != 0 && (items.empty() || items.size() <= resumeAt)) idle.notify_all();
+        Item done;
+        {
+            std::lock_guard lock(mutex);
+            countWrites(items.front().writes, false);
+            done = std::move(items.front());
+            items.pop_front();
+            ++commits;
+            commitNs += spent;
+            if (failed) ++commitErrors;
+            if (fatal != nullptr && failure == nullptr) failure = fatal;
+            outstanding.fetch_sub(1, std::memory_order_release);
+            if (idleWaiters != 0 && (items.empty() || items.size() <= resumeAt)) idle.notify_all();
+        }
+        retire(std::move(done));
     }
     runningCommitters.fetch_sub(1, std::memory_order_acq_rel);
+}
+
+void DrawPipeline::retire(Item&& item) {
+    static const bool reaperEnabled = std::getenv("APS5_NO_COMMIT_REAPER") == nullptr;
+    if (!reaperEnabled) {
+        const Item dropped = std::move(item);
+        return;
+    }
+    constexpr std::size_t ReapBatch = 64;
+    std::unique_lock lock(retireMutex);
+    if (reaperStopping) {
+        lock.unlock();
+        const Item dropped = std::move(item);
+        return;
+    }
+    retired.push_back(std::move(item));
+    if (!reaper.joinable()) {
+        runningReapers.fetch_add(1, std::memory_order_acq_rel);
+        reaper = std::thread([this] { reap(); });
+    }
+    if (retired.size() >= ReapBatch && reaperWaiting) reapWake.notify_one();
+}
+
+void DrawPipeline::reap() {
+    for (;;) {
+        std::deque<Item> batch;
+        bool last = false;
+        {
+            std::unique_lock lock(retireMutex);
+            reaperWaiting = true;
+            reapWake.wait_for(lock, std::chrono::milliseconds(2), [&] { return retired.size() >= 64 || reaperStopping; });
+            reaperWaiting = false;
+            last = reaperStopping;
+            if (retired.empty() && !last) continue;
+            batch.swap(retired);
+        }
+        batch.clear();
+        if (last) break;
+    }
+    runningReapers.fetch_sub(1, std::memory_order_acq_rel);
 }
 
 void DrawPipeline::Stop() {
@@ -428,14 +473,23 @@ void DrawPipeline::Stop() {
         committer = std::move(thread);
     }
     wake.notify_all();
-    if (!committer.joinable()) return;
-    if (committer.get_id() == std::this_thread::get_id()) committer.detach();
-    else committer.join();
+    if (committer.joinable()) {
+        if (committer.get_id() == std::this_thread::get_id()) committer.detach();
+        else committer.join();
+    }
+    std::thread stoppedReaper;
+    {
+        std::lock_guard lock(retireMutex);
+        reaperStopping = true;
+        stoppedReaper = std::move(reaper);
+    }
+    reapWake.notify_all();
+    if (stoppedReaper.joinable()) stoppedReaper.join();
 }
 
 void DrawPipeline::ReleaseRetired() {
-    std::vector<Item> done;
-    std::lock_guard lock(mutex);
+    std::deque<Item> done;
+    std::lock_guard lock(retireMutex);
     std::swap(done, retired);
 }
 
