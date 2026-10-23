@@ -562,7 +562,11 @@ float APS5_VABI powf_nid_postfix(float x, float y) {
     std::int32_t ix = hx & 0x7fffffff;
     const std::int32_t iy = hy & 0x7fffffff;
     if (iy == 0) return one;
-    if (ix > 0x7f800000 || iy > 0x7f800000) return x + y;
+    if (ix > 0x7f800000 || iy > 0x7f800000) {
+        if ((ix > 0x7f800000 && (ix & 0x00400000) == 0) ||
+            (iy > 0x7f800000 && (iy & 0x00400000) == 0)) std::feraiseexcept(FE_INVALID);
+        return PowfFloat((ix > 0x7f800000 ? hx : hy) | 0x00400000);
+    }
     yisint = 0;
     if (hx < 0) {
         if (iy >= 0x4b800000) yisint = 2;
