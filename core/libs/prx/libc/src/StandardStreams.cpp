@@ -91,6 +91,9 @@ int APS5_VABI getc_unlocked_nid_postfix(FileStream* stream) {
     if (!stream->SwitchToReadingUnlocked()) return -1;
 #ifdef _WIN32
     const int result = _fgetc_nolock(native);
+#elif defined(__APPLE__)
+    // Apple's <stdio.h> defines getc_unlocked as a macro, which a leading :: cannot name.
+    const int result = getc_unlocked(native);
 #else
     const int result = ::getc_unlocked(native);
 #endif

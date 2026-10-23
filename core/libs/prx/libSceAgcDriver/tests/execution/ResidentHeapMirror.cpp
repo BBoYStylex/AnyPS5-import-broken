@@ -15,6 +15,10 @@
 #else
 #include <sys/mman.h>
 #endif
+#if defined(__APPLE__) && !defined(MAP_FIXED_NOREPLACE)
+// macOS has no MAP_FIXED_NOREPLACE; the address is then only a hint, and the heap checks that the mapping landed there.
+#define MAP_FIXED_NOREPLACE 0
+#endif
 #include <algorithm>
 #include <array>
 #include <cstdint>
@@ -338,6 +342,15 @@ int main() {
             std::puts("skipped, no guest write watch: heap mirrors need one");
             return VulkanTestSkipped;
         }
+#ifdef __APPLE__
+        // MoltenVK has no sparse binding, so every heap mirror is a whole copy; only the copied-mirror checks apply.
+        const auto context = device->graphicsContext();
+        if (!context.sparseBinding || !context.sparseResidencyBuffer || !context.sparseResidencyAliased) {
+            CopiedTests(*device);
+            std::puts("resident heap mirror tests passed (copied mirrors only: the device has no sparse residency)");
+            return 0;
+        }
+#endif
         ResidentTests(*device);
         ReusedAddressTests(*device);
         JoinedImportTests(*device);

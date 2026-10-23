@@ -253,6 +253,13 @@ std::uint32_t EmitBuiltinU32(SpirvEmitterState& state, StageInputKind kind, std:
         const auto pointer = state.module.AllocateId();
         const auto value = state.module.AllocateId();
         const auto bits = state.module.AllocateId();
+#ifdef __APPLE__
+        if (state.sampleMaskCopy != 0u) {
+            state.module.AddFunction(spv::OpLoad, TypeI32(state), value, state.sampleMaskCopy);
+            state.module.AddFunction(spv::OpBitcast, TypeU32(state), bits, value);
+            return bits;
+        }
+#endif
         state.module.AddFunction(spv::OpAccessChain, TypePointer(state, spv::StorageClassInput, TypeI32(state)), pointer, variable, ConstantU32(state, 0u));
         state.module.AddFunction(spv::OpLoad, TypeI32(state), value, pointer);
         state.module.AddFunction(spv::OpBitcast, TypeU32(state), bits, value);
@@ -1085,6 +1092,16 @@ void EmitPixelEntryPoint(SpirvEmitterState& state) {
     state.module.AddFunction(spv::OpFunction, TypeVoid(state), state.mainFunc, spv::FunctionControlMaskNone, TypeFunction(state));
     EmitLabel(state, state.module.AllocateId());
     state.module.AddFunction(spv::OpStore, state.pixelStopFlag, ConstantBool(state, false));
+#ifdef __APPLE__
+    if (state.sampleMaskCopy != 0u) {
+        const auto source = state.sampleMaskInputVariable != 0u ? state.sampleMaskInputVariable : InputVariableForKind(state, StageInputKind::SampleMask);
+        const auto pointer = state.module.AllocateId();
+        const auto value = state.module.AllocateId();
+        state.module.AddFunction(spv::OpAccessChain, TypePointer(state, spv::StorageClassInput, TypeI32(state)), pointer, source, ConstantU32(state, 0u));
+        state.module.AddFunction(spv::OpLoad, TypeI32(state), value, pointer);
+        state.module.AddFunction(spv::OpStore, state.sampleMaskCopy, value);
+    }
+#endif
     state.module.AddFunction(spv::OpFunctionCall, TypeVoid(state), state.module.AllocateId(), state.pixelGuestFunc);
     if (state.pixelStopStored) {
         const auto stopped = state.module.AllocateId();
@@ -1102,6 +1119,13 @@ void EmitPixelEntryPoint(SpirvEmitterState& state) {
         }
         EmitLabel(state, done);
     }
+#ifdef __APPLE__
+    if (state.stencilRefOutput != 0u) {
+        const auto value = state.module.AllocateId();
+        state.module.AddFunction(spv::OpLoad, TypeI32(state), value, state.stencilRefVariable);
+        state.module.AddFunction(spv::OpStore, state.stencilRefOutput, value);
+    }
+#endif
     state.module.AddFunction(spv::OpReturn);
     state.module.AddFunction(spv::OpFunctionEnd);
 }
@@ -1549,6 +1573,23 @@ void EmitProgram(SpirvEmitterState& state) {
         state.pixelStopFlag = state.module.DefineGlobalVariable(TypePointer(state, spv::StorageClassPrivate, TypeBool(state)), spv::StorageClassPrivate);
         if (state.spirvVersion >= 0x00010400u) state.interfaceVariables.push_back(state.pixelStopFlag);
         state.module.AddName(state.pixelStopFlag, "bda_stopped");
+#ifdef __APPLE__
+        // SPIRV-Cross passes the SampleMask input array to the guest function as the scalar gl_SampleMaskIn masked by the
+        // sample id, which Metal rejects; the entry point copies the mask into a private variable the guest reads instead.
+        if (state.sampleMaskInputVariable != 0u || InputVariableForKind(state, StageInputKind::SampleMask) != 0u) {
+            state.sampleMaskCopy = state.module.DefineGlobalVariable(TypePointer(state, spv::StorageClassPrivate, TypeI32(state)), spv::StorageClassPrivate);
+            if (state.spirvVersion >= 0x00010400u) state.interfaceVariables.push_back(state.sampleMaskCopy);
+            state.module.AddName(state.sampleMaskCopy, "sample_mask_in");
+        }
+        // The same split makes SPIRV-Cross declare the stencil output as int in the entry point but pass it to the guest
+        // function as uint&, which Metal rejects; the guest writes a private copy the entry point stores after the call.
+        if (state.stencilRefVariable != 0u && !state.stencilReplay) {
+            state.stencilRefOutput = state.stencilRefVariable;
+            state.stencilRefVariable = state.module.DefineGlobalVariable(TypePointer(state, spv::StorageClassPrivate, TypeI32(state)), spv::StorageClassPrivate);
+            if (state.spirvVersion >= 0x00010400u) state.interfaceVariables.push_back(state.stencilRefVariable);
+            state.module.AddName(state.stencilRefVariable, "stencil_ref_out");
+        }
+#endif
     }
     state.module.AddFunction(spv::OpFunction, TypeVoid(state), state.meshGuestFunc != 0u ? state.meshGuestFunc : state.pixelGuestFunc != 0u ? state.pixelGuestFunc : state.mainFunc, spv::FunctionControlMaskNone, TypeFunction(state));
     EmitLabel(state, state.entryLabel);
@@ -1633,10 +1674,21 @@ void EmitProgram(SpirvEmitterState& state) {
             const auto row = Select(state, TypeU32(state), lower, bottom, top);
             const auto shift = EmitBinaryU32(state, spv::OpShiftLeftLogical, EmitBinaryU32(state, spv::OpBitwiseAnd, quad, ConstantU32(state, 1u)), ConstantU32(state, 4u));
             const auto covered = EmitBinaryU32(state, spv::OpBitwiseAnd, EmitBinaryU32(state, spv::OpShiftRightLogical, row, shift), ConstantU32(state, 0xffffu));
+#ifdef __APPLE__
+            const auto rasterized = state.module.AllocateId();
+            if (state.sampleMaskCopy != 0u) {
+                state.module.AddFunction(spv::OpLoad, TypeI32(state), rasterized, state.sampleMaskCopy);
+            } else {
+                const auto pointer = state.module.AllocateId();
+                state.module.AddFunction(spv::OpAccessChain, TypePointer(state, spv::StorageClassInput, TypeI32(state)), pointer, state.sampleMaskInputVariable, ConstantU32(state, 0u));
+                state.module.AddFunction(spv::OpLoad, TypeI32(state), rasterized, pointer);
+            }
+#else
             const auto pointer = state.module.AllocateId();
             state.module.AddFunction(spv::OpAccessChain, TypePointer(state, spv::StorageClassInput, TypeI32(state)), pointer, state.sampleMaskInputVariable, ConstantU32(state, 0u));
             const auto rasterized = state.module.AllocateId();
             state.module.AddFunction(spv::OpLoad, TypeI32(state), rasterized, pointer);
+#endif
             auto guestRasterized = Unary(state, spv::OpBitcast, TypeU32(state), rasterized);
             if (state.sampleOrderWord != 0u) guestRasterized = ReorderedSampleBits(state, guestRasterized, false);
             bit = EmitBinaryU32(state, spv::OpBitwiseAnd, guestRasterized, covered);
@@ -1941,7 +1993,12 @@ void EmitSetAttribute(SpirvValueEmitContext& ctx, const IrValue& inst) {
         if (state.program.Resources().stage != IrShaderStage::Mesh && variable == 0u) {
             return;
         }
+#ifdef __APPLE__
+        const bool metalUint = state.program.Resources().stage == IrShaderStage::Pixel && exp.kind == ExportTargetKind::Mrt && state.inputInfo.pixel != nullptr && exp.index < std::size(state.inputInfo.pixel->metalTargetOutputMode) && state.inputInfo.pixel->metalTargetOutputMode[exp.index] == 7u;
+        const bool uintOutput = MrtOutputMode(state, exp) == 7u || metalUint;
+#else
         const bool uintOutput = MrtOutputMode(state, exp) == 7u;
+#endif
         const auto vectorType = uintOutput ? TypeU32Vector(state, 4u) : TypeF32Vector(state, 4u);
         auto value = ExportVector(ctx, data, exp, uintOutput);
         if (state.program.Resources().stage == IrShaderStage::Pixel && exp.kind == ExportTargetKind::Mrt) {

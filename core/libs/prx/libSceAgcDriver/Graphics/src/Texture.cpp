@@ -1234,9 +1234,19 @@ VkFormat StorageFormatOrUndefined(const Context& context, VkFormat format) {
     };
     VkFormat storage = VK_FORMAT_UNDEFINED;
     const auto packed = PackedStorageViewFormat(format);
+#ifdef __APPLE__
+    // MoltenVK lists the 8-bit sRGB formats as storage images, but Metal reads such a storage image back without sRGB
+    // decoding; keep sRGB storage in the UNORM form the fallback below uses, so sampled reads decode the stored codes.
+    const bool srgbStorage = format == VK_FORMAT_R8G8B8A8_SRGB || format == VK_FORMAT_B8G8R8A8_SRGB || format == VK_FORMAT_A8B8G8R8_SRGB_PACK32 ||
+                             format == VK_FORMAT_R8_SRGB || format == VK_FORMAT_R8G8_SRGB;
+    if (packed != VK_FORMAT_UNDEFINED) {
+        if (supports(packed)) storage = format;
+    } else if (!srgbStorage && supports(format)) {
+#else
     if (packed != VK_FORMAT_UNDEFINED) {
         if (supports(packed)) storage = format;
     } else if (supports(format)) {
+#endif
         storage = format;
     } else {
         VkFormat linear = VK_FORMAT_UNDEFINED;
@@ -1485,7 +1495,11 @@ public:
         return !textures.empty() && Overlaps(ranges, address, bytes);
     }
     bool SurelyClear(std::uint64_t address, std::size_t bytes) const {
+#ifdef __APPLE__
+        const auto current = std::atomic_load_explicit(&published, std::memory_order_acquire);
+#else
         const auto current = published.load(std::memory_order_acquire);
+#endif
         return current != nullptr && current->version == changes.load(std::memory_order_acquire) && !Overlaps(current->ranges, address, bytes);
     }
 
@@ -1518,14 +1532,23 @@ private:
         }
         ranges.resize(merged);
         indexed = version;
+#ifdef __APPLE__
+        std::atomic_store_explicit(&published, std::make_shared<const Snapshot>(Snapshot{version, ranges}), std::memory_order_release);
+#else
         published.store(std::make_shared<const Snapshot>(Snapshot{version, ranges}), std::memory_order_release);
+#endif
     }
     std::vector<StorageTexture*> textures;
     Ranges ranges;
     std::uint64_t version = 0;
     std::uint64_t indexed = ~std::uint64_t{0};
     std::atomic<std::uint64_t> changes{0};
+#ifdef __APPLE__
+    // Apple's libc++ has no std::atomic<std::shared_ptr>; the shared_ptr atomic free functions give the same ordering.
+    std::shared_ptr<const Snapshot> published;
+#else
     std::atomic<std::shared_ptr<const Snapshot>> published;
+#endif
 };
 
 // Storage images whose results have not reached guest memory yet.

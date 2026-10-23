@@ -60,6 +60,11 @@ function(configure_windows_unwind target)
                 COMMAND "${CMAKE_OBJCOPY}" --rename-section .eh_frame=.ehfram --rename-section .eh_fram=.ehfram "$<TARGET_FILE:${target}>"
                 VERBATIM
         )
+    elseif(APPLE)
+        # The guest unwinder (prx/libc/src/exception/Unwind.cpp) reads __eh_frame, but Apple clang emits compact
+        # unwind and ld64 keeps only __unwind_info, so a guest throw could not step out of these images' frames.
+        target_compile_options(${target} PRIVATE -femit-dwarf-unwind=always)
+        target_link_options(${target} PRIVATE LINKER:-no_compact_unwind)
     endif()
 endfunction()
 
@@ -310,6 +315,10 @@ if(BUILD_TESTING)
         target_link_options(patched_libraries_tests PRIVATE -static -static-libgcc -static-libstdc++)
     endif()
     add_test(NAME patched_libraries COMMAND patched_libraries_tests ${PATCHED_DIR})
+    if(APPLE)
+        # The first run after a rebuild waits for Rosetta to translate every patched library (minutes under a parallel suite); later runs take seconds.
+        set_tests_properties(patched_libraries PROPERTIES TIMEOUT 900)
+    endif()
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         add_library(host_libstdcxx_exception_module SHARED tests/HostLibstdcxxExceptionModule.cpp)
         target_link_libraries(host_libstdcxx_exception_module PRIVATE ${PATCHED_DIR}/libc.prx)

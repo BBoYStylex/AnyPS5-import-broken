@@ -31,6 +31,9 @@
 #include "prx/libSceAgcDriver/Execution/include/GuestMemory.hpp"
 #include "prx/libc/include/PreciseWait.hpp"
 #include "prx/libc/include/Shutdown.hpp"
+#ifdef __APPLE__
+#include "prx/libc/include/MainThread.hpp"
+#endif
 
 namespace {
 
@@ -52,7 +55,13 @@ std::vector<const char*> windowExtensions(SDL_Window* window) {
 
 VkSurfaceKHR createWindowSurface(void* context, VkInstance instance) {
     VkSurfaceKHR surface = VK_NULL_HANDLE;
+#ifdef __APPLE__
+    RunOnMainThread([&] {
+        if (!SDL_Vulkan_CreateSurface(static_cast<SDL_Window*>(context), instance, &surface)) throw std::runtime_error(std::string("SDL_Vulkan_CreateSurface failed: ") + SDL_GetError());
+    });
+#else
     if (!SDL_Vulkan_CreateSurface(static_cast<SDL_Window*>(context), instance, &surface)) throw std::runtime_error(std::string("SDL_Vulkan_CreateSurface failed: ") + SDL_GetError());
+#endif
     return surface;
 }
 
@@ -277,7 +286,13 @@ VideoOutDriver::VideoOutDriver() {
 #ifdef __linux__
     SDL_SetHint(SDL_HINT_VIDEODRIVER, "wayland,x11");
 #endif
+#ifdef __APPLE__
+    int initialized = 0;
+    RunOnMainThread([&] { initialized = SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER); });
+    if (initialized < 0) {
+#else
     if (SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) < 0) {
+#endif
         throw std::runtime_error(std::string("SDL_InitSubSystem(VIDEO | GAMECONTROLLER) failed: ") + SDL_GetError());
     }
     try {
@@ -668,7 +683,13 @@ void VideoOutDriver::presentLoop(std::stop_token token, std::promise<void>& star
             }
 
             SDL_Event event;
+#ifdef __APPLE__
+            // Cocoa events are only pumped on the main thread; this thread then drains SDL's queue without pumping.
+            RunOnMainThread([] { SDL_PumpEvents(); });
+            while (SDL_PeepEvents(&event, 1, SDL_GETEVENT, SDL_FIRSTEVENT, SDL_LASTEVENT) > 0) {
+#else
             while (SDL_PollEvent(&event)) {
+#endif
                 if (event.type == SDL_QUIT) {
                     LibcRequestExit_nid_postfix(0);
                     throw ProcessShutdown{};

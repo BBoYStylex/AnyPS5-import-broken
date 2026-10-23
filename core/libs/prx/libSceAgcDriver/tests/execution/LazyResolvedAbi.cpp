@@ -605,7 +605,13 @@ int main(int argc, char** argv) {
             SetEnvironment("ANYPS5_SHADER_CACHE_DIR", cache.string());
             SetEnvironment("APS5_NO_PIPELINE_JOURNAL", "1");
             ClearEnvironment("APS5_LAZY_SHADER_PREPARE");
+#ifdef __APPLE__
+            // std::system runs /bin/sh, which macOS starts without DYLD_* variables; pass the Vulkan library path on.
+            const char* libraries = std::getenv("DYLD_LIBRARY_PATH");
+            const std::string command = (libraries != nullptr && *libraries != '\0' ? "DYLD_LIBRARY_PATH=\"" + std::string(libraries) + "\" " : std::string()) + "\"" + std::string(argv[0]) + "\" --eager-reference";
+#else
             const std::string command = "\"" + std::string(argv[0]) + "\" --eager-reference";
+#endif
             Require(std::system(command.c_str()) == 0, "lazy resolved ABI: the eager reference process failed");
             cached = CacheFiles(cache);
             Require(!cached.empty(), "lazy resolved ABI: the eager reference process wrote no shader cache files");

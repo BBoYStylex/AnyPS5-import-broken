@@ -318,6 +318,21 @@ size_t APS5_VABI strlcpy_nid_postfix(char* dest, const char* src, size_t size) {
 }
 
 bool StopAtPrefixLetter_nid_no_patch(const char* str, char** endptr, int base) {
+#ifdef __APPLE__
+    // Apple's strto* set errno to EINVAL when no digits are found; the PS5 libc leaves errno alone, so the
+    // no-conversion case is answered here (value 0, nothing consumed) before the host parser runs.
+    if (base == 0 || (base >= 2 && base <= 36)) {
+        const char* digits = str;
+        while (*digits == ' ' || (*digits >= '\t' && *digits <= '\r')) ++digits;
+        if (*digits == '+' || *digits == '-') ++digits;
+        const char c = *digits;
+        const int value = c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'z' ? c - 'a' + 10 : c >= 'A' && c <= 'Z' ? c - 'A' + 10 : 99;
+        if (value >= (base == 0 ? 10 : base)) {
+            if (endptr) *endptr = const_cast<char*>(str);
+            return true;
+        }
+    }
+#endif
     if (base != 0 && base != 2 && base != 16) return false;
     const char* const start = str;
     while (*str == ' ' || (*str >= '\t' && *str <= '\r')) ++str;

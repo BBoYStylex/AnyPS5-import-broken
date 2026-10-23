@@ -45,7 +45,8 @@ function update() {
   const folderOption = $("save").querySelector('[value="disk"]');
   folderOption.disabled = !canStream || target === "windows" || multi;
   folderOption.textContent = target === "windows" ? "Save to folder · unavailable for Windows (DLL restrictions)" : multi ? "Save to folder · unavailable for batch output" : "Save to folder · uncompressed";
-  const libraryBytes = release?.platforms[target]?.expandedBytes;
+  $("rosetta-option").hidden = target !== "macos";
+  const libraryBytes = target === "macos" && release && !release.platforms.macos ? 0 : release?.platforms[target]?.expandedBytes;
   const selectedBytes = inspected ? sum(summaries.map(summary => target === "windows" ? summary.windowsSelectedBytes : summary.selectedBytes)) : null;
   const conversionTooLarge = inspected && summaries.some(summary => (target === "windows" ? summary.windowsSelectedBytes : summary.selectedBytes) > 256 * 1024 * 1024);
   const iconTooLarge = target === "windows" && inspected && summaries.some(summary => summary.windowsIconTooLarge);
@@ -80,7 +81,7 @@ function update() {
 }
 
 function lock(value) {
-  for (const id of ["choose", "choose-folder", "change", "target", "save", "intel"]) $(id).disabled = value || !supported || (id === "choose-folder" && !("webkitdirectory" in $("folder")));
+  for (const id of ["choose", "choose-folder", "change", "target", "save", "intel", "rosetta"]) $(id).disabled = value || !supported || (id === "choose-folder" && !("webkitdirectory" in $("folder")));
 }
 
 async function fail(message) {
@@ -211,7 +212,9 @@ async function onMessage({ data }) {
         $("result-info").textContent += " · ZIP saved to disk";
       } else {
         $("result-info").textContent += ` · Saved in ${outputTransaction.name}/`;
-        if (document.querySelector('input[name="target"]:checked').value === "linux") $("result-info").textContent += ` · On Linux, run chmod +x "${data.outputName}" before launching.`;
+        const savedTarget = document.querySelector('input[name="target"]:checked').value;
+        if (savedTarget === "linux") $("result-info").textContent += ` · On Linux, run chmod +x "${data.outputName}" before launching.`;
+        if (savedTarget === "macos") $("result-info").textContent += ` · On macOS, run chmod +x "${data.outputName}" and remove the download quarantine with xattr -dr com.apple.quarantine . before launching.`;
       }
       $("result-note").textContent = data.apps > 1 ? "Extract the ZIP; each app is in its own folder with its executable, libs and app0 files. On Linux, run chmod +x */*.elf before launching." : "Extract the entire ZIP before launching the executable.";
       $("result-note").hidden = data.mode === "disk";
@@ -290,7 +293,7 @@ $("drop").ondrop = event => {
   if (working) return;
   selectInputs([...event.dataTransfer.files].map(file => ({ name: file.name, file })));
 };
-for (const id of ["save", "target", "acknowledge"]) $(id).addEventListener("change", update);
+for (const id of ["save", "target", "acknowledge", "rosetta"]) $(id).addEventListener("change", update);
 $("cancel").onclick = () => fail("Cancelled. Choose the ZIP or folder again to restart.");
 $("convert").onclick = async () => {
   if ($("convert").disabled) return;
@@ -312,7 +315,7 @@ $("convert").onclick = async () => {
     $("status").hidden = false;
     $("cancel").hidden = false;
     $("error").hidden = true;
-    worker.postMessage({ type: "convert", target, toIntel: $("intel").checked, mode: $("save").value });
+    worker.postMessage({ type: "convert", target, toIntel: $("intel").checked, toRosetta: $("rosetta").checked, mode: $("save").value });
   } catch (error) {
     if (error.name === "AbortError") { working = false; lock(false); update(); }
     else await fail(error.message);

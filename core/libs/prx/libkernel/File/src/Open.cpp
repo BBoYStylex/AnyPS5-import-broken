@@ -134,6 +134,9 @@ static int MapFlags(int sceFlags) {
 #else
 #include <fcntl.h>
 #include <unistd.h>
+#ifdef __APPLE__
+#include <sys/stat.h>
+#endif
 static int NativeOpen(const std::filesystem::path& p, int nativeFlags, std::uint16_t mode) {
     return ::open(p.c_str(), nativeFlags, static_cast<mode_t>(mode));
 }
@@ -226,6 +229,17 @@ static int OpenNative(const std::filesystem::path& native, int flags, std::uint1
 #endif
     }
     int fd = NativeOpen(native, MapFlags(flags), mode);
+#ifdef __APPLE__
+    // Darwin opens an existing directory for O_CREAT without O_EXCL; FreeBSD (and Linux) refuse it with EISDIR.
+    if (fd >= 0 && (flags & (SCE_KERNEL_O_CREAT | SCE_KERNEL_O_EXCL)) == SCE_KERNEL_O_CREAT) {
+        struct stat opened{};
+        if (::fstat(fd, &opened) == 0 && S_ISDIR(opened.st_mode)) {
+            ::close(fd);
+            fd = -1;
+            errno = EISDIR;
+        }
+    }
+#endif
 #ifdef _WIN32
     if (fd < 0 && (errno != ENOENT || !native.has_filename())) {
         const int openError = errno;
@@ -400,6 +414,21 @@ static int StatNative(const std::filesystem::path& native, bool directory, FileS
     if (error) return SceErrorFromErrno(FilesystemError(error));
 #endif
     const auto status = std::filesystem::status(metadataPath, error);
+#ifdef __APPLE__
+    // Darwin's PATH_MAX equals the guest limit, so a guest path near it no longer fits once the host root is prepended.
+    if (error == std::errc::filename_too_long) {
+        FileStat host{};
+        if (!File::TryFillFileStat(metadataPath, &host)) {
+            if (errno == ENOENT) return SceErrorFromErrno(NotFoundError_nid_no_patch(native));
+            if (errno == ENOTDIR) return SceErrorFromErrno(GuestEnotdir);
+            return SceStatErrorFromErrno(errno);
+        }
+        if (directory && (host.st_mode & 0170000) != 0040000) return SceErrorFromErrno(GuestEnotdir);
+        if (sb == nullptr) return SceErrorFromErrno(GuestEfault);
+        *sb = host;
+        return 0;
+    }
+#endif
     if (error == std::errc::not_a_directory) return SceErrorFromErrno(GuestEnotdir);
     if (error == std::errc::filename_too_long || error == std::errc::too_many_symbolic_link_levels) return SceKernelError(FilesystemError(error));
     if (!std::filesystem::exists(status)) {

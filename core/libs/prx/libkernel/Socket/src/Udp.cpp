@@ -109,6 +109,9 @@ int SendError(int type) {
     const int error = WSAGetLastError();
     if (type == 2 && error == WSAENOTCONN) return 39;
     if (type == 1 && (error == WSAECONNABORTED || error == WSAECONNRESET)) return 32;
+#elif defined(__APPLE__)
+    // After the peer closes, macOS can fail the next stream send with ECONNRESET where FreeBSD reports EPIPE.
+    if (type == 1 && errno == ECONNRESET) return 32;
 #else
     static_cast<void>(type);
 #endif
@@ -555,13 +558,20 @@ constexpr short GuestPollWritable = 0x4;
 constexpr short GuestPollVnodeReady = GuestPollReadable | GuestPollWritable;
 constexpr short GuestPollHangUp = 0x10;
 constexpr short GuestPollError = 0x8;
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__APPLE__)
 short ClosedStreamEvents(int descriptor, short revents, short requested) {
     if ((revents & (POLLHUP | POLLERR)) != POLLHUP) return revents;
     const auto socket = Find(descriptor);
     if (!socket || socket->type != 1) return revents;
     revents = static_cast<short>(revents | (requested & POLLRDNORM));
     std::lock_guard lock(socket->modeMutex);
+#ifdef __APPLE__
+    // XNU reports POLLHUP once the peer shuts its write side and then drops POLLOUT, though this side can still send.
+    if (!socket->sendShut && (requested & POLLOUT)) {
+        pollfd writable{socket->value, POLLOUT, 0};
+        if (::poll(&writable, 1, 0) == 1 && (writable.revents & POLLOUT)) revents = static_cast<short>(revents | POLLOUT);
+    }
+#endif
     return socket->sendShut ? revents : static_cast<short>(revents & ~POLLHUP);
 }
 #endif
@@ -1241,7 +1251,16 @@ int APS5_VABI connect_nid_postfix(int descriptor, const void* address, std::uint
         std::lock_guard lock(socket->modeMutex);
         socket->options.reportedError = 0;
     }
+#ifdef __APPLE__
+    bool nonblocking = false;
+    {
+        std::lock_guard lock(socket->modeMutex);
+        nonblocking = socket->options.nonblocking;
+    }
+    return ConnectRetryingLoopbackReset_nid_no_patch(socket->value, reinterpret_cast<const sockaddr*>(&native), size, socket->type == 1 && !nonblocking) ? Fail(ConnectError()) : 0;
+#else
     return ::connect(socket->value, reinterpret_cast<sockaddr*>(&native), size) ? Fail(ConnectError()) : 0;
+#endif
 }
 int APS5_VABI listen_nid_postfix(int descriptor, int backlog) {
     const auto socket = Lookup(descriptor);
@@ -1321,7 +1340,17 @@ int APS5_VABI shutdown_nid_postfix(int descriptor, int how) {
     const auto socket = Lookup(descriptor);
     if (!socket) return -1;
     if (how < 0 || how > 2) return Fail(22);
+#ifdef __APPLE__
+    // macOS refuses SHUT_RD with ENOTCONN once the peer has shut down its sending side, although the socket is
+    // still connected (getpeername succeeds) and queued data stays readable; the console accepts it.
+    if (::shutdown(socket->value, how)) {
+        sockaddr_storage peer{};
+        socklen_t peerSize = sizeof(peer);
+        if (!(how == 0 && errno == ENOTCONN && ::getpeername(socket->value, reinterpret_cast<sockaddr*>(&peer), &peerSize) == 0)) return Fail(NativeError());
+    }
+#else
     if (::shutdown(socket->value, how)) return Fail(NativeError());
+#endif
     std::lock_guard lock(socket->modeMutex);
     if (how != 1) socket->receiveShut = true;
     if (how != 0) socket->sendShut = true;
@@ -1770,7 +1799,7 @@ int APS5_VABI poll_nid_postfix(GuestPollDescriptor* descriptors, std::uint32_t c
     }
     const auto collect = [&](std::size_t i, bool pipe) {
         auto& entry = descriptors[owners[i]];
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__APPLE__)
         if (!pipe) native[i].revents = ClosedStreamEvents(entry.descriptor, native[i].revents, native[i].events);
 #endif
         for (const auto& flag : RequestFlags)
@@ -1818,6 +1847,45 @@ int APS5_VABI poll_nid_postfix(GuestPollDescriptor* descriptors, std::uint32_t c
             return ready;
         }
     }
+#elif defined(__APPLE__)
+    // macOS poll() neither reports POLLPRI for pending TCP urgent data nor wakes for it. SIOCATMARK reports it without
+    // consuming it (a MSG_OOB | MSG_PEEK on macOS uses the urgent byte up, so the guest's recv(MSG_OOB) would fail),
+    // but only once the urgent byte is the next one to read. While a socket waits for it, the wait is cut into short
+    // slices and re-checked.
+    const auto urgentPending = [&](std::size_t i) {
+        int atMark = 0;
+        return (native[i].events & POLLPRI) && ::ioctl(native[i].fd, SIOCATMARK, &atMark) == 0 && atMark != 0;
+    };
+    bool watchesUrgent = false;
+    for (std::size_t i = 0; i < socketCount; ++i)
+        if (native[i].events & POLLPRI) watchesUrgent = true;
+    const int wait = ready ? 0 : timeout;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(wait < 0 ? 0 : wait);
+    for (;;) {
+        bool urgent = false;
+        for (std::size_t i = 0; i < socketCount; ++i)
+            if (urgentPending(i)) urgent = true;
+        int slice = wait;
+        if (urgent) {
+            slice = 0;
+        } else if (watchesUrgent && wait != 0) {
+            const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now()).count();
+            slice = wait < 0 ? 10 : static_cast<int>(std::clamp<long long>(left, 0, 10));
+        }
+        for (auto& request : native) request.revents = 0;
+        const int result = ::poll(native.data(), static_cast<nfds_t>(native.size()), slice);
+        if (result < 0) return Fail(NativeError());
+        for (std::size_t i = 0; i < socketCount; ++i) {
+            if (urgentPending(i)) {
+                native[i].revents = static_cast<short>(native[i].revents | POLLPRI);
+                urgent = true;
+            }
+        }
+        if (result > 0 || urgent || !watchesUrgent || wait == 0) break;
+        if (wait > 0 && std::chrono::steady_clock::now() >= deadline) break;
+    }
+    for (std::size_t i = 0; i < native.size(); ++i) collect(i, i >= socketCount);
+    return ready;
 #else
     const int wait = ready ? 0 : timeout;
     const int result = ::poll(native.data(), static_cast<nfds_t>(native.size()), wait);

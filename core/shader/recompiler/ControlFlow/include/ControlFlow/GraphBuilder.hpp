@@ -52,6 +52,11 @@ struct TableCall {
     std::uint32_t entryOffset = 0;
     std::uint32_t entryStride = 0;
     std::optional<std::uint64_t> constantPointer;
+#ifdef __APPLE__
+    // Program counters of the two s_mov_b32 that build constantPointer, so the driver can retarget it.
+    std::uint32_t pointerLowWriter = 0;
+    std::uint32_t pointerHighWriter = 0;
+#endif
 };
 
 struct TableCallee {

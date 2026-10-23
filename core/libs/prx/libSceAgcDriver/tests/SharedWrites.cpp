@@ -16,6 +16,11 @@
 #ifndef _WIN32
 #include <sys/resource.h>
 #endif
+#ifdef __APPLE__
+#include <libproc.h>
+#include <sys/proc_info.h>
+#include <unistd.h>
+#endif
 
 extern "C" {
 int APS5_VABI sceKernelAllocateDirectMemory(std::int64_t, std::int64_t, std::size_t, std::size_t, int, std::int64_t*);
@@ -63,7 +68,7 @@ void benchmark(bool labels = false, bool backing = true) {
         std::vector<double> times;
         std::uint64_t faults = 0;
         for (unsigned pass = 0; pass < 10; ++pass) {
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__APPLE__)
             rusage before{}, after{};
             getrusage(RUSAGE_THREAD, &before);
 #endif
@@ -77,7 +82,7 @@ void benchmark(bool labels = false, bool backing = true) {
                 } else Write(mapping.Address(), std::span(source).first(bytes), 1);
             }
             const auto us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - start).count() / 256;
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__APPLE__)
             getrusage(RUSAGE_THREAD, &after);
             if (pass != 0) faults += after.ru_minflt - before.ru_minflt;
 #endif
@@ -191,7 +196,21 @@ template<class TAction> void fails(TAction&& fn) {
     require(failed, "invalid write was accepted");
 }
 
-#ifndef _WIN32
+#ifdef __APPLE__
+// macOS backs direct memory with an unlinked "anyps5-direct-memory-*" file; the kernel still reports its path per region.
+std::size_t directMappings() {
+    std::size_t count = 0;
+    for (std::uint64_t address = 0;;) {
+        proc_regionwithpathinfo info{};
+        if (proc_pidinfo(getpid(), PROC_PIDREGIONPATHINFO, address, &info, sizeof(info)) != static_cast<int>(sizeof(info))) break;
+        if (std::string_view(info.prp_vip.vip_path).find("/anyps5-direct-memory-") != std::string_view::npos) ++count;
+        const auto next = info.prp_prinfo.pri_address + info.prp_prinfo.pri_size;
+        if (next <= address) break;
+        address = next;
+    }
+    return count;
+}
+#elif !defined(_WIN32)
 std::size_t directMappings() {
     std::ifstream maps("/proc/self/maps");
     require(maps.is_open(), "cannot inspect mapping lifetimes");

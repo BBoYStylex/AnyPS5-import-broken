@@ -19,6 +19,10 @@
 #include <sstream>
 #include <sys/mman.h>
 #include <sys/resource.h>
+#ifdef __APPLE__
+#include <mach/mach.h>
+#include <mach/mach_vm.h>
+#endif
 #endif
 #include <algorithm>
 #include <cassert>
@@ -384,6 +388,19 @@ int APS5_VABI sceKernelVirtualQuery(const void* addr, int flags, VirtualQueryInf
  info->end = info->start + host.RegionSize;
  const bool writable = (host.Protect & (PAGE_READWRITE | PAGE_EXECUTE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_WRITECOPY)) != 0;
  const bool executable = (host.Protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)) != 0;
+ #elif defined(__APPLE__)
+ // macOS has no /proc/self/maps; the Mach region holding the address gives the same extent and permissions.
+ mach_vm_address_t regionStart = address;
+ mach_vm_size_t regionBytes = 0;
+ vm_region_basic_info_data_64_t region{};
+ mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+ mach_port_t object = MACH_PORT_NULL;
+ if (mach_vm_region(mach_task_self(), &regionStart, &regionBytes, VM_REGION_BASIC_INFO_64, reinterpret_cast<vm_region_info_t>(&region), &count, &object) != KERN_SUCCESS
+     || address < regionStart || address >= regionStart + regionBytes || !(region.protection & VM_PROT_READ)) return SCE_KERNEL_ERROR_EACCES;
+ info->start = static_cast<uintptr_t>(regionStart);
+ info->end = static_cast<uintptr_t>(regionStart + regionBytes);
+ const bool writable = (region.protection & VM_PROT_WRITE) != 0;
+ const bool executable = (region.protection & VM_PROT_EXECUTE) != 0;
  #else
  std::ifstream maps("/proc/self/maps");
  std::string line;
@@ -673,6 +690,21 @@ int UnlockHostPages(std::uintptr_t start, std::uintptr_t end) {
 int LockHostPages(std::uintptr_t start, std::uintptr_t end) {
     auto* const address = reinterpret_cast<void*>(start);
     const std::size_t bytes = end - start;
+#ifdef __APPLE__
+    // Linux mlock fails with ENOMEM on PROT_NONE or unmapped pages (reservations, unmapped guest ranges); macOS
+    // mlock succeeds there without pinning anything, so refuse any page whose host protection is none.
+    for (mach_vm_address_t cursor = start; cursor < end;) {
+        mach_vm_address_t region = cursor;
+        mach_vm_size_t size = 0;
+        vm_region_basic_info_data_64_t info{};
+        mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+        mach_port_t object = MACH_PORT_NULL;
+        if (mach_vm_region(mach_task_self(), &region, &size, VM_REGION_BASIC_INFO_64, reinterpret_cast<vm_region_info_t>(&info), &count, &object) != KERN_SUCCESS)
+            return SCE_KERNEL_ERROR_ENOMEM;
+        if (region > cursor || info.protection == VM_PROT_NONE) return SCE_KERNEL_ERROR_ENOMEM;
+        cursor = region + size;
+    }
+#endif
     if (::mlock(address, bytes) == 0) {
         RecordLockedRange(start, end);
         return 0;
@@ -730,7 +762,7 @@ int APS5_VABI sceKernelMunlock_nid_postfix(void* address, std::uint64_t length) 
 }
 
 int APS5_VABI sceKernelMunlockall_nid_postfix() {
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__APPLE__)
     ::munlockall();
 #endif
     std::map<uintptr_t, size_t> ranges;
@@ -756,6 +788,12 @@ int APS5_VABI sceKernelMunlockall_nid_postfix() {
             cursor = next;
         }
     }
+#elif defined(__APPLE__)
+    // macOS has no munlockall (it fails with ENOSYS and overwrites errno), so unlock each range this process locked
+    // and leave errno as the guest had it, matching Linux's successful munlockall.
+    const int savedError = errno;
+    for (const auto& [start, len] : ranges) ::munlock(reinterpret_cast<void*>(start), len);
+    errno = savedError;
 #endif
     return 0;
 }

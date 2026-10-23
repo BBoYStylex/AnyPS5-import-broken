@@ -111,6 +111,40 @@ for (const target of ["windows", "linux"]) {
 }
 }
 
+for (const toRosetta of [false, true]) {
+  const archive = new Archive(source);
+  await archive.inspect(() => {});
+  const input = await archive.conversionInput("macos", false, () => {}, toRosetta);
+  assert.equal(input.outputName, "program");
+  assert.equal(input.toRosetta, toRosetta);
+  const converted = native.Convert(input, () => {});
+  assert.equal(converted.ok, true, converted.error);
+  assert.deepEqual([...converted.executable.subarray(0, 4)], [0xcf, 0xfa, 0xed, 0xfe]);
+  const image = new DataView(converted.executable.buffer, converted.executable.byteOffset, converted.executable.byteLength);
+  assert.equal(image.getUint32(4, true), 0x01000007);
+  const chunks = [];
+  const destination = new WritableStream({ write(chunk) { chunks.push(chunk.slice()); } });
+  await packageArchive(archive, converted, input.outputName, null, destination, () => {});
+  await destination.close();
+  const reader = new ZipReader(new BlobReader(new Blob(chunks)));
+  const byName = new Map((await reader.getEntries()).map(entry => [entry.filename, entry]));
+  assert(byName.has("program"));
+  assert.equal((byName.get("program").externalFileAttributes >>> 16) & 0o777, 0o755);
+  assert(byName.has("app0/content/resource.bin"));
+  assert(![...byName.keys()].some(name => name.startsWith("libs/")));
+  await reader.close();
+  await archive.close();
+  console.log(`ZIP, macos${toRosetta ? " (Rosetta)" : ""}: Mach-O x86-64 conversion and packaging without published libraries verified`);
+}
+{
+  const archive = new Archive(source);
+  await archive.inspect(() => {});
+  const input = await archive.conversionInput("linux", false, () => {}, true);
+  assert.equal(input.toRosetta, false);
+  assert.equal(input.outputName, "program.elf");
+  await archive.close();
+  console.log("Rosetta preparation applies only to macOS output");
+}
 const bundleArchive = new Archive(source);
 await bundleArchive.inspect(() => {});
 const bundleInput = await bundleArchive.conversionInput("linux", false, () => {});

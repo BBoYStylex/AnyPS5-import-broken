@@ -63,6 +63,9 @@ static std::size_t OpenHandles() {
     DWORD count = 0;
     Require(GetProcessHandleCount(GetCurrentProcess(), &count) != 0);
     return count;
+#elif defined(__APPLE__)
+    return static_cast<std::size_t>(std::distance(std::filesystem::directory_iterator("/dev/fd"),
+        std::filesystem::directory_iterator{}));
 #else
 #ifdef __APPLE__
     const std::filesystem::path descriptors = "/dev/fd";

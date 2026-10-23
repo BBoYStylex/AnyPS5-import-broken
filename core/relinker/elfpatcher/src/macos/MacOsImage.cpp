@@ -811,7 +811,10 @@ std::vector<std::uint8_t> WriteMacOsImage(MacOsImageInput& input) {
 
     std::vector<std::uint8_t> file;
     constexpr std::size_t HeaderSize = 32;
-    const auto stubOffset = AlignUp(HeaderSize + commands.size(), 16);
+    // Free space after the load commands, like ld's -headerpad: codesign appends LC_CODE_SIGNATURE there, and
+    // written over the entry stub it corrupts the stub's first instructions while codesign -v still passes.
+    constexpr std::size_t LoadCommandReserve = 0x400;
+    const auto stubOffset = AlignUp(HeaderSize + commands.size() + LoadCommandReserve, 16);
     if (stubOffset + (input.Executable ? sizeof(EntryStub) : 0) > LoadRva)
         throw Domain::RelinkerException("Mach-O load commands do not fit before the guest image");
     file.resize(LoadRva, 0);

@@ -7,6 +7,9 @@
 #include <cstdlib>
 #include <fstream>
 #include <stdexcept>
+#ifdef __APPLE__
+#include <unistd.h>
+#endif
 
 extern "C" {
 int APS5_VABI sceKernelOpen(const char*, int, std::uint16_t);
@@ -73,12 +76,19 @@ int main() {
 #ifndef _WIN32
     std::filesystem::create_directory_symlink("Data", directory / "Linked");
     CheckRead("linked/SETTINGS.INI", 'x');
+#ifdef __APPLE__
+    // APFS and HFS+ volumes are case-insensitive by default, where Settings.ini and SETTINGS.INI are one file.
+    if (::pathconf(directory.c_str(), _PC_CASE_SENSITIVE) == 1) {
+#endif
     { std::ofstream file(directory / "Data" / "SETTINGS.INI"); file << 'z'; }
     CheckRead("Data/Settings.ini", 'x');
     CheckRead("Data/SETTINGS.INI", 'z');
     bool ambiguous = false;
     try { CheckRead("data/settings.ini", 'x'); } catch (const std::runtime_error&) { ambiguous = true; }
     Require(ambiguous);
+#ifdef __APPLE__
+    }
+#endif
     std::filesystem::remove(directory / "Data" / "SETTINGS.INI");
     std::filesystem::remove(directory / "Data" / "Settings.ini");
     { std::ofstream file(directory / "Data" / "SETTINGS.ini"); file << 'n'; }

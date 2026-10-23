@@ -972,7 +972,12 @@ static void CheckScaledHyperbolic() {
             std::feraiseexcept(FE_DIVBYZERO);
             errno = 12345;
             const float result = function(x, y);
+#ifdef __APPLE__
+            // Darwin's FE_ALL_EXCEPT includes the x86 denormal-operand flag, which glibc's leaves out.
+            const int raised = std::fetestexcept(FE_ALL_EXCEPT & ~FE_DENORMALOPERAND);
+#else
             const int raised = std::fetestexcept(FE_ALL_EXCEPT);
+#endif
             if (std::bit_cast<std::uint32_t>(result) != expectedBits || errno != error || raised != (FE_DIVBYZERO | flags)) {
                 std::fprintf(stderr, "%s special (%a, %a): got %08x, expected %08x, errno %d, flags %x\n",
                     name, static_cast<double>(x), static_cast<double>(y), std::bit_cast<std::uint32_t>(result), expectedBits, errno, raised);

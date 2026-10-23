@@ -16,6 +16,11 @@
 #include <sys/resource.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#include <mach/mach.h>
+#include <mach/mach_vm.h>
+#endif
 #endif
 
 extern "C" {
@@ -49,6 +54,19 @@ static PageState QueryPage(std::uintptr_t address) {
     Require(VirtualQuery(reinterpret_cast<const void*>(address), &memory, sizeof(memory)) == sizeof(memory));
     const bool mapped = memory.State == MEM_COMMIT;
     return {mapped, mapped && (memory.Protect & (PAGE_READWRITE | PAGE_EXECUTE_READWRITE)) != 0, (static_cast<std::uint64_t>(memory.State) << 32) | memory.Protect};
+#elif defined(__APPLE__)
+    // macOS has no /proc/self/maps; the Mach region holding the address carries the same permissions, encoded like
+    // the maps line below.
+    mach_vm_address_t start = address;
+    mach_vm_size_t bytes = 0;
+    vm_region_basic_info_data_64_t region{};
+    mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+    mach_port_t object = MACH_PORT_NULL;
+    if (mach_vm_region(mach_task_self(), &start, &bytes, VM_REGION_BASIC_INFO_64, reinterpret_cast<vm_region_info_t>(&region), &count, &object) != KERN_SUCCESS || address < start) return {false, false, 0};
+    const bool readable = (region.protection & VM_PROT_READ) != 0;
+    const bool writable = (region.protection & VM_PROT_WRITE) != 0;
+    const bool executable = (region.protection & VM_PROT_EXECUTE) != 0;
+    return {true, readable && writable, 1ull | (readable ? 2ull : 0) | (writable ? 4ull : 0) | (executable ? 8ull : 0)};
 #else
     std::FILE* maps = std::fopen("/proc/self/maps", "r");
     Require(maps != nullptr);
@@ -512,7 +530,14 @@ static bool ChildPasses(const char* mode, bool unlimitedStack) {
     if (child == 0) {
         rlimit limit{};
         if (unlimitedStack && getrlimit(RLIMIT_STACK, &limit) == 0) limit.rlim_cur = RLIM_INFINITY;
+#ifdef __APPLE__
+        // macOS has no /proc/self/exe; the executable path comes from dyld.
+        char self[4096];
+        std::uint32_t selfSize = sizeof(self);
+        if ((!unlimitedStack || setrlimit(RLIMIT_STACK, &limit) == 0) && _NSGetExecutablePath(self, &selfSize) == 0) execl(self, self, mode, static_cast<char*>(nullptr));
+#else
         if (!unlimitedStack || setrlimit(RLIMIT_STACK, &limit) == 0) execl("/proc/self/exe", "/proc/self/exe", mode, static_cast<char*>(nullptr));
+#endif
         std::_Exit(127);
     }
     int status = 0;

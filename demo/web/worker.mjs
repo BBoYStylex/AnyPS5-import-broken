@@ -36,7 +36,7 @@ export async function downloadLibraries(target) {
   if (!response.ok) throw new Error(`Cannot load release manifest (${response.status})`);
   const release = await response.json();
   const asset = release.platforms[target];
-  if (!asset || !Number.isSafeInteger(asset.size) || asset.size < 0 || asset.size > 512 * 1024 * 1024 || !/^libraries\/(windows|linux)-[a-f0-9]+\.zip$/u.test(asset.path) || !/^[a-f0-9]{64}$/u.test(asset.sha256)) throw new Error("Invalid release manifest");
+  if (!asset || !Number.isSafeInteger(asset.size) || asset.size < 0 || asset.size > 512 * 1024 * 1024 || !/^libraries\/(windows|linux|macos)-[a-f0-9]+\.zip$/u.test(asset.path) || !/^[a-f0-9]{64}$/u.test(asset.sha256)) throw new Error("Invalid release manifest");
   const latestResponse = await fetch("https://api.github.com/repos/boykopovar/AnyPS5/releases/latest", { headers: { Accept: "application/vnd.github+json" } });
   if (!latestResponse.ok) {
     const rateLimited = latestResponse.status === 429 || (latestResponse.status === 403 && latestResponse.headers.get("x-ratelimit-remaining") === "0");
@@ -74,13 +74,22 @@ export async function downloadLibraries(target) {
   return { file: new Blob([bytes]), release, expandedBytes: asset.expandedBytes };
 }
 
+export async function macosLibraries() {
+  const response = await fetch("./release.json", { cache: "no-cache" });
+  if (!response.ok) throw new Error(`Cannot load release manifest (${response.status})`);
+  const release = await response.json();
+  if (release.platforms?.macos) return downloadLibraries("macos");
+  report({ phase: "Downloading system libraries", message: "No macOS system libraries are published yet; the result contains the converted app without libs/. Build them with the full macOS build." });
+  return { file: null, release: { tag: "no macOS" }, expandedBytes: 0 };
+}
+
 async function convertInput(item, index, native, libraries, data, destination, directory, writer) {
   const current = archive ?? new Archive(item.files ?? item.file);
   archive = null;
   try {
     const itemReport = reportFor(item, index);
     if (inputs.length > 1) await current.inspect(itemReport);
-    const input = await current.conversionInput(data.target, data.toIntel, itemReport);
+    const input = await current.conversionInput(data.target, data.toIntel, itemReport, data.toRosetta);
     const converted = native.Convert(input, itemReport);
     if (!converted.ok) throw new Error(converted.error);
     const options = inputs.length > 1 ? { prefix: `${batchOutputDirectory(item.name, index)}/`, writer } : {};
@@ -130,7 +139,7 @@ self.onmessage = async ({ data }) => {
       }
       self.postMessage({ type: "inspection-complete", count: inputs.length });
     } else if (data.type === "convert") {
-      if (data.target !== "linux" && data.target !== "windows") throw new Error(`Unsupported conversion target: ${data.target}`);
+      if (data.target !== "linux" && data.target !== "windows" && data.target !== "macos") throw new Error(`Unsupported conversion target: ${data.target}`);
       if (!["memory", "zip", "disk"].includes(data.mode)) throw new Error("Unknown save mode");
       if (data.target === "windows" && data.mode === "disk") throw new Error("Windows folder output is unavailable because browsers block DLL creation. Choose a ZIP save mode.");
       if (!inputs.length || summaries.length !== inputs.length) throw new Error("Inspect the selected apps before converting.");
@@ -140,7 +149,7 @@ self.onmessage = async ({ data }) => {
         if (data.target === "windows" && summary.windowsIconTooLarge) throw new Error("A Windows icon exceeds 16 MiB. Choose Linux or use the native relinker.");
         if (selectedBytes > CONVERSION_LIMIT) throw new Error(`Selected ${data.target} conversion input exceeds the 256 MiB conversion limit. Use the native relinker for this app.`);
       }
-      const libraries = await downloadLibraries(data.target);
+      const libraries = data.target === "macos" ? await macosLibraries() : await downloadLibraries(data.target);
       if (data.mode === "memory" && batchMemoryEstimate(summaries, data.target, libraries.expandedBytes) > MEMORY_LIMIT) throw new Error("This result exceeds the 256 MiB memory-download budget. Use Save ZIP to disk in desktop Chrome or Edge.");
       report({ phase: "Loading converter" });
       const { default: createRelinker } = await import("./native/relinker_wasm.mjs");

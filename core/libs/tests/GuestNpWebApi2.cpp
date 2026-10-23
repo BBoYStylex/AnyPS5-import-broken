@@ -3,6 +3,9 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#ifdef __APPLE__
+#include <initializer_list>
+#endif
 #include <stdexcept>
 
 struct NpWebApi2MemoryPoolStats {
