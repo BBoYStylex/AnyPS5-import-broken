@@ -36,7 +36,7 @@ Input must contain a defined `STT_FUNC` symbol with a nonzero extent entirely in
 
 `--triple` accepts `x86_64-unknown-linux-gnu`, `x86_64-w64-windows-gnu`, `x86_64-pc-windows-msvc`, or `x86_64-apple-darwin`; the default matches the host OS. `--opt 0..3` selects LLVM's code-generation optimization level. Objects must be linked by the target's toolchain. The CLI does not invoke a shell or linker.
 
-The tests link and execute emitted objects and emitted assembly, compare both against the original x86-64 function and independent integer results, and parse emitted IR using LLVM. They require an x86-64 host and a GCC-compatible C++ compiler. Unsupported input and malformed CLI requests must fail without replacing existing output. Limits are tracked in [AOT debt](debt/aot.md).
+The tests link and execute emitted objects and emitted assembly, compare both against the original x86-64 function and independent integer results, and parse emitted IR using LLVM. They require an x86-64 host or Apple Silicon with Rosetta, and a GCC-compatible C++ compiler. Each execution runs in a separate x86-64 program; Python only orchestrates compilation and checks the returned results. On macOS the test compiler receives `-arch x86_64`, and Python may run as either arm64 or x86-64. A compile-time architecture check rejects non-x86-64 test programs before any fixture bytes can execute. Missing execution support fails the test rather than skipping it. Unsupported input and malformed CLI requests must fail without replacing existing output. Limits are tracked in [AOT debt](debt/aot.md).
 
 ## Full build
 

@@ -1,5 +1,5 @@
-if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(AMD64|amd64|x86_64)$")
-    message(FATAL_ERROR "Leaf compiler execution tests require a native x86-64 host")
+if(NOT APPLE AND NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(AMD64|amd64|x86_64)$")
+    message(FATAL_ERROR "Leaf compiler execution tests require x86-64 or macOS with Rosetta")
 endif()
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 if(COMMAND add_test_executable)

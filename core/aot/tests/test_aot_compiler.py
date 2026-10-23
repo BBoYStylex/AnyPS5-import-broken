@@ -1,6 +1,4 @@
 import argparse
-import _ctypes
-import ctypes
 import os
 import random
 import struct
@@ -101,7 +99,7 @@ def moves():
         (b"\x49\x89\xfa\x4c\x89\xd0\xc3", lambda a: a[0]),
         (b"\x4c\x89\xc0\x4c\x01\xc8\xc3", lambda a: (a[4] + a[5]) & MASK),
         (b"\x41\xb8\xff\xff\xff\xff\x4c\x89\xc0\xc3", lambda a: 0xffffffff),
-        (b"\x48\x63\xc7\xc3", lambda a: ctypes.c_int32(a[0]).value & MASK),
+        (b"\x48\x63\xc7\xc3", lambda a: ((a[0] & 0x7fffffff) - (a[0] & 0x80000000)) & MASK),
         (b"\x31\xc0\xc3", lambda a: 0),
         (b"\x48\x29\xc0\xc3", lambda a: 0),
         (b"\x48\x89\xf8\x48\x83\xc0\xff\xc3", lambda a: (a[0] - 1) & MASK),
@@ -165,18 +163,14 @@ def execute_cases(options, directory, cases):
         ]
     reference_assembly.write_text("\n".join(assembly_lines) + "\n")
     reference_source.write_text("\n".join(source_lines) + "\n")
-    reference_library = directory / ("reference.dll" if os.name == "nt" else "reference.so")
-    run([options.host_compiler, "-shared", "-fPIC", "-o", reference_library,
-         reference_source, reference_assembly])
-    native_expected = execute_library(reference_library,
+    native_expected = execute_program(options, directory, "reference", [reference_source, reference_assembly],
                                       [f"original_{i}" for i in range(len(cases))], vectors)
     for index, (_, expected) in enumerate(cases):
         if native_expected[index] != [expected(arguments) for arguments in vectors]:
             raise AssertionError(f"Reference model disagrees with native x86-64 for case {index}")
     for kind, inputs in (("object", objects), ("assembly", assemblies)):
-        library = directory / (f"{kind}.dll" if os.name == "nt" else f"{kind}.so")
-        run([options.host_compiler, "-shared", "-o", library, *inputs])
-        actual_results = execute_library(library, [name for name, _ in expected_functions], vectors)
+        actual_results = execute_program(options, directory, kind, inputs,
+                                         [name for name, _ in expected_functions], vectors)
         for index, (name, expected) in enumerate(expected_functions):
             for arguments, actual, wanted in zip(vectors, actual_results[index], native_expected[index]):
                 if actual != wanted:
@@ -184,21 +178,39 @@ def execute_cases(options, directory, cases):
     print(f"Executed {len(cases)} functions from both object and assembly output on {len(vectors)} input vectors")
 
 
-def execute_library(path, names, vectors):
-    library = ctypes.CDLL(str(path))
+def execute_program(options, directory, kind, inputs, names, vectors):
+    source = directory / f"{kind}_runner.cpp"
+    executable = directory / (f"{kind}.exe" if os.name == "nt" else kind)
+    parameters = ", ".join(["uint64_t"] * 6)
+    arguments = ", ".join(f"a[{i}]" for i in range(6))
+    lines = [
+        "#if !defined(__x86_64__) && !defined(_M_X64)",
+        '#error "Leaf execution tests must be compiled for x86-64"', "#endif",
+        "#include <cstdint>", "#include <cstdio>",
+        *[f'extern "C" uint64_t {name}({parameters});' for name in names],
+        "int main() {",
+        f"using Function = uint64_t (*)({parameters});",
+        "const Function functions[] = {" + ", ".join(names) + "};",
+        "const uint64_t vectors[][6] = {",
+        *["{" + ", ".join(f"{value}ULL" for value in vector) + "}," for vector in vectors],
+        "};",
+        "for (auto function : functions) {",
+        "for (const auto& a : vectors) {",
+        f'std::printf("%llu\\n", static_cast<unsigned long long>(function({arguments})));',
+        "}", "}", "return std::ferror(stdout) ? 1 : 0;", "}",
+    ]
+    source.write_text("\n".join(lines) + "\n")
+    architecture = ["-arch", "x86_64"] if sys.platform == "darwin" else []
+    run([options.host_compiler, *architecture, "-std=c++20", "-o", executable, source, *inputs])
     try:
-        results = []
-        for name in names:
-            function = getattr(library, name)
-            function.argtypes = [ctypes.c_uint64] * 6
-            function.restype = ctypes.c_uint64
-            results.append([function(*arguments) for arguments in vectors])
-        return results
-    finally:
-        if os.name == "nt":
-            _ctypes.FreeLibrary(library._handle)
-        else:
-            _ctypes.dlclose(library._handle)
+        result = run([executable])
+    except OSError as error:
+        hint = " Apple Silicon requires Rosetta." if sys.platform == "darwin" else ""
+        raise AssertionError(f"Cannot launch x86-64 test program.{hint} {error}") from error
+    values = [int(line) for line in result.stdout.splitlines()]
+    if len(values) != len(names) * len(vectors) or any(value < 0 or value > MASK for value in values):
+        raise AssertionError("Test program returned incomplete or invalid uint64_t results")
+    return [values[index * len(vectors):(index + 1) * len(vectors)] for index in range(len(names))]
 
 
 def reject(options, directory):
@@ -283,9 +295,8 @@ def main():
     parser.add_argument("--ir-checker", required=True)
     parser.add_argument("--group", required=True)
     options = parser.parse_args()
-    dll_directory = None
     if os.name == "nt":
-        dll_directory = os.add_dll_directory(str(Path(options.host_compiler).parent))
+        os.environ["PATH"] = str(Path(options.host_compiler).parent) + os.pathsep + os.environ.get("PATH", "")
     with tempfile.TemporaryDirectory(prefix="anyps5-leaf-") as temporary:
         directory = Path(temporary)
         if options.group == "reject":
@@ -294,8 +305,6 @@ def main():
             formats(options, directory)
         else:
             execute_cases(options, directory, {"arithmetic": arithmetic, "moves": moves, "shifts": shifts}[options.group]())
-    if dll_directory is not None:
-        dll_directory.close()
 
 
 if __name__ == "__main__":
