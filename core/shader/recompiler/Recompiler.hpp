@@ -635,6 +635,8 @@ private:
     std::shared_ptr<Holder> holder;
 };
 
+[[nodiscard]] SharedSpirv InternSpirv(std::vector<std::uint32_t> words);
+
 struct VertexInput {
     std::uint32_t location;
     std::uint32_t components;

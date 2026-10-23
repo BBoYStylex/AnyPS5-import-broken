@@ -844,7 +844,7 @@ std::shared_ptr<const SpecializedModule> buildSpecializedModule(const CompiledSh
         }
         cursor += count;
     }
-    module->spirv = std::move(materialized);
+    module->spirv = InternSpirv(std::move(materialized));
     module->specializationId = constants.empty() ? 0u : nextVariantId();
     return module;
 }
@@ -1168,6 +1168,20 @@ bool sameLayout(const BindingLayout& left, const BindingLayout& right) {
     return left.descriptorSet == right.descriptorSet && left.firstBinding == right.firstBinding && left.pushConstantOffsetBytes == right.pushConstantOffsetBytes && left.pushConstantSizeBytes == right.pushConstantSizeBytes;
 }
 
+}
+
+SharedSpirv InternSpirv(std::vector<std::uint32_t> words) {
+    SharedSpirv spirv(std::move(words));
+    const auto hash = spirv.ContentHash();
+    static std::mutex mutex;
+    static std::unordered_map<std::uint64_t, std::vector<SharedSpirv>> interned;
+    std::lock_guard lock(mutex);
+    auto& candidates = interned[hash.low ^ (hash.high * 0x9e3779b97f4a7c15ull)];
+    for (const auto& candidate : candidates) {
+        if (candidate.ContentHash() == hash && candidate == spirv) return candidate;
+    }
+    candidates.push_back(spirv);
+    return spirv;
 }
 
 MeshOutputBudget MeshBarycentricOutputBudget(const MeshConfiguration& mesh, const MeshTargetLimits& limits, const MeshOutputUse& use) {
