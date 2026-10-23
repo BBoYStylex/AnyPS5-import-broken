@@ -1178,6 +1178,7 @@ int APS5_VABI sceUltGetUlthreadInfo(void* object, UltUlthreadInfo* info) {
 int APS5_VABI sceUltGetUlthreadRuntimeInfo(void* runtime, UltUlthreadRuntimeInfo* info, void** ulthreads, std::uint32_t ulthreadCapacity, Pthread* workerThreads, std::uint32_t workerCapacity) {
     if (runtime == nullptr || info == nullptr) return ULT_ERROR_NULL;
     if (ulthreads == nullptr && ulthreadCapacity != 0) return ULT_ERROR_NULL;
+    if (workerThreads == nullptr && workerCapacity != 0) return ULT_ERROR_NULL;
     if (workerThreads != nullptr && workerCapacity != 0) throw std::runtime_error("ULT ulthread runtime worker thread handles are not implemented");
     std::lock_guard lock(gMutex);
     const auto it = gRuntimes.find(runtime);

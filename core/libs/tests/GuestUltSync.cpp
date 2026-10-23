@@ -361,6 +361,8 @@ void GetInfoTests() {
     CHECK(sceUltGetQueueDataResourcePoolInfo(nullptr, nullptr) == Null);
     CHECK(sceUltGetUlthreadInfo(nullptr, nullptr) == Null);
     CHECK(sceUltGetUlthreadRuntimeInfo(nullptr, nullptr, nullptr, 0, nullptr, 0) == Null);
+    CHECK(sceUltGetUlthreadRuntimeInfo(nullptr, &rtInfo, nullptr, 1, nullptr, 0) == Null);
+    CHECK(sceUltGetUlthreadRuntimeInfo(nullptr, &rtInfo, nullptr, 0, nullptr, 1) == Null);
 
     CHECK(sceUltGetMutexInfo(dummy, &mutexInfo, nullptr, 0) == State);
     CHECK(sceUltGetConditionVariableInfo(dummy, &condInfo, nullptr, 0) == State);
@@ -472,6 +474,14 @@ void GetInfoTests() {
         workerQueryThrew = true;
     }
     CHECK(workerQueryThrew);
+
+    UltUlthreadRuntimeInfo untouchedInfo{};
+    std::memset(&untouchedInfo, 0xEE, sizeof(untouchedInfo));
+    CHECK(sceUltGetUlthreadRuntimeInfo(rtObj, &untouchedInfo, nullptr, 0, nullptr, 1) == Null);
+    const auto* infoBytes = reinterpret_cast<const std::uint8_t*>(&untouchedInfo);
+    for (std::size_t i = 0; i < sizeof(untouchedInfo); ++i) {
+        CHECK(infoBytes[i] == 0xEE);
+    }
 
     CHECK(sceUltConditionVariableDestroy(condObj) == Ok);
     CHECK(sceUltMutexDestroy(mutexObj) == Ok);
