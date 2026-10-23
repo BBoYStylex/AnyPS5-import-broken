@@ -217,6 +217,7 @@ struct JobHeader {
     std::uint32_t inputCount;
     std::uint32_t outputCount;
     std::uint8_t parameters[16];
+    bool console;
 };
 
 struct PackedJob {
@@ -816,6 +817,7 @@ void RunAt9(Instance& instance, const JobHeader& job, const AjmBuffer* inputs, c
         ++frames;
 
         EmitFrame(instance, pcmOutputs, pcm.data(), frameSamples, channels, sampleBytes);
+        if (job.console && (job.flags & RUN_MULTIPLE_FRAMES) == 0) break;
     }
     if (segmentEnded()) instance.segmentSamples = 0;
 
@@ -1808,6 +1810,7 @@ struct ConsoleRefusal {
 bool ReadConsoleJob(std::uint32_t instance, const std::uint8_t* job, const std::uint8_t* end, ConsoleJob& out, ConsoleRefusal& refusal) {
     out.header = JobHeader{};
     out.header.instance = instance;
+    out.header.console = true;
     std::vector<AjmBuffer> inputs;
     std::vector<AjmBuffer> outputs;
     AjmBuffer controlInput{};

@@ -2064,6 +2064,28 @@ void TestConsoleEmptyBatch(std::uint32_t context) {
     Require(sceAjmBatchWait(context, id, 0, &error) == invalidBatch);
 }
 
+void TestConsoleSingleFrameRun(std::uint32_t context) {
+    constexpr std::uint64_t version = 1;
+    constexpr std::uint64_t sidebandStream = 1ull << 47;
+    std::vector<std::uint8_t> stream(1024, 0);
+    std::memcpy(stream.data(), AT9_MONO_SILENT_SUPERFRAME, sizeof(AT9_MONO_SILENT_SUPERFRAME));
+    std::uint32_t instance = 0;
+    Require(sceAjmInstanceCreate(context, 1, 0, &instance) == 0);
+    const At9Control start{{0, 0, 0}, {0xFE, 0x70, 0x1F, 0xF0}, 0};
+    std::int32_t result[2] = {-1, -1};
+    std::vector<std::int16_t> pcm(1024, 0x55);
+    DecodeSideband single{-1, -1, 0, 0, 0};
+    std::vector<std::uint8_t> batch(4096, 0xCD);
+    void* at = sceAjmBatchJobControlBufferRa(batch.data(), instance, version | CONTROL_START, &start, sizeof(start), result, sizeof(result), nullptr);
+    at = sceAjmBatchJobRunBufferRa(at, instance, version | sidebandStream, stream.data(), stream.size(), pcm.data(), pcm.size() * sizeof(std::int16_t), &single, sizeof(single), nullptr);
+    Require(StartBuffer(context, batch.data(), static_cast<std::uint8_t*>(at) - batch.data()) == 0);
+    Require(result[0] == 0 && single.result == 0 && single.inputConsumed > 0 && single.inputConsumed < 1024);
+    Require(single.outputWritten == 256 * 2 && single.totalDecodedSamples == 256);
+    Require(std::all_of(pcm.begin(), pcm.begin() + 256, [](std::int16_t sample) { return sample == 0; }));
+    Require(std::all_of(pcm.begin() + 256, pcm.end(), [](std::int16_t sample) { return sample == 0x55; }));
+    Require(sceAjmInstanceDestroy(context, instance) == 0);
+}
+
 void TestConsoleStaleHeaderBits(std::uint32_t context) {
     std::vector<std::uint8_t> stream(1024, 0);
     std::memcpy(stream.data(), AT9_MONO_SILENT_SUPERFRAME, sizeof(AT9_MONO_SILENT_SUPERFRAME));
@@ -2349,6 +2371,7 @@ int main() {
     TestConsoleHandWrittenJobs(context);
     TestConsoleBufferEdges(context);
     TestConsoleEmptyBatch(context);
+    TestConsoleSingleFrameRun(context);
     TestConsoleStaleHeaderBits(context);
     Require(sceAjmFinalize(context) == 0);
 }
