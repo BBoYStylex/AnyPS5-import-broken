@@ -453,103 +453,106 @@ int APS5_VABI strcoll_nid_postfix(const char* s1, const char* s2) {
     return std::strcmp(s1, s2);
 }
 
-int APS5_VABI strncpy_s_nid_postfix(char* dest, size_t destsz, const char* src, size_t count) {
-    constexpr int GuestEinval = 22;
-    constexpr int GuestErange = 34;
-    constexpr size_t RsizeMax = SIZE_MAX >> 1;
-    if (!dest || destsz == 0) return GuestEinval;
-    if (destsz > RsizeMax) return GuestErange;
-    if (!src) {
+namespace {
+
+constexpr int SafeEinval = 22;
+constexpr int SafeErange = 34;
+constexpr size_t ByteRsizeMax = (size_t{1} << 61) - 1;
+
+int Violation(const char* function, void* dest, int error) {
+    SonyInvokeConstraintHandler(function, dest, error);
+    return error;
+}
+
+int CopyString(const char* function, char* dest, size_t destsz, const char* src, size_t count, bool counted) {
+    if (!dest || destsz == 0 || destsz > ByteRsizeMax) return Violation(function, dest, SafeEinval);
+    if (!src || (counted && count > ByteRsizeMax)) {
         dest[0] = '\0';
-        return GuestEinval;
+        return Violation(function, dest, SafeEinval);
     }
     size_t length = 0;
     while (length < count && src[length] != '\0') ++length;
     if (length >= destsz) {
         dest[0] = '\0';
-        return GuestErange;
+        return Violation(function, dest, SafeErange);
     }
     const auto destination = reinterpret_cast<std::uintptr_t>(dest);
     const auto source = reinterpret_cast<std::uintptr_t>(src);
     if (destination < source + (length + 1) && source < destination + length + 1) {
         dest[0] = '\0';
-        return GuestEinval;
+        return Violation(function, dest, SafeEinval);
     }
     std::memcpy(dest, src, length);
     dest[length] = '\0';
     return 0;
 }
 
-int APS5_VABI strcpy_s_nid_postfix(char* dest, size_t destsz, const char* src) {
-    return strncpy_s_nid_postfix(dest, destsz, src, static_cast<size_t>(-1));
-}
-
-int APS5_VABI strncat_s_nid_postfix(char* dest, size_t destsz, const char* src, size_t count) {
-    constexpr int GuestEinval = 22;
-    constexpr int GuestErange = 34;
-    constexpr size_t RsizeMax = SIZE_MAX >> 1;
-    if (!dest || destsz == 0) return GuestEinval;
-    if (destsz > RsizeMax) return GuestErange;
+int AppendString(const char* function, char* dest, size_t destsz, const char* src, size_t count, bool counted) {
+    if (!dest || destsz == 0 || destsz > ByteRsizeMax) return Violation(function, dest, SafeEinval);
     size_t used = 0;
     while (used < destsz && dest[used] != '\0') ++used;
-    if (used == destsz || !src) {
+    if (used == destsz || !src || (counted && count > ByteRsizeMax)) {
         dest[0] = '\0';
-        return used == destsz ? GuestErange : GuestEinval;
+        return Violation(function, dest, SafeEinval);
     }
     size_t length = 0;
     while (length < count && src[length] != '\0') ++length;
     if (length >= destsz - used) {
         dest[0] = '\0';
-        return GuestErange;
+        return Violation(function, dest, SafeErange);
     }
     const auto destination = reinterpret_cast<std::uintptr_t>(dest);
     const auto source = reinterpret_cast<std::uintptr_t>(src);
     if (destination < source + (length + 1) && source < destination + used + length + 1) {
         dest[0] = '\0';
-        return GuestEinval;
+        return Violation(function, dest, SafeEinval);
     }
     std::memcpy(dest + used, src, length);
     dest[used + length] = '\0';
     return 0;
 }
 
-int APS5_VABI strcat_s_nid_postfix(char* dest, size_t destsz, const char* src) {
-    return strncat_s_nid_postfix(dest, destsz, src, static_cast<size_t>(-1));
-}
-
-int APS5_VABI memcpy_s_nid_postfix(void* dest, size_t destsz, const void* src, size_t count) {
-    constexpr int GuestEinval = 22;
-    constexpr int GuestErange = 34;
-    constexpr size_t RsizeMax = SIZE_MAX >> 1;
-    if (!dest) return GuestEinval;
-    if (destsz > RsizeMax) return GuestErange;
-    if (!src || count > destsz) {
+int CopyMemory(const char* function, void* dest, size_t destsz, const void* src, size_t count, bool overlapping) {
+    if (!dest || destsz > ByteRsizeMax) return Violation(function, dest, SafeEinval);
+    if (!src || count > ByteRsizeMax || count > destsz) {
         std::memset(dest, 0, destsz);
-        return src ? GuestErange : GuestEinval;
+        return Violation(function, dest, src && count <= ByteRsizeMax ? SafeErange : SafeEinval);
     }
     const auto destination = reinterpret_cast<std::uintptr_t>(dest);
     const auto source = reinterpret_cast<std::uintptr_t>(src);
     const auto distance = destination < source ? source - destination : destination - source;
-    if (count != 0 && distance < count) {
+    if (!overlapping && count != 0 && distance < count) {
         std::memset(dest, 0, destsz);
-        return GuestEinval;
-    }
-    std::memcpy(dest, src, count);
-    return 0;
-}
-
-int APS5_VABI memmove_s_nid_postfix(void* dest, size_t destsz, const void* src, size_t count) {
-    constexpr int GuestEinval = 22;
-    constexpr int GuestErange = 34;
-    constexpr size_t RsizeMax = SIZE_MAX >> 1;
-    if (!dest) return GuestEinval;
-    if (destsz > RsizeMax) return GuestErange;
-    if (!src || count > destsz) {
-        std::memset(dest, 0, destsz);
-        return src ? GuestErange : GuestEinval;
+        return Violation(function, dest, SafeEinval);
     }
     std::memmove(dest, src, count);
     return 0;
+}
+
+}
+
+int APS5_VABI strncpy_s_nid_postfix(char* dest, size_t destsz, const char* src, size_t count) {
+    return CopyString("strncpy_s", dest, destsz, src, count, true);
+}
+
+int APS5_VABI strcpy_s_nid_postfix(char* dest, size_t destsz, const char* src) {
+    return CopyString("strcpy_s", dest, destsz, src, static_cast<size_t>(-1), false);
+}
+
+int APS5_VABI strncat_s_nid_postfix(char* dest, size_t destsz, const char* src, size_t count) {
+    return AppendString("strncat_s", dest, destsz, src, count, true);
+}
+
+int APS5_VABI strcat_s_nid_postfix(char* dest, size_t destsz, const char* src) {
+    return AppendString("strcat_s", dest, destsz, src, static_cast<size_t>(-1), false);
+}
+
+int APS5_VABI memcpy_s_nid_postfix(void* dest, size_t destsz, const void* src, size_t count) {
+    return CopyMemory("memcpy_s", dest, destsz, src, count, false);
+}
+
+int APS5_VABI memmove_s_nid_postfix(void* dest, size_t destsz, const void* src, size_t count) {
+    return CopyMemory("memmove_s", dest, destsz, src, count, true);
 }
 
 int APS5_VABI memset_s_nid_postfix(void* dest, size_t destsz, int value, size_t count) {
