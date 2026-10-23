@@ -1,4 +1,5 @@
 #include "prx/libSceAgcDriver/Graphics/include/UnitShadow.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/BufferPool.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/SlimMutex.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/GuestBufferMemory.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Recorder.hpp"
@@ -192,12 +193,16 @@ std::shared_ptr<ShadowSlab> makeSlab(const Context& context, std::uint64_t first
     VkBufferCreateInfo info{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
     info.size = static_cast<VkDeviceSize>(units) * UnitBytes;
     info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+    const bool addressable = BufferPool::ForceAddresses() && context.bufferDeviceAddress;
+    if (addressable) info.usage |= VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
     info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     VkBuffer buffer = VK_NULL_HANDLE;
     if (context.Function<PFN_vkCreateBuffer>("vkCreateBuffer")(context.device, &info, nullptr, &buffer) != VK_SUCCESS) return nullptr;
     VkMemoryRequirements requirements{};
     context.Function<PFN_vkGetBufferMemoryRequirements>("vkGetBufferMemoryRequirements")(context.device, buffer, &requirements);
     VkMemoryAllocateInfo allocation{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+    const VkMemoryAllocateFlagsInfo addressFlags{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO, nullptr, VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT, 0};
+    if (addressable) allocation.pNext = &addressFlags;
     allocation.allocationSize = requirements.size;
     VkDeviceMemory memory = VK_NULL_HANDLE;
     try {
@@ -492,11 +497,11 @@ std::size_t PublishShadow(std::uint64_t address, std::size_t bytes, PublishScope
     return units;
 }
 
-bool AnyShadowedOverlaps(std::uint64_t address, std::size_t bytes) {
-    if (!UnitShadowEnabled() || bytes == 0) return false;
+namespace {
+
+bool anyShadowedLocked(const Shadows& registry, std::uint64_t address, std::size_t bytes) {
+    if (bytes == 0) return false;
     const auto end = bytes > std::numeric_limits<std::uint64_t>::max() - address ? std::numeric_limits<std::uint64_t>::max() : address + bytes;
-    auto& registry = Registry();
-    std::lock_guard lock(registry.mutex);
     return anyOverlapping(registry, address, end, [&](const std::shared_ptr<UnitShadow>& shadow) {
         if (shadow->liveUnits == 0) return false;
         const auto begin = std::max(address, shadow->importBase);
@@ -508,10 +513,21 @@ bool AnyShadowedOverlaps(std::uint64_t address, std::size_t bytes) {
     });
 }
 
+}
+
+bool AnyShadowedOverlaps(std::uint64_t address, std::size_t bytes) {
+    if (!UnitShadowEnabled() || bytes == 0) return false;
+    auto& registry = Registry();
+    std::lock_guard lock(registry.mutex);
+    return anyShadowedLocked(registry, address, bytes);
+}
+
 bool AnyShadowedOverlaps(std::span<const std::pair<std::uint64_t, std::uint64_t>> ranges) {
-    if (!UnitShadowEnabled()) return false;
+    if (!UnitShadowEnabled() || ranges.empty()) return false;
+    auto& registry = Registry();
+    std::lock_guard lock(registry.mutex);
     for (const auto& [begin, end] : ranges) {
-        if (end > begin && AnyShadowedOverlaps(begin, static_cast<std::size_t>(end - begin))) return true;
+        if (end > begin && anyShadowedLocked(registry, begin, static_cast<std::size_t>(end - begin))) return true;
     }
     return false;
 }

@@ -189,7 +189,9 @@ function(add_shader_recompiler target runtimeTarget)
     get_target_property(shaderCacheCompiledSources ${target} SOURCES)
     list(APPEND shaderCacheRecompilerSources ${shaderCacheCompiledSources})
     list(REMOVE_DUPLICATES shaderCacheRecompilerSources)
-    set(shaderCacheKeySources "${PROJECT_SOURCE_DIR}/core/libs/prx/libc/include/HostThreadLocal.hpp")
+    set(shaderCacheKeySources
+            "${PROJECT_SOURCE_DIR}/core/libs/prx/libc/include/HostThreadLocal.hpp"
+            "${PROJECT_SOURCE_DIR}/core/libs/prx/libc/include/general/AtomicSharedPtr.hpp")
     foreach(source IN LISTS shaderCacheKeySources)
         if(NOT EXISTS "${source}")
             message(FATAL_ERROR "Shader disk cache key source does not exist: ${source}")
@@ -233,8 +235,13 @@ function(add_shader_recompiler target runtimeTarget)
     endif()
     set(shaderCacheReviewedNames
             BdaAbi::RangesOrdered
+            RuntimeAbi::GpuHeapStorageKind
+            StorageElementPointer
+            FirstAtomicStorageImageBinding
             BuildBarycentricGeometryShader
             BuildBarycentricTessellationShaders
+            HeapFragmentEligible
+            CompleteHeapDataWords
             BuildPreparedShaderKey
             BuildRectListShaders
             CaptureResources
@@ -267,7 +274,10 @@ function(add_shader_recompiler target runtimeTarget)
             MaterializeShader
             RegistrationResult
             ResolveSource
+            DescriptorBindingForImage
             ResourceMaterializer::EvaluateNanoseconds
+            ResourceMaterializer::TryRuntimeImageMode
+            ResourceMaterializer::ExpectedDeviceImages
             ResourceMaterializer::MaterializeNanoseconds
             ReleaseUndrawnResourcePlan
             ResourceMaterializer::SpecializationNanoseconds

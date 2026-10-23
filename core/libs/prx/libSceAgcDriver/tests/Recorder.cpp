@@ -12,6 +12,7 @@
 #include "prx/libSceAgcDriver/Graphics/include/MultisampleTarget.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/GuestBufferMemory.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Resources.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/PlaceholderImages.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/ShaderResources.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Shaders.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Texture.hpp"
@@ -4642,6 +4643,9 @@ bool unitShadowTests(const Device& device, Recorder& recorder) {
     retile(*half, unit3, unit / 2, 0x22, true);
     Require(AnyShadowedOverlaps(unit3, 1) && AnyShadowedOverlaps(unit4 - 1, 1) && AnyShadowedOverlaps(unit3 + 1000, 64), "a fresh unit is not seen as shadowed");
     Require(!AnyShadowedOverlaps(unit3 - 1, 1) && !AnyShadowedOverlaps(unit4, unit) && !AnyShadowedOverlaps(address, 3 * unit), "a range outside the unit is seen as shadowed");
+    const std::array<std::pair<std::uint64_t, std::uint64_t>, 2> outside{{{unit3 - 8, unit3}, {unit4, unit4 + unit}}};
+    const std::array<std::pair<std::uint64_t, std::uint64_t>, 2> reaching{{{unit3 - 8, unit3}, {unit4 - 4, unit4}}};
+    Require(!AnyShadowedOverlaps(outside) && AnyShadowedOverlaps(reaching), "a set of ranges around the fresh unit was answered wrongly");
     {
         // An upload's runs over units 2..4 split at unit 3's freshness; the fresh piece reads the slab.
         const std::pair<std::uint64_t, std::uint64_t> run{2 * unit, 5 * unit};
@@ -6334,6 +6338,46 @@ void refreshProofTests(const Device& device, Recorder& recorder) {
         recorder.Sync();
     }
     recorder.Sync();
+    {
+        std::memset(keys, 0xff, keyCount);
+        const auto meta = resource.dccAddress >> 8u;
+        const std::vector<std::uint32_t> words{
+            static_cast<std::uint32_t>(address >> 8u),
+            static_cast<std::uint32_t>((address >> 40u) & 0xffu) | (56u << 20u) | (((side - 1u) & 3u) << 30u),
+            ((side - 1u) >> 2u) | ((side - 1u) << 14u),
+            0xfacu | (0x1bu << 20u) | (9u << 28u),
+            0u,
+            0u,
+            (1u << 19u) | (1u << 20u) | (1u << 21u) | (static_cast<std::uint32_t>(meta & 0xffu) << 24u),
+            static_cast<std::uint32_t>(meta >> 8u),
+        };
+        ShaderRecompiler::RecompileResult program;
+        ShaderRecompiler::DescriptorBinding images{ShaderRecompiler::DescriptorKind::StorageImage, ShaderRecompiler::DescriptorRole::GuestImages, 0, ShaderRecompiler::RuntimeAbi::FirstStorageImageBinding, 1, words};
+        images.imageShape = ShaderRecompiler::DescriptorImageShape::Image2D;
+        images.imageWritten = {true};
+        program.bindings.push_back(images);
+        const CompiledShader compute{ShaderRecompiler::ShaderStage::Compute, &program, 0};
+        const PlaceholderImages placeholders(context);
+        auto imageContext = context;
+        imageContext.placeholderImages = &placeholders;
+        std::lock_guard gpu(GpuMutex());
+        ShaderResources resources(imageContext, compute);
+        Require(resources.Reusable(), "a set writing a keyed storage image is not kept for reuse");
+        ShaderResources::ProofReport report;
+        Require(resources.Revalidate(std::span(&compute, 1), &report), "a set over an unchanged keyed storage image did not revalidate");
+        Require(resources.Revalidate(std::span(&compute, 1), &report) && report.path == ShaderResources::ProofPath::Fast, "a set over an unchanged keyed storage image left the fast proof");
+        const auto image = StorageTexture::FindLive(address, surfaceBytes);
+        Require(image != nullptr && image->UploadedKeys() == DccKeys::Uncompressed, "the storage image was not uploaded under uncompressed keys");
+        std::memset(keys, 0x00, keyCount);
+        Require(resources.Revalidate(std::span(&compute, 1), &report), "a set over a fast-cleared keyed storage image did not revalidate");
+        Require(report.path == ShaderResources::ProofPath::OwnRefreshed, "a fast clear of a storage image's keys took the full walk instead of the image's own refresh");
+        Require(image->UploadedKeys() != DccKeys::Uncompressed, "the own refresh did not apply the fast clear");
+        Require(resources.Revalidate(std::span(&compute, 1), &report) && report.path == ShaderResources::ProofPath::Fast, "the set did not return to the fast proof after the fast clear");
+        recorder.Submit();
+        device.WaitQueue();
+        recorder.Sync();
+        ClearCachedTextures(context.device);
+    }
 }
 
 
@@ -6420,6 +6464,9 @@ void unchangedCpuStampTests(const Device& device, Recorder& recorder) {
                 context.Function<PFN_vkCmdClearColorImage>("vkCmdClearColorImage")(commands, image->Image(), VK_IMAGE_LAYOUT_GENERAL, &value, 1, &range);
                 RecordMemoryBarrier(context, commands, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT);
                 image->MarkDirty();
+                const std::array<std::pair<std::uint64_t, std::uint64_t>, 2> beside{{{address - 64, address - 16}, {address + surfaceBytes, address + surfaceBytes + 64}}};
+                const std::array<std::pair<std::uint64_t, std::uint64_t>, 2> touching{{{address - 64, address - 16}, {address + surfaceBytes - 4, address + surfaceBytes}}};
+                Require(!StorageTexture::AnyPendingOverlaps(beside) && StorageTexture::AnyPendingOverlaps(touching), "(c) " + what + ": a set of ranges beside the pending image or touching its last word was answered wrongly");
                 for (std::size_t i = 0; i < 4096; ++i) memory[offset + i] = pattern(offset + i);
                 if (changed) memory[offset + 16] = static_cast<std::uint8_t>(~pattern(offset + 16));
                 AgcDriver::GuestMemory::CollectWritesUncached(blockAddress, bytes);
@@ -10252,6 +10299,11 @@ int main(int argc, char** argv) {
         }
         if (argc == 2 && std::string_view(argv[1]) == "--unchanged-cpu-stamps-only") {
             unchangedCpuStampTests(device, recorder);
+            return 0;
+        }
+        if (argc == 2 && std::string_view(argv[1]) == "--refresh-proofs-only") {
+            refreshProofTests(device, recorder);
+            std::cout << "refresh proof tests passed\n";
             return 0;
         }
         if (argc == 2 && std::string_view(argv[1]) == "--kept-unit-settle-only") {
