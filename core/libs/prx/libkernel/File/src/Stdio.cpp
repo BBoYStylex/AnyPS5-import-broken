@@ -173,10 +173,13 @@ static int SetTimes(HANDLE handle, const KernelTimeval* times) {
         errno = EINVAL;
         return -1;
     }
-    return SetFileTime(handle, nullptr, &access, &modified) ? 0 : File::WindowsFileTime::Failure(GetLastError());
+    FILETIME creation{};
+    if (!GetFileTime(handle, &creation, nullptr, nullptr)) return File::WindowsFileTime::Failure(GetLastError());
+    const auto birth = CompareFileTime(&modified, &creation) < 0 ? &modified : nullptr;
+    return SetFileTime(handle, birth, &access, &modified) ? 0 : File::WindowsFileTime::Failure(GetLastError());
 }
 static int NativeUtimes(const std::filesystem::path& path, const KernelTimeval* times, bool followLink = true) {
-    const auto handle = CreateFileW(path.c_str(), FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+    const auto handle = CreateFileW(path.c_str(), FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
         nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | (followLink ? 0 : FILE_FLAG_OPEN_REPARSE_POINT), nullptr);
     if (handle == INVALID_HANDLE_VALUE) return File::WindowsFileTime::Failure(GetLastError());
     const int result = SetTimes(handle, times);
@@ -189,7 +192,7 @@ static int NativeFutimes(int descriptor, const KernelTimeval* times) {
     const auto original = reinterpret_cast<HANDLE>(::_get_osfhandle(descriptor));
     if (original == INVALID_HANDLE_VALUE) { errno = EBADF; return -1; }
     if (GetFileType(original) != FILE_TYPE_DISK) { errno = EINVAL; return -1; }
-    const auto handle = ReOpenFile(original, FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, 0);
+    const auto handle = ReOpenFile(original, FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, 0);
     if (handle == INVALID_HANDLE_VALUE) return File::WindowsFileTime::Failure(GetLastError());
     const int result = SetTimes(handle, times);
     CloseHandle(handle);
