@@ -860,6 +860,7 @@ bool importsStale(const Context& context, const HostImports& state);
 constexpr std::uint64_t settleFloorBytes = 0x100000;
 #ifdef _WIN32
 constexpr std::uint64_t settleBlockBytes = 0x10000;
+constexpr std::uint64_t settlePageBytes = 0x1000;
 constexpr auto settlePollPeriod = std::chrono::microseconds(100);
 std::atomic<bool> deferredSettles{std::getenv("APS5_NO_DEFERRED_SETTLES") == nullptr};
 #endif
@@ -1118,7 +1119,7 @@ void rewatchSettledImports(HostImports& state) {
             continue;
         }
         bases.push_back(base);
-        ranges.push_back(span.front());
+        ranges.emplace_back(base & ~(settlePageBytes - 1), (base + import->second.bytes + settlePageBytes - 1) & ~(settlePageBytes - 1));
     }
     state.settleReady.clear();
     if (ranges.empty()) return;
