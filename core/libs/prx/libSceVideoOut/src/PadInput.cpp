@@ -76,6 +76,7 @@ void PadInput::enableSensors() {
 }
 
 void PadInput::openStatus() {
+    PadClearTriggerStatus_nid_postfix();
     if (controller == nullptr || SDL_GameControllerGetType(controller) != SDL_CONTROLLER_TYPE_PS5) return;
     const char* path = SDL_GameControllerPath(controller);
     if (path == nullptr) return;
@@ -103,6 +104,7 @@ void PadInput::pollStatus() {
 }
 
 void PadInput::closeStatus() {
+    PadClearTriggerStatus_nid_postfix();
     if (statusHid == nullptr) return;
     SDL_hid_close(statusHid);
     statusHid = nullptr;

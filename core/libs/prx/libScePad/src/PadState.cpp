@@ -145,6 +145,9 @@ void Pad::Initialize() {
         queue.clear();
         pressedSinceRead = 0;
     }
+    liveTriggerEffects.fill(0);
+    liveTriggerStatuses.fill(0);
+    liveTriggerStatusValid = false;
     initialized = true;
 }
 
@@ -446,6 +449,13 @@ extern "C" void PadPublishTriggerStatus_nid_postfix(std::uint8_t leftEffect, std
     liveTriggerStatuses[0] = leftStatus;
     liveTriggerStatuses[1] = rightStatus;
     liveTriggerStatusValid = true;
+}
+
+extern "C" void PadClearTriggerStatus_nid_postfix() {
+    std::lock_guard lock(stateMutex);
+    liveTriggerEffects.fill(0);
+    liveTriggerStatuses.fill(0);
+    liveTriggerStatusValid = false;
 }
 
 extern "C" void PadGetTriggerEffectState_nid_postfix(std::int32_t* states) {
