@@ -330,7 +330,8 @@ struct UltQueueState {
     std::condition_variable _dataAvailable;
     std::uint32_t _head = UINT32_MAX;
     std::uint32_t _tail = UINT32_MAX;
-    std::uint32_t _waiters = 0;
+    std::uint32_t _waitingPushers = 0;
+    std::uint32_t _waitingPoppers = 0;
     bool _alive = true;
     std::uint64_t _dataSize = 0;
     void* _waitingPool = nullptr;

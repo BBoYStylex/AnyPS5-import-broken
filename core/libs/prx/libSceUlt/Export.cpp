@@ -77,14 +77,15 @@ int QueueTransfer(void* queue, void* data, const void* source, bool push, bool b
     const auto ready = [&] { return !state->_alive || (push ? pool._free : state->_head) != UINT32_MAX; };
     if (!ready()) {
         if (!blocking) return ULT_ERROR_AGAIN;
-        ++state->_waiters;
+        auto& waiters = push ? state->_waitingPushers : state->_waitingPoppers;
+        ++waiters;
         try {
             (push ? pool._spaceAvailable : state->_dataAvailable).wait(lock, ready);
         } catch (...) {
-            --state->_waiters;
+            --waiters;
             throw;
         }
-        --state->_waiters;
+        --waiters;
         if (!state->_alive) return ULT_ERROR_STATE;
     }
     if (push) {
@@ -535,7 +536,7 @@ int APS5_VABI sceUltWaitingQueueResourcePoolDestroy(void* pool) {
     for (const auto& entry : gQueues) {
         if (entry.second->_pool && entry.second->_pool->_waitingPool == pool) {
             std::lock_guard<std::mutex> poolLock(entry.second->_pool->_mutex);
-            if (entry.second->_waiters != 0) {
+            if (entry.second->_waitingPushers != 0 || entry.second->_waitingPoppers != 0) {
                 return ULT_ERROR_STATE;
             }
         }
@@ -661,7 +662,7 @@ int APS5_VABI sceUltQueueDestroy(void* queue) {
     auto& pool = *state->_pool;
     {
         std::lock_guard stateLock(pool._mutex);
-        if (state->_waiters != 0) return ULT_ERROR_STATE;
+        if (state->_waitingPushers != 0 || state->_waitingPoppers != 0) return ULT_ERROR_STATE;
         ReleaseQueue(*state);
         gQueues.erase(it);
     }
@@ -1118,8 +1119,10 @@ int APS5_VABI sceUltGetQueueInfo(void* object, UltQueueInfo* info, UltWaitingThr
     info->dataPool = state->_dataPool;
     info->dataSize = state->_dataSize;
     info->queuedItems = state->_queuedItems;
-    info->waitingPoppers = state->_waiters;
-    const auto toCopy = std::min(capacity, info->waitingPoppers);
+    info->waitingPushers = state->_waitingPushers;
+    info->waitingPoppers = state->_waitingPoppers;
+    const auto waitingCount = info->waitingPushers + info->waitingPoppers;
+    const auto toCopy = std::min(capacity, waitingCount);
     for (std::uint32_t i = 0; i < toCopy; ++i) {
         std::memset(&waitingThreads[i], 0, sizeof(UltWaitingThreadInfo));
         waitingThreads[i].size = sizeof(UltWaitingThreadInfo);
@@ -1173,10 +1176,9 @@ int APS5_VABI sceUltGetUlthreadInfo(void* object, UltUlthreadInfo* info) {
 }
 
 int APS5_VABI sceUltGetUlthreadRuntimeInfo(void* runtime, UltUlthreadRuntimeInfo* info, void** ulthreads, std::uint32_t ulthreadCapacity, Pthread* workerThreads, std::uint32_t workerCapacity) {
-    (void)workerThreads;
-    (void)workerCapacity;
     if (runtime == nullptr || info == nullptr) return ULT_ERROR_NULL;
     if (ulthreads == nullptr && ulthreadCapacity != 0) return ULT_ERROR_NULL;
+    if (workerThreads != nullptr && workerCapacity != 0) throw std::runtime_error("ULT ulthread runtime worker thread handles are not implemented");
     std::lock_guard lock(gMutex);
     const auto it = gRuntimes.find(runtime);
     if (it == gRuntimes.end()) return ULT_ERROR_STATE;

@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <initializer_list>
+#include <stdexcept>
 #include <thread>
 #include <vector>
 
@@ -463,6 +464,15 @@ void GetInfoTests() {
     CHECK(rtInfo.workerThreads == 1);
     CHECK(rtInfo.activeUlthreads == 0);
 
+    Pthread workerHandles[2]{};
+    bool workerQueryThrew = false;
+    try {
+        sceUltGetUlthreadRuntimeInfo(rtObj, &rtInfo, nullptr, 0, workerHandles, 2);
+    } catch (const std::runtime_error&) {
+        workerQueryThrew = true;
+    }
+    CHECK(workerQueryThrew);
+
     CHECK(sceUltConditionVariableDestroy(condObj) == Ok);
     CHECK(sceUltMutexDestroy(mutexObj) == Ok);
     CHECK(sceUltSemaphoreDestroy(semObj) == Ok);
@@ -471,6 +481,72 @@ void GetInfoTests() {
     CHECK(sceUltQueueDataResourcePoolDestroy(dataPoolObj) == Ok);
     CHECK(sceUltWaitingQueueResourcePoolDestroy(poolObj) == Ok);
     CHECK(sceUltUlthreadRuntimeDestroy(rtObj) == Ok);
+}
+
+void WaitForQueueWaiters(std::uint8_t* queue, UltQueueInfo* info, std::uint32_t pushers, std::uint32_t poppers) {
+    for (int attempt = 0; attempt < 4000; ++attempt) {
+        CHECK(sceUltGetQueueInfo(queue, info, nullptr, 0) == Ok);
+        if (info->waitingPushers == pushers && info->waitingPoppers == poppers) return;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    CHECK(false);
+}
+
+void QueueWaiters() {
+    alignas(8) std::uint8_t poolObj[256]{};
+    alignas(8) std::uint8_t dataPoolObj[512]{};
+    alignas(8) std::uint8_t queueObj[512]{};
+    UltQueueInfo info{};
+    UltWaitingThreadInfo waiters[4]{};
+
+    CHECK(sceUltWaitingQueueResourcePoolCreate(poolObj, "waiter-pool", 4, 4, nullptr, nullptr, 0) == Ok);
+    CHECK(sceUltQueueDataResourcePoolCreate(dataPoolObj, "waiter-data", 2, 64, 1, poolObj, nullptr, nullptr, 0) == Ok);
+    CHECK(sceUltQueueCreate(queueObj, "waiter-queue", 64, poolObj, dataPoolObj, nullptr, 0) == Ok);
+
+    std::uint8_t item[64]{0x11};
+    std::uint8_t popped[64]{};
+
+    std::atomic<int> popResult{1};
+    std::thread popper([&] { popResult.store(sceUltQueuePop(queueObj, popped)); });
+    WaitForQueueWaiters(queueObj, &info, 0, 1);
+    CHECK(info.queuedItems == 0);
+    std::memset(waiters, 0xAA, sizeof(waiters));
+    CHECK(sceUltGetQueueInfo(queueObj, &info, waiters, 4) == Ok);
+    CHECK(info.waitingPushers == 0);
+    CHECK(info.waitingPoppers == 1);
+    CHECK(waiters[0].size == sizeof(UltWaitingThreadInfo));
+    for (std::size_t i = 1; i < sizeof(waiters) / sizeof(waiters[0]); ++i) {
+        const auto* bytes = reinterpret_cast<const std::uint8_t*>(&waiters[i]);
+        for (std::size_t j = 0; j < sizeof(UltWaitingThreadInfo); ++j) CHECK(bytes[j] == 0xAA);
+    }
+    CHECK(sceUltQueueDestroy(queueObj) == State);
+    CHECK(sceUltQueuePush(queueObj, item) == Ok);
+    popper.join();
+    CHECK(popResult.load() == Ok);
+    CHECK(popped[0] == 0x11);
+    WaitForQueueWaiters(queueObj, &info, 0, 0);
+
+    CHECK(sceUltQueuePush(queueObj, item) == Ok);
+    CHECK(sceUltQueuePush(queueObj, item) == Ok);
+
+    std::atomic<int> pushResult{1};
+    std::thread pusher([&] { pushResult.store(sceUltQueuePush(queueObj, item)); });
+    WaitForQueueWaiters(queueObj, &info, 1, 0);
+    CHECK(info.queuedItems == 2);
+    CHECK(sceUltGetQueueInfo(queueObj, &info, waiters, 0) == Ok);
+    CHECK(info.waitingPushers == 1);
+    CHECK(info.waitingPoppers == 0);
+    CHECK(sceUltQueuePop(queueObj, popped) == Ok);
+    pusher.join();
+    CHECK(pushResult.load() == Ok);
+    WaitForQueueWaiters(queueObj, &info, 0, 0);
+    CHECK(info.queuedItems == 2);
+
+    CHECK(sceUltQueuePop(queueObj, popped) == Ok);
+    CHECK(sceUltQueuePop(queueObj, popped) == Ok);
+    CHECK(sceUltQueueDestroy(queueObj) == Ok);
+    CHECK(sceUltQueueDataResourcePoolDestroy(dataPoolObj) == Ok);
+    CHECK(sceUltWaitingQueueResourcePoolDestroy(poolObj) == Ok);
 }
 
 }
@@ -487,6 +563,7 @@ int main(int argc, char** argv) {
     else if (std::strcmp(argv[1], "rwlock-finalize") == 0) ReaderWriterFinalize();
     else if (std::strcmp(argv[1], "ulthreads") == 0) Ulthreads();
     else if (std::strcmp(argv[1], "get-info") == 0) GetInfoTests();
+    else if (std::strcmp(argv[1], "queue-waiters") == 0) QueueWaiters();
     else return 2;
     CHECK(sceUltFinalize() == Ok);
     std::puts("ULT sync tests passed");
