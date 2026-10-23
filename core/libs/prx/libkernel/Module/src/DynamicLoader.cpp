@@ -181,7 +181,36 @@ void* APS5_VABI dlopen_nid_postfix(const char* path, int flags) {
             if (!*path) { Error("dlopen: empty module path"); return nullptr; }
             const auto resolved = RelinkedModulePath_nid_no_patch(ResolvePath_nid_no_patch(path));
             module->native = LoadLibraryExW(resolved.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
-            if (module->native) InitializeDeferredModule(static_cast<HMODULE>(module->native));
+            if (!module->native) {
+                const auto filename = resolved.filename();
+                HMODULE existing = GetModuleHandleW(filename.c_str());
+                if (!existing) {
+                    const auto guestName = filename.wstring() + L".guest.prx";
+                    existing = GetModuleHandleW(guestName.c_str());
+                }
+                if (existing) {
+                    module->native = existing;
+                    module->owned = false;
+                }
+            }
+            if (!module->native) {
+                const std::filesystem::path candidates[] = {
+                    resolved.parent_path() / "game_modules" / resolved.filename(),
+                    RelinkedModulePath_nid_no_patch(resolved.parent_path() / "game_modules" / resolved.filename()),
+                    resolved.parent_path() / "game_modules" / (resolved.filename().string() + ".guest.prx"),
+                    resolved.parent_path() / (resolved.filename().string() + ".guest.prx"),
+                    resolved.parent_path() / "libs" / resolved.filename(),
+                    RelinkedModulePath_nid_no_patch(resolved.parent_path() / "libs" / resolved.filename()),
+                };
+                for (const auto& candidate : candidates) {
+                    std::error_code ec;
+                    if (std::filesystem::exists(candidate, ec)) {
+                        module->native = LoadLibraryExW(candidate.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
+                        if (module->native) break;
+                    }
+                }
+            }
+            if (module->native && module->owned) InitializeDeferredModule(static_cast<HMODULE>(module->native));
         }
         if (!module->native) {
             char message[128];
