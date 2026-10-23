@@ -429,6 +429,7 @@ private:
                 item.push_back(static_cast<char16_t>(input.Peek()));
                 input.Advance();
             }
+            if (sized && target != nullptr && directive.length == "l" && capacity == 0) return Outcome::Matching;
             if (item.size() < count && sized && target != nullptr && capacity < count)
                 Fail("short character field with capacity below width");
         } else {
