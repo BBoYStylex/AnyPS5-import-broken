@@ -2415,9 +2415,11 @@ bool settleInitialDccTests(const Device& device) {
     context.detiler = &detiler;
     Recorder recorder(context);
     recorder.Activate();
-    enum class Case { Pending, PartialBlock, ComparedNeighbour, DeferredOff, UnwatchedKeys, PendingFmask };
+    enum class Case { Pending, PartialBlock, ComparedNeighbour, DeferredOff, UnwatchedKeys, PendingFmask, PendingFmaskAlone };
     const auto run = [&](Case kind, std::uint32_t height) {
-        if (kind == Case::PendingFmask && (!base.storageImageMultisample || (base.limits.framebufferColorSampleCounts & VK_SAMPLE_COUNT_8_BIT) == 0)) {
+        const bool fmaskAlone = kind == Case::PendingFmaskAlone;
+        const bool eightSamples = kind == Case::PendingFmask || fmaskAlone;
+        if (eightSamples && (!base.storageImageMultisample || (base.limits.framebufferColorSampleCounts & VK_SAMPLE_COUNT_8_BIT) == 0)) {
             std::cout << "(m) 8x color or multisampled storage images unavailable: an initial FMASK import over a pending settle not tested\n";
             return;
         }
@@ -2427,7 +2429,7 @@ bool settleInitialDccTests(const Device& device) {
         target.surfaceExtent = target.extent;
         target.format = VK_FORMAT_R8G8B8A8_UNORM;
         target.elementBytes = 4;
-        target.samples = kind == Case::PendingFmask ? 8 : 4;
+        target.samples = eightSamples ? 8 : 4;
         target.tileMode = ColorTileMode::RenderTarget;
         target.dccPipeAligned = true;
         const auto colorBytes = static_cast<std::size_t>(MultisampledColorBytes(target));
@@ -2436,20 +2438,20 @@ bool settleInitialDccTests(const Device& device) {
         const auto reserved = (importBytes + unit - 1) & ~(unit - 1);
         const auto fmaskBytes = static_cast<std::size_t>(target.extent.width) * target.extent.height * 4u;
         const auto fmaskReserved = (fmaskBytes + unit - 1) & ~(unit - 1);
-        const auto regionBytes = unit + reserved + unit + (kind == Case::UnwatchedKeys ? unit : kind == Case::PendingFmask ? fmaskReserved + unit : 0);
+        const auto regionBytes = unit + reserved + unit + (kind == Case::UnwatchedKeys ? unit : eightSamples ? fmaskReserved + unit : 0);
         auto* region = static_cast<std::uint8_t*>(AllocateWatched(regionBytes, unit));
         void* block = region != nullptr ? region + unit : nullptr;
         void* keys = region != nullptr && kind == Case::UnwatchedKeys ? region + unit + reserved + unit : nullptr;
-        void* fmask = region != nullptr && kind == Case::PendingFmask ? region + unit + reserved + unit : nullptr;
+        void* fmask = region != nullptr && eightSamples ? region + unit + reserved + unit : nullptr;
         const auto destBytes = static_cast<std::size_t>(target.extent.width) * target.extent.height * 4u;
         void* dest = VirtualAlloc(nullptr, destBytes, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
-        Require(block != nullptr && dest != nullptr && (kind != Case::UnwatchedKeys || keys != nullptr) && (kind != Case::PendingFmask || fmask != nullptr), "(m) cannot allocate the target");
+        Require(block != nullptr && dest != nullptr && (kind != Case::UnwatchedKeys || keys != nullptr) && (!eightSamples || fmask != nullptr), "(m) cannot allocate the target");
         const auto address = reinterpret_cast<std::uint64_t>(block);
         const auto neighbour = address + importBytes + tail;
         const auto describe = [](const HostImport* found, std::uint64_t at, std::size_t bytes) {
-            char text[224];
+            char text[256];
             if (found == nullptr) std::snprintf(text, sizeof(text), ": no import of 0x%llx+0x%zx, watched %d", static_cast<unsigned long long>(at), bytes, Watched(at, bytes) ? 1 : 0);
-            else std::snprintf(text, sizeof(text), ": import 0x%llx+0x%llx, unwatched %d, for 0x%llx+0x%zx, watched %d", static_cast<unsigned long long>(found->base), static_cast<unsigned long long>(found->bytes), found->unwatched ? 1 : 0, static_cast<unsigned long long>(at), bytes, Watched(at, bytes) ? 1 : 0);
+            else std::snprintf(text, sizeof(text), ": import 0x%llx+0x%llx, unwatched %d, settled on demand %d, for 0x%llx+0x%zx, watched %d", static_cast<unsigned long long>(found->base), static_cast<unsigned long long>(found->bytes), found->unwatched ? 1 : 0, found->settleOnDemand ? 1 : 0, static_cast<unsigned long long>(at), bytes, Watched(at, bytes) ? 1 : 0);
             return std::string(text);
         };
         struct Release {
@@ -2515,12 +2517,30 @@ bool settleInitialDccTests(const Device& device) {
             const auto* other = HostImportFor(context, neighbour, reserved - (importBytes + tail));
             Require(other != nullptr && other->unwatched && !Watched(neighbour, reserved - (importBytes + tail)), "(m) the import sharing the target's last 64 KiB block was not compared" + describe(other, neighbour, reserved - (importBytes + tail)));
         }
-        if (fmask != nullptr) {
+        if (fmask != nullptr && !fmaskAlone) {
             const auto* fmaskImport = HostImportFor(context, target.fmaskAddress, fmaskBytes);
             Require(fmaskImport != nullptr && fmaskImport->base == target.fmaskAddress && fmaskImport->bytes == fmaskBytes && fmaskImport->unwatched && !Watched(target.fmaskAddress, fmaskBytes), "(m) the FMASK's import was not compared at first" + describe(fmaskImport, target.fmaskAddress, fmaskBytes));
         }
         const auto* import = HostImportFor(context, address, importBytes);
         Require(import != nullptr && import->base == address && import->bytes == importBytes && import->unwatched && !Watched(address, importBytes), "(m) the target's import of " + std::to_string(importBytes) + " bytes was not compared at first" + describe(import, address, importBytes));
+        HostImportSettleCounts quiet{};
+        if (fmaskAlone) {
+            {
+                std::lock_guard gpu(GpuMutex());
+                const auto start = HostImportSettles();
+                Require(WatchedAfterSettle(context, address, importBytes), "(m) the target's import did not settle before the FMASK's import" + describe(ExistingHostImportFor(context, address, importBytes), address, importBytes));
+                const auto settledTarget = HostImportSettles();
+                Require(settledTarget.submitted > start.submitted && settledTarget.rewatched > start.rewatched, "(m) the target's import returned to the write watch without a settle read");
+            }
+            const std::array<std::pair<std::uint64_t, std::size_t>, 3> planes{{{address, colorBytes}, {target.dccAddress, dccBytes}, {target.cmaskAddress, static_cast<std::size_t>(target.cmaskBytes)}}};
+            for (const auto& [at, bytes] : planes) {
+                const auto* covering = ExistingHostImportFor(context, at, bytes);
+                Require(Watched(at, bytes) && (covering == nullptr || !covering->unwatched), "(m) a color, DCC or CMASK plane is not watched before the FMASK's import" + describe(covering, at, bytes));
+            }
+            quiet = HostImportSettles();
+            const auto* fmaskImport = HostImportFor(context, target.fmaskAddress, fmaskBytes);
+            Require(fmaskImport != nullptr && fmaskImport->base == target.fmaskAddress && fmaskImport->bytes == fmaskBytes && fmaskImport->unwatched && !fmaskImport->settleOnDemand && !Watched(target.fmaskAddress, fmaskBytes), "(m) the FMASK's import is not compared with its deferred settle wanted" + describe(fmaskImport, target.fmaskAddress, fmaskBytes));
+        }
         std::unique_lock gpu(GpuMutex());
         if (partial) {
             for (int round = 0; round < 20; ++round) {
@@ -2532,6 +2552,7 @@ bool settleInitialDccTests(const Device& device) {
             Require(!Watched(address, importBytes), "(m) a deferred settle returned an import that is not a whole number of 64 KiB blocks to the write watch");
         }
         const auto before = HostImportSettles();
+        Require(!fmaskAlone || before.submitted == quiet.submitted, "(m) a settle read was submitted between the FMASK's import and the target's first use");
         std::string refusal;
         try {
             Require(MultisampleTargetView(context, target) != VK_NULL_HANDLE, "(m) the multisampled DCC target has no view");
@@ -2540,7 +2561,7 @@ bool settleInitialDccTests(const Device& device) {
         }
         const auto after = HostImportSettles();
         const auto* settled = ExistingHostImportFor(context, address, importBytes);
-        const char* name = kind == Case::Pending ? "a pending settle" : kind == Case::PartialBlock ? "an import of whole and partial 64 KiB blocks" : kind == Case::ComparedNeighbour ? "a compared import in its last 64 KiB block" : kind == Case::DeferredOff ? "deferred settles off" : kind == Case::UnwatchedKeys ? "explicitly unwatched DCC keys" : "an eight-sample target whose FMASK has its own pending settle";
+        const char* name = kind == Case::Pending ? "a pending settle" : kind == Case::PartialBlock ? "an import of whole and partial 64 KiB blocks" : kind == Case::ComparedNeighbour ? "a compared import in its last 64 KiB block" : kind == Case::DeferredOff ? "deferred settles off" : kind == Case::UnwatchedKeys ? "explicitly unwatched DCC keys" : kind == Case::PendingFmask ? "an eight-sample target whose color and FMASK imports both have pending settles" : "an eight-sample target whose FMASK alone has a pending settle";
         std::cout << "(m) initial DCC over " << name << " (import " << importBytes << " bytes): " << (refusal.empty() ? "accepted" : refusal) << "; " << after.submitted - before.submitted << " settle reads submitted, " << after.rewatched - before.rewatched << " back in the write watch\n";
         if (kind == Case::ComparedNeighbour || kind == Case::DeferredOff || kind == Case::UnwatchedKeys) {
             Require(refusal.find("initial multisampled DCC contents require watched guest memory") != std::string::npos, std::string("(m) an initial multisampled DCC import over ") + name + " was not refused: " + refusal);
@@ -2549,6 +2570,7 @@ bool settleInitialDccTests(const Device& device) {
             return;
         }
         Require(refusal.empty(), std::string("(m) an initial multisampled DCC import over ") + name + " was refused: " + refusal);
+        Require(!fmaskAlone || (after.submitted - before.submitted == 1 && after.rewatched - before.rewatched == 1), "(m) the first use over a pending FMASK settle alone submitted " + std::to_string(after.submitted - before.submitted) + " settle reads, not the FMASK's alone");
         Require(after.submitted > before.submitted && after.rewatched > before.rewatched && Watched(address, importBytes) && settled != nullptr && !settled->unwatched, std::string("(m) the initial DCC import over ") + name + " did not settle the import and return it to the write watch");
         if (fmask != nullptr) {
             const auto* settledFmask = ExistingHostImportFor(context, target.fmaskAddress, fmaskBytes);
@@ -2605,6 +2627,7 @@ bool settleInitialDccTests(const Device& device) {
     run(Case::DeferredOff, 128);
     run(Case::UnwatchedKeys, 128);
     run(Case::PendingFmask, 128);
+    run(Case::PendingFmaskAlone, 128);
     std::cout << "initial multisampled DCC over a pending settle tests passed\n";
     return true;
 }
